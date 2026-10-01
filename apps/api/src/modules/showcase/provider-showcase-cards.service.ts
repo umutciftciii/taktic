@@ -204,7 +204,7 @@ export class ProviderShowcaseCardsService {
       include: showcaseCardInclude,
     });
 
-    return cards.map(toShowcaseCard);
+    return cards.map((card) => toShowcaseCard(card));
   }
 
   async getCard(providerId: string, cardId: string) {

@@ -7,7 +7,7 @@ import {
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
-import { mayEmbed } from '../auth/embedded-permissions';
+import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import {
   FinanceAnalyticsDto,
@@ -118,7 +118,8 @@ function resolveSourceNumber(
 export class FinanceService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async summary() {
+  /** The recent rows name their operator; the operator's e-mail per `mayEmbedStaffEmail`. */
+  async summary(viewer: AuthUser | null = null) {
     const now = new Date();
     const todayStart = startOfIstanbulDay(now);
     const monthStart = startOfIstanbulMonth(now);
@@ -168,9 +169,7 @@ export class FinanceService {
             provider: {
               select: { id: true, businessName: true },
             },
-            createdBy: {
-              select: { id: true, name: true, email: true },
-            },
+            createdBy: staffActorSelect(viewer),
           },
         })
         .then((rows) => this.attachSourceNumbers(rows)),
@@ -375,9 +374,8 @@ export class FinanceService {
               email: providerContact,
             },
           },
-          createdBy: {
-            select: { id: true, name: true, email: true },
-          },
+          // The acting operator's e-mail is the staff directory's (ADMIN_USERS_READ).
+          createdBy: staffActorSelect(viewer),
         },
       }),
     ]);

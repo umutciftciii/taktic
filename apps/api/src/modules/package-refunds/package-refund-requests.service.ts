@@ -25,6 +25,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { hasPermission } from '../auth/admin-permissions';
 import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import {
   enqueuePackageRefundNotice,
   PackageRefundNotificationOutbox,
@@ -469,7 +470,9 @@ export class PackageRefundRequestsService {
     const approveReady = underReview && flowOpen && hasEvidence && can(AdminPermission.PACKAGE_REFUND_APPROVE);
 
     return {
-      ...toAdminRefundDetail(request, events, evidence),
+      ...toAdminRefundDetail(request, events, evidence, {
+        supportTicketContent: mayEmbed(viewer, AdminPermission.SUPPORT_READ),
+      }),
       currentEligibility,
       flowOpen,
       allowedActions: {

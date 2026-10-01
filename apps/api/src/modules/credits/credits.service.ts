@@ -17,6 +17,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { assertDeltaPermissions } from '../auth/delta-permissions';
+import { staffActorSelect } from '../auth/embedded-permissions';
 import { readSpendablePromoLots } from './promo-credit-ledger';
 import { PACKAGE_PERIOD_DAYS } from '../entitlements/entitlement-period';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
@@ -306,7 +307,13 @@ export class CreditsService {
     });
   }
 
-  async getProviderCredits(providerId: string, options: { includeActor?: boolean } = {}) {
+  /**
+   * `actorViewer`: when set, each row names its operator (`createdBy`), with
+   * the operator's e-mail only for a viewer who may read it
+   * (`mayEmbedStaffEmail`, ADMIN_USERS_READ). Unset — the provider's own read —
+   * no actor at all.
+   */
+  async getProviderCredits(providerId: string, options: { actorViewer?: AuthUser | null } = {}) {
     await this.ensureProviderExists(providerId);
     const [balance, transactions] = await Promise.all([
       this.getProviderCreditBalance(providerId),
@@ -314,8 +321,8 @@ export class CreditsService {
         where: { providerId },
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: 20,
-        ...(options.includeActor
-          ? { include: { createdBy: { select: { id: true, name: true, email: true } } } }
+        ...(options.actorViewer
+          ? { include: { createdBy: staffActorSelect(options.actorViewer) } }
           : {}),
       }),
     ]);
@@ -334,7 +341,7 @@ export class CreditsService {
    * always with the actor (as `/finance/credit-ledger` shows it), plus the
    * few provider fields the screen labels itself with.
    */
-  async getProviderCreditsForAdmin(providerId: string) {
+  async getProviderCreditsForAdmin(providerId: string, viewer: AuthUser) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id: providerId },
       select: { id: true, businessName: true, status: true, city: true, district: true },
@@ -342,7 +349,7 @@ export class CreditsService {
     if (!provider) {
       throw new NotFoundException('Provider not found');
     }
-    const credits = await this.getProviderCredits(providerId, { includeActor: true });
+    const credits = await this.getProviderCredits(providerId, { actorViewer: viewer });
     return { ...credits, provider };
   }
 
@@ -369,15 +376,15 @@ export class CreditsService {
 
   async listProviderCreditTransactions(
     providerId: string,
-    options: { includeActor?: boolean } = {},
+    options: { actorViewer?: AuthUser | null } = {},
   ) {
     await this.ensureProviderExists(providerId);
 
     return this.prisma.providerCreditTransaction.findMany({
       where: { providerId },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      ...(options.includeActor
-        ? { include: { createdBy: { select: { id: true, name: true, email: true } } } }
+      ...(options.actorViewer
+        ? { include: { createdBy: staffActorSelect(options.actorViewer) } }
         : {}),
     });
   }

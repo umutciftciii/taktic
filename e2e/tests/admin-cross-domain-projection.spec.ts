@@ -1,4 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
+// The canonical terms text and its snapshot layout: two side-effect-free
+// modules, so the refund fixture writes exactly the evidence the checkout
+// writes (the database recomputes and checks its digest and shape).
+import { PURCHASE_TERMS_DOCUMENT_SET } from '../../apps/api/src/modules/purchase-terms/purchase-terms.documents';
+import { buildPurchaseTermsSnapshot, sha256Hex } from '../../apps/api/src/modules/purchase-terms/purchase-terms.snapshot';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import {
   createAdmin,
@@ -7,9 +12,12 @@ import {
   createLemonSqueezyCreditPackage,
   createProvider,
   createStaffAdmin,
+  createSupportTicket,
   prisma,
   uniqueLocation,
+  uniqueSuffix,
 } from '../src/fixtures';
+import { seedActiveCampaign, seedGrantedLot } from '../src/campaign-fixtures';
 import { seedOffer } from '../src/offer-fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -233,6 +241,181 @@ test.describe('offer and request screens', () => {
     } finally {
       await reader.close();
       await withCustomers.close();
+    }
+  });
+});
+
+/**
+ * API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002: the three gaps -001 left open,
+ * through their screens. A campaign redemption's lot balance is the ledger's
+ * (FINANCE_LEDGER_READ); a refund's linked ticket content is the support
+ * desk's (SUPPORT_READ); a staff actor's e-mail is the staff directory's
+ * (ADMIN_USERS_READ). Without the permission the screen draws no figure, no
+ * subject and no address — and no error screen; with it, or as SUPER_ADMIN,
+ * it draws them as before.
+ */
+test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
+  test('a redemption row shows the lot balance only to a session that may read the ledger', async ({ browser }) => {
+    const root = await createAdmin();
+    const location = uniqueLocation();
+    const category = await createCategory(2, { namePrefix: 'E2E Projeksiyon Kampanya' });
+    const provider = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const seeded = await seedActiveCampaign(root.id, `e2e-projeksiyon-${uniqueSuffix()}`);
+    await seedGrantedLot(seeded, provider.id, 10, 3);
+
+    const reader = await openAs(browser, ['CAMPAIGNS_READ']);
+    const ledger = await openAs(browser, ['CAMPAIGNS_READ', 'FINANCE_LEDGER_READ']);
+    const admin = await openAs(browser, 'super');
+    try {
+      const path = `/campaigns/${seeded.campaign.id}`;
+      for (const [actor, shown] of [
+        [reader, false],
+        [ledger, true],
+        [admin, true],
+      ] as const) {
+        await actor.gotoAdmin(path);
+        await expectOpen(actor.page);
+        const row = actor.page.getByTestId('campaign-redemptions').getByTestId('campaign-redemption-row');
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText(provider.businessName);
+        if (shown) await expect(row).toContainText('kalan 7');
+        else await expect(row).not.toContainText('kalan');
+      }
+    } finally {
+      await Promise.all([reader.close(), ledger.close(), admin.close()]);
+    }
+  });
+
+  test('a refund page shows the linked ticket’s subject only to a session that may read support', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(2, { namePrefix: 'E2E Projeksiyon İade' });
+    const provider = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const pkg = await createLemonSqueezyCreditPackage({ creditAmount: 10, priceAmount: 10_000 });
+    // A refund request needs a purchase carrying purchase-terms evidence (the
+    // database refuses one without), written the way the checkout writes it.
+    const purchaseId = `pp-e2e-${uniqueSuffix()}`;
+    const terms = buildPurchaseTermsSnapshot(PURCHASE_TERMS_DOCUMENT_SET);
+    const purchase = await prisma().$transaction(async (tx) => {
+      const acceptance = await tx.purchaseTermsAcceptance.create({
+        data: {
+          purchaseId,
+          userId: provider.userId,
+          documentKey: PURCHASE_TERMS_DOCUMENT_SET.documentKey,
+          documentVersion: PURCHASE_TERMS_DOCUMENT_SET.version,
+          documentSha256: sha256Hex(terms),
+          documentTextSnapshot: terms,
+          sourceChannel: 'WEB',
+        },
+      });
+      return tx.packagePurchase.create({
+        data: {
+          id: purchaseId,
+          providerId: provider.id,
+          packageId: pkg.id,
+          status: 'PAID',
+          creditAmountSnapshot: 10,
+          priceAmountSnapshot: 10_000,
+          packageNameSnapshot: pkg.name,
+          paidAt: new Date(),
+          termsAcceptanceRequired: true,
+          purchaseTermsAcceptanceId: acceptance.id,
+        },
+      });
+    });
+    const subject = `E2E gizli iade konusu ${uniqueSuffix()}`;
+    const ticket = await createSupportTicket({ requesterId: provider.userId, requesterRole: 'PROVIDER', status: 'OPEN', subject });
+    await prisma().supportTicket.update({ where: { id: ticket.id }, data: { topic: 'PACKAGE_AND_CREDIT_REFUND' } });
+    const refund = await prisma().packageRefundRequest.create({
+      data: {
+        supportTicketId: ticket.id,
+        purchaseId: purchase.id,
+        providerId: provider.id,
+        origin: 'PROVIDER',
+        createdById: provider.userId,
+        // The shape the eligibility service records at submission.
+        submittedEligibility: {
+          purchaseId: purchase.id,
+          recommendation: 'REFUNDABLE',
+          summary: 'Normal iade koşulları sağlanıyor.',
+          reasons: [],
+          blockingCodes: [],
+          evaluatedAt: new Date().toISOString(),
+          paidAt: purchase.paidAt?.toISOString() ?? null,
+          windowEndsAt: null,
+          facts: {
+            offerSpendCountSincePaid: 0,
+            firstOfferSpendAtSincePaid: null,
+            linkedPromoConsumptionCount: 0,
+            linkedPromoConsumedCredits: 0,
+          },
+        },
+        submittedRecommendation: 'REFUNDABLE',
+      },
+    });
+
+    const reader = await openAs(browser, ['PACKAGE_REFUND_READ']);
+    const support = await openAs(browser, ['PACKAGE_REFUND_READ', 'SUPPORT_READ']);
+    const admin = await openAs(browser, 'super');
+    try {
+      const path = `/package-refunds/${refund.id}`;
+
+      await reader.gotoAdmin(path);
+      await expectOpen(reader.page);
+      await expect(reader.page.getByTestId('package-refund-ticket-hidden')).toBeVisible();
+      await expect(reader.page.getByTestId('package-refund-ticket-link')).toHaveCount(0);
+      expect(await reader.page.content()).not.toContain(subject);
+
+      for (const actor of [support, admin]) {
+        await actor.gotoAdmin(path);
+        await expectOpen(actor.page);
+        const link = actor.page.getByTestId('package-refund-ticket-link');
+        await expect(link).toHaveText(subject);
+        await expect(link).toHaveAttribute('href', `/support/${ticket.id}`);
+        await expect(actor.page.getByTestId('package-refund-ticket-hidden')).toHaveCount(0);
+      }
+    } finally {
+      await Promise.all([reader.close(), support.close(), admin.close()]);
+    }
+  });
+
+  test('the credit ledger names the operator, and prints the operator’s e-mail only with ADMIN_USERS_READ', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(2, { namePrefix: 'E2E Projeksiyon Defter' });
+    const provider = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const operator = await createStaffAdmin(['FINANCE_LEDGER_READ']);
+    const operatorName = `E2E Operatör ${uniqueSuffix()}`;
+    await prisma().user.update({ where: { id: operator.id }, data: { name: operatorName } });
+    await prisma().providerCreditTransaction.create({
+      data: {
+        providerId: provider.id,
+        type: 'ADMIN_GRANT',
+        amount: 5,
+        balanceAfter: 5,
+        reason: 'E2E telafi',
+        createdById: operator.id,
+      },
+    });
+
+    const reader = await openAs(browser, ['FINANCE_LEDGER_READ']);
+    const directory = await openAs(browser, ['FINANCE_LEDGER_READ', 'ADMIN_USERS_READ']);
+    const admin = await openAs(browser, 'super');
+    try {
+      const path = `/finance/credit-ledger?providerId=${provider.id}`;
+      for (const [actor, withEmail] of [
+        [reader, false],
+        [directory, true],
+        [admin, true],
+      ] as const) {
+        await actor.gotoAdmin(path);
+        await expectOpen(actor.page);
+        const row = actor.page.getByTestId('ledger-row');
+        await expect(row).toHaveCount(1);
+        await expect(row).toContainText(operatorName);
+        if (withEmail) await expect(row).toContainText(operator.email);
+        else expect(await actor.page.content()).not.toContain(operator.email);
+      }
+    } finally {
+      await Promise.all([reader.close(), directory.close(), admin.close()]);
     }
   });
 });

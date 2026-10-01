@@ -22,7 +22,7 @@ import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEn
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { mayEmbed } from '../auth/embedded-permissions';
+import { mayEmbed, mayEmbedStaffEmail } from '../auth/embedded-permissions';
 import {
   CONTACT_DISCLOSURE_REQUIRED_CODE,
   readContactSharingConfig,
@@ -922,6 +922,21 @@ export class ServiceRequestsService {
 
     if (!request) {
       throw new NotFoundException('Service request not found');
+    }
+
+    // Who cancelled is the cancellation's own fact (id, name, role); their
+    // address is not. A staff actor's e-mail is the staff directory's
+    // (ADMIN_USERS_READ), a customer's is the account's (CUSTOMERS_READ, as the
+    // `customer` block above) — API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002.
+    const { cancellation } = request;
+    if (cancellation) {
+      const { email, ...actor } = cancellation.actor;
+      const actorEmail =
+        cancellation.actorKind === ServiceRequestCancelActor.STAFF ? mayEmbedStaffEmail(viewer) : customerAccount;
+      return withQualityLabel({
+        ...request,
+        cancellation: { ...cancellation, actor: actorEmail ? { ...actor, email } : actor },
+      });
     }
 
     return withQualityLabel(request);

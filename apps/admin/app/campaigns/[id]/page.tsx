@@ -269,7 +269,9 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                       <td>
                         {row.lot ? (
                           <>
-                            {promoLotStatusLabel(row.lot.status)} · kalan {row.lot.remainingCredits}
+                            {promoLotStatusLabel(row.lot.status)}
+                            {/* The unspent balance is the ledger's: drawn only when the API sent it (FINANCE_LEDGER_READ). */}
+                            {row.lot.remainingCredits !== undefined ? ` · kalan ${row.lot.remainingCredits}` : null}
                             <span className="campaign-ops-meta">son kullanma {formatDateTime(row.lot.expiresAt)}</span>
                           </>
                         ) : (

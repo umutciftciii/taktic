@@ -22,14 +22,22 @@ export class AdminPromotionEligibilityController {
 
   @Get('holds')
   @RequiresPermission(AdminPermission.PROMOTION_ELIGIBILITY_REVIEW)
-  list(@Query('filter') filter?: string, @Query('providerId') providerId?: string) {
-    return this.reviews.list(filter === 'decided' ? 'decided' : filter === 'all' ? 'all' : 'open', providerId?.trim() || null);
+  list(
+    @CurrentUser() user: AuthUser,
+    @Query('filter') filter?: string,
+    @Query('providerId') providerId?: string,
+  ) {
+    return this.reviews.list(
+      filter === 'decided' ? 'decided' : filter === 'all' ? 'all' : 'open',
+      providerId?.trim() || null,
+      user,
+    );
   }
 
   @Get('holds/:eventId')
   @RequiresPermission(AdminPermission.PROMOTION_ELIGIBILITY_REVIEW)
-  get(@Param('eventId') eventId: string) {
-    return this.reviews.get(eventId);
+  get(@Param('eventId') eventId: string, @CurrentUser() user: AuthUser) {
+    return this.reviews.get(eventId, user);
   }
 
   @Post('holds/:eventId/decision')
@@ -38,6 +46,6 @@ export class AdminPromotionEligibilityController {
     if (!user?.id) {
       throw new ForbiddenException('Uygunluk kararı yalnızca oturum açmış bir yönetici tarafından verilebilir');
     }
-    return this.reviews.decide(eventId, dto, user.id);
+    return this.reviews.decide(eventId, dto, user.id, user);
   }
 }

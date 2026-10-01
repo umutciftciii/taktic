@@ -815,7 +815,8 @@ export type ProviderCreditTransaction = {
   createdBy?: {
     id: string;
     name: string | null;
-    email: string | null;
+    /** The operator's address: ADMIN_USERS_READ only, absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+    email?: string | null;
   } | null;
 };
 
@@ -1138,7 +1139,8 @@ export type CustomerNote = {
   createdBy: {
     id: string;
     name: string | null;
-    email: string | null;
+    /** The operator's address: ADMIN_USERS_READ only, absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+    email?: string | null;
   } | null;
 };
 
@@ -1362,7 +1364,8 @@ export type FinanceSummaryRecentTransaction = {
   createdBy: {
     id: string;
     name: string | null;
-    email: string | null;
+    /** The operator's address: ADMIN_USERS_READ only, absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+    email?: string | null;
   } | null;
 };
 
@@ -1420,7 +1423,8 @@ export type CreditLedgerEntry = {
   createdBy: {
     id: string;
     name: string | null;
-    email: string | null;
+    /** The operator's address: ADMIN_USERS_READ only, absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+    email?: string | null;
   } | null;
 };
 
@@ -3016,7 +3020,8 @@ type StaffRef = { id: string; name: string | null } | null;
 
 export type PackageRefundDetail = PackageRefundListItem & {
   purchase: PackageRefundPurchase & { kind: string; status: string; refundedAt: string | null };
-  supportTicket: { id: string; subject: string; status: SupportTicketStatus; topic: string };
+  /** The linked ticket's content: present only for a session holding SUPPORT_READ; `supportTicketId` always (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+  supportTicket?: { id: string; subject: string; status: SupportTicketStatus; topic: string };
   createdBy: { id: string; name: string | null; role: string };
   reviewStartedBy: StaffRef;
   approvedBy: StaffRef;
@@ -3124,7 +3129,8 @@ export type ShowcaseCardReviewRecord = {
   decision: ShowcaseVersionReview;
   note: string | null;
   createdAt: string;
-  reviewedBy: { id: string; name: string | null; email: string } | null;
+  /** `email` only for a session holding ADMIN_USERS_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+  reviewedBy: { id: string; name: string | null; email?: string } | null;
 };
 
 export type ShowcaseCardVersion = {
@@ -3662,7 +3668,8 @@ export type CampaignRedemption = {
   grantedCredits: number;
   grantedAt: string;
   grantTransactionId: string | null;
-  lot: { id: string; status: PromoCreditLotStatus; remainingCredits: number; expiresAt: string } | null;
+  /** `remainingCredits` is the ledger's: present only for a session holding FINANCE_LEDGER_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+  lot: { id: string; status: PromoCreditLotStatus; remainingCredits?: number; expiresAt: string } | null;
   revokedAt: string | null;
   revokeReason: 'PAYMENT_REVERSED' | 'ADMIN_REVOKED' | null;
   spentAtRevoke: number | null;
@@ -3860,7 +3867,11 @@ export function listAdminUserRoles(userId: string) {
 /** The cancellation record a cancel writes (PR #118). Admin surfaces only. */
 export type RequestCancellation = {
   actorKind: 'CUSTOMER' | 'STAFF';
-  actor: { id: string; name: string | null; email: string | null; role: string };
+  /**
+   * `email`: a staff actor's only with ADMIN_USERS_READ, a customer actor's only with
+   * CUSTOMERS_READ; absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+   */
+  actor: { id: string; name: string | null; email?: string | null; role: string };
   previousStatus: ServiceRequestStatus;
   acceptedOfferId: string | null;
   winnerRefundDecision: 'NOT_MATCHED' | 'REFUNDED' | 'WITHHELD' | 'NOTHING_TO_REFUND';

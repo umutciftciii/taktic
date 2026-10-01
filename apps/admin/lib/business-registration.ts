@@ -67,7 +67,8 @@ export type PromotionEligibilityHoldView = {
     decision: 'ELIGIBLE' | 'INELIGIBLE';
     reason: string;
     decidedAt: string;
-    decidedBy: { id: string; name: string | null; email: string | null };
+    /** `email` only for a session holding ADMIN_USERS_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+    decidedBy: { id: string; name: string | null; email?: string | null };
   } | null;
   candidateCampaigns?: Array<{ id: string; key: string; name: string }>;
 };

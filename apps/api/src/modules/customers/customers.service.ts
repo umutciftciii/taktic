@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { AdminPermission, CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.types';
-import { mayEmbed } from '../auth/embedded-permissions';
+import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
@@ -436,7 +436,8 @@ export class CustomersService {
     };
   }
 
-  async listNotes(customerId: string) {
+  /** Notes with their author; the author's e-mail per `mayEmbedStaffEmail` (ADMIN_USERS_READ). */
+  async listNotes(customerId: string, viewer: AuthUser | null = null) {
     await this.assertCustomerExists(customerId);
 
     const notes = await this.prisma.customerNote.findMany({
@@ -447,20 +448,14 @@ export class CustomersService {
         note: true,
         createdAt: true,
         updatedAt: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+        createdBy: staffActorSelect(viewer),
       },
     });
 
     return { items: notes };
   }
 
-  async createNote(customerId: string, dto: CreateCustomerNoteDto, actorId: string) {
+  async createNote(customerId: string, dto: CreateCustomerNoteDto, actorId: string, viewer: AuthUser | null = null) {
     await this.assertCustomerExists(customerId);
 
     const note = await this.prisma.customerNote.create({
@@ -474,13 +469,7 @@ export class CustomersService {
         note: true,
         createdAt: true,
         updatedAt: true,
-        createdBy: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-          },
-        },
+        createdBy: staffActorSelect(viewer),
       },
     });
 

@@ -34,7 +34,11 @@ export function RevokeRedemptionForm({
   redemptionId: string;
   providerName: string;
   grantedCredits: number;
-  /** The lot's unused credit, what the revoke deducts; null when the row has no lot. */
+  /**
+   * The lot's unused credit, what the revoke deducts; null when the row has no
+   * lot or the session may not read the balance (FINANCE_LEDGER_READ) — the
+   * dialog then names the deduction without a figure.
+   */
   remainingCredits: number | null;
   /** The running version's revokes-per-UTC-day before the campaign pauses itself; null = no threshold. */
   revokeThreshold: number | null;

@@ -10,6 +10,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { mayEmbedStaffEmail } from '../auth/embedded-permissions';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
@@ -27,6 +28,7 @@ import {
 import {
   showcaseCardInclude,
   showcaseVersionInclude,
+  type ShowcaseProjectionOptions,
   toShowcaseCard,
   toShowcaseVersion,
 } from './showcase.projection';
@@ -72,7 +74,8 @@ export class AdminShowcaseService {
    * Oldest submission first: a queue that showed the newest first would leave
    * the provider who has waited longest at the bottom of the operator's screen.
    */
-  async listVersions(filters: ListShowcaseVersionsDto) {
+  async listVersions(filters: ListShowcaseVersionsDto, viewer: AuthUser | null = null) {
+    const view = operatorView(viewer);
     const versions = await this.prisma.showcaseCardVersion.findMany({
       where: {
         reviewStatus: filters.reviewStatus ?? ShowcaseVersionReview.PENDING,
@@ -91,8 +94,8 @@ export class AdminShowcaseService {
     });
 
     return versions.map((version) => ({
-      ...toShowcaseVersion(version),
-      card: toShowcaseCard(version.card),
+      ...toShowcaseVersion(version, view),
+      card: toShowcaseCard(version.card, view),
       provider: version.card.provider,
     }));
   }
@@ -105,7 +108,8 @@ export class AdminShowcaseService {
    * provider's own screen does not — an operator judging a claim about
    * "İstanbul/Kadıköy" needs to see whose claim it is.
    */
-  async getVersion(versionId: string) {
+  async getVersion(versionId: string, viewer: AuthUser | null = null) {
+    const view = operatorView(viewer);
     const version = await this.prisma.showcaseCardVersion.findUnique({
       where: { id: versionId },
       include: {
@@ -154,8 +158,8 @@ export class AdminShowcaseService {
     const now = new Date();
 
     return {
-      ...toShowcaseVersion(version),
-      card: toShowcaseCard(version.card),
+      ...toShowcaseVersion(version, view),
+      card: toShowcaseCard(version.card, view),
       provider: version.card.provider,
       autoPublish: version.autoPublishAudit,
       entitlement: reserved
@@ -170,7 +174,8 @@ export class AdminShowcaseService {
     };
   }
 
-  async listCards(filters: ListShowcaseCardsDto) {
+  async listCards(filters: ListShowcaseCardsDto, viewer: AuthUser | null = null) {
+    const view = operatorView(viewer);
     const cards = await this.prisma.showcaseCard.findMany({
       where: {
         ...(filters.status ? { status: filters.status } : {}),
@@ -183,10 +188,11 @@ export class AdminShowcaseService {
       },
     });
 
-    return cards.map((card) => ({ ...toShowcaseCard(card), provider: card.provider }));
+    return cards.map((card) => ({ ...toShowcaseCard(card, view), provider: card.provider }));
   }
 
-  async getCard(cardId: string) {
+  async getCard(cardId: string, viewer: AuthUser | null = null) {
+    const view = operatorView(viewer);
     const card = await this.prisma.showcaseCard.findUnique({
       where: { id: cardId },
       include: {
@@ -204,9 +210,9 @@ export class AdminShowcaseService {
     }
 
     return {
-      ...toShowcaseCard(card),
+      ...toShowcaseCard(card, view),
       provider: card.provider,
-      versions: card.versions.map(toShowcaseVersion),
+      versions: card.versions.map((version) => toShowcaseVersion(version, view)),
     };
   }
 
@@ -359,7 +365,7 @@ export class AdminShowcaseService {
     void activatedPlacementId;
     await this.mail.sendShowcaseCardApprovalOutcome(versionId);
 
-    return this.getVersion(versionId);
+    return this.getVersion(versionId, user);
   }
 
   /**
@@ -414,7 +420,7 @@ export class AdminShowcaseService {
       { label: 'showcase.suspendCard' },
     );
 
-    return this.getCard(cardId);
+    return this.getCard(cardId, user);
   }
 
   /**
@@ -428,7 +434,7 @@ export class AdminShowcaseService {
    * that never had one goes back to where it was, which for the only case that
    * can reach here is DRAFT.
    */
-  async unsuspendCard(cardId: string) {
+  async unsuspendCard(cardId: string, viewer: AuthUser | null = null) {
     await runSerializable(
       this.prisma,
       async (tx) => {
@@ -477,7 +483,7 @@ export class AdminShowcaseService {
       { label: 'showcase.unsuspendCard' },
     );
 
-    return this.getCard(cardId);
+    return this.getCard(cardId, viewer);
   }
 
   /**
@@ -559,6 +565,11 @@ export class AdminShowcaseService {
       await this.mail.sendShowcaseRevisionRejected(versionId);
     }
 
-    return this.getVersion(versionId);
+    return this.getVersion(versionId, user);
   }
+}
+
+/** An operator's projection: the reviewer's e-mail per `mayEmbedStaffEmail` (ADMIN_USERS_READ). */
+function operatorView(viewer: AuthUser | null): ShowcaseProjectionOptions {
+  return { reviewerEmail: mayEmbedStaffEmail(viewer) };
 }

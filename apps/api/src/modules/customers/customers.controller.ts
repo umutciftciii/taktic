@@ -37,8 +37,8 @@ export class CustomersController {
   @Get(':id/notes')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CUSTOMER_NOTES_READ)
-  listNotes(@Param('id') id: string) {
-    return this.customersService.listNotes(id);
+  listNotes(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.customersService.listNotes(id, user);
   }
 
   @Post(':id/notes')
@@ -49,7 +49,7 @@ export class CustomersController {
     @Body() dto: CreateCustomerNoteDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.customersService.createNote(id, dto, user.id);
+    return this.customersService.createNote(id, dto, user.id, user);
   }
 
   @Patch(':id/status')

@@ -121,7 +121,7 @@ export class CreditsController {
   @UseGuards(AuthGuard, ProviderAccessGuard)
   getProviderCredits(@Param('providerId') providerId: string, @CurrentUser() user: AuthUser) {
     return this.creditsService.getProviderCredits(providerId, {
-      includeActor: user.role === UserRole.SUPER_ADMIN,
+      actorViewer: user.role === UserRole.SUPER_ADMIN ? user : null,
     });
   }
 
@@ -132,7 +132,7 @@ export class CreditsController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.creditsService.listProviderCreditTransactions(providerId, {
-      includeActor: user.role === UserRole.SUPER_ADMIN,
+      actorViewer: user.role === UserRole.SUPER_ADMIN ? user : null,
     });
   }
 
@@ -152,8 +152,8 @@ export class CreditsController {
   @Get('admin/providers/:providerId/credits')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.FINANCE_LEDGER_READ)
-  getProviderCreditsForAdmin(@Param('providerId') providerId: string) {
-    return this.creditsService.getProviderCreditsForAdmin(providerId);
+  getProviderCreditsForAdmin(@Param('providerId') providerId: string, @CurrentUser() user: AuthUser) {
+    return this.creditsService.getProviderCreditsForAdmin(providerId, user);
   }
 
   @Post('providers/:providerId/credits/grant')
