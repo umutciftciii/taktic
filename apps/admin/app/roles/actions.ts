@@ -65,15 +65,24 @@ export async function updateAdminRoleAction(formData: FormData) {
 /**
  * Deactivating a role takes its permissions from everyone holding it, at once
  * and without touching a single assignment row — the session's permission read
- * filters on `role.isActive`. The confirmation checkbox on the form is there
- * because that consequence is invisible on this screen.
+ * filters on `role.isActive` — and reactivating gives them all back the same
+ * way. Both directions are confirmed in a dialog, which sends `confirm=on`
+ * only once the form has hydrated; a submission without it (a click that beat
+ * the JavaScript) is refused here rather than taken as confirmed.
  */
 export async function setAdminRoleActiveAction(formData: FormData) {
   const id = readString(formData, 'roleId');
   const isActive = readString(formData, 'isActive') === 'true';
 
-  if (!isActive && readString(formData, 'confirm') !== 'on') {
-    redirect(`/roles/${id}?error=` + encodeURIComponent('Rolü pasifleştirmek için onay kutusunu işaretleyin.'));
+  if (readString(formData, 'confirm') !== 'on') {
+    redirect(
+      `/roles/${id}?error=` +
+        encodeURIComponent(
+          isActive
+            ? 'Rolü aktifleştirmek için açılan onay penceresinde onaylayın.'
+            : 'Rolü pasifleştirmek için onay kutusunu işaretleyin.',
+        ),
+    );
   }
 
   let errorMessage: string | null = null;

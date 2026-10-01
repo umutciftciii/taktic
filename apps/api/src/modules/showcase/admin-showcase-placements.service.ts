@@ -3,9 +3,11 @@ import { ShowcasePlacementStatus, ShowcasePlacementSuspendReason } from '@prisma
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH } from './dto/showcase-placement-admin.dto';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
 import {
+  showcasePlacementCancelNoteRequired,
   showcasePlacementNotCancellable,
   showcasePlacementNotFound,
   showcasePlacementNotResumable,
@@ -107,7 +109,13 @@ export class AdminShowcasePlacementsService {
    * — the purchase's `adminNote` is written only when the purchase was not
    * already flagged, so it cannot be the record of who cancelled.
    */
-  async cancel(placementId: string, user: AuthUser, note: string | null) {
+  async cancel(placementId: string, user: AuthUser, rawNote: string) {
+    // Required, and judged trimmed: the DTO only proves it is a string.
+    const note = rawNote.trim();
+    if (note.length < SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH) {
+      throw showcasePlacementCancelNoteRequired(SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH);
+    }
+
     const now = new Date();
 
     await runSerializable(
@@ -151,7 +159,7 @@ export class AdminShowcasePlacementsService {
         // conditional update above already refuses a second cancel before this
         // line is reached.
         await tx.showcasePlacementCancellation.create({
-          data: { placementId, actorUserId: user.id, note: note?.trim() || null },
+          data: { placementId, actorUserId: user.id, note },
         });
 
         await tx.showcasePlacementSuspension.updateMany({

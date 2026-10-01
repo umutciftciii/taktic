@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
+import { isPlacementCancelNoteValid } from './placement-cancel';
 
 /**
  * The three things an operator may do to a paid run.
@@ -66,11 +67,18 @@ export async function resumeShowcasePlacementAction(formData: FormData) {
 export async function cancelShowcasePlacementAction(formData: FormData) {
   const placementId = readString(formData, 'placementId');
   const target = `/showcase/placements/${placementId}`;
+  // Required, as the API requires it (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  // Refused here before any request, with the API's own code, so a form that
+  // skipped the browser's check gets the same message the API would give.
+  const note = readString(formData, 'note');
+  if (!isPlacementCancelNoteValid(note)) {
+    redirect(`${target}?error=SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED`);
+  }
 
   try {
     await apiFetch(`/admin/showcase/placements/${placementId}/cancel`, {
       method: 'POST',
-      body: JSON.stringify({ note: readOptional(formData, 'note') }),
+      body: JSON.stringify({ note }),
     });
   } catch (error) {
     rethrowNextControlFlow(error);

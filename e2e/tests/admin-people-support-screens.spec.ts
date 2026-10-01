@@ -150,7 +150,27 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expect(form.getByTestId('credit-operation-amount-invalid')).toHaveCount(0);
       await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: ekleme');
       await expect(previewTotal).toHaveText('52');
+      // ADMIN-DESTRUCTIVE-CONFIRMATION-001: adding asks first, like deducting.
+      // The dialog says the business, the amount, the balance before and
+      // after, the reason and that the row is permanent; cancel sends nothing.
+      const grantDialog = page.getByTestId('credit-operation-grant-dialog');
       await form.getByTestId('credit-operation-grant').click();
+      await expect(grantDialog).toBeVisible();
+      await expect(grantDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+      await expect(grantDialog.getByTestId('credit-grant-impact')).toContainText(provider.businessName);
+      await expect(grantDialog.getByTestId('credit-grant-impact')).toContainText('12 kredi');
+      await expect(grantDialog.getByTestId('credit-grant-impact')).toContainText('bakiye 40 → 52');
+      await expect(grantDialog.getByTestId('credit-grant-reason')).toContainText('Faz 3B E2E: ekleme');
+      await expect(grantDialog).toContainText('silinemez');
+      await expect(grantDialog).toContainText('ayrı bir kredi düşme işlemiyle dengelenebilir');
+      await capture(page, 'credits-grant-dialog');
+      await grantDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(grantDialog).toBeHidden();
+      expect(await creditBalance(provider.id)).toBe(40);
+      expect(await staffRows()).toBe(0);
+
+      await form.getByTestId('credit-operation-grant').click();
+      await grantDialog.getByRole('button', { name: 'Evet, kredi ekle' }).click();
       await expect(page.getByTestId('credit-operation-done')).toHaveText('12 kredi eklendi. Yeni bakiye 52.');
       expect(await creditBalance(provider.id)).toBe(52);
       await expect(page.getByTestId('credits-fact-balance')).toContainText('52');
@@ -213,6 +233,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await form.getByTestId('credit-operation-reason').fill('Faz 3B E2E: sınır');
       await expect(previewTotal).toHaveText('57');
       await form.getByTestId('credit-operation-grant').click();
+      await grantDialog.getByRole('button', { name: 'Evet, kredi ekle' }).click();
       const refusal = page.getByTestId('credit-operation-error');
       await expect(refusal).toContainText('üst sınırını aşardı');
       await expect(refusal).toContainText('en fazla 3 kredi eklenebilir');
@@ -231,6 +252,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expect(form.getByTestId('credit-operation-overflow')).toHaveCount(0);
       await expect(previewTotal).toHaveText(String(MAX));
       await form.getByTestId('credit-operation-grant').click();
+      await grantDialog.getByRole('button', { name: 'Evet, kredi ekle' }).click();
       await expect(page.getByTestId('credit-operation-done')).toHaveText(`3 kredi eklendi. Yeni bakiye ${MAX}.`);
       expect(await creditBalance(provider.id)).toBe(MAX);
     } finally {

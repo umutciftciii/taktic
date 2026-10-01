@@ -40,7 +40,11 @@ const PACKAGE_TYPES = [
 export default async function NewCreditPackagePage({ searchParams }: NewCreditPackagePageProps) {
   // WRITE for the form, READ for the eligible-category list it is built from
   // (`GET /admin/offer-packages/unlimited-eligible-categories`).
-  await requireAdmin('CREDIT_PACKAGES_READ', 'CREDIT_PACKAGES_WRITE');
+  const { can } = await requireAdmin('CREDIT_PACKAGES_READ', 'CREDIT_PACKAGES_WRITE');
+  // An active package is on sale the moment it exists, so the API asks for
+  // CREDIT_PACKAGES_STATUS as well to create one (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  // Without it the form offers the inactive package only.
+  const canChooseStatus = can('CREDIT_PACKAGES_STATUS');
   const params = await searchParams;
   const errorMessage = (params.error ?? '').trim();
   // The pool an unlimited scope may be drawn from. Empty until an admin marks
@@ -69,7 +73,7 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
     currency: (params.currency ?? 'TRY').toUpperCase(),
     description: params.description ?? '',
     sortOrder: params.sortOrder ?? '0',
-    isActive: params.isActive !== 'false',
+    isActive: canChooseStatus && params.isActive !== 'false',
   };
   const selectedCurrency = (CURRENCIES as readonly string[]).includes(draft.currency)
     ? draft.currency
@@ -255,12 +259,29 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
               </label>
               <label className="field field-6">
                 <span>Durum</span>
-                <select name="isActive" defaultValue={String(draft.isActive)}>
-                  <option value="true">Aktif (satışa açık)</option>
-                  <option value="false">Pasif (satışa kapalı)</option>
-                </select>
-                <span className="help-text">
-                  Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.
+                {canChooseStatus ? (
+                  <select name="isActive" defaultValue={String(draft.isActive)} data-testid="credit-package-new-status">
+                    <option value="true">Aktif (satışa açık)</option>
+                    <option value="false">Pasif (satışa kapalı)</option>
+                  </select>
+                ) : (
+                  <>
+                    {/*
+                      No CREDIT_PACKAGES_STATUS: the package is created inactive,
+                      and the shown select cannot be moved. A disabled select
+                      never reaches FormData, so the value travels in the hidden
+                      field; the API refuses an active create anyway.
+                    */}
+                    <input type="hidden" name="isActive" value="false" />
+                    <select defaultValue="false" disabled data-testid="credit-package-new-status">
+                      <option value="false">Pasif (satışa kapalı)</option>
+                    </select>
+                  </>
+                )}
+                <span className="help-text" data-testid="credit-package-new-status-help">
+                  {canChooseStatus
+                    ? 'Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.'
+                    : 'Paket pasif oluşturulur. Satışa açmak paket durumu yetkisi gerektirir; bu yetkiye sahip biri paketi detay ekranından aktifleştirebilir.'}
                 </span>
               </label>
 

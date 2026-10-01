@@ -400,13 +400,43 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(page.getByRole('button', { name: 'Yerleşimi durdur' })).toHaveCount(0);
       await capture(page, 'yerlesim-detayi');
 
-      await page.getByTestId('placement-cancel-form').getByRole('textbox', { name: 'Not' }).fill('Faz 3C E2E iptali');
+      // ADMIN-DESTRUCTIVE-CONFIRMATION-001: the reason is required. Empty,
+      // the browser refuses the form and the dialog never opens.
       const dialog = page.getByTestId('placement-cancel-dialog');
+      const note = page.getByTestId('placement-cancel-form').getByRole('textbox', { name: 'İptal gerekçesi *' });
+      await expect(note).toHaveAttribute('required', '');
+      await expect
+        .poll(() =>
+          page
+            .getByTestId('placement-cancel')
+            .evaluate((element) => Object.keys(element).some((key) => key.startsWith('__reactProps'))),
+        )
+        .toBe(true);
+      await page.getByTestId('placement-cancel').click();
+      await expect(dialog).toBeHidden();
+      expect(await note.evaluate((element) => (element as HTMLTextAreaElement).validity.valueMissing)).toBe(true);
+      expect((await placementOf()).status).toBe('ACTIVE');
+
+      // With the browser's check taken off, a blank reason reaches the action,
+      // which refuses it before any request: nothing changes.
+      await note.evaluate((element) => {
+        element.removeAttribute('required');
+        element.removeAttribute('minlength');
+      });
+      await note.fill('   kısa   ');
+      await page.getByTestId('placement-cancel').click();
+      await dialog.getByRole('button', { name: 'Evet, kalıcı olarak iptal et' }).click();
+      await expect(page.locator('.notice-error')).toContainText('İptal gerekçesi zorunludur');
+      expect((await placementOf()).status).toBe('ACTIVE');
+      expect(await prisma().showcasePlacementCancellation.count({ where: { placementId: seeded.placement.id } })).toBe(0);
+
+      await expect(note).toHaveAttribute('required', '');
+      await note.fill('Faz 3C E2E iptali');
       await page.getByTestId('placement-cancel').click();
       await expect(dialog).toContainText('Geri alınamaz');
       await expect(dialog).toContainText('Para iadesi yapılmaz');
       await expect(dialog).toContainText('manuel inceleme');
-      await expect(dialog).toContainText('iptal eden kişi ve notunuz yerleşimin kalıcı kaydına yazılır');
+      await expect(dialog).toContainText('iptal eden kişi ve yazdığınız gerekçe yerleşimin kalıcı kaydına yazılır');
       await capture(page, 'yerlesim-iptal-diyalogu');
       await dialog.getByRole('button', { name: 'Vazgeç' }).click();
 

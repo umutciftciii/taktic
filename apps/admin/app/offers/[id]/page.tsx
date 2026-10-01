@@ -26,6 +26,7 @@ import { Tabs, type TabItem } from '../../../components/tabs';
 import { Timeline, type TimelineItem } from '../../../components/timeline';
 import { resolveTab } from '../../../lib/list-query';
 import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
+import { offerAcceptRecharge } from './offer-accept-recharge';
 
 /**
  * Teklif detayı (#6), design `offerDetail` (ADMIN-DESIGN-001 Faz 3A).
@@ -748,6 +749,7 @@ function OperationsList({
 }) {
   const isAccepted = offer.status === 'ACCEPTED';
   const canAccept = canOfferStatusActions && !isAccepted && offer.request.status === 'APPROVED';
+  const recharge = offerAcceptRecharge(offer);
   // The refund block a super admin's decision writes (OffersService): the
   // decision is recorded as the customer's, so the automatic refund no longer
   // applies to this offer.
@@ -821,6 +823,15 @@ function OperationsList({
                   seçilmedi” e-postası gider. İletişim paylaşımı açıksa iki tarafın iletişim bilgileri açılır; müşterinin
                   paylaşım onayı kayıtlı değilse işlem reddedilir.{refundBlockNote}
                 </p>
+                {recharge !== null ? (
+                  <p data-testid="offer-accept-recharge">
+                    <strong>
+                      Kredi yeniden tahsil edilir: bu teklifin kredisi daha önce iade edildiği için kabulde{' '}
+                      {offer.provider.businessName} bakiyesinden {recharge} kredi yeniden düşülür.
+                    </strong>{' '}
+                    Bakiye yetmezse kabul reddedilir ve hiçbir şey değişmez.
+                  </p>
+                ) : null}
                 <p>Eşleşmeyi geri alan bir işlem yok.</p>
               </>
             }

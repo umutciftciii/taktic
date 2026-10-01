@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * Vitrin, package first: the right is bought before the card is written, the
@@ -478,7 +479,8 @@ test.describe('vitrin: paket-önce akış', () => {
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByTestId('review-entitlement')).toContainText(pkg.name);
       await expect(admin.page.getByTestId('review-entitlement-missing')).toHaveCount(0);
-      await admin.page.getByRole('button', { name: 'Onayla' }).click();
+      // The first approval spends the right and asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await confirmThrough(admin.page.getByTestId('showcase-approve'), 'Evet, onayla ve yayına al');
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('vitrinde yayına girdi', { exact: false })).toBeVisible();
 
@@ -625,7 +627,8 @@ test.describe('vitrin: paket-önce akış', () => {
       await admin.page.getByRole('link', { name: 'E2E Klima Bakımı Aynı Gün' }).click();
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByTestId('review-entitlement')).toContainText(pkg.name);
-      await admin.page.getByRole('button', { name: 'Onayla' }).click();
+      // The first approval spends the right and asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await confirmThrough(admin.page.getByTestId('showcase-approve'), 'Evet, onayla ve yayına al');
       await assertNoErrorScreen(admin.page);
       await expect(admin.page.getByText('vitrinde yayına girdi', { exact: false })).toBeVisible();
 

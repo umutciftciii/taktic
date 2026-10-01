@@ -87,8 +87,18 @@ test.describe('admin RBAC', () => {
       await expect(sidebar.getByRole('link', { name: 'Hizmet alanlar' })).toHaveCount(0);
 
       await root.gotoAdmin(`/users/${staff.id}`);
-      await root.page.getByTestId('user-role-assign').locator('select[name="roleId"]').selectOption(role.id);
-      await root.page.getByTestId('user-role-assign').getByRole('button', { name: 'Ata' }).click();
+      // The select is a controlled field now (no role preselected), so pick
+      // only once React owns it; "Ata" then asks first
+      // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      const roleSelect = root.page.getByTestId('user-role-assign').locator('select[name="roleId"]');
+      await expect
+        .poll(() => roleSelect.evaluate((element) => Object.keys(element).some((name) => name.startsWith('__reactProps'))))
+        .toBe(true);
+      await roleSelect.selectOption(role.id);
+      await root.page.getByTestId('user-role-assign-submit').click();
+      const assignDialog = root.page.getByTestId('user-role-assign-submit-dialog');
+      await expect(assignDialog.getByTestId('user-role-assign-impact')).toContainText('“E2E Hizmet Alan Okuyucu”');
+      await assignDialog.getByRole('button', { name: 'Evet, rolü ata' }).click();
       await expect(root.page.getByTestId('role-assignment-ok')).toHaveText('Rol atandı.');
 
       await member.gotoAdmin('/');

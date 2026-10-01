@@ -19,6 +19,7 @@ import {
 import { seedOffer, seedRequestReport } from '../src/offer-fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
 import { artifactsDir, contactSharingRuntime, primaryRuntime, type Runtime } from '../src/runtime';
+import { waitForHydration } from '../src/confirm-dialog';
 
 /**
  * ADMIN-DESIGN-001 Faz 3A: talepler, teklifler and the refund scan, as an
@@ -332,6 +333,9 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await page.getByTestId('offer-accept').click();
       const acceptDialog = page.getByRole('dialog', { name: 'Teklif müşteri adına kabul edilsin mi?' });
       await expect(acceptDialog).toContainText('diğer açık teklifler');
+      // Never refunded: the dialog says nothing about credit
+      // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await expect(acceptDialog.getByTestId('offer-accept-recharge')).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(acceptDialog).toBeHidden();
       await page.waitForTimeout(300);
@@ -363,6 +367,20 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       // Once refunded, the operation is gone from the list.
       await tabs.getByRole('link', { name: 'Teklif ve işlemler' }).click();
       await expect(page.getByTestId('offer-action-refund')).toHaveCount(0);
+
+      // Refunded now, so accepting would charge the 3 credits again, and the
+      // dialog says so with the amount (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      // Esc leaves it; nothing is charged.
+      await waitForHydration(page.getByTestId('offer-accept'));
+      await page.getByTestId('offer-accept').click();
+      const recharge = acceptDialog.getByTestId('offer-accept-recharge');
+      await expect(recharge).toContainText('Kredi yeniden tahsil edilir');
+      await expect(recharge).toContainText(`${provider.businessName} bakiyesinden 3 kredi yeniden düşülür`);
+      await page.screenshot({ path: shot(testInfo, 'offer-accept-recharge-dialog-1440'), fullPage: false });
+      await page.keyboard.press('Escape');
+      await expect(acceptDialog).toBeHidden();
+      await page.waitForTimeout(300);
+      expect((await prisma().offer.findUniqueOrThrow({ where: { id: offer.id } })).creditRechargeTransactionId).toBeNull();
 
       // ---- the related request, with every offer it received -------------
       await tabs.getByRole('link', { name: 'İlgili talep' }).click();

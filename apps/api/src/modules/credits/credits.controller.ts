@@ -77,8 +77,10 @@ export class CreditsController {
   @Post('credit-packages')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CREDIT_PACKAGES_WRITE)
-  createCreditPackage(@Body() dto: CreateCreditPackageDto) {
-    return this.creditsService.createCreditPackage(dto);
+  // ADMIN-DESTRUCTIVE-CONFIRMATION-001: WRITE opens the route; an active
+  // package also needs CREDIT_PACKAGES_STATUS, which the service checks.
+  createCreditPackage(@Body() dto: CreateCreditPackageDto, @CurrentUser() user: AuthUser) {
+    return this.creditsService.createCreditPackage(dto, user);
   }
 
   @Patch('credit-packages/:id')

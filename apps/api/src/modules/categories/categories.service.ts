@@ -667,15 +667,36 @@ export class CategoriesService {
     return routerQuestion;
   }
 
-  async createCategory(dto: CreateCategoryDto) {
+  /**
+   * Creates a category.
+   *
+   * The status it is born in is a status decision like any other: ACTIVE is
+   * public, takes requests and is indexable, INACTIVE is a closed shelf. Both
+   * are what `PATCH /categories/:id/status` guards with CATEGORIES_STATUS, so
+   * creating straight into either needs that permission as well as the route's
+   * CATEGORIES_WRITE (ADMIN-DESTRUCTIVE-CONFIRMATION-001). DRAFT — invisible,
+   * no intake — needs WRITE alone. A payload naming no status still means
+   * ACTIVE, as it always has, and therefore needs both: the default can no
+   * longer be used to publish without the permission.
+   */
+  async createCategory(dto: CreateCategoryDto, actor: Pick<AuthUser, 'role' | 'permissions'>) {
+    // `isActive` is the pre-taxonomy spelling of the same switch; ACTIVE is
+    // what a payload that mentions neither has always meant.
+    const status = resolveRequestedStatus(dto) ?? ServiceCategoryStatus.ACTIVE;
+
+    // Before any read, so a caller without the permission learns nothing about
+    // the parent it named.
+    assertDeltaPermissions(
+      actor,
+      { business: true, status: status !== ServiceCategoryStatus.DRAFT },
+      { write: AdminPermission.CATEGORIES_WRITE, status: AdminPermission.CATEGORIES_STATUS },
+    );
+
     const parentId = normalizeNullableString(dto.parentId);
     if (parentId) {
       await this.assertParentIsGroup(parentId);
     }
 
-    // `isActive` is the pre-taxonomy spelling of the same switch; ACTIVE is
-    // what a payload that mentions neither has always meant.
-    const status = resolveRequestedStatus(dto) ?? ServiceCategoryStatus.ACTIVE;
     const kind = dto.kind ?? ServiceCategoryKind.LEAF;
 
     assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, { kind, status });

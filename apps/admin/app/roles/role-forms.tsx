@@ -163,8 +163,9 @@ export function RolePermissionsForm({
  * submits only through the dialog, so a click that lands before JavaScript
  * runs is refused exactly as an unticked checkbox was.
  *
- * Reactivating gives the permissions back to the same accounts and is undone
- * by the same button, so it is a plain submit.
+ * Reactivating gives the permissions back to the same accounts, at once, so
+ * it asks too (ADMIN-DESTRUCTIVE-CONFIRMATION-001) and carries the same
+ * hydrated `confirm=on`: the action refuses either direction without it.
  */
 export function RoleStatusForm({
   roleId,
@@ -172,6 +173,7 @@ export function RoleStatusForm({
   isActive,
   permissionCount,
   reach,
+  criticalPermissions = [],
   action,
 }: {
   roleId: string;
@@ -179,6 +181,8 @@ export function RoleStatusForm({
   isActive: boolean;
   permissionCount: number;
   reach: RoleReach;
+  /** The role's critical permissions with their panel lines, for the reactivation dialog. */
+  criticalPermissions?: { permission: string; label: string }[];
   action: FormAction;
 }) {
   const [hydrated, setHydrated] = useState(false);
@@ -188,9 +192,9 @@ export function RoleStatusForm({
     <form action={action} className="inline-form" data-testid="role-status-form">
       <input type="hidden" name="roleId" value={roleId} />
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
+      {hydrated ? <input type="hidden" name="confirm" value="on" /> : null}
       {isActive ? (
         <>
-          {hydrated ? <input type="hidden" name="confirm" value="on" /> : null}
           <ConfirmDialog
             triggerLabel="Rolü pasifleştir"
             triggerClassName="btn btn-destructive"
@@ -213,10 +217,66 @@ export function RoleStatusForm({
           />
         </>
       ) : (
-        <button className="btn btn-primary" type="submit" data-testid="role-activate">
-          Rolü aktifleştir
-        </button>
+        <ConfirmDialog
+          triggerLabel="Rolü aktifleştir"
+          triggerClassName="btn btn-primary"
+          tone="primary"
+          title={`"${roleName}" aktifleştirilsin mi?`}
+          consequence={
+            <RoleActivateConsequence
+              permissionCount={permissionCount}
+              reach={reach}
+              criticalPermissions={criticalPermissions}
+            />
+          }
+          confirmLabel="Evet, aktifleştir"
+          testId="role-activate"
+        />
       )}
     </form>
+  );
+}
+
+/**
+ * What reactivating a role does (ADMIN-DESTRUCTIVE-CONFIRMATION-001): the
+ * reverse of deactivation, and just as wide. Deactivating touched no
+ * assignment row — the session read filters on `role.isActive` — so every
+ * account still holding the role gets its permissions back at once, with the
+ * permission set the role has *today* (it may have been edited while off).
+ * Exported for the unit test.
+ */
+export function RoleActivateConsequence({
+  permissionCount,
+  reach,
+  criticalPermissions,
+}: {
+  permissionCount: number;
+  reach: RoleReach;
+  criticalPermissions: { permission: string; label: string }[];
+}) {
+  return (
+    <>
+      <p data-testid="role-activate-impact">
+        {reach.holders === 0
+          ? `${describeReach(reach)}; aktifleştirmek bugün kimsenin yetkisini değiştirmez. Rol ${permissionCount} izin taşır ve yeniden atanabilir hale gelir.`
+          : `${describeReach(reach)} bu rolün ${permissionCount} iznini hemen geri kazanır; açık oturumlar bir sonraki isteklerinde yeni yetkiyi okur. Pasif hesaplar da yeniden aktifleştirildiklerinde bu izinlerle döner.`}
+      </p>
+      {criticalPermissions.length > 0 ? (
+        <div className="confirm-change-list" data-testid="role-activate-critical">
+          <p className="confirm-change-title">Rolün kritik izinleri</p>
+          <ul>
+            {criticalPermissions.map((item) => (
+              <li key={item.permission}>
+                {item.label} <code>{item.permission}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      <p>
+        Geri dönen izinler rolün pasifken değiştirilmiş olabilecek bugünkü izin kümesidir. Rol yeniden yeni atama kabul
+        eder. Değişiklik adınızla kayda geçer; rol buradan yeniden pasifleştirilebilir.
+      </p>
+    </>
   );
 }

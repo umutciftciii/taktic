@@ -162,7 +162,7 @@ export class AdminShowcasePlacementsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: ShowcasePlacementCancelDto,
   ) {
-    return this.admin.cancel(placementId, user, dto.note ?? null);
+    return this.admin.cancel(placementId, user, dto.note);
   }
 
   @Get('leads')

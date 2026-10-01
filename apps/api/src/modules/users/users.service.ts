@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -8,7 +9,7 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
 import { PrismaService } from '../../prisma/prisma.service';
-import { STAFF_ROLES } from '../auth/admin-permissions';
+import { isSuperAdmin, STAFF_ROLES } from '../auth/admin-permissions';
 import { AuthUser } from '../auth/auth.types';
 import { AdminInviteService } from './admin-invite.service';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -18,6 +19,14 @@ import {
   UserSortField,
 } from './dto/list-users.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
+
+/**
+ * The refusal for an ADMIN who holds ADMIN_USERS_STATUS and points it at a
+ * SUPER_ADMIN (ADMIN-DESTRUCTIVE-CONFIRMATION-001). Its own code rather than
+ * INSUFFICIENT_PERMISSION: the caller holds the permission the route asks for;
+ * what it lacks is the account kind the target demands.
+ */
+export const SUPER_ADMIN_TARGET_REQUIRES_SUPER_ADMIN = 'SUPER_ADMIN_TARGET_REQUIRES_SUPER_ADMIN';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -321,6 +330,24 @@ export class UsersService {
 
     if (!target) {
       throw new NotFoundException('User not found');
+    }
+
+    /*
+     * A super admin's account is a super admin's to switch, in both directions.
+     *
+     * ADMIN_USERS_STATUS is delegable, and before this an ADMIN holding it could
+     * switch off any super admin but the last one — and, worse, switch a
+     * deactivated one back on: an escalation from "may pause staff accounts"
+     * to every permission and the three root capabilities. Asked before the
+     * no-op answer below, so the refusal does not depend on (or reveal) the
+     * target's current state. The two guards after this one — not oneself,
+     * not the last active super admin — still apply to a super admin caller.
+     */
+    if (target.role === UserRole.SUPER_ADMIN && !isSuperAdmin(actor)) {
+      throw new ForbiddenException({
+        code: SUPER_ADMIN_TARGET_REQUIRES_SUPER_ADMIN,
+        message: 'Süper yönetici hesabının durumunu yalnız bir süper yönetici değiştirebilir.',
+      });
     }
 
     if (target.isActive === dto.isActive) {

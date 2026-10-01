@@ -22,6 +22,10 @@ import {
 export default async function NewCategoryPage() {
   const { can } = await requireAdmin('CATALOG_READ', 'CATEGORIES_WRITE');
   const canUpload = can('UPLOADS_WRITE');
+  // Creating straight into ACTIVE or INACTIVE is a status decision, so the API
+  // asks for CATEGORIES_STATUS as well (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  // Without it the form offers DRAFT only.
+  const canChooseStatus = can('CATEGORIES_STATUS');
   const categories = await apiFetch<Category[]>('/admin/categories');
   // Only a GROUP can be a parent — a service is not a folder — so the picker
   // offers exactly what the API will accept.
@@ -83,14 +87,33 @@ export default async function NewCategoryPage() {
               </label>
               <label className="field field-4">
                 <span>Durum *</span>
-                <select name="status" defaultValue="DRAFT">
-                  {CATEGORY_STATUSES.map((status) => (
-                    <option key={status} value={status}>
-                      {STATUS_LABELS[status]}
-                    </option>
-                  ))}
-                </select>
-                <span className="help-text">{STATUS_HINTS.DRAFT}</span>
+                {canChooseStatus ? (
+                  <select name="status" defaultValue="DRAFT" data-testid="category-new-status">
+                    {CATEGORY_STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {STATUS_LABELS[status]}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <>
+                    {/*
+                      No CATEGORIES_STATUS: DRAFT is the only status on offer.
+                      Sent by the hidden field — a disabled select never reaches
+                      FormData, and a create naming no status means ACTIVE,
+                      which the API would refuse.
+                    */}
+                    <input type="hidden" name="status" value="DRAFT" />
+                    <select defaultValue="DRAFT" disabled data-testid="category-new-status">
+                      <option value="DRAFT">{STATUS_LABELS.DRAFT}</option>
+                    </select>
+                  </>
+                )}
+                <span className="help-text" data-testid="category-new-status-help">
+                  {canChooseStatus
+                    ? STATUS_HINTS.DRAFT
+                    : `${STATUS_HINTS.DRAFT} Yayına almak kategori durumu yetkisi gerektirir; bu yetkiye sahip biri detay ekranından yayına alabilir.`}
+                </span>
               </label>
               <label className="field field-4">
                 <span>Üst kategori</span>

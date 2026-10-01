@@ -183,7 +183,7 @@ describe('role forms keep their actions’ contracts', () => {
     expect(markup).toContain('type="reset"');
   });
 
-  it('deactivation sends confirm=on only from a hydrated dialog; the server-rendered form carries none', () => {
+  it('both directions send confirm=on only from a hydrated dialog; the server-rendered form carries none', () => {
     const active = html(
       <RoleStatusForm roleId="role-1" roleName="Destek" isActive permissionCount={2} reach={{ holders: 3, activeHolders: 2 }} action={noop} />,
     );
@@ -195,14 +195,18 @@ describe('role forms keep their actions’ contracts', () => {
     const inactive = html(
       <RoleStatusForm roleId="role-1" roleName="Destek" isActive={false} permissionCount={2} reach={{ holders: 3, activeHolders: 2 }} action={noop} />,
     );
+    // ADMIN-DESTRUCTIVE-CONFIRMATION-001: reactivating asks too.
     expect(inactive).toContain('<input type="hidden" name="isActive" value="true"/>');
-    expect(inactive).not.toContain('<dialog');
-    expect(inactive).toContain('Rolü aktifleştir');
+    expect(inactive).not.toContain('name="confirm"');
+    expect(inactive).toMatch(/<button type="submit"[^>]*aria-haspopup="dialog"[^>]*>Rolü aktifleştir<\/button>/);
+    expect(inactive).toContain('data-testid="role-activate-dialog"');
+    expect(inactive).toContain('Bu rolü taşıyan 3 hesap (2 tanesi aktif) bu rolün 2 iznini hemen geri kazanır');
   });
 
-  it('the deactivate action still refuses a submission without confirm=on', () => {
+  it('the status action refuses a submission without confirm=on, in either direction', () => {
     const actions = read('app/roles/actions.ts');
-    expect(actions).toContain("if (!isActive && readString(formData, 'confirm') !== 'on')");
+    expect(actions).toContain("if (readString(formData, 'confirm') !== 'on')");
+    expect(actions).not.toContain("if (!isActive && readString(formData, 'confirm') !== 'on')");
     // The four role writes and two assignment writes are the same calls.
     for (const call of [
       "'/admin/roles'",

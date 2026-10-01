@@ -20,6 +20,7 @@ import { KeyValueList } from '../../../../components/key-value-list';
 import { SectionCard } from '../../../../components/section-card';
 import type { SummaryItem } from '../../../../components/summary-strip';
 import { approveShowcaseVersionAction, rejectShowcaseVersionAction } from './actions';
+import { FirstApprovalConsequence } from './first-approval-consequence';
 
 type ShowcaseReviewPageProps = {
   params: Promise<{ versionId: string }>;
@@ -41,7 +42,9 @@ type ShowcaseReviewPageProps = {
  * alone.
  *
  * ADMIN-DESIGN-001 Faz 3C: no screen of its own in the design (`soon`), so it
- * sits on the shared detail template. Refusing asks first, in a dialog whose
+ * sits on the shared detail template. Approving a first version asks first
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001; a revision approval still does not).
+ * Refusing asks first, in a dialog whose
  * text follows `rejectVersion` exactly — including the part that is easy to
  * get wrong: no mail goes out for a refusal, and for a card that is already
  * live the note does not reach the provider's panel either.
@@ -256,13 +259,30 @@ export default async function ShowcaseReviewPage({
           >
             <form action={approveShowcaseVersionAction} className="inline-actions">
               <input type="hidden" name="versionId" value={version.id} />
-              <button
-                className="btn btn-primary btn-sm"
-                type="submit"
-                disabled={!isPending || (card.liveVersion === null && !version.entitlement?.valid)}
-              >
-                Onayla
-              </button>
+              {card.liveVersion === null ? (
+                // The first approval is the publication: it spends the right,
+                // puts the card on the air and mails the provider, and nothing
+                // takes it back — so it asks (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+                <ConfirmDialog
+                  triggerLabel="Onayla"
+                  triggerClassName="btn btn-primary btn-sm"
+                  tone="primary"
+                  title="İlk sürüm onaylanıp yayına alınsın mı?"
+                  consequence={
+                    <FirstApprovalConsequence
+                      businessName={version.provider.businessName}
+                      entitlement={version.entitlement}
+                    />
+                  }
+                  confirmLabel="Evet, onayla ve yayına al"
+                  disabled={!isPending || !version.entitlement?.valid}
+                  testId="showcase-approve"
+                />
+              ) : (
+                <button className="btn btn-primary btn-sm" type="submit" disabled={!isPending}>
+                  Onayla
+                </button>
+              )}
               {card.liveVersion === null && !version.entitlement?.valid ? (
                 <span className="cell-muted">Geçerli bir yayın hakkı yok.</span>
               ) : null}

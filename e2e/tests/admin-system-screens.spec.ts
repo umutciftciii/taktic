@@ -207,8 +207,25 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
       await expect(page.getByTestId('role-status')).toHaveText('Pasif');
       await expect.poll(async () => (await prisma().adminRole.findUniqueOrThrow({ where: { id: role.id } })).isActive).toBe(false);
 
-      // Reactivating goes straight through.
-      await page.getByTestId('role-activate').click();
+      // Reactivating asks too (ADMIN-DESTRUCTIVE-CONFIRMATION-001): the same
+      // holders get the permissions back, and the dialog says how many.
+      const activate = page.getByTestId('role-activate');
+      await hydrated(activate);
+      await expect(page.getByTestId('role-status-form').locator('input[name="confirm"]')).toHaveCount(1);
+      await activate.click();
+      const activateDialog = page.getByTestId('role-activate-dialog');
+      await expect(activateDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+      await expect(activateDialog.getByTestId('role-activate-impact')).toContainText(
+        'Bu rolü taşıyan 3 hesap (2 tanesi aktif) bu rolün 2 iznini hemen geri kazanır',
+      );
+      await capture(page, 'role-activate-dialog');
+      await activateDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(activateDialog).toBeHidden();
+      expect((await prisma().adminRole.findUniqueOrThrow({ where: { id: role.id } })).isActive).toBe(false);
+
+      await activate.click();
+      await activateDialog.getByRole('button', { name: 'Evet, aktifleştir' }).click();
+      await expect(page.getByTestId('role-ok')).toHaveText('Rol yeniden aktifleştirildi.');
       await expect(page.getByTestId('role-status')).toHaveText('Aktif');
       await expect.poll(async () => (await prisma().adminRole.findUniqueOrThrow({ where: { id: role.id } })).isActive).toBe(true);
 
@@ -257,7 +274,23 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
       await expect(page.getByTestId('user-status')).toHaveText('Pasif');
       await expect.poll(async () => (await prisma().user.findUniqueOrThrow({ where: { id: target.id } })).isActive).toBe(false);
 
-      await page.getByTestId('user-activate').click();
+      // Activating asks too (ADMIN-DESTRUCTIVE-CONFIRMATION-001). This viewer
+      // may not read roles, and the dialog says so instead of guessing.
+      const activate = page.getByTestId('user-activate');
+      await hydrated(activate);
+      await activate.click();
+      const activateDialog = page.getByTestId('user-activate-dialog');
+      await expect(activateDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+      await expect(activateDialog.getByTestId('user-activate-impact')).toContainText('yeniden giriş yapabilir');
+      await expect(activateDialog.getByTestId('user-activate-scope-hidden')).toContainText(
+        'rollerini yalnız süper yöneticiler görebilir',
+      );
+      await activateDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(activateDialog).toBeHidden();
+      expect((await prisma().user.findUniqueOrThrow({ where: { id: target.id } })).isActive).toBe(false);
+
+      await activate.click();
+      await activateDialog.getByRole('button', { name: 'Evet, aktifleştir' }).click();
       await expect(page.getByTestId('user-status')).toHaveText('Aktif');
       await expect.poll(async () => (await prisma().user.findUniqueOrThrow({ where: { id: target.id } })).isActive).toBe(true);
 
@@ -311,9 +344,29 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
       await expect(page).toHaveURL(new RegExp(`/users/${created.id}$`));
       await expect(page.getByTestId('user-invite-card').getByRole('button', { name: 'Davet linki oluştur' })).toBeVisible();
 
-      // Assign.
-      await page.getByTestId('user-role-assign').locator('select[name="roleId"]').selectOption(role.id);
-      await page.getByTestId('user-role-assign').getByRole('button', { name: 'Ata' }).click();
+      // Assign (ADMIN-DESTRUCTIVE-CONFIRMATION-001): no role is preselected,
+      // so "Ata" is shut until one is picked, and then it asks first.
+      const assignForm = page.getByTestId('user-role-assign');
+      const assign = assignForm.getByTestId('user-role-assign-submit');
+      await hydrated(assignForm.locator('select[name="roleId"]'));
+      await expect(assignForm.locator('select[name="roleId"]')).toHaveValue('');
+      await expect(assign).toBeDisabled();
+      await assignForm.locator('select[name="roleId"]').selectOption(role.id);
+      await expect(assign).toBeEnabled();
+      await assign.click();
+      const assignDialog = page.getByTestId('user-role-assign-submit-dialog');
+      await expect(assignDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+      await expect(assignDialog.getByTestId('user-role-assign-impact')).toContainText('E2E Faz 3G Personel');
+      await expect(assignDialog.getByTestId('user-role-assign-impact')).toContainText('“E2E Faz 3G Müşteri Rolü”');
+      await expect(assignDialog.getByTestId('user-role-assign-impact')).toContainText('Rol 2 izin taşır');
+      await expect(assignDialog.getByTestId('user-role-assign-impact')).toContainText('2 iznin tamamını hemen kazanır');
+      await capture(page, 'user-role-assign-dialog');
+      await assignDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(assignDialog).toBeHidden();
+      expect(await prisma().adminRoleAssignment.count({ where: { userId: created.id } })).toBe(0);
+
+      await assign.click();
+      await assignDialog.getByRole('button', { name: 'Evet, rolü ata' }).click();
       await expect(page.getByTestId('role-assignment-ok')).toHaveText('Rol atandı.');
       await expect(page.locator(`[data-testid="user-role-row"][data-role-id="${role.id}"]`)).toBeVisible();
       await expect(page.getByTestId('user-fact-roles')).toContainText('2 izin');
