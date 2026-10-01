@@ -48,12 +48,13 @@ export async function clickBeforeHydration(page: Page, url: string, trigger: Loc
   const gate = new Promise<void>((resolve) => {
     release = resolve;
   });
-  const hold = async (route: Route) => {
+  // Left in place after the release: an open gate passes every later request
+  // straight through, and unrouting while held requests are still finishing
+  // races them ("Route is already handled").
+  await page.route(/\/_next\/static\/.+\.js(\?.*)?$/, async (route: Route) => {
     await gate;
-    await route.continue();
-  };
-  const scripts = /\/_next\/static\/.+\.js(\?.*)?$/;
-  await page.route(scripts, hold);
+    await route.continue().catch(() => undefined);
+  });
   try {
     await page.goto(url, { waitUntil: 'commit' });
     await trigger.waitFor({ state: 'visible' });
@@ -64,6 +65,5 @@ export async function clickBeforeHydration(page: Page, url: string, trigger: Loc
     await trigger.click();
   } finally {
     release();
-    await page.unroute(scripts, hold);
   }
 }
