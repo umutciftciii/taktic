@@ -161,10 +161,15 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                     testId: 'purchase-credit-hold-delivered',
                   },
                   { label: 'Sağlayıcı sipariş no', value: <code className="cell-break">{hold.providerOrderId ?? '—'}</code> },
-                  {
-                    label: 'Vaka açıldığında bakiye',
-                    value: `${hold.balanceAtOpen !== undefined ? formatCount(hold.balanceAtOpen) : '—'} (üst sınır ${formatCount(CREDIT_AMOUNT_MAX)})`,
-                  },
+                  // The provider's balance is the ledger's (FINANCE_LEDGER_READ).
+                  ...(hold.balanceAtOpen !== undefined
+                    ? [
+                        {
+                          label: 'Vaka açıldığında bakiye',
+                          value: `${formatCount(hold.balanceAtOpen)} (üst sınır ${formatCount(CREDIT_AMOUNT_MAX)})`,
+                        },
+                      ]
+                    : []),
                   {
                     label: 'Reddedilen teslimat',
                     value: `${hold.refusedDeliveries ?? '—'}${hold.lastRefusedAt ? ` · son ${formatDateTime(hold.lastRefusedAt)}` : ''}`,
@@ -216,7 +221,8 @@ export default async function AdminPackagePurchaseDetailPage({ params }: AdminPa
                 ),
               },
               { label: 'Hizmet veren', value: purchase.provider.businessName },
-              { label: 'HV e-posta', value: purchase.provider.email ?? '—' },
+              // The provider's contact is PROVIDERS_READ's; the row exists only where it was sent.
+              ...('email' in purchase.provider ? [{ label: 'HV e-posta', value: purchase.provider.email ?? '—' }] : []),
               { label: 'Paket', value: purchase.packageNameSnapshot },
               { label: 'Kredi', value: formatCount(purchase.creditAmountSnapshot) },
               { label: 'Tutar', value: <strong>{price}</strong> },

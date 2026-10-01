@@ -2,6 +2,8 @@ import { Controller, Get, Inject, Query, UseGuards } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { AuthUser } from '../auth/auth.types';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { FinanceAnalyticsDto } from './dto/finance-analytics.dto';
@@ -30,14 +32,14 @@ export class FinanceController {
   @Get('credit-ledger')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.FINANCE_LEDGER_READ)
-  creditLedger(@Query() query: ListCreditLedgerDto) {
-    return this.financeService.listCreditLedger(query);
+  creditLedger(@Query() query: ListCreditLedgerDto, @CurrentUser() user: AuthUser) {
+    return this.financeService.listCreditLedger(query, user);
   }
 
   @Get('providers')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.FINANCE_READ)
-  providerFinance(@Query() query: ListProviderFinanceDto) {
-    return this.financeService.listProviderFinance(query);
+  providerFinance(@Query() query: ListProviderFinanceDto, @CurrentUser() user: AuthUser) {
+    return this.financeService.listProviderFinance(query, user);
   }
 }

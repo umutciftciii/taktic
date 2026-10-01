@@ -68,21 +68,29 @@ export class PackagePurchasesController {
     @Query('providerId') providerId?: string,
     @Query('packageId') packageId?: string,
     @Query('creditHold') creditHold?: string,
+    @CurrentUser() user?: AuthUser,
   ) {
-    return this.packagePurchasesService.listAdminPurchases({ status, providerId, packageId, creditHold });
+    return this.packagePurchasesService.listAdminPurchases(
+      { status, providerId, packageId, creditHold },
+      user ?? null,
+    );
   }
 
   @Get('package-purchases/:id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.PACKAGE_PURCHASES_READ)
-  getAdminPurchase(@Param('id') id: string) {
-    return this.packagePurchasesService.getAdminPurchase(id);
+  getAdminPurchase(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.packagePurchasesService.getAdminPurchase(id, user);
   }
 
   @Patch('package-purchases/:id/status')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.PACKAGE_PURCHASE_STATUS_WRITE)
-  updateAdminPurchaseStatus(@Param('id') id: string, @Body() dto: UpdatePackagePurchaseStatusDto) {
-    return this.packagePurchasesService.updateAdminPurchaseStatus(id, dto);
+  updateAdminPurchaseStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdatePackagePurchaseStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.packagePurchasesService.updateAdminPurchaseStatus(id, dto, user);
   }
 }

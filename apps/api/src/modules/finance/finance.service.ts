@@ -1,10 +1,13 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import {
+  AdminPermission,
   CreditTransactionType,
   PackagePurchaseStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import {
   FinanceAnalyticsDto,
@@ -343,11 +346,18 @@ export class FinanceService {
     };
   }
 
-  async listCreditLedger(filters: ListCreditLedgerDto) {
+  /**
+   * The ledger (FINANCE_LEDGER_READ). Each row names its provider by id and
+   * business name; the provider's phone and e-mail are the provider list's
+   * (PROVIDERS_READ) and travel — and are searched — only for a caller holding
+   * that (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+   */
+  async listCreditLedger(filters: ListCreditLedgerDto, viewer: AuthUser | null = null) {
     const page = filters.page ?? 1;
     const pageSize = clampPageSize(filters.pageSize);
+    const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
 
-    const where = buildCreditLedgerWhere(filters);
+    const where = buildCreditLedgerWhere(filters, providerContact);
 
     const [total, rows] = await Promise.all([
       this.prisma.providerCreditTransaction.count({ where }),
@@ -361,8 +371,8 @@ export class FinanceService {
             select: {
               id: true,
               businessName: true,
-              phone: true,
-              email: true,
+              phone: providerContact,
+              email: providerContact,
             },
           },
           createdBy: {
@@ -406,13 +416,18 @@ export class FinanceService {
     };
   }
 
-  async listProviderFinance(filters: ListProviderFinanceDto) {
+  /**
+   * Per-provider finance (FINANCE_READ). The provider's phone and e-mail as in
+   * {@link listCreditLedger}: PROVIDERS_READ's, absent and unsearchable without it.
+   */
+  async listProviderFinance(filters: ListProviderFinanceDto, viewer: AuthUser | null = null) {
     const page = filters.page ?? 1;
     const pageSize = clampProviderFinancePageSize(filters.pageSize);
     const sortBy: ProviderFinanceSortField = filters.sortBy ?? 'lastTransactionAt';
     const sortDir: 'asc' | 'desc' = filters.sortDir ?? 'desc';
+    const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
 
-    const providerWhere = buildProviderFinanceWhere(filters);
+    const providerWhere = buildProviderFinanceWhere(filters, providerContact);
 
     const providers = await this.prisma.providerProfile.findMany({
       where: providerWhere,
@@ -511,8 +526,7 @@ export class FinanceService {
         provider: {
           id: provider.id,
           businessName: provider.businessName,
-          phone: provider.phone,
-          email: provider.email,
+          ...(providerContact ? { phone: provider.phone, email: provider.email } : {}),
           status: provider.status,
         },
         currentBalance: balanceByProvider.get(provider.id) ?? 0,
@@ -678,14 +692,19 @@ function clampProviderFinancePageSize(value: number | undefined): number {
 
 function buildProviderFinanceWhere(
   filters: ListProviderFinanceDto,
+  providerContact: boolean,
 ): Prisma.ProviderProfileWhereInput {
   if (!filters.q) return {};
   const term = filters.q;
   return {
     OR: [
       { businessName: { contains: term, mode: 'insensitive' } },
-      { phone: { contains: term, mode: 'insensitive' } },
-      { email: { contains: term, mode: 'insensitive' } },
+      ...(providerContact
+        ? ([
+            { phone: { contains: term, mode: 'insensitive' } },
+            { email: { contains: term, mode: 'insensitive' } },
+          ] satisfies Prisma.ProviderProfileWhereInput[])
+        : []),
     ],
   };
 }
@@ -710,8 +729,9 @@ type ProviderFinanceItem = {
   provider: {
     id: string;
     businessName: string;
-    phone: string;
-    email: string | null;
+    /** PROVIDERS_READ's: absent for a caller without it. */
+    phone?: string;
+    email?: string | null;
     status: string;
   };
   currentBalance: number;
@@ -820,6 +840,7 @@ function normalizeLedgerTypeFilter(
 
 function buildCreditLedgerWhere(
   filters: ListCreditLedgerDto,
+  providerContact: boolean,
 ): Prisma.ProviderCreditTransactionWhereInput {
   const where: Prisma.ProviderCreditTransactionWhereInput = {};
 
@@ -850,8 +871,12 @@ function buildCreditLedgerWhere(
           is: {
             OR: [
               { businessName: { contains: term, mode: 'insensitive' } },
-              { phone: { contains: term, mode: 'insensitive' } },
-              { email: { contains: term, mode: 'insensitive' } },
+              ...(providerContact
+                ? ([
+                    { phone: { contains: term, mode: 'insensitive' } },
+                    { email: { contains: term, mode: 'insensitive' } },
+                  ] satisfies Prisma.ProviderProfileWhereInput[])
+                : []),
             ],
           },
         },

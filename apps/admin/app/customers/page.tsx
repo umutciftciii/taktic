@@ -2,7 +2,6 @@ import Link from 'next/link';
 import {
   apiFetch,
   CUSTOMER_ORIGIN_VALUES,
-  CUSTOMER_SORT_FIELDS,
   CustomerListResponse,
   CustomerOrigin,
   customerOriginBadgeClass,
@@ -20,6 +19,13 @@ import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
 import { Pagination } from '../../components/pagination';
 import { provenChannels } from '../../lib/customer-verification';
+import {
+  customerColumnGates,
+  customerDefaultSort,
+  type CustomerFigures,
+  customerSortFields,
+  gateColumns,
+} from '../../lib/cross-domain-projection';
 import { buildHref, type QueryParams } from '../../lib/list-query';
 import { formatCount } from '../../lib/pagination';
 
@@ -59,7 +65,6 @@ const COLUMNS: DataColumn[] = [
 ];
 
 const DEFAULT_PAGE_SIZE = 20;
-const DEFAULT_SORT_BY: CustomerSortField = 'lastRequestAt';
 const DEFAULT_SORT_DIR: CustomerSortDirection = 'desc';
 
 type RawSearchParams = {
@@ -87,11 +92,15 @@ const SORT_LABEL: Record<CustomerSortField, string> = {
   acceptedOfferCount: 'Kabul edilen teklif',
 };
 
-function normalizeSortBy(value: string | undefined): CustomerSortField {
-  if (value && (CUSTOMER_SORT_FIELDS as readonly string[]).includes(value)) {
+function normalizeSortBy(
+  value: string | undefined,
+  allowed: readonly CustomerSortField[],
+  fallback: CustomerSortField,
+): CustomerSortField {
+  if (value && (allowed as readonly string[]).includes(value)) {
     return value as CustomerSortField;
   }
-  return DEFAULT_SORT_BY;
+  return fallback;
 }
 
 function normalizeSortDir(value: string | undefined): CustomerSortDirection {
@@ -120,15 +129,24 @@ function normalizePageSize(value: string | undefined): number {
 }
 
 export default async function AdminCustomersPage({ searchParams }: AdminCustomersPageProps) {
-  await requireAdmin('CUSTOMERS_READ');
+  const { can } = await requireAdmin('CUSTOMERS_READ');
+  // The request and offer figures are REQUESTS_READ's and OFFERS_READ's: the
+  // API leaves them out — and refuses their sorts and filters — without them,
+  // so the screen neither draws those columns nor offers those controls
+  // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+  const figures: CustomerFigures = { requests: can('REQUESTS_READ'), offers: can('OFFERS_READ') };
+  const columns = gateColumns(COLUMNS, customerColumnGates(figures));
+  const sortFields = customerSortFields(figures);
+  const defaultSort = customerDefaultSort(figures);
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
-  const city = (params.city ?? '').trim();
-  const lastRequestFrom = (params.lastRequestFrom ?? '').trim();
-  const lastRequestTo = (params.lastRequestTo ?? '').trim();
+  // The request filters are dropped, not sent, where the API would refuse them.
+  const city = figures.requests ? (params.city ?? '').trim() : '';
+  const lastRequestFrom = figures.requests ? (params.lastRequestFrom ?? '').trim() : '';
+  const lastRequestTo = figures.requests ? (params.lastRequestTo ?? '').trim() : '';
   const customerOrigin = normalizeCustomerOrigin(params.customerOrigin);
-  const sortBy = normalizeSortBy(params.sortBy);
+  const sortBy = normalizeSortBy(params.sortBy, sortFields, defaultSort);
   const sortDir = normalizeSortDir(params.sortDir);
   const page = normalizePage(params.page);
   const pageSize = normalizePageSize(params.pageSize);
@@ -154,7 +172,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
       lastRequestFrom ||
       lastRequestTo ||
       customerOrigin ||
-      sortBy !== DEFAULT_SORT_BY ||
+      sortBy !== defaultSort ||
       sortDir !== DEFAULT_SORT_DIR,
   );
 
@@ -166,7 +184,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
     lastRequestFrom,
     lastRequestTo,
     customerOrigin: customerOrigin || undefined,
-    sortBy: sortBy !== DEFAULT_SORT_BY ? sortBy : undefined,
+    sortBy: sortBy !== defaultSort ? sortBy : undefined,
     sortDir: sortDir !== DEFAULT_SORT_DIR ? sortDir : undefined,
     pageSize: pageSize !== DEFAULT_PAGE_SIZE ? pageSize : undefined,
   };
@@ -178,13 +196,15 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
         : 'Henüz kayıtlı müşteri yok'
       : hasFilters
         ? `${formatCount(response.total)} müşteri filtreye uyuyor`
-        : `${formatCount(response.total)} kayıtlı müşteri · son talebi en yeni olan önce`;
+        : `${formatCount(response.total)} kayıtlı müşteri · ${
+            figures.requests ? 'son talebi en yeni olan önce' : 'en yeni kayıt önce'
+          }`;
 
   return (
     <main className="customers-page">
       <PageHeader title="Hizmet alanlar" subtitle={summary} info={SCREEN_INFO} />
 
-      {response.meta.anonymousRequestCount > 0 ? (
+      {(response.meta.anonymousRequestCount ?? 0) > 0 ? (
         <div className="notice notice-warning detail-notice" role="status" data-testid="customers-anonymous-notice">
           <strong>Müşteri hesabına bağlanmamış eski talepler var.</strong>{' '}
           {response.meta.anonymousRequestCount} eski talep henüz müşteri hesabıyla eşleşmemiş.
@@ -210,22 +230,26 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
             autoComplete="off"
           />
         </FilterField>
-        <FilterField label="Şehir" htmlFor="customer-city">
-          <input
-            id="customer-city"
-            name="city"
-            type="text"
-            placeholder="İstanbul"
-            defaultValue={city}
-            autoComplete="off"
-          />
-        </FilterField>
-        <FilterField label="Son talep (başlangıç)" htmlFor="customer-from">
-          <input id="customer-from" name="lastRequestFrom" type="date" defaultValue={lastRequestFrom} />
-        </FilterField>
-        <FilterField label="Son talep (bitiş)" htmlFor="customer-to">
-          <input id="customer-to" name="lastRequestTo" type="date" defaultValue={lastRequestTo} />
-        </FilterField>
+        {figures.requests ? (
+          <>
+            <FilterField label="Şehir" htmlFor="customer-city">
+              <input
+                id="customer-city"
+                name="city"
+                type="text"
+                placeholder="İstanbul"
+                defaultValue={city}
+                autoComplete="off"
+              />
+            </FilterField>
+            <FilterField label="Son talep (başlangıç)" htmlFor="customer-from">
+              <input id="customer-from" name="lastRequestFrom" type="date" defaultValue={lastRequestFrom} />
+            </FilterField>
+            <FilterField label="Son talep (bitiş)" htmlFor="customer-to">
+              <input id="customer-to" name="lastRequestTo" type="date" defaultValue={lastRequestTo} />
+            </FilterField>
+          </>
+        ) : null}
         <FilterField label="Müşteri tipi" htmlFor="customer-origin">
           <select id="customer-origin" name="customerOrigin" defaultValue={customerOrigin}>
             <option value="">Tümü</option>
@@ -238,7 +262,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
         </FilterField>
         <FilterField label="Sıralama" htmlFor="customer-sort">
           <select id="customer-sort" name="sortBy" defaultValue={sortBy}>
-            {CUSTOMER_SORT_FIELDS.map((field) => (
+            {sortFields.map((field) => (
               <option key={field} value={field}>
                 {SORT_LABEL[field]}
               </option>
@@ -277,9 +301,9 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
             }
           />
         ) : (
-          <DataTable caption="Hizmet alanlar" columns={COLUMNS} minWidth={1060} testId="customer-table">
+          <DataTable caption="Hizmet alanlar" columns={columns} minWidth={1060} testId="customer-table">
             {response.items.map((customer) => (
-              <CustomerRow key={customer.id} customer={customer} />
+              <CustomerRow key={customer.id} customer={customer} figures={figures} />
             ))}
           </DataTable>
         )}
@@ -300,7 +324,7 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
   );
 }
 
-function CustomerRow({ customer }: { customer: CustomerSummary }) {
+function CustomerRow({ customer, figures }: { customer: CustomerSummary; figures: CustomerFigures }) {
   const displayName = customer.name ?? customer.email ?? customer.phone ?? '—';
 
   return (
@@ -337,31 +361,41 @@ function CustomerRow({ customer }: { customer: CustomerSummary }) {
       <td>
         <CustomerVerificationCell customer={customer} />
       </td>
-      <td>{customer.lastRequestCity ? customer.lastRequestCity : <span className="cell-muted">—</span>}</td>
-      <td className="is-num">
-        {customer.requestCount === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          <strong>{customer.requestCount}</strong>
-        )}
-      </td>
-      <td className="is-num">
-        {customer.offerCount === 0 ? <span className="cell-muted">0</span> : customer.offerCount}
-      </td>
-      <td className="is-num">
-        {customer.acceptedOfferCount === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          <span className="badge badge-good">{customer.acceptedOfferCount}</span>
-        )}
-      </td>
-      <td>
-        {customer.lastRequestAt ? (
-          formatDateTime(customer.lastRequestAt)
-        ) : (
-          <span className="cell-muted">Henüz talep yok</span>
-        )}
-      </td>
+      {figures.requests ? (
+        <>
+          <td>{customer.lastRequestCity ? customer.lastRequestCity : <span className="cell-muted">—</span>}</td>
+          <td className="is-num" data-testid="customer-request-count">
+            {!customer.requestCount ? (
+              <span className="cell-muted">0</span>
+            ) : (
+              <strong>{customer.requestCount}</strong>
+            )}
+          </td>
+        </>
+      ) : null}
+      {figures.offers ? (
+        <>
+          <td className="is-num" data-testid="customer-offer-count">
+            {!customer.offerCount ? <span className="cell-muted">0</span> : customer.offerCount}
+          </td>
+          <td className="is-num">
+            {!customer.acceptedOfferCount ? (
+              <span className="cell-muted">0</span>
+            ) : (
+              <span className="badge badge-good">{customer.acceptedOfferCount}</span>
+            )}
+          </td>
+        </>
+      ) : null}
+      {figures.requests ? (
+        <td>
+          {customer.lastRequestAt ? (
+            formatDateTime(customer.lastRequestAt)
+          ) : (
+            <span className="cell-muted">Henüz talep yok</span>
+          )}
+        </td>
+      ) : null}
       <td>
         {customer.isActive ? (
           <span className="badge badge-good">Aktif</span>

@@ -62,8 +62,9 @@ export class ProvidersController {
     @Query('city') city?: string,
     @Query('categoryId') categoryId?: string,
     @Query('ownership') ownership?: string,
+    @CurrentUser() user?: AuthUser,
   ) {
-    return this.providersService.listProviders({ status, city, categoryId, ownership });
+    return this.providersService.listProviders({ status, city, categoryId, ownership }, user ?? null);
   }
 
   @Get('me')
@@ -148,8 +149,8 @@ export class ProvidersController {
   @Get(':providerId/admin-detail')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.PROVIDERS_READ_DETAIL)
-  getAdminProviderDetail(@Param('providerId') providerId: string) {
-    return this.providersService.getAdminProviderDetail(providerId);
+  getAdminProviderDetail(@Param('providerId') providerId: string, @CurrentUser() user: AuthUser) {
+    return this.providersService.getAdminProviderDetail(providerId, user);
   }
 
   /**

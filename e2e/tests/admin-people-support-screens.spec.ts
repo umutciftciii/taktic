@@ -247,7 +247,13 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await staff.gotoAdmin(`/providers/${provider.id}`);
       await expectOpen(page, new RegExp(`/providers/${provider.id}$`));
       const tabs = page.getByRole('navigation', { name: 'Hizmet veren sekmeleri' });
-      await expect(tabs.getByRole('link')).toHaveText(['İşletme bilgileri', /Teklifler ve paketler/]);
+      // No OFFERS_READ / PACKAGE_PURCHASES_READ either: the API carries no
+      // offers or purchases, so there is no tab for them and no figure
+      // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+      await expect(tabs.getByRole('link')).toHaveText(['İşletme bilgileri']);
+      await expect(page.getByTestId('provider-fact-credit')).toHaveCount(0);
+      await expect(page.getByTestId('provider-fact-open-offers')).toHaveCount(0);
+      await expect(page.getByTestId('provider-fact-purchases')).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'Krediler', exact: true })).toHaveCount(0);
       // PROVIDERS_READ is not held: no way back to a list that would refuse.
       await expect(page.locator('.detail-back')).toHaveCount(0);
@@ -280,7 +286,11 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await reader.actor.gotoAdmin(`/customers/${customer.id}`);
       await expectOpen(page, new RegExp(`/customers/${customer.id}$`));
       const tabs = page.getByRole('navigation', { name: 'Müşteri sekmeleri' });
-      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim', /Talep geçmişi/, /Aldığı teklifler/]);
+      // The request and offer history are REQUESTS_READ's and OFFERS_READ's
+      // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001): CUSTOMERS_READ alone
+      // opens the account and nothing it is joined to.
+      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim']);
+      await expect(page.getByTestId('customer-fact-requests')).toHaveCount(0);
       await expect(page.getByTestId('customer-email-verification')).toBeVisible();
       for (const name of ['Hesabı pasife al', 'Şifre belirleme bağlantısı oluştur']) {
         await expect(page.getByRole('button', { name })).toHaveCount(0);

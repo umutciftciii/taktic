@@ -35,7 +35,7 @@ export class OffersController {
   @Get()
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.OFFERS_READ)
-  listOffers(@Query() query: ListOffersQueryDto) {
+  listOffers(@Query() query: ListOffersQueryDto, @CurrentUser() user: AuthUser) {
     return this.offersService.listOffers({
       q: query.q,
       status: query.status,
@@ -46,7 +46,7 @@ export class OffersController {
       city: query.city,
       submittedFrom: query.submittedFrom,
       submittedTo: query.submittedTo,
-    });
+    }, user);
   }
 
   @Get('refund-scan')
@@ -66,8 +66,8 @@ export class OffersController {
   @Get(':id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.OFFERS_READ)
-  getOffer(@Param('id') id: string) {
-    return this.offersService.getOffer(id);
+  getOffer(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.offersService.getOffer(id, user);
   }
 
   /**

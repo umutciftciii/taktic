@@ -1,5 +1,6 @@
 import { ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  AdminPermission,
   Prisma,
   ServiceRequestReportReason,
   ServiceRequestReportResolution,
@@ -7,6 +8,8 @@ import {
 } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { ProvidersService } from '../providers/providers.service';
 import { ServiceRequestsService } from '../service-requests/service-requests.service';
@@ -243,7 +246,15 @@ export class RequestReportsService {
    * request's `moderationNote`, an admin field; the reports' `resolutionNote`
    * is an admin field; the reporter is named nowhere the customer can see.
    */
-  async resolve(requestId: string, dto: ResolveRequestReportsDto, adminUserId: string) {
+  /**
+   * Answers with the request as the request page shows it — to a caller that
+   * may read that page (REQUESTS_READ). REQUEST_REPORTS_RESOLVE alone closes
+   * the reports; it does not open the request, its owner's contact or the
+   * account behind it, so that caller gets the request's reference and the
+   * status the resolution left it in (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+   */
+  async resolve(requestId: string, dto: ResolveRequestReportsDto, admin: AuthUser) {
+    const adminUserId = admin.id;
     const now = new Date();
     const resolutionNote = dto.resolutionNote?.trim() || null;
 
@@ -288,7 +299,13 @@ export class RequestReportsService {
     if (outcome.removed) {
       await this.notifySafely(() => this.mail.sendRequestRemoved(requestId, now, outcome.reason), requestId);
     }
-    return this.requests.getServiceRequest(requestId);
+    if (mayEmbed(admin, AdminPermission.REQUESTS_READ)) {
+      return this.requests.getServiceRequest(requestId, admin);
+    }
+    return this.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: requestId },
+      select: { id: true, requestNumber: true, status: true },
+    });
   }
 
   /**

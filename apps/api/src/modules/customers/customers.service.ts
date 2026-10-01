@@ -1,5 +1,14 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { AdminPermission, CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
+import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import {
@@ -53,11 +62,35 @@ type CustomerListItem = {
 export class CustomersService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async list(filters: ListCustomersDto) {
+  /**
+   * The operator's customer list (CUSTOMERS_READ).
+   *
+   * The account columns are this route's. The request figures (count, last
+   * request, its city, and the unlinked-request notice) are REQUESTS_READ's
+   * and the offer figures OFFERS_READ's: absent from every row for a caller
+   * without that permission, and not computed at all. Sorting or filtering by
+   * one of them would answer the same question through the order of the rows,
+   * so those parameters are refused (403) instead of ignored; the default sort
+   * falls back to the account's own creation date.
+   */
+  async list(filters: ListCustomersDto, viewer: AuthUser | null = null) {
+    const scope = customerEmbedScope(viewer);
     const page = filters.page ?? 1;
     const pageSize = clampPageSize(filters.pageSize);
-    const sortBy: CustomerSortField = filters.sortBy ?? 'lastRequestAt';
+    const sortBy: CustomerSortField =
+      filters.sortBy ?? (scope.requests ? 'lastRequestAt' : 'createdAt');
     const sortDir: CustomerSortDirection = filters.sortDir ?? 'desc';
+
+    const needsRequests =
+      REQUEST_SORT_FIELDS.has(sortBy) ||
+      Boolean(filters.city || filters.lastRequestFrom || filters.lastRequestTo);
+    const needsOffers = OFFER_SORT_FIELDS.has(sortBy);
+    if ((needsRequests && !scope.requests) || (needsOffers && !scope.offers)) {
+      throw new ForbiddenException({
+        code: INSUFFICIENT_PERMISSION,
+        message: 'Insufficient permission',
+      });
+    }
 
     const lastRequestRange = parseDateRange(
       filters.lastRequestFrom,
@@ -121,7 +154,7 @@ export class CustomersService {
     const customerIds = customers.map((customer) => customer.id);
 
     const [requestStats, offerStats, lastRequests, anonymousRequestCount] = await Promise.all([
-      customerIds.length === 0
+      customerIds.length === 0 || !scope.requests
         ? Promise.resolve(
             [] as Array<{
               customerId: string | null;
@@ -135,7 +168,7 @@ export class CustomersService {
             _count: { _all: true },
             _max: { submittedAt: true },
           }),
-      customerIds.length === 0
+      customerIds.length === 0 || !scope.offers
         ? Promise.resolve([] as Array<{ customerId: string; status: OfferStatus; count: number }>)
         : this.prisma.$queryRaw<
             Array<{ customerId: string; status: OfferStatus; count: bigint }>
@@ -152,7 +185,7 @@ export class CustomersService {
               count: Number(row.count),
             })),
           ),
-      customerIds.length === 0
+      customerIds.length === 0 || !scope.requests
         ? Promise.resolve([] as Array<{ customerId: string; city: string; submittedAt: Date }>)
         : this.prisma.$queryRaw<
             Array<{ customerId: string; city: string; submittedAt: Date }>
@@ -162,7 +195,9 @@ export class CustomersService {
             WHERE "customerId" IN (${Prisma.join(customerIds)})
             ORDER BY "customerId", "submittedAt" DESC, "id" DESC
           `),
-      this.prisma.serviceRequest.count({ where: { customerId: null } }),
+      scope.requests
+        ? this.prisma.serviceRequest.count({ where: { customerId: null } })
+        : Promise.resolve(null),
     ]);
 
     const requestStatsByCustomer = new Map<
@@ -228,18 +263,24 @@ export class CustomersService {
     const hasNextPage = end < total;
 
     return {
-      items: pagedItems,
+      items: pagedItems.map((item) => toCustomerListRow(item, scope)),
       total,
       page,
       pageSize,
       hasNextPage,
-      meta: {
-        anonymousRequestCount,
-      },
+      meta: anonymousRequestCount !== null ? { anonymousRequestCount } : {},
     };
   }
 
-  async detail(id: string) {
+  /**
+   * The operator's customer page (CUSTOMERS_READ).
+   *
+   * The account is this route's. The customer's requests are REQUESTS_READ's
+   * and the offers they received OFFERS_READ's; each block — rows and the
+   * figures that count them — is read and carried only for a caller holding
+   * that permission, and is absent from the body otherwise (see `mayEmbed`).
+   */
+  async detail(id: string, viewer: AuthUser | null = null) {
     const user = await this.prisma.user.findUnique({
       where: { id },
       select: {
@@ -264,21 +305,44 @@ export class CustomersService {
     }
 
     const hasPassword = user.passwordHash !== null;
+    const scope = customerEmbedScope(viewer);
 
-    const [
-      requestCount,
-      offerCountAgg,
-      acceptedOfferCountAgg,
-      lastRequest,
-      recentRequestRows,
-      recentOfferRows,
-      acceptedOfferRows,
-    ] = await Promise.all([
+    const [requests, offers] = await Promise.all([
+      scope.requests ? this.detailRequests(id) : Promise.resolve(null),
+      scope.offers ? this.detailOffers(id) : Promise.resolve(null),
+    ]);
+
+    return {
+      customer: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        isActive: user.isActive,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+        lastLoginAt: user.lastLoginAt,
+        customerOrigin: user.customerOrigin,
+        // The same two account columns the list carries; see CustomerListItem.
+        emailVerifiedAt: user.emailVerifiedAt,
+        phoneVerifiedAt: user.phoneVerifiedAt,
+        hasPassword,
+      },
+      // Each figure travels with the block it summarises: a caller that may
+      // not read the requests is not told how many there are either.
+      metrics: {
+        ...(requests ? requests.metrics : {}),
+        ...(offers ? offers.metrics : {}),
+      },
+      ...(requests ? { recentRequests: requests.recentRequests } : {}),
+      ...(offers ? { recentOffers: offers.recentOffers, acceptedOffers: offers.acceptedOffers } : {}),
+    };
+  }
+
+  /** The customer's requests, for a caller holding REQUESTS_READ. */
+  private async detailRequests(id: string) {
+    const [requestCount, lastRequest, recentRequestRows] = await Promise.all([
       this.prisma.serviceRequest.count({ where: { customerId: id } }),
-      this.prisma.offer.count({ where: { request: { customerId: id } } }),
-      this.prisma.offer.count({
-        where: { request: { customerId: id }, status: OfferStatus.ACCEPTED },
-      }),
       this.prisma.serviceRequest.findFirst({
         where: { customerId: id },
         orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
@@ -300,53 +364,57 @@ export class CustomersService {
           _count: { select: { offers: true } },
         },
       }),
+    ]);
+
+    return {
+      metrics: { requestCount, lastRequestAt: lastRequest?.submittedAt ?? null },
+      recentRequests: recentRequestRows.map((row) => ({
+        id: row.id,
+        requestNumber: row.requestNumber,
+        categoryName: row.category.name,
+        city: row.city,
+        district: row.district,
+        status: row.status,
+        qualityLabel: qualityLabel(row.qualityScore),
+        submittedAt: row.submittedAt,
+        offerCount: row._count.offers,
+      })),
+    };
+  }
+
+  /** The offers the customer received, for a caller holding OFFERS_READ. */
+  private async detailOffers(id: string) {
+    const offerSelect = {
+      id: true,
+      offerNumber: true,
+      requestId: true,
+      providerId: true,
+      priceAmount: true,
+      currency: true,
+      status: true,
+      submittedAt: true,
+      request: { select: { requestNumber: true } },
+      provider: { select: { businessName: true } },
+    } satisfies Prisma.OfferSelect;
+
+    const [offerCount, acceptedOfferCount, recentOfferRows, acceptedOfferRows] = await Promise.all([
+      this.prisma.offer.count({ where: { request: { customerId: id } } }),
+      this.prisma.offer.count({
+        where: { request: { customerId: id }, status: OfferStatus.ACCEPTED },
+      }),
       this.prisma.offer.findMany({
         where: { request: { customerId: id } },
         orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
         take: RECENT_OFFERS_LIMIT,
-        select: {
-          id: true,
-          offerNumber: true,
-          requestId: true,
-          providerId: true,
-          priceAmount: true,
-          currency: true,
-          status: true,
-          submittedAt: true,
-          request: { select: { requestNumber: true } },
-          provider: { select: { businessName: true } },
-        },
+        select: offerSelect,
       }),
       this.prisma.offer.findMany({
         where: { request: { customerId: id }, status: OfferStatus.ACCEPTED },
         orderBy: [{ acceptedAt: 'desc' }, { id: 'desc' }],
         take: ACCEPTED_OFFERS_LIMIT,
-        select: {
-          id: true,
-          offerNumber: true,
-          requestId: true,
-          providerId: true,
-          priceAmount: true,
-          currency: true,
-          status: true,
-          submittedAt: true,
-          request: { select: { requestNumber: true } },
-          provider: { select: { businessName: true } },
-        },
+        select: offerSelect,
       }),
     ]);
-
-    const recentRequests = recentRequestRows.map((row) => ({
-      id: row.id,
-      requestNumber: row.requestNumber,
-      categoryName: row.category.name,
-      city: row.city,
-      district: row.district,
-      status: row.status,
-      qualityLabel: qualityLabel(row.qualityScore),
-      submittedAt: row.submittedAt,
-      offerCount: row._count.offers,
-    }));
 
     const mapOffer = (row: (typeof recentOfferRows)[number]) => ({
       id: row.id,
@@ -362,28 +430,7 @@ export class CustomersService {
     });
 
     return {
-      customer: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        isActive: user.isActive,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt,
-        lastLoginAt: user.lastLoginAt,
-        customerOrigin: user.customerOrigin,
-        // The same two account columns the list carries; see CustomerListItem.
-        emailVerifiedAt: user.emailVerifiedAt,
-        phoneVerifiedAt: user.phoneVerifiedAt,
-        hasPassword,
-      },
-      metrics: {
-        requestCount,
-        offerCount: offerCountAgg,
-        acceptedOfferCount: acceptedOfferCountAgg,
-        lastRequestAt: lastRequest?.submittedAt ?? null,
-      },
-      recentRequests,
+      metrics: { offerCount, acceptedOfferCount },
       recentOffers: recentOfferRows.map(mapOffer),
       acceptedOffers: acceptedOfferRows.map(mapOffer),
     };
@@ -499,6 +546,43 @@ function parseDateRange(
     throw new BadRequestException(`"${fromKey}" must be on or before "${toKey}"`);
   }
   return range;
+}
+
+/**
+ * Which other domains an operator's customer response may carry
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+ */
+type CustomerEmbedScope = { requests: boolean; offers: boolean };
+
+function customerEmbedScope(viewer: AuthUser | null): CustomerEmbedScope {
+  return {
+    requests: mayEmbed(viewer, AdminPermission.REQUESTS_READ),
+    offers: mayEmbed(viewer, AdminPermission.OFFERS_READ),
+  };
+}
+
+const REQUEST_SORT_FIELDS: ReadonlySet<CustomerSortField> = new Set(['lastRequestAt', 'requestCount']);
+const OFFER_SORT_FIELDS: ReadonlySet<CustomerSortField> = new Set(['offerCount', 'acceptedOfferCount']);
+
+/**
+ * One row on the way out: the account columns always, each domain's figures
+ * only for a caller that may read that domain. The internal item is sorted
+ * first, and a sort on a figure the caller may not read never gets this far.
+ */
+function toCustomerListRow(item: CustomerListItem, scope: CustomerEmbedScope) {
+  const {
+    requestCount,
+    lastRequestAt,
+    lastRequestCity,
+    offerCount,
+    acceptedOfferCount,
+    ...account
+  } = item;
+  return {
+    ...account,
+    ...(scope.requests ? { requestCount, lastRequestAt, lastRequestCity } : {}),
+    ...(scope.offers ? { offerCount, acceptedOfferCount } : {}),
+  };
 }
 
 function buildCustomerComparator(sortBy: CustomerSortField, sortDir: CustomerSortDirection) {

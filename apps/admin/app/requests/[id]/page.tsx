@@ -469,6 +469,10 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                   },
                   {
                     label: 'Bağlı hesap',
+                    // The account itself is CUSTOMERS_READ's; without it the
+                    // API sends only the request's own `customerId`, which
+                    // still says whether there is one (API-ADMIN-CROSS-DOMAIN-
+                    // PROJECTION-RBAC-001).
                     value: request.customer ? (
                       <span>
                         {request.customer.name ??
@@ -479,6 +483,8 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                           <span className="cell-muted"> · {request.customer.email}</span>
                         ) : null}
                       </span>
+                    ) : request.customerId ? (
+                      <span data-testid="request-account-linked">Müşteri hesabına bağlı</span>
                     ) : (
                       <span className="cell-muted">Bağlı hesap yok</span>
                     ),

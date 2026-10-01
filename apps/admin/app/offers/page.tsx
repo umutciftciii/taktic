@@ -14,6 +14,7 @@ import {
   statusLabel,
 } from '../../lib/api';
 import { DataTable, type DataColumn } from '../../components/data-table';
+import { gateColumns } from '../../lib/cross-domain-projection';
 import { EmptyState } from '../../components/empty-state';
 import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
@@ -124,6 +125,8 @@ function isIsoDate(value: string) {
 
 export default async function AdminOffersPage({ searchParams }: AdminOffersPageProps) {
   const { can } = await requireAdmin('OFFERS_READ');
+  // The customer column is the request's contact snapshot, which the API
+  // sends only with REQUESTS_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
   const canReadRequests = can('REQUESTS_READ');
   const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
   const params = (await searchParams) ?? {};
@@ -306,7 +309,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
             id="offer-q"
             name="q"
             type="search"
-            placeholder="HV, müşteri, şehir, ID"
+            placeholder={canReadRequests ? 'HV, müşteri, şehir, ID' : 'HV, şehir, ID'}
             defaultValue={query}
             autoComplete="off"
           />
@@ -376,7 +379,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
             />
           )
         ) : (
-          <DataTable caption="Teklifler" columns={COLUMNS} minWidth={1280} testId="offer-table">
+          <DataTable caption="Teklifler" columns={gateColumns(COLUMNS, { customer: canReadRequests })} minWidth={1280} testId="offer-table">
             {pageRows.map((offer) => (
               <OfferRow
                 key={offer.id}
@@ -436,20 +439,22 @@ function OfferRow({
       <td>
         <div className="cell-stack">
           <strong>{offer.provider.businessName}</strong>
-          <span className="cell-muted">{offer.provider.contactName}</span>
+          {offer.provider.contactName ? <span className="cell-muted">{offer.provider.contactName}</span> : null}
         </div>
       </td>
       <td>{offer.request.category.name}</td>
-      <td>
-        <div className="cell-stack">
-          <span>{customerName || '-'}</span>
-          {customerPhone ? (
-            <a className="cell-link cell-muted" href={`tel:${customerPhone}`}>
-              {customerPhone}
-            </a>
-          ) : null}
-        </div>
-      </td>
+      {canReadRequests ? (
+        <td>
+          <div className="cell-stack">
+            <span>{customerName || '-'}</span>
+            {customerPhone ? (
+              <a className="cell-link cell-muted" href={`tel:${customerPhone}`}>
+                {customerPhone}
+              </a>
+            ) : null}
+          </div>
+        </td>
+      ) : null}
       <td>
         {offer.request.city}/{offer.request.district}
       </td>

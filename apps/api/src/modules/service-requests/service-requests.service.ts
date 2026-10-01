@@ -22,6 +22,7 @@ import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEn
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import {
   CONTACT_DISCLOSURE_REQUIRED_CODE,
   readContactSharingConfig,
@@ -819,25 +820,33 @@ export class ServiceRequestsService {
     };
   }
 
-  async listServiceRequests() {
+  /**
+   * The operator's request list (REQUESTS_READ). The request's own columns —
+   * the contact its owner typed into it among them — are this route's; the
+   * customer *account* behind it is CUSTOMERS_READ's and is carried only for a
+   * caller holding that, absent otherwise (`customerId` stays: it is the
+   * request's own reference, not the account).
+   */
+  async listServiceRequests(viewer: AuthUser | null = null) {
+    const customerAccount = mayEmbed(viewer, AdminPermission.CUSTOMERS_READ);
     const requests = await this.prisma.serviceRequest.findMany({
       orderBy: { submittedAt: 'desc' },
       include: {
         category: {
           select: { id: true, name: true, slug: true },
         },
-        customer: {
-          select: { id: true, email: true, phone: true, name: true },
-        },
+        ...(customerAccount
+          ? { customer: { select: { id: true, email: true, phone: true, name: true } } }
+          : {}),
         _count: {
           select: { offers: true },
         },
       },
     });
 
-    return requests.map((request) => ({
+    return requests.map(({ _count, ...request }) => ({
       ...withQualityLabel(request),
-      offersCount: request._count.offers,
+      offersCount: _count.offers,
     }));
   }
 
@@ -878,16 +887,18 @@ export class ServiceRequestsService {
     };
   }
 
-  async getServiceRequest(id: string) {
+  /** The operator's request page (REQUESTS_READ); the account block as in {@link listServiceRequests}. */
+  async getServiceRequest(id: string, viewer: AuthUser | null = null) {
+    const customerAccount = mayEmbed(viewer, AdminPermission.CUSTOMERS_READ);
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
       include: {
         category: {
           select: { id: true, name: true, slug: true },
         },
-        customer: {
-          select: { id: true, email: true, phone: true, name: true },
-        },
+        ...(customerAccount
+          ? { customer: { select: { id: true, email: true, phone: true, name: true } } }
+          : {}),
         // The cancellation record (PR #118), for the admin detail only: who
         // cancelled, what was decided about the winner's credit and why.
         cancellation: {

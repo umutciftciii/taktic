@@ -300,6 +300,7 @@ export type ServiceRequest = {
     name: string;
     slug: string;
   };
+  /** CUSTOMERS_READ only: the account behind `customerId`. */
   customer?: {
     id: string;
     email: string | null;
@@ -586,12 +587,18 @@ export type Offer = {
   withdrawnAt: string | null;
   /** When a request cascade (removal or cancel) closed it. */
   cancelledAt: string | null;
+  /**
+   * The provider and the request travel by their identity; the rest of each
+   * belongs to another read permission and is absent without it
+   * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+   */
   provider: {
     id: string;
     businessName: string;
-    contactName: string;
-    phone: string;
-    email: string | null;
+    /** PROVIDERS_READ only, with `phone` and `email`. */
+    contactName?: string;
+    phone?: string;
+    email?: string | null;
     city: string;
     district: string;
     status: ProviderStatus;
@@ -599,20 +606,24 @@ export type Offer = {
   request: {
     id: string;
     requestNumber: string | null;
+    /** The reference, not the account: whether the request has an owner at all. */
+    customerId: string | null;
     city: string;
     district: string;
-    neighborhood: string | null;
     status: ServiceRequestStatus;
-    qualityScore: number;
-    customerName: string;
-    customerPhone: string;
-    customerEmail: string | null;
+    /** REQUESTS_READ only: the request's detail and its owner's contact snapshot. */
+    neighborhood?: string | null;
+    qualityScore?: number;
+    customerName?: string;
+    customerPhone?: string;
+    customerEmail?: string | null;
     category: {
       id: string;
       name: string;
       slug: string;
     };
-    customer: {
+    /** CUSTOMERS_READ only: the account behind the request. */
+    customer?: {
       id: string;
       name: string | null;
       email: string | null;
@@ -892,8 +903,9 @@ export type PackagePurchase = {
   provider: {
     id: string;
     businessName: string;
-    contactName: string;
-    email: string | null;
+    /** PROVIDERS_READ only, as is `email` (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001). */
+    contactName?: string;
+    email?: string | null;
     city: string;
     district: string;
     status: ProviderStatus;
@@ -962,6 +974,7 @@ export type PurchaseCreditHold = {
   /** Detail endpoint only. */
   reason?: string;
   providerOrderId?: string;
+  /** FINANCE_LEDGER_READ only: the provider's balance when the hold opened. */
   balanceAtOpen?: number;
   refusedDeliveries?: number;
   lastRefusedAt?: string;
@@ -1028,15 +1041,21 @@ export type CustomerSummary = {
    */
   emailVerifiedAt?: string | null;
   phoneVerifiedAt?: string | null;
-  requestCount: number;
-  offerCount: number;
-  acceptedOfferCount: number;
-  lastRequestAt: string | null;
-  lastRequestCity: string | null;
+  /**
+   * The request figures (REQUESTS_READ) and the offer figures (OFFERS_READ)
+   * travel only for a session holding that permission
+   * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001); absent otherwise.
+   */
+  requestCount?: number;
+  offerCount?: number;
+  acceptedOfferCount?: number;
+  lastRequestAt?: string | null;
+  lastRequestCity?: string | null;
 };
 
 export type CustomerListMeta = {
-  anonymousRequestCount: number;
+  /** REQUESTS_READ only. */
+  anonymousRequestCount?: number;
 };
 
 export type CustomerListResponse = {
@@ -1064,11 +1083,16 @@ export type CustomerDetail = {
   phoneVerifiedAt?: string | null;
 };
 
+/**
+ * Each figure travels with the block it counts (API-ADMIN-CROSS-DOMAIN-
+ * PROJECTION-RBAC-001): the request figures only for a session holding
+ * REQUESTS_READ, the offer figures only for OFFERS_READ. Absent otherwise.
+ */
 export type CustomerMetrics = {
-  requestCount: number;
-  offerCount: number;
-  acceptedOfferCount: number;
-  lastRequestAt: string | null;
+  requestCount?: number;
+  offerCount?: number;
+  acceptedOfferCount?: number;
+  lastRequestAt?: string | null;
 };
 
 export type CustomerRecentRequest = {
@@ -1099,9 +1123,11 @@ export type CustomerRecentOffer = {
 export type CustomerDetailResponse = {
   customer: CustomerDetail;
   metrics: CustomerMetrics;
-  recentRequests: CustomerRecentRequest[];
-  recentOffers: CustomerRecentOffer[];
-  acceptedOffers: CustomerRecentOffer[];
+  /** REQUESTS_READ only. */
+  recentRequests?: CustomerRecentRequest[];
+  /** OFFERS_READ only, as is `acceptedOffers`. */
+  recentOffers?: CustomerRecentOffer[];
+  acceptedOffers?: CustomerRecentOffer[];
 };
 
 export type CustomerNote = {
@@ -1372,8 +1398,9 @@ export const CREDIT_TRANSACTION_TYPES: CreditTransactionType[] = [
 export type CreditLedgerProvider = {
   id: string;
   businessName: string;
-  phone: string;
-  email: string | null;
+  /** PROVIDERS_READ only, as is `email` (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001). */
+  phone?: string;
+  email?: string | null;
 };
 
 export type CreditLedgerEntry = {
@@ -1688,8 +1715,9 @@ export type ProviderFinanceItem = {
   provider: {
     id: string;
     businessName: string;
-    phone: string;
-    email: string | null;
+    /** PROVIDERS_READ only, as is `email` (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001). */
+    phone?: string;
+    email?: string | null;
     status: ProviderStatus;
   };
   currentBalance: number;

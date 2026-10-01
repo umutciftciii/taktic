@@ -172,7 +172,7 @@ export default async function AdminProviderFinancePage({
             id="provider-finance-search"
             name="q"
             type="search"
-            placeholder="İşletme, telefon, e-posta"
+            placeholder={can('PROVIDERS_READ') ? 'İşletme, telefon, e-posta' : 'İşletme'}
             defaultValue={q}
             autoComplete="off"
           />
