@@ -152,6 +152,10 @@ describe('GET /service-requests/my/:id', () => {
     const cookie = await loginAs(ctx.prisma, owner.id);
     // A spelling the location validator knows, from its own dataset.
     const [neighborhood] = listNeighborhoods('İstanbul', 'Kadıköy');
+    // Counted from today: the create route refuses a past day, and fixed
+    // calendar dates here turned into a failure the day they went by.
+    const preferredDate = isoDayFromToday(10);
+    const preferredDateEnd = isoDayFromToday(14);
 
     const created = await request(ctx.server)
       .post('/service-requests')
@@ -162,8 +166,8 @@ describe('GET /service-requests/my/:id', () => {
           addressNote: 'Kapıcıya haber verin',
           budgetMin: 150000,
           budgetMax: 250000,
-          preferredDate: '2026-10-01',
-          preferredDateEnd: '2026-10-05',
+          preferredDate,
+          preferredDateEnd,
           urgency: 'FLEXIBLE',
           description: 'Salon kliması soğutmuyor.',
           answers: [
@@ -194,8 +198,8 @@ describe('GET /service-requests/my/:id', () => {
     expect(detail.body.addressNote).toBe('Kapıcıya haber verin');
     expect(detail.body.budgetMin).toBe(150000);
     expect(detail.body.budgetMax).toBe(250000);
-    expect(detail.body.preferredDate).toBe('2026-10-01T00:00:00.000Z');
-    expect(detail.body.preferredDateEnd).toBe('2026-10-05T00:00:00.000Z');
+    expect(detail.body.preferredDate).toBe(`${preferredDate}T00:00:00.000Z`);
+    expect(detail.body.preferredDateEnd).toBe(`${preferredDateEnd}T00:00:00.000Z`);
     expect(detail.body.urgency).toBe('FLEXIBLE');
     expect(detail.body.answers).toEqual([
       {
@@ -364,3 +368,11 @@ describe('GET /service-requests/my/:id', () => {
       .expect(404);
   });
 });
+
+/** `YYYY-MM-DD`, `days` after today in Istanbul — the day the request form judges against. */
+function isoDayFromToday(days: number): string {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
+  const date = new Date(`${today}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
