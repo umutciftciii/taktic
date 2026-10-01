@@ -12,6 +12,8 @@ import {
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { CampaignFormState } from './form-state';
 import type { CampaignLifecycleState } from './lifecycle-state';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * The builder's two verbs: check, and save.
@@ -179,6 +181,13 @@ export async function campaignLifecycleAction(
   if (intent !== 'activate' && reason.length < 3) {
     return { status: 'error', message: 'Gerekçe en az 3 karakter olmalı.', errors: [] };
   }
+  // Closing a draft and ending a campaign are asked in a dialog; the dialog's
+  // proof is checked before anything is sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (intent === 'close' || intent === 'end') {
+    if (!(await hasConfirmationProof(formData, intent === 'close' ? 'campaign.close-draft' : 'campaign.end'))) {
+      return { status: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, errors: [] };
+    }
+  }
 
   let failure: CampaignLifecycleState | null = null;
   try {
@@ -245,6 +254,9 @@ export async function campaignOperationAction(
   const reason = readString(formData, 'reason').trim();
   if (intent === 'revoke' && reason.length < 3) {
     return { status: 'error', message: 'Gerekçe en az 3 karakter olmalı.', errors: [] };
+  }
+  if (intent === 'revoke' && !(await hasConfirmationProof(formData, 'campaign.redemption-revoke'))) {
+    return { status: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, errors: [] };
   }
 
   let failure: CampaignLifecycleState | null = null;

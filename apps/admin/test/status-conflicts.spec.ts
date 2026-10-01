@@ -28,7 +28,7 @@ describe('offer status conflicts', () => {
 
   it('draws a message only for a known key', () => {
     for (const key of Object.keys(OFFER_STATUS_ERROR_MESSAGES)) {
-      expect(offerStatusErrorMessage(key)).toMatch(/değiştirilmedi|kabul edilmedi/);
+      expect(offerStatusErrorMessage(key)).toMatch(/değiştirilmedi|kabul edilmedi|İşlem yapılmadı/);
     }
     expect(offerStatusErrorMessage(undefined)).toBeNull();
     expect(offerStatusErrorMessage('toString')).toBeNull();

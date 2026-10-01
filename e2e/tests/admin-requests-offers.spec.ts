@@ -463,8 +463,9 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       const result = page.getByTestId('refund-scan-result');
       await expect(result).toBeVisible();
       await expect(result.getByRole('row').filter({ hasText: offer.id })).toContainText('İade edildi');
-      // The run, then the fresh preview.
-      expect(actionCalls).toBe(2);
+      // The confirmation proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001), the run,
+      // then the fresh preview.
+      expect(actionCalls).toBe(3);
       expect(await refunded()).toBe(true);
       // The preview is read again after the run: the offer is not offered twice.
       await expect(page.getByTestId('refund-scan-row').filter({ hasText: offer.id })).toHaveCount(0);

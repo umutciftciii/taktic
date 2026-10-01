@@ -11,6 +11,8 @@ import {
   ProviderStatus,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { providerStatusConsequence } from './[id]/provider-status-consequence';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 
 /**
  * Moves a provider to another status, with the note and the rejection reason
@@ -24,6 +26,16 @@ import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 export async function updateProviderStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as ProviderStatus;
+
+  // The moves the screen asks about (`providerStatusConsequence`: suspending,
+  // rejecting, taking an approved business out of approval) need the dialog's
+  // proof; the rest go straight through (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  // Judged against the stored status, not one the form says it had.
+  if (await providerStatusNeedsConfirmation(id, status)) {
+    if (!(await hasConfirmationProof(formData, 'provider.status'))) {
+      redirect(`/providers/${id}?statusError=confirmation#durum-yonetimi`);
+    }
+  }
 
   try {
     await apiFetch<ProviderProfile>(`/providers/${id}/status`, {
@@ -81,6 +93,11 @@ export async function removeProviderServiceCategoryAction(formData: FormData) {
   const categoryId = readFormString(formData, 'categoryId');
   const query = readFormString(formData, 'categoryQuery');
 
+  // Removing a binding is confirmed in a dialog (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, 'provider.category-remove'))) {
+    redirect(providerCategoryUrl(id, query, 'confirmation'));
+  }
+
   try {
     await apiFetch<AdminProviderServiceCategories>(
       `/providers/${id}/service-categories/${categoryId}`,
@@ -94,6 +111,22 @@ export async function removeProviderServiceCategoryAction(formData: FormData) {
   revalidatePath('/providers');
   revalidatePath(`/providers/${id}`);
   redirect(providerCategoryUrl(id, query, 'removed'));
+}
+
+/**
+ * Whether moving this provider to `to` is one of the moves the screen confirms.
+ * A provider that cannot be read is treated as needing confirmation: the
+ * refusal is the safe answer, and the screen that posts here reads it anyway.
+ */
+async function providerStatusNeedsConfirmation(id: string, to: ProviderStatus): Promise<boolean> {
+  let from: ProviderStatus | null = null;
+  try {
+    from = (await apiFetch<ProviderProfile>(`/providers/${id}`)).status;
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return true;
+  }
+  return providerStatusConsequence(from, to) !== null;
 }
 
 function providerCategoryUrl(id: string, query: string, notice: string): string {

@@ -293,7 +293,7 @@ describe('ConfirmDialog and a field named "id" (Faz 3D)', () => {
 
   it('keeps its ordinary trigger unchanged when it is not a switch', () => {
     const markup = html(
-      <ConfirmDialog triggerLabel="Sonlandır" title="?" consequence="." confirmLabel="Evet" name="intent" value="end" testId="t" />,
+      <ConfirmDialog proof="campaign.end" triggerLabel="Sonlandır" title="?" consequence="." confirmLabel="Evet" name="intent" value="end" testId="t" />,
     );
     const trigger = button(markup, 't')!;
     expect(trigger).toContain('aria-haspopup="dialog"');

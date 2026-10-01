@@ -190,7 +190,9 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
       // ---- Rolü pasifleştir ------------------------------------------------
       const deactivate = page.getByTestId('role-deactivate');
       await hydrated(deactivate);
-      await expect(page.getByTestId('role-status-form').locator('input[name="confirm"]')).toHaveCount(1);
+      // No fixed confirmation field any more: the dialog sends a single-use
+      // proof for one submission (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await expect(page.getByTestId('role-status-form').locator('input[name="confirm"]')).toHaveCount(0);
       await deactivate.click();
       const deactivateDialog = page.getByTestId('role-deactivate-dialog');
       await expect(deactivateDialog.getByTestId('role-deactivate-impact')).toContainText(
@@ -211,7 +213,9 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
       // holders get the permissions back, and the dialog says how many.
       const activate = page.getByTestId('role-activate');
       await hydrated(activate);
-      await expect(page.getByTestId('role-status-form').locator('input[name="confirm"]')).toHaveCount(1);
+      // No fixed confirmation field any more: the dialog sends a single-use
+      // proof for one submission (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+      await expect(page.getByTestId('role-status-form').locator('input[name="confirm"]')).toHaveCount(0);
       await activate.click();
       const activateDialog = page.getByTestId('role-activate-dialog');
       await expect(activateDialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();

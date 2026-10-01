@@ -175,6 +175,7 @@ export function ReviewModerationForm({
                 <SubmitButton label={ACTION_COPY[open].submit} />
               ) : (
                 <ConfirmDialog
+                  proof="provider-review.moderate"
                   triggerLabel={ACTION_COPY[open].submit}
                   triggerClassName={open === 'REMOVE_REVIEW' ? 'btn btn-danger btn-sm' : 'btn btn-primary btn-sm'}
                   title={open === 'REMOVE_REVIEW' ? 'Değerlendirme kaldırılsın mı?' : 'Yorum kaldırılsın mı?'}

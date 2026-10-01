@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { confirmThrough, waitForHydration } from '../src/confirm-dialog';
+import { clickBeforeHydration, confirmThrough, waitForHydration } from '../src/confirm-dialog';
 import { createAdmin, createStaffAdmin, prisma, uniqueSuffix } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
@@ -233,5 +233,61 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 1', () => {
     } finally {
       await Promise.all([writer.actor.close(), both.actor.close()]);
     }
+  });
+
+  test.describe('a click before hydration writes nothing (the confirmation proof)', () => {
+    test('a new R4 confirmation: "Hesabı aktifleştir" clicked before React hydrates is refused', async ({ browser }) => {
+      const target = await createStaffAdmin(['DASHBOARD_READ']);
+      await prisma().user.update({ where: { id: target.id }, data: { isActive: false } });
+      const { actor } = await openAs(browser, 'super');
+      const page = actor.page;
+
+      try {
+        const trigger = page.getByTestId('user-activate');
+        await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/users/${target.id}`, trigger);
+
+        // React replayed the queued submission to the action, which had no
+        // proof: refused before any request, and said so.
+        await expect(page.getByTestId('user-status-error')).toContainText('onay penceresinden onay alınamadı');
+        await expect(page.getByTestId('user-activate-dialog')).toBeHidden();
+        expect(await isActive(target.id)).toBe(false);
+
+        // The same screen, hydrated, still works through the dialog.
+        await confirmThrough(page.getByTestId('user-activate'), 'Evet, aktifleştir');
+        await expect(page.getByTestId('user-status')).toHaveText('Aktif');
+        await expect.poll(() => isActive(target.id)).toBe(true);
+      } finally {
+        await actor.close();
+      }
+    });
+
+    test('an older confirmation: "Rolü pasifleştir" clicked before React hydrates is refused', async ({ browser }) => {
+      const owner = await createAdmin();
+      const role = await prisma().adminRole.create({
+        data: {
+          key: `e2e-r4-hydration-${uniqueSuffix()}`,
+          name: 'E2E Hydration Rolü',
+          createdById: owner.id,
+          permissions: { create: [{ permission: 'SUPPORT_READ' }] },
+        },
+        select: { id: true },
+      });
+      const roleActive = async () =>
+        (await prisma().adminRole.findUniqueOrThrow({ where: { id: role.id }, select: { isActive: true } })).isActive;
+      const { actor } = await openAs(browser, 'super');
+      const page = actor.page;
+
+      try {
+        await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/roles/${role.id}`, page.getByTestId('role-deactivate'));
+        await expect(page.getByTestId('role-error')).toContainText('onay penceresinden onay alınamadı');
+        expect(await roleActive()).toBe(true);
+
+        await confirmThrough(page.getByTestId('role-deactivate'), 'Evet, pasifleştir');
+        await expect(page.getByTestId('role-status')).toHaveText('Pasif');
+        await expect.poll(roleActive).toBe(false);
+      } finally {
+        await actor.close();
+      }
+    });
   });
 });

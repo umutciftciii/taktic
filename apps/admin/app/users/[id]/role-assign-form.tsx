@@ -74,6 +74,7 @@ export function RoleAssignForm({
       </div>
       <div className="form-actions">
         <ConfirmDialog
+          proof="role.assign"
           triggerLabel="Ata"
           triggerClassName="btn btn-primary btn-sm"
           tone="primary"

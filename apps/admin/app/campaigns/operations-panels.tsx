@@ -60,6 +60,7 @@ export function RevokeRedemptionForm({
         data-testid="campaign-revoke-reason"
       />
       <ConfirmDialog
+        proof="campaign.redemption-revoke"
         triggerLabel="Geri al"
         triggerClassName="btn btn-destructive btn-sm"
         title="Hak ediş geri alınsın mı?"

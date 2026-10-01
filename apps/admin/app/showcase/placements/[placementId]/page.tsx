@@ -23,6 +23,7 @@ import {
   suspendShowcasePlacementAction,
 } from '../actions';
 import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH } from '../placement-cancel';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 
 type PlacementPageProps = {
   params: Promise<{ placementId: string }>;
@@ -41,6 +42,7 @@ const ERRORS: Record<string, string> = {
     'Bu yerleşim operatör kararıyla durdurulmuş bir yerleşim değil. Diğer durdurma sebepleri, sebep ortadan kalktığında kendiliğinden kalkar.',
   SHOWCASE_PLACEMENT_NOT_CANCELLABLE: 'Yalnız süresi devam eden bir yerleşim iptal edilebilir.',
   SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED: `İptal gerekçesi zorunludur (en az ${PLACEMENT_CANCEL_NOTE_MIN_LENGTH} karakter). Yerleşim iptal edilmedi.`,
+  CONFIRMATION_REQUIRED: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   SHOWCASE_PLACEMENT_ACTION_FAILED: 'İşlem tamamlanamadı.',
 };
 
@@ -385,6 +387,7 @@ export default async function ShowcasePlacementPage({
               </label>
               <div className="form-actions form-grid-wide">
                 <ConfirmDialog
+                  proof="showcase.placement-cancel"
                   triggerLabel="Yerleşimi iptal et"
                   triggerClassName="btn btn-destructive"
                   title="Yerleşim iptal edilsin mi?"

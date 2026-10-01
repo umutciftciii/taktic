@@ -46,6 +46,7 @@ export function SchedulerToggle({
         <OffSwitch job={job} jobName={jobName} />
       ) : (
         <ConfirmDialog
+          proof="scheduler.toggle"
           triggerLabel={jobName}
           triggerClassName="toggle"
           switchChecked={false}

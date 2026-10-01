@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, readAdminAccess } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import type { ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * CMP-006 PR-B — the operator's refund actions.
@@ -25,6 +28,7 @@ export async function takePackageRefundAction(formData: FormData) {
 
 export async function approvePackageRefundAction(formData: FormData) {
   const id = readString(formData, 'id');
+  await refuseWithoutProof(formData, id, 'package-refund.approve');
   const kind = readString(formData, 'kind');
   const body =
     kind === 'EXCEPTION'
@@ -39,6 +43,7 @@ export async function approvePackageRefundAction(formData: FormData) {
 
 export async function rejectPackageRefundAction(formData: FormData) {
   const id = readString(formData, 'id');
+  await refuseWithoutProof(formData, id, 'package-refund.reject');
   await submit(
     id,
     `/admin/package-refund-requests/${encodeURIComponent(id)}/reject`,
@@ -49,6 +54,7 @@ export async function rejectPackageRefundAction(formData: FormData) {
 
 export async function markPackageRefundSettlementFailedAction(formData: FormData) {
   const id = readString(formData, 'id');
+  await refuseWithoutProof(formData, id, 'package-refund.settlement-failed');
   await submit(
     id,
     `/admin/package-refund-requests/${encodeURIComponent(id)}/settlement-failed`,
@@ -93,6 +99,20 @@ export async function openPackageRefundRequestAction(formData: FormData) {
   const access = await readAdminAccess();
   const canReadRefund = Boolean(access && (access.isSuperAdmin || access.permissions.includes('PACKAGE_REFUND_READ')));
   redirect(canReadRefund ? `/package-refunds/${createdId}?done=created` : `/support/${ticketId}?refundOpened=1`);
+}
+
+/**
+ * Approve, reject and settlement-failed are confirmed in a dialog; a
+ * submission without its proof goes back to the request with the reason and
+ * nothing sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+ */
+async function refuseWithoutProof(formData: FormData, id: string, key: ConfirmationProofKey) {
+  if (!id) {
+    redirect('/package-refunds');
+  }
+  if (!(await hasConfirmationProof(formData, key))) {
+    redirect(`/package-refunds/${id}?${new URLSearchParams({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }).toString()}`);
+  }
 }
 
 async function submit(id: string, path: string, body: Record<string, unknown>, done: string) {

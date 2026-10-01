@@ -215,6 +215,7 @@ describe('ConfirmDialog', () => {
     const markup = html(
       <form>
         <ConfirmDialog
+          proof="customer.status"
           triggerLabel="Hesabı pasife al"
           title="Hesap pasife alınsın mı?"
           consequence="Kullanıcı bir daha giriş yapamaz."
@@ -242,7 +243,7 @@ describe('ConfirmDialog', () => {
   it('keeps its trigger closed while the screen says so (Faz 3A: a client call in flight)', () => {
     const markup = html(
       <form>
-        <ConfirmDialog triggerLabel="İadeyi onayla" title="?" consequence="." confirmLabel="Evet" disabled />
+        <ConfirmDialog proof="package-refund.approve" triggerLabel="İadeyi onayla" title="?" consequence="." confirmLabel="Evet" disabled />
       </form>,
     );
     const trigger = markup.match(/<button type="submit"[^>]*>İadeyi onayla<\/button>/)?.[0] ?? '';

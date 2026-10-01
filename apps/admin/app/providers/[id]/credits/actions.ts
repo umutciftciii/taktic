@@ -6,6 +6,8 @@ import { CREDIT_AMOUNT_MAX, creditAmountProblemMessage, parseCreditAmount } from
 import { formatCount } from '../../../../lib/pagination';
 import { rethrowNextControlFlow } from '../../../../lib/next-control-flow';
 import type { CreditOperationState, CreditOperationType } from './credit-operation-state';
+import { hasConfirmationProof } from '../../../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 
 /**
  * One manual credit movement, granted or deducted, and what the operator is
@@ -38,6 +40,12 @@ export async function submitCreditOperationAction(
   }
   if (!providerId) {
     return { kind: 'error', message: 'Hizmet veren bulunamadı; işlem yapılmadı.', at: Date.now() };
+  }
+  // Both directions are confirmed in a dialog. Without its proof — a click
+  // that beat hydration, a post with JavaScript off, a replayed submission —
+  // nothing reaches the ledger (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, operation === 'DEDUCT' ? 'credits.deduct' : 'credits.grant'))) {
+    return { kind: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, at: Date.now() };
   }
   const payload = { amount: amount.value, reason: readFormString(formData, 'reason').trim() };
 

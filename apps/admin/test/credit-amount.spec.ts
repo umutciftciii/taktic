@@ -22,6 +22,9 @@ vi.mock('../lib/api', () => ({
   },
 }));
 vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+// The confirmation proof has its own spec (destructive-confirmation-proof);
+// here every submission is taken as confirmed.
+vi.mock('../lib/confirmation-proof-server', () => ({ hasConfirmationProof: vi.fn(async () => true) }));
 
 const { submitCreditOperationAction } = await import('../app/providers/[id]/credits/actions');
 const { ApiError } = await import('../lib/api');

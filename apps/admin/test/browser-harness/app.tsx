@@ -35,6 +35,10 @@ type Harness = {
   saveMode: 'ok' | 'reject';
   /** How many times the router rendered a new path. */
   navigations: number;
+  /** Every confirmation-proof request the dialog made (the key it asked for). */
+  minted: string[];
+  /** `ok` hands out a proof; `refuse` answers null, as the server does without a session. */
+  mintMode: 'ok' | 'refuse';
 };
 
 declare global {
@@ -43,7 +47,7 @@ declare global {
   }
 }
 
-const harness: Harness = { submissions: [], saves: [], saveMode: 'ok', navigations: 0 };
+const harness: Harness = { submissions: [], saves: [], saveMode: 'ok', navigations: 0, minted: [], mintMode: 'ok' };
 window.__harness = harness;
 
 function plainEntries(formData: FormData): Submission {
@@ -145,6 +149,7 @@ function ConfirmScreen() {
           <input name="note" />
         </label>
         <ConfirmDialog
+          proof="customer.status"
           triggerLabel="Hesabı pasife al"
           title="Hesap pasife alınsın mı?"
           consequence="Kullanıcı bir daha giriş yapamaz."
@@ -183,6 +188,7 @@ function ShadowedIdScreen() {
           <input name="note" />
         </label>
         <ConfirmDialog
+          proof="campaign.end"
           triggerLabel="Sonlandır"
           title="Kayıt sonlandırılsın mı?"
           consequence="Bu durum kalıcıdır."

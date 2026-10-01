@@ -117,6 +117,7 @@ export function AdminRoleAssignmentCard({ userId, accountName, isSuperAdminViewe
                   <input type="hidden" name="userId" value={userId} />
                   <input type="hidden" name="roleId" value={assignment.role.id} />
                   <ConfirmDialog
+                    proof="role.revoke"
                     triggerLabel="Geri al"
                     triggerClassName="btn btn-destructive btn-sm"
                     title={`"${assignment.role.name}" bu hesaptan geri alınsın mı?`}

@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 import { isPlacementCancelNoteValid } from './placement-cancel';
+import { hasConfirmationProof } from '../../../lib/confirmation-proof-server';
 
 /**
  * The three things an operator may do to a paid run.
@@ -73,6 +74,10 @@ export async function cancelShowcasePlacementAction(formData: FormData) {
   const note = readString(formData, 'note');
   if (!isPlacementCancelNoteValid(note)) {
     redirect(`${target}?error=SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED`);
+  }
+  // Confirmed in a dialog; without its proof nothing is cancelled.
+  if (!(await hasConfirmationProof(formData, 'showcase.placement-cancel'))) {
+    redirect(`${target}?error=CONFIRMATION_REQUIRED`);
   }
 
   try {

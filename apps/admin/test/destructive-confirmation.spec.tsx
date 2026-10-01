@@ -139,9 +139,9 @@ describe('B) Hesabı aktifleştir asks first, and only a super admin sees it on 
 
   it('the page asks before activating, keeps the deactivation dialog, and hides the switch on a super admin from anyone else', () => {
     const source = read('app/users/[id]/page.tsx');
-    expect(source).toMatch(/<ConfirmDialog\s+triggerLabel="Hesabı aktifleştir"/);
+    expect(source).toMatch(/<ConfirmDialog\s+proof="user.status"\s+triggerLabel="Hesabı aktifleştir"/);
     expect(source).toContain('testId="user-activate"');
-    expect(source).toMatch(/<ConfirmDialog\s+triggerLabel="Hesabı pasifleştir"/);
+    expect(source).toMatch(/<ConfirmDialog\s+proof="user.status"\s+triggerLabel="Hesabı pasifleştir"/);
     expect(source).toContain("const superAdminTargetLocked = isSuperAdminTarget && !isSuperAdminViewer;");
     expect(source).toContain(
       'const showStatusControl = canChangeStatus && !(isSelf && user.isActive) && !superAdminTargetLocked;',
@@ -239,7 +239,7 @@ describe('E) the first vitrin approval asks first; a revision does not (Faz 4)',
 
   it('the page wraps only the first approval, and the rejection keeps its dialog', () => {
     const source = read('app/showcase/reviews/[versionId]/page.tsx');
-    expect(source).toMatch(/\{card\.liveVersion === null \? \([\s\S]*?<ConfirmDialog\s+triggerLabel="Onayla"/);
+    expect(source).toMatch(/\{card\.liveVersion === null \? \([\s\S]*?<ConfirmDialog\s+proof="showcase.approve-first"\s+triggerLabel="Onayla"/);
     expect(source).toContain('testId="showcase-approve"');
     expect(source).toMatch(/<button className="btn btn-primary btn-sm" type="submit" disabled=\{!isPending\}>\s*Onayla/);
     expect(source).toContain('testId="showcase-reject"');

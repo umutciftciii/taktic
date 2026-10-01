@@ -60,9 +60,8 @@ const HOLDER_COLUMNS: DataColumn[] = [
  *   (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
  * Renaming is undone by the same control and does not.
  *
- * Unchanged: the three server actions and every field they read; the
- * deactivation still needs `confirm=on`, now sent by the dialog, and so does
- * the reactivation.
+ * Every one of those writes is refused by its action without the dialog's
+ * single-use confirmation proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
  */
 export default async function AdminRoleDetailPage({ params, searchParams }: RoleDetailPageProps) {
   await requireSuperAdmin();

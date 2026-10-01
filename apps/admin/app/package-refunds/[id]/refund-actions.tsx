@@ -66,6 +66,7 @@ export function RefundActions({
           <p className="detail-muted-note">Satın alma bugünkü değerlendirmeye göre normal iadeye uygun.</p>
           <div className="detail-form-actions">
             <ConfirmDialog
+              proof="package-refund.approve"
               triggerLabel="Normal iadeyi onayla"
               triggerClassName="btn btn-primary btn-sm"
               tone="primary"
@@ -102,6 +103,7 @@ export function RefundActions({
           </label>
           <div className="detail-form-actions">
             <ConfirmDialog
+              proof="package-refund.approve"
               triggerLabel="İstisna olarak onayla"
               triggerClassName="btn btn-primary btn-sm"
               tone="primary"
@@ -124,6 +126,7 @@ export function RefundActions({
           </label>
           <div className="detail-form-actions">
             <ConfirmDialog
+              proof="package-refund.reject"
               triggerLabel="İsteği reddet"
               triggerClassName="btn btn-destructive btn-sm"
               title="İade isteği reddedilsin mi?"
@@ -160,6 +163,7 @@ export function RefundActions({
           </label>
           <div className="detail-form-actions">
             <ConfirmDialog
+              proof="package-refund.settlement-failed"
               triggerLabel="Ödeme iadesi tamamlanamadı olarak kaydet"
               triggerClassName="btn btn-secondary btn-sm"
               title="Ödeme iadesi tamamlanamadı olarak kaydedilsin mi?"

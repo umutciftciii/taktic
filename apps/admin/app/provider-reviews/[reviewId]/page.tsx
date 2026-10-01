@@ -17,6 +17,7 @@ import { SectionCard } from '../../../components/section-card';
 import type { SummaryItem } from '../../../components/summary-strip';
 import { dismissReviewReportAction } from './actions';
 import { ReviewModerationForm } from './moderation-form';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
  * One review, with everything the operator may know about it.
@@ -58,6 +59,7 @@ const OK_MESSAGES: Record<string, string> = {
 };
 
 const ERROR_MESSAGES: Record<string, string> = {
+  confirmation: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   action: 'Tanınmayan bir karar gönderildi.',
   reason: 'Kaldırmak için bir gerekçe seçilmelidir.',
   noop: 'Bu karar zaten uygulanmış; sayfa güncel durumu gösteriyor.',

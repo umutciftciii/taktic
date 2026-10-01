@@ -71,6 +71,7 @@ export function EligibilityDecisionForm({
       </p>
       <div className="detail-form-actions">
         <ConfirmDialog
+          proof="promotion-eligibility.decide"
           triggerLabel="Kararı kaydet"
           triggerClassName="btn btn-primary btn-sm"
           tone={decision === 'INELIGIBLE' ? 'danger' : 'primary'}

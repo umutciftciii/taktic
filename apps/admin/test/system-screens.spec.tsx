@@ -183,7 +183,7 @@ describe('role forms keep their actions’ contracts', () => {
     expect(markup).toContain('type="reset"');
   });
 
-  it('both directions send confirm=on only from a hydrated dialog; the server-rendered form carries none', () => {
+  it('both directions ask first; neither form carries a confirmation value of its own', () => {
     const active = html(
       <RoleStatusForm roleId="role-1" roleName="Destek" isActive permissionCount={2} reach={{ holders: 3, activeHolders: 2 }} action={noop} />,
     );
@@ -203,10 +203,14 @@ describe('role forms keep their actions’ contracts', () => {
     expect(inactive).toContain('Bu rolü taşıyan 3 hesap (2 tanesi aktif) bu rolün 2 iznini hemen geri kazanır');
   });
 
-  it('the status action refuses a submission without confirm=on, in either direction', () => {
+  it('every role write refuses a submission without the dialog proof', () => {
     const actions = read('app/roles/actions.ts');
-    expect(actions).toContain("if (readString(formData, 'confirm') !== 'on')");
-    expect(actions).not.toContain("if (!isActive && readString(formData, 'confirm') !== 'on')");
+    // ADMIN-DESTRUCTIVE-CONFIRMATION-001: the dialog's single-use proof, not a
+    // fixed `confirm=on`, is what the action checks — for every role write.
+    expect(actions).not.toContain("'confirm'");
+    for (const key of ["'role.status'", "'role.permissions'", "'role.assign'", "'role.revoke'"]) {
+      expect(actions).toContain(`await refuseWithoutProof(formData, ${key},`);
+    }
     // The four role writes and two assignment writes are the same calls.
     for (const call of [
       "'/admin/roles'",

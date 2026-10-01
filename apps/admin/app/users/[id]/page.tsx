@@ -321,6 +321,7 @@ function UserStatusForm({
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
       {isActive ? (
         <ConfirmDialog
+          proof="user.status"
           triggerLabel="Hesabı pasifleştir"
           title="Hesap pasifleştirilsin mi?"
           consequence={
@@ -343,6 +344,7 @@ function UserStatusForm({
         />
       ) : (
         <ConfirmDialog
+          proof="user.status"
           triggerLabel="Hesabı aktifleştir"
           triggerClassName="btn btn-primary"
           tone="primary"

@@ -27,6 +27,7 @@ import { Timeline, type TimelineItem } from '../../../components/timeline';
 import { resolveTab } from '../../../lib/list-query';
 import { refundOfferCreditAction, updateOfferStatusAction } from '../actions';
 import { offerAcceptRecharge } from './offer-accept-recharge';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
  * Teklif detayı (#6), design `offerDetail` (ADMIN-DESIGN-001 Faz 3A).
@@ -253,6 +254,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
       {justRefunded ? (
         <div className="notice-success detail-notice" role="status">
           Manuel iade tamamlandı. Kredi hizmet verenin bakiyesine eklendi.
+        </div>
+      ) : null}
+      {search.refundError === 'confirmationRequired' ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="offer-refund-confirmation-error">
+          {CONFIRMATION_PROOF_REFUSAL_MESSAGE}
         </div>
       ) : null}
       {refundBlockedByLimit ? (
@@ -656,6 +662,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                       </label>
                       <div className="detail-form-actions">
                         <ConfirmDialog
+                          proof="offer.refund"
                           triggerLabel={`${offer.creditCost} krediyi iade et`}
                           triggerClassName="btn btn-destructive"
                           title="Kredi iade edilsin mi?"
@@ -807,6 +814,7 @@ function OperationsList({
           <input type="hidden" name="id" value={offer.id} />
           <input type="hidden" name="status" value="ACCEPTED" />
           <ConfirmDialog
+            proof="offer.accept"
             triggerLabel="Kabul et"
             triggerClassName="btn btn-primary btn-sm"
             tone="primary"
@@ -875,6 +883,7 @@ function OperationsList({
           <input type="hidden" name="id" value={offer.id} />
           <input type="hidden" name="status" value="REJECTED" />
           <ConfirmDialog
+            proof="offer.reject"
             triggerLabel="Reddet"
             triggerClassName="btn btn-destructive btn-sm"
             title="Teklif müşteri adına reddedilsin mi?"

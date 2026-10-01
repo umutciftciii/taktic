@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { redirect } from 'next/navigation';
 import {
   apiFetch,
   CustomerActivationLinkResponse,
@@ -9,6 +10,8 @@ import {
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { ActivationLinkState } from './activation-link-state';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 export async function createCustomerNoteAction(formData: FormData) {
   const customerId = readFormString(formData, 'customerId');
@@ -32,6 +35,12 @@ export async function updateCustomerStatusAction(formData: FormData) {
 
   if (!customerId) {
     return;
+  }
+
+  // Passivating is confirmed in a dialog; activating is not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!isActive && !(await hasConfirmationProof(formData, 'customer.status'))) {
+    redirect(`/customers/${customerId}?statusError=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
   }
 
   await apiFetch<UpdateCustomerStatusResponse>(`/customers/${customerId}/status`, {

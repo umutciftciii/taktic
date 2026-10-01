@@ -88,6 +88,7 @@ export function CancelRequestForm({
         </div>
       ) : null}
       <ConfirmDialog
+        proof="request.cancel"
         triggerLabel="İptal et"
         triggerClassName="btn btn-destructive btn-sm status-action-btn"
         title="Talep iptal edilsin mi?"

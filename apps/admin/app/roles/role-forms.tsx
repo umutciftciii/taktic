@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { diffPermissions, permissionLines, type PermissionGroup } from '../../lib/permission-model';
 import { PermissionMatrix } from './permission-matrix';
@@ -127,6 +127,7 @@ export function RolePermissionsForm({
             Vazgeç
           </button>
           <ConfirmDialog
+            proof="role.permissions"
             triggerLabel="İzinleri kaydet"
             triggerClassName="btn btn-primary"
             tone="primary"
@@ -156,16 +157,11 @@ export function RolePermissionsForm({
  * through `setAdminRoleActiveAction`, unchanged).
  *
  * Deactivating takes the role's permissions from everyone holding it at once,
- * so it asks first; the dialog replaces the old "I understand" checkbox and
- * says how many accounts hold the role. The action's own rule stays: a
- * deactivation without `confirm=on` is refused before any request. That field
- * is rendered only once this component has hydrated, and a hydrated trigger
- * submits only through the dialog, so a click that lands before JavaScript
- * runs is refused exactly as an unticked checkbox was.
- *
- * Reactivating gives the permissions back to the same accounts, at once, so
- * it asks too (ADMIN-DESTRUCTIVE-CONFIRMATION-001) and carries the same
- * hydrated `confirm=on`: the action refuses either direction without it.
+ * and reactivating gives them back the same way, so both ask first and the
+ * dialog says how many accounts hold the role. The action refuses either
+ * direction without the dialog's single-use confirmation proof
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001), which replaced the hydrated
+ * `confirm=on` field: a fixed value is not proof that anybody confirmed.
  */
 export function RoleStatusForm({
   roleId,
@@ -185,17 +181,14 @@ export function RoleStatusForm({
   criticalPermissions?: { permission: string; label: string }[];
   action: FormAction;
 }) {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-
   return (
     <form action={action} className="inline-form" data-testid="role-status-form">
       <input type="hidden" name="roleId" value={roleId} />
       <input type="hidden" name="isActive" value={isActive ? 'false' : 'true'} />
-      {hydrated ? <input type="hidden" name="confirm" value="on" /> : null}
       {isActive ? (
         <>
           <ConfirmDialog
+            proof="role.status"
             triggerLabel="Rolü pasifleştir"
             triggerClassName="btn btn-destructive"
             title={`"${roleName}" pasifleştirilsin mi?`}
@@ -218,6 +211,7 @@ export function RoleStatusForm({
         </>
       ) : (
         <ConfirmDialog
+          proof="role.status"
           triggerLabel="Rolü aktifleştir"
           triggerClassName="btn btn-primary"
           tone="primary"

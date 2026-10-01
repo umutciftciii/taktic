@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * A person's decision on a held event (CMP-006 PR-C). The API re-checks the
@@ -25,6 +27,9 @@ export async function decideEligibilityAction(formData: FormData) {
     failure = 'Bir karar seçin.';
   } else if (reason.length < 10 || reason.length > 1000) {
     failure = 'Gerekçe 10–1000 karakter olmalı.';
+  } else if (!(await hasConfirmationProof(formData, 'promotion-eligibility.decide'))) {
+    // Confirmed in a dialog (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+    failure = CONFIRMATION_PROOF_REFUSAL_MESSAGE;
   } else {
     try {
       await apiFetch<unknown>(`/admin/promotion-eligibility/holds/${encodeURIComponent(eventId)}/decision`, {

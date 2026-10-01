@@ -80,6 +80,7 @@ export function ProviderStatusForm({
       <div className="detail-form-actions">
         {consequence ? (
           <ConfirmDialog
+            proof="provider.status"
             triggerLabel="Durumu kaydet"
             triggerClassName="btn btn-destructive btn-sm"
             title={`Durum “${STATUS_LABELS[selected]}” olsun mu?`}

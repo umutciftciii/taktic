@@ -12,6 +12,8 @@ import {
   SchedulerSettings,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
 
 /**
  * Saves the operations settings.
@@ -73,6 +75,12 @@ export async function toggleSchedulerAction(formData: FormData) {
 
   if (enabled !== 'true' && enabled !== 'false') {
     redirect(schedulerUrl({ error: 'Zamanlanmış iş durumu yalnızca açık veya kapalı olabilir.' }));
+  }
+
+  // Switching a job on is confirmed in a dialog; switching it off is not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (enabled === 'true' && !(await hasConfirmationProof(formData, 'scheduler.toggle'))) {
+    redirect(schedulerUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   let errorMessage: string | null = null;
@@ -206,17 +214,15 @@ function providerReviewsUrl(params: Record<string, string>): string {
  */
 export async function toggleCampaignEngineAction(formData: FormData) {
   const enabled = readString(formData, 'enabled').trim();
-  const confirmed = readString(formData, 'confirm').trim() === 'yes';
 
   if (enabled !== 'true' && enabled !== 'false') {
     redirect(campaignEngineUrl({ error: 'Kampanya motoru durumu yalnızca açık veya kapalı olabilir.' }));
   }
-  if (!confirmed) {
-    redirect(
-      campaignEngineUrl({
-        error: 'Kampanya motorunu değiştirmek için önce etkisini anladığınızı onaylayın; hiçbir şey değişmedi.',
-      }),
-    );
+  // Both directions are confirmed in a dialog. The old hydrated `confirm=yes`
+  // was a fixed value anybody could send; the dialog's single-use proof is
+  // not (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  if (!(await hasConfirmationProof(formData, 'campaign-engine.toggle'))) {
+    redirect(campaignEngineUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   let errorMessage: string | null = null;

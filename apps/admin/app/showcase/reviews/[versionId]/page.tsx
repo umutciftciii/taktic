@@ -264,6 +264,7 @@ export default async function ShowcaseReviewPage({
                 // puts the card on the air and mails the provider, and nothing
                 // takes it back — so it asks (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
                 <ConfirmDialog
+                  proof="showcase.approve-first"
                   triggerLabel="Onayla"
                   triggerClassName="btn btn-primary btn-sm"
                   tone="primary"
@@ -304,6 +305,7 @@ export default async function ShowcaseReviewPage({
               </label>
               <div className="inline-actions" style={{ marginTop: 12 }}>
                 <ConfirmDialog
+                  proof="showcase.reject"
                   triggerLabel="Reddet"
                   triggerClassName="btn btn-secondary btn-sm"
                   title="Bu sürüm reddedilsin mi?"

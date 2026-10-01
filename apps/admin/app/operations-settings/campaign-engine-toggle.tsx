@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { toggleCampaignEngineAction } from './actions';
 
@@ -13,26 +12,23 @@ import { toggleCampaignEngineAction } from './actions';
  * shared ConfirmDialog, with the switch as its trigger and the checkbox's
  * sentence as the dialog's text.
  *
- * The server action's rule is unchanged: a submission without `confirm=yes`
- * is refused before any request is made. That field is rendered only once
- * this component has hydrated — and a hydrated trigger never submits except
- * through the dialog's confirm — so a click that lands before JavaScript runs
- * posts without it and is refused, exactly as an unticked checkbox was. A
- * hand-built request still has to carry it on purpose.
+ * The server action refuses a submission that does not carry the dialog's
+ * confirmation proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001): a single-use,
+ * session-bound value the server mints only when "Evet" is pressed. It
+ * replaced the hydrated `confirm=yes` field — a fixed value a hand-built
+ * request could carry — so a click that lands before JavaScript runs, or a
+ * post with JavaScript off, is refused before any request is made.
  *
  * The payload is the state being asked for, computed from what is currently
  * true, so a double submission asks for the same thing twice and the API
  * records one change.
  */
 export function CampaignEngineToggle({ enabled }: { enabled: boolean }) {
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
-
   return (
     <form action={toggleCampaignEngineAction} className="setting-toggle-form" data-testid="campaign-engine-form">
       <input type="hidden" name="enabled" value={enabled ? 'false' : 'true'} />
-      {hydrated ? <input type="hidden" name="confirm" value="yes" /> : null}
       <ConfirmDialog
+        proof="campaign-engine.toggle"
         triggerLabel="Kampanya motoru çalışsın"
         triggerClassName="toggle"
         switchChecked={enabled}

@@ -204,6 +204,7 @@ export function CreditOperationForm({
 
       {isDeduct ? (
         <ConfirmDialog
+          proof="credits.deduct"
           triggerLabel="Kredi düş"
           triggerClassName="btn btn-danger btn-block"
           title="Kredi düşülsün mü?"
@@ -225,6 +226,7 @@ export function CreditOperationForm({
         />
       ) : (
         <ConfirmDialog
+          proof="credits.grant"
           triggerLabel="Kredi ekle"
           triggerClassName="btn btn-primary btn-block"
           tone="primary"
