@@ -60,6 +60,14 @@ import {
   updateRequestStatusAction,
 } from '../actions';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
+import {
+  REQUEST_PUBLISH_DAYS,
+  reportDismissConsequence,
+  requestApproveConsequence,
+  requestCompleteConsequence,
+  requestReopenConsequence,
+  requestUnpublishConsequence,
+} from './request-lifecycle-consequence';
 
 /**
  * Talep detayı (#3), design `requestDetail` (ADMIN-DESIGN-001 Faz 3A).
@@ -108,7 +116,7 @@ const REPORT_ERROR_MESSAGES: Record<string, string> = {
 };
 
 /** An approved request stays open for 14 days from its approval moment. */
-const REQUEST_OPEN_DAYS = 14;
+const REQUEST_OPEN_DAYS = REQUEST_PUBLISH_DAYS;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The design's ⓘ for the quality card, fitted to the real ten-part score. */
@@ -772,9 +780,16 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                   Kapatılan teklifler geri açılmaz; iadeler geri alınmaz. Onay zamanı yenilenir, yani 14 günlük yayın
                   süresi yeniden başlar.
                 </p>
-                <button className="btn btn-primary btn-sm" type="submit" data-testid="report-reopen">
-                  Talebi geri aç
-                </button>
+                <ConfirmDialog
+                  proof="request.reopen"
+                  triggerLabel="Talebi geri aç"
+                  triggerClassName="btn btn-primary btn-sm"
+                  title="Talep yeniden yayına açılsın mı?"
+                  consequence={requestReopenConsequence()}
+                  confirmLabel="Evet, geri aç"
+                  tone="primary"
+                  testId="report-reopen"
+                />
               </form>
             ) : null}
           </SectionCard>
@@ -837,7 +852,7 @@ function StatusCard({
       className="is-wide status-action-panel"
       id="durum"
       title="Durum yönetimi"
-      subtitle={`İnceleme geçişleri anında uygulanır. Reddetme için gerekçe zorunludur. Eşleşme, tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı yazar ve onaydan ${REQUEST_OPEN_DAYS} gün sonra uygular.`}
+      subtitle={`Yeni talebi incelemeye almak anında uygulanır; onaylamak (yayına almak), yayındaki talebi incelemeye geri almak ve reddetmek önce ne olacağını söyleyip onay ister. Reddetme için gerekçe zorunludur. Eşleşme, tamamlanma ve süre dolumu buradan yazılamaz: süre dolumunu yalnızca zamanlayıcı yazar ve onaydan ${REQUEST_OPEN_DAYS} gün sonra uygular.`}
     >
       {statusErrorMessage ? (
         <div className="status-action-error" role="alert" data-testid="status-error">
@@ -892,15 +907,29 @@ function StatusCard({
           {canComplete ? (
             <form action={completeRequestAction} className="status-quick-form">
               <input type="hidden" name="id" value={request.id} />
-              <button
-                className="btn btn-primary btn-sm status-action-btn"
-                type="submit"
-                disabled={request.status !== 'MATCHED'}
-                aria-disabled={request.status !== 'MATCHED'}
-                title={request.status === 'MATCHED' ? undefined : 'Yalnız eşleşmiş talep tamamlanabilir.'}
-              >
-                <span className="status-action-label">Hizmeti tamamlandı işaretle</span>
-              </button>
+              {request.status === 'MATCHED' ? (
+                <ConfirmDialog
+                  proof="request.complete"
+                  triggerLabel="Hizmeti tamamlandı işaretle"
+                  triggerClassName="btn btn-primary btn-sm status-action-btn"
+                  title="Hizmet tamamlandı olarak işaretlensin mi?"
+                  consequence={requestCompleteConsequence()}
+                  confirmLabel="Evet, tamamlandı işaretle"
+                  tone="primary"
+                  testId="request-complete"
+                />
+              ) : (
+                <button
+                  className="btn btn-primary btn-sm status-action-btn"
+                  type="submit"
+                  disabled
+                  aria-disabled
+                  title="Yalnız eşleşmiş talep tamamlanabilir."
+                  data-testid="request-complete"
+                >
+                  <span className="status-action-label">Hizmeti tamamlandı işaretle</span>
+                </button>
+              )}
             </form>
           ) : null}
           {canCancel ? (
@@ -1428,9 +1457,16 @@ function ReportDecisions({
         <p className="report-decision-hint">
           Bildirimler kapanır; talep, teklifler ve krediler olduğu gibi kalır. Kimseye e-posta gönderilmez.
         </p>
-        <button className="btn btn-secondary btn-sm" type="submit" data-testid="report-dismiss">
-          Uygun bulundu
-        </button>
+        <ConfirmDialog
+          proof="request.report-dismiss"
+          triggerLabel="Uygun bulundu"
+          triggerClassName="btn btn-secondary btn-sm"
+          title="Bildirimler “Uygun bulundu” ile kapatılsın mı?"
+          consequence={reportDismissConsequence(openCount)}
+          confirmLabel="Evet, uygun bulundu"
+          tone="primary"
+          testId="report-dismiss"
+        />
       </form>
 
       {/*
@@ -1623,14 +1659,48 @@ function StatusQuickForm({ requestId, targetStatus, currentStatus, label, varian
   const buttonClass = isCurrent
     ? 'btn btn-sm status-action-btn is-current'
     : `btn btn-${variant} btn-sm status-action-btn`;
+  // Publishing, and taking a published request back into review, ask first
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2); a new request goes into
+  // review directly. The action demands the same proof on the same rule.
+  const confirm = isCurrent
+    ? null
+    : targetStatus === 'APPROVED'
+      ? 'approve'
+      : currentStatus === 'APPROVED'
+        ? 'unpublish'
+        : null;
   return (
     <form action={updateRequestStatusAction} className="status-quick-form">
       <input type="hidden" name="id" value={requestId} />
       <input type="hidden" name="status" value={targetStatus} />
-      <button className={buttonClass} type="submit" disabled={isCurrent} aria-disabled={isCurrent}>
-        <span className="status-action-label">{label}</span>
-        {isCurrent ? <span className="status-current-tag">Mevcut</span> : null}
-      </button>
+      {confirm === 'approve' ? (
+        <ConfirmDialog
+          proof="request.approve"
+          triggerLabel={label}
+          triggerClassName={buttonClass}
+          title="Talep onaylanıp yayına alınsın mı?"
+          consequence={requestApproveConsequence()}
+          confirmLabel="Evet, onayla ve yayınla"
+          tone="primary"
+          testId="request-approve"
+        />
+      ) : confirm === 'unpublish' ? (
+        <ConfirmDialog
+          proof="request.unpublish"
+          triggerLabel={label}
+          triggerClassName={buttonClass}
+          title="Talep yayından alınıp incelemeye dönsün mü?"
+          consequence={requestUnpublishConsequence()}
+          confirmLabel="Evet, incelemeye al"
+          tone="primary"
+          testId="request-unpublish"
+        />
+      ) : (
+        <button className={buttonClass} type="submit" disabled={isCurrent} aria-disabled={isCurrent}>
+          <span className="status-action-label">{label}</span>
+          {isCurrent ? <span className="status-current-tag">Mevcut</span> : null}
+        </button>
+      )}
     </form>
   );
 }

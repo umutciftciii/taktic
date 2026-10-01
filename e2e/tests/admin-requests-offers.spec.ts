@@ -19,7 +19,7 @@ import {
 import { seedOffer, seedRequestReport } from '../src/offer-fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
 import { artifactsDir, contactSharingRuntime, primaryRuntime, type Runtime } from '../src/runtime';
-import { waitForHydration } from '../src/confirm-dialog';
+import { confirmThrough, waitForHydration } from '../src/confirm-dialog';
 
 /**
  * ADMIN-DESIGN-001 Faz 3A: talepler, teklifler and the refund scan, as an
@@ -842,7 +842,9 @@ test.describe('Faz 3A review: moves the screen no longer offers', () => {
       await moves.getByRole('button', { name: 'İncelemeye al' }).click();
       await expect(staff.page.getByTestId('request-status')).toHaveText('İncelemede');
       await expect(moves.getByRole('button', { name: /^İncelemeye al/ })).toBeDisabled();
-      await moves.getByRole('button', { name: 'Onayla' }).click();
+      // Publishing asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2); the
+      // first step into review above does not.
+      await confirmThrough(moves.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
       await expect(staff.page.getByTestId('request-status')).toHaveText('Onaylandı');
       await expect(moves.getByRole('button', { name: /^Onayla/ })).toBeDisabled();
       await expect(moves.getByRole('button', { name: 'İncelemeye al' })).toBeEnabled();
@@ -1004,7 +1006,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         where: { id: moderated.request.id },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
-      await page.getByTestId('request-moderation-actions').getByRole('button', { name: 'Onayla' }).click();
+      await confirmThrough(page.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
       await expect(statusError).toContainText('Talep artık inceleme kuyruğunda değil');
       await expect(page).toHaveURL(/statusError=transitionNotAllowed/);
       await assertNoErrorScreen(page);
@@ -1045,7 +1047,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         where: { id: matched.request.id },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
-      await page.getByRole('button', { name: 'Hizmeti tamamlandı işaretle' }).click();
+      await confirmThrough(page.getByTestId('request-complete'), 'Evet, tamamlandı işaretle');
       await expect(statusError).toContainText('Talep tamamlandı olarak işaretlenmedi');
       await expect(page).toHaveURL(/statusError=notCompletable/);
       await assertNoErrorScreen(page);

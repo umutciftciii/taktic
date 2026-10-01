@@ -2,6 +2,7 @@
 
 import { formatDateTime } from '@taktic/shared';
 import { useActionState, useState } from 'react';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { createCustomerActivationLinkAction } from '../actions';
 import { ACTIVATION_LINK_IDLE } from '../activation-link-state';
 
@@ -17,7 +18,10 @@ import { ACTIVATION_LINK_IDLE } from '../activation-link-state';
  *
  * "Bağlantıyı kopyala" writes that same string to the operator's clipboard and
  * nowhere else — no request, no URL, no log. Issuing again replaces the link:
- * the API marks every unused earlier link as used.
+ * the API marks every unused earlier link as used, so "Yeni bağlantı oluştur"
+ * asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2) and posts
+ * `replaces=1`, which makes the action demand the dialog's proof. The first
+ * link goes straight through.
  *
  * It still works without JavaScript: `useActionState` forms submit normally
  * and React renders the returned state on the server.
@@ -29,6 +33,9 @@ export function ActivationLinkForm({ customerId }: { customerId: string }) {
   );
   const [copied, setCopied] = useState<string | null>(null);
   const issued = state.kind === 'issued';
+  // A refused or failed reissue keeps the reissue button: the link handed out
+  // before may still be live, and the next press would void it too.
+  const reissue = issued || (state.kind === 'error' && state.reissue === true);
 
   async function copy(url: string) {
     try {
@@ -73,19 +80,47 @@ export function ActivationLinkForm({ customerId }: { customerId: string }) {
         ) : null}
         <form action={submit}>
           <input type="hidden" name="customerId" value={customerId} />
-          <button
-            type="submit"
-            className={issued ? 'btn btn-link btn-sm' : 'btn btn-primary btn-sm'}
-            disabled={pending}
-            data-testid="customer-activation-issue"
-          >
-            {issued ? 'Yeni bağlantı oluştur' : 'Şifre belirleme bağlantısı oluştur'}
-          </button>
+          {reissue ? (
+            <>
+              <input type="hidden" name="replaces" value="1" />
+              <ConfirmDialog
+                proof="customer.activation-link-reissue"
+                triggerLabel="Yeni bağlantı oluştur"
+                triggerClassName="btn btn-link btn-sm"
+                title="Yeni bağlantı oluşturulsun mu?"
+                consequence={ACTIVATION_LINK_REISSUE_CONSEQUENCE}
+                confirmLabel="Evet, yeni bağlantı oluştur"
+                tone="primary"
+                disabled={pending}
+                testId="customer-activation-issue"
+              />
+            </>
+          ) : (
+            <button
+              type="submit"
+              className="btn btn-primary btn-sm"
+              disabled={pending}
+              data-testid="customer-activation-issue"
+            >
+              Şifre belirleme bağlantısı oluştur
+            </button>
+          )}
         </form>
       </div>
-      {issued ? (
+      {reissue ? (
         <p className="detail-muted-note">Yeni bağlantı oluşturmak bu bağlantıyı geçersiz kılar.</p>
       ) : null}
     </div>
   );
 }
+
+/** What `POST /customers/:id/activation-link` does to the link already handed out. */
+export const ACTIVATION_LINK_REISSUE_CONSEQUENCE = (
+  <>
+    <p>
+      Daha önce oluşturulan ve henüz kullanılmamış şifre belirleme bağlantısı hemen geçersiz olur. Müşteriye
+      onu ilettiyseniz o bağlantıyla artık şifre belirleyemez; yeni bağlantıyı yeniden paylaşmanız gerekir.
+    </p>
+    <p>Yeni bağlantı 72 saat geçerlidir ve yalnız bu ekranda bir kez gösterilir. Müşteriye otomatik mesaj gitmez.</p>
+  </>
+);

@@ -6,8 +6,11 @@ import type { ProviderStatus } from '../../../lib/api';
 import {
   PROVIDER_STATUSES,
   PROVIDER_STATUS_LABELS as STATUS_LABELS,
+  providerApproveConsequence,
+  providerDraftConsequence,
   providerStatusConsequence,
 } from './provider-status-consequence';
+import { providerStatusProofKey } from './provider-status-proof';
 
 type ProviderStatusFormProps = {
   providerId: string;
@@ -21,8 +24,9 @@ type ProviderStatusFormProps = {
  * The full status form: any status, the moderation note, and the rejection
  * reason the API requires for REJECTED. The same action and the same fields
  * the old moderation dialog sent; what changed is that a move that stops the
- * business working goes through a confirmation that says so, and a cancelled
- * confirmation sends nothing.
+ * business working (Faz 1), an approval and a move into DRAFT (Faz 2) go
+ * through a confirmation that says what they do, each with its own proof key
+ * (`providerStatusProofKey`), and a cancelled confirmation sends nothing.
  */
 export function ProviderStatusForm({
   providerId,
@@ -32,8 +36,9 @@ export function ProviderStatusForm({
   action,
 }: ProviderStatusFormProps) {
   const [selected, setSelected] = useState<ProviderStatus>(status);
-  const consequence = providerStatusConsequence(status, selected);
+  const proofKey = providerStatusProofKey(status, selected);
   const unchanged = selected === status;
+  const title = `Durum “${STATUS_LABELS[selected]}” olsun mu?`;
 
   return (
     <form action={action} className="detail-form" data-testid="provider-status-form">
@@ -78,14 +83,36 @@ export function ProviderStatusForm({
         />
       </label>
       <div className="detail-form-actions">
-        {consequence ? (
+        {proofKey === 'provider.status' ? (
           <ConfirmDialog
             proof="provider.status"
             triggerLabel="Durumu kaydet"
             triggerClassName="btn btn-destructive btn-sm"
-            title={`Durum “${STATUS_LABELS[selected]}” olsun mu?`}
-            consequence={consequence}
+            title={title}
+            consequence={providerStatusConsequence(status, selected)}
             confirmLabel={selected === 'REJECTED' ? 'Evet, reddet' : selected === 'SUSPENDED' ? 'Evet, askıya al' : 'Evet, kaydet'}
+            testId="provider-status-save"
+          />
+        ) : proofKey === 'provider.approve' ? (
+          <ConfirmDialog
+            proof="provider.approve"
+            triggerLabel="Durumu kaydet"
+            triggerClassName="btn btn-primary btn-sm"
+            title={title}
+            consequence={providerApproveConsequence(status)}
+            confirmLabel={status === 'SUSPENDED' ? 'Evet, tekrar aktif et' : 'Evet, onayla'}
+            tone="primary"
+            testId="provider-status-save"
+          />
+        ) : proofKey === 'provider.draft' ? (
+          <ConfirmDialog
+            proof="provider.draft"
+            triggerLabel="Durumu kaydet"
+            triggerClassName="btn btn-secondary btn-sm"
+            title={title}
+            consequence={providerDraftConsequence(status)}
+            confirmLabel="Evet, taslağa al"
+            tone="primary"
             testId="provider-status-save"
           />
         ) : (

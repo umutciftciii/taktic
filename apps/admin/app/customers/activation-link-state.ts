@@ -5,6 +5,7 @@
 export type ActivationLinkState =
   | { kind: 'idle' }
   | { kind: 'issued'; activationUrl: string; expiresAt: string }
-  | { kind: 'error'; message: string };
+  /** `reissue`: the press replaced (or tried to replace) a link already handed out. */
+  | { kind: 'error'; message: string; reissue?: boolean };
 
 export const ACTIVATION_LINK_IDLE: ActivationLinkState = { kind: 'idle' };
