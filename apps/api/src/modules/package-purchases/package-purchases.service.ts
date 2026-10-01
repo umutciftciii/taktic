@@ -8,6 +8,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   CreditTransactionType,
   NumberedEntityType,
   OfferPackageType,
@@ -33,6 +34,7 @@ import { CreditsService } from '../credits/credits.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { NumberingService } from '../numbering/numbering.service';
 import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import { purchaseTermsEvidenceOmit } from '../purchase-terms/purchase-terms.projection';
 import { PurchaseTermsService } from '../purchase-terms/purchase-terms.service';
 import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
@@ -487,7 +489,12 @@ export class PackagePurchasesService implements OnModuleInit {
     return settled;
   }
 
-  listAdminPurchases(filters: AdminPurchaseFilters) {
+  /**
+   * The operator's purchase list (PACKAGE_PURCHASES_READ). The provider is
+   * named by the purchase; its contact person and e-mail are the provider
+   * list's (PROVIDERS_READ) — see {@link toAdminPurchase}.
+   */
+  async listAdminPurchases(filters: AdminPurchaseFilters, viewer: AuthUser | null = null) {
     const status = normalizeOptionalPurchaseStatus(filters.status);
     const providerId = normalizeNullableString(filters.providerId);
     const packageId = normalizeNullableString(filters.packageId);
@@ -496,7 +503,7 @@ export class PackagePurchasesService implements OnModuleInit {
       throw new BadRequestException('creditHold must be OPEN or ANY');
     }
 
-    return this.prisma.packagePurchase.findMany({
+    const purchases = await this.prisma.packagePurchase.findMany({
       where: {
         ...(status ? { status } : {}),
         ...(providerId ? { providerId } : {}),
@@ -508,9 +515,17 @@ export class PackagePurchasesService implements OnModuleInit {
       include: packagePurchaseInclude,
       omit: packagePurchaseOmit,
     });
+    const scope = adminPurchaseEmbedScope(viewer);
+    return purchases.map((purchase) => toAdminPurchase(purchase, scope));
   }
 
-  async getAdminPurchase(id: string) {
+  /**
+   * One purchase for the operator (PACKAGE_PURCHASES_READ): the provider as in
+   * the list, and the credit hold whole except `balanceAtOpen` — the
+   * provider's balance when the hold opened, which is the ledger's
+   * (FINANCE_LEDGER_READ).
+   */
+  async getAdminPurchase(id: string, viewer: AuthUser | null = null) {
     const purchase = await this.prisma.packagePurchase.findUnique({
       where: { id },
       include: packagePurchaseInclude,
@@ -521,10 +536,13 @@ export class PackagePurchasesService implements OnModuleInit {
       throw new NotFoundException('Package purchase not found');
     }
 
+    const scope = adminPurchaseEmbedScope(viewer);
+    const creditHold = await this.readCreditHoldForAdmin(id);
+
     return {
-      ...purchase,
+      ...toAdminPurchase(purchase, scope),
       webhookEvents: await this.readWebhookAttempts(id),
-      creditHold: await this.readCreditHoldForAdmin(id),
+      creditHold: creditHold && !scope.ledger ? withoutBalanceAtOpen(creditHold) : creditHold,
     };
   }
 
@@ -588,7 +606,11 @@ export class PackagePurchasesService implements OnModuleInit {
     });
   }
 
-  async updateAdminPurchaseStatus(id: string, dto: UpdatePackagePurchaseStatusDto) {
+  async updateAdminPurchaseStatus(
+    id: string,
+    dto: UpdatePackagePurchaseStatusDto,
+    viewer: AuthUser | null = null,
+  ) {
     const status = normalizeManualStatus(dto.status);
     const purchase = await this.prisma.packagePurchase.findUnique({
       where: { id },
@@ -643,7 +665,7 @@ export class PackagePurchasesService implements OnModuleInit {
       await this.mail.sendShowcasePackagePaymentFailed(updated.id);
     }
 
-    return updated;
+    return toAdminPurchase(updated, adminPurchaseEmbedScope(viewer));
   }
 
   private async ensureProviderExists(providerId: string) {
@@ -656,6 +678,34 @@ export class PackagePurchasesService implements OnModuleInit {
       throw new NotFoundException('Provider not found');
     }
   }
+}
+
+/**
+ * Which other domains an operator's purchase response may carry
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001). The provider's own screens use
+ * `packagePurchaseInclude` unprojected: it is their own contact.
+ */
+type AdminPurchaseEmbedScope = { providerContact: boolean; ledger: boolean };
+
+function adminPurchaseEmbedScope(viewer: AuthUser | null): AdminPurchaseEmbedScope {
+  return {
+    providerContact: mayEmbed(viewer, AdminPermission.PROVIDERS_READ),
+    ledger: mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ),
+  };
+}
+
+function toAdminPurchase<T extends { provider: { contactName: string; email: string | null } }>(
+  purchase: T,
+  scope: AdminPurchaseEmbedScope,
+) {
+  if (scope.providerContact) return purchase;
+  const { contactName: _contactName, email: _email, ...provider } = purchase.provider;
+  return { ...purchase, provider };
+}
+
+function withoutBalanceAtOpen<T extends { balanceAtOpen: unknown }>(hold: T): Omit<T, 'balanceAtOpen'> {
+  const { balanceAtOpen: _balance, ...rest } = hold;
+  return rest;
 }
 
 const packagePurchaseInclude = {

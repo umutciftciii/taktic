@@ -255,11 +255,16 @@ export default async function ProviderDetailPage({
   // catalogue and stays on the write permission alone.
   const canAddCategories = canWriteCategories && canReadCatalog;
 
+  // The offers and purchases blocks of `admin-detail` are OFFERS_READ's and
+  // PACKAGE_PURCHASES_READ's; the API leaves out what the session cannot read
+  // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001), so the tab exists only when
+  // one of the two has something to show.
+  const hasActivityTab = canReadOffers || canReadPackagePurchases;
   const tabKeys: TabKey[] = [
     '',
     ...(canReadCredits ? (['kredi'] as const) : []),
     ...(canReadReviews ? (['degerlendirmeler'] as const) : []),
-    'teklifler',
+    ...(hasActivityTab ? (['teklifler'] as const) : []),
   ];
   const activeTab = resolveTab<TabKey>(search.tab, tabKeys, '');
   const path = `/providers/${provider.id}`;
@@ -364,19 +369,49 @@ export default async function ProviderDetailPage({
           },
         ]
       : []),
-    { key: 'teklifler', label: 'Teklifler ve paketler', count: totalOffers, testId: 'provider-tab-teklifler' },
+    ...(hasActivityTab
+      ? [
+          {
+            key: 'teklifler',
+            label: canReadOffers
+              ? canReadPackagePurchases
+                ? 'Teklifler ve paketler'
+                : 'Teklifler'
+              : 'Paket alımları',
+            count: canReadOffers ? totalOffers : packagePurchases,
+            testId: 'provider-tab-teklifler',
+          },
+        ]
+      : []),
   ];
 
+  // Each figure only where the session may read its domain: the API carries
+  // none of them otherwise, and a "0" here would be a claim it never made.
   const facts: SummaryItem[] = [
-    {
-      label: 'Kredi bakiyesi',
-      value: String(creditBalance),
-      tone: creditBalance > 0 ? 'neutral' : 'warning',
-      testId: 'provider-fact-credit',
-    },
-    { label: 'Açık teklif', value: String(openOffers), note: 'Müşteri hâlâ değerlendirebilir' },
-    { label: 'Toplam teklif', value: String(totalOffers) },
-    { label: 'Paket alımı', value: String(packagePurchases) },
+    ...(canReadCredits
+      ? [
+          {
+            label: 'Kredi bakiyesi',
+            value: String(creditBalance),
+            tone: (creditBalance > 0 ? 'neutral' : 'warning') as SummaryItem['tone'],
+            testId: 'provider-fact-credit',
+          },
+        ]
+      : []),
+    ...(canReadOffers
+      ? [
+          {
+            label: 'Açık teklif',
+            value: String(openOffers),
+            note: 'Müşteri hâlâ değerlendirebilir',
+            testId: 'provider-fact-open-offers',
+          },
+          { label: 'Toplam teklif', value: String(totalOffers), testId: 'provider-fact-total-offers' },
+        ]
+      : []),
+    ...(canReadPackagePurchases
+      ? [{ label: 'Paket alımı', value: String(packagePurchases), testId: 'provider-fact-purchases' }]
+      : []),
     ...(canReadReviews
       ? [
           {
@@ -955,104 +990,108 @@ export default async function ProviderDetailPage({
 
       {activeTab === 'teklifler' ? (
         <div className="detail-panel" data-testid="provider-panel-teklifler">
-          <SectionCard
-            title="Son teklifler"
-            subtitle={totalOffers > 0 ? `Toplam ${totalOffers}` : undefined}
-            actions={
-              totalOffers > 0 && canReadOffers ? (
-                <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${provider.id}`}>
-                  Tümünü gör
-                </Link>
-              ) : undefined
-            }
-          >
-            {recentOffers.length === 0 ? (
-              <EmptyState
-                title="Henüz teklif yok."
-                description="İşletme bir talebe teklif gönderdiğinde burada görünür."
-              />
-            ) : (
-              <DataTable caption="Son teklifler" columns={OFFER_COLUMNS} minWidth={640} testId="provider-recent-offers">
-                {recentOffers.map((offer) => (
-                  <tr key={offer.id}>
-                    <td>{formatDateTime(offer.submittedAt)}</td>
-                    <td>
-                      <div className="cell-stack">
-                        <span>{offer.request.category.name}</span>
-                        <span className="cell-muted">
-                          {offer.request.city}/{offer.request.district}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="is-num">{formatPrice(offer.priceAmount, offer.currency)}</td>
-                    <td>
-                      <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
-                    </td>
-                    <td className="col-actions">
-                      {canReadOffers ? (
-                        <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
-                          Aç
-                        </Link>
-                      ) : null}
-                    </td>
-                  </tr>
-                ))}
-              </DataTable>
-            )}
-          </SectionCard>
-
-          <SectionCard
-            title="Son paket alımları"
-            subtitle={packagePurchases > 0 ? `Toplam ${packagePurchases}` : undefined}
-            actions={
-              packagePurchases > 0 && canReadPackagePurchases ? (
-                <Link className="btn btn-ghost btn-sm" href={`/package-purchases?providerId=${provider.id}`}>
-                  Tümünü gör
-                </Link>
-              ) : undefined
-            }
-          >
-            {recentPackagePurchases.length === 0 ? (
-              <EmptyState
-                title="Henüz paket alımı yok."
-                description="İşletme bir kredi paketi satın aldığında burada görünür."
-              />
-            ) : (
-              <DataTable
-                caption="Son paket alımları"
-                columns={PURCHASE_COLUMNS}
-                minWidth={760}
-                testId="provider-recent-purchases"
-              >
-                {recentPackagePurchases.map((purchase) => {
-                  const statusTimestamp = packagePurchaseStatusTimestamp(purchase);
-                  return (
-                    <tr key={purchase.id}>
-                      <td>{formatDateTime(purchase.createdAt)}</td>
-                      <td>{purchase.packageNameSnapshot}</td>
-                      <td className="is-num">{purchase.creditAmountSnapshot}</td>
-                      <td className="is-num">
-                        {formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}
-                      </td>
+          {canReadOffers ? (
+            <SectionCard
+              title="Son teklifler"
+              subtitle={totalOffers > 0 ? `Toplam ${totalOffers}` : undefined}
+              actions={
+                totalOffers > 0 && canReadOffers ? (
+                  <Link className="btn btn-ghost btn-sm" href={`/offers?providerId=${provider.id}`}>
+                    Tümünü gör
+                  </Link>
+                ) : undefined
+              }
+            >
+              {recentOffers.length === 0 ? (
+                <EmptyState
+                  title="Henüz teklif yok."
+                  description="İşletme bir talebe teklif gönderdiğinde burada görünür."
+                />
+              ) : (
+                <DataTable caption="Son teklifler" columns={OFFER_COLUMNS} minWidth={640} testId="provider-recent-offers">
+                  {recentOffers.map((offer) => (
+                    <tr key={offer.id}>
+                      <td>{formatDateTime(offer.submittedAt)}</td>
                       <td>
-                        <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                        <div className="cell-stack">
+                          <span>{offer.request.category.name}</span>
+                          <span className="cell-muted">
+                            {offer.request.city}/{offer.request.district}
+                          </span>
+                        </div>
                       </td>
+                      <td className="is-num">{formatPrice(offer.priceAmount, offer.currency)}</td>
                       <td>
-                        {statusTimestamp ? formatDateTime(statusTimestamp) : <span className="cell-muted">—</span>}
+                        <span className={statusBadgeClass(offer.status)}>{statusLabel(offer.status)}</span>
                       </td>
                       <td className="col-actions">
-                        {canReadPackagePurchases ? (
-                          <Link className="btn btn-secondary btn-sm" href={`/package-purchases/${purchase.id}`}>
+                        {canReadOffers ? (
+                          <Link className="btn btn-secondary btn-sm" href={`/offers/${offer.id}`}>
                             Aç
                           </Link>
                         ) : null}
                       </td>
                     </tr>
-                  );
-                })}
-              </DataTable>
-            )}
-          </SectionCard>
+                  ))}
+                </DataTable>
+              )}
+            </SectionCard>
+          ) : null}
+
+          {canReadPackagePurchases ? (
+            <SectionCard
+              title="Son paket alımları"
+              subtitle={packagePurchases > 0 ? `Toplam ${packagePurchases}` : undefined}
+              actions={
+                packagePurchases > 0 && canReadPackagePurchases ? (
+                  <Link className="btn btn-ghost btn-sm" href={`/package-purchases?providerId=${provider.id}`}>
+                    Tümünü gör
+                  </Link>
+                ) : undefined
+              }
+            >
+              {recentPackagePurchases.length === 0 ? (
+                <EmptyState
+                  title="Henüz paket alımı yok."
+                  description="İşletme bir kredi paketi satın aldığında burada görünür."
+                />
+              ) : (
+                <DataTable
+                  caption="Son paket alımları"
+                  columns={PURCHASE_COLUMNS}
+                  minWidth={760}
+                  testId="provider-recent-purchases"
+                >
+                  {recentPackagePurchases.map((purchase) => {
+                    const statusTimestamp = packagePurchaseStatusTimestamp(purchase);
+                    return (
+                      <tr key={purchase.id}>
+                        <td>{formatDateTime(purchase.createdAt)}</td>
+                        <td>{purchase.packageNameSnapshot}</td>
+                        <td className="is-num">{purchase.creditAmountSnapshot}</td>
+                        <td className="is-num">
+                          {formatPrice(purchase.priceAmountSnapshot, purchase.currencySnapshot)}
+                        </td>
+                        <td>
+                          <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
+                        </td>
+                        <td>
+                          {statusTimestamp ? formatDateTime(statusTimestamp) : <span className="cell-muted">—</span>}
+                        </td>
+                        <td className="col-actions">
+                          {canReadPackagePurchases ? (
+                            <Link className="btn btn-secondary btn-sm" href={`/package-purchases/${purchase.id}`}>
+                              Aç
+                            </Link>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </DataTable>
+              )}
+            </SectionCard>
+          ) : null}
         </div>
       ) : null}
     </main>

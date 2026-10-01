@@ -58,7 +58,7 @@ export class AdminRequestReportsController {
     @Body() dto: ResolveRequestReportsDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.reports.resolve(id, dto, user.id);
+    return this.reports.resolve(id, dto, user);
   }
 
   @Post(':id/reopen')

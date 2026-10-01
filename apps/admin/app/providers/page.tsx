@@ -11,6 +11,7 @@ import {
   statusLabel,
 } from '../../lib/api';
 import { DataTable, type DataColumn } from '../../components/data-table';
+import { gateColumns, providerColumnGates } from '../../lib/cross-domain-projection';
 import { EmptyState } from '../../components/empty-state';
 import { FilterBar, FilterField } from '../../components/filter-bar';
 import { PageHeader } from '../../components/page-header';
@@ -121,6 +122,15 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
   const canReadOffers = can('OFFERS_READ');
   const canReadProviderCredits = can('FINANCE_LEDGER_READ');
+  const canReadPackagePurchases = can('PACKAGE_PURCHASES_READ');
+  // The three figure columns are other domains' (balance, offers, purchases):
+  // the API carries each only with its read permission, and a column the
+  // session cannot read is not drawn — a `0` would be a claim the response
+  // never made (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+  const columns = gateColumns(
+    COLUMNS,
+    providerColumnGates({ credit: canReadProviderCredits, offers: canReadOffers, packages: canReadPackagePurchases }),
+  );
   const params = await searchParams;
   const query = (params.q ?? '').trim();
   const status = normalizeStatus(params.status);
@@ -300,7 +310,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
             />
           )
         ) : (
-          <DataTable caption="Hizmet verenler" columns={COLUMNS} minWidth={1100} testId="provider-table">
+          <DataTable caption="Hizmet verenler" columns={columns} minWidth={1100} testId="provider-table">
             {pageRows.map((provider) => (
               <ProviderRow
                 key={provider.id}
@@ -308,6 +318,7 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
                 canReadProviderDetail={canReadProviderDetail}
                 canReadOffers={canReadOffers}
                 canReadProviderCredits={canReadProviderCredits}
+                canReadPackagePurchases={canReadPackagePurchases}
               />
             ))}
           </DataTable>
@@ -333,11 +344,13 @@ function ProviderRow({
   canReadProviderDetail,
   canReadOffers,
   canReadProviderCredits,
+  canReadPackagePurchases,
 }: {
   provider: ProviderProfile;
   canReadProviderDetail: boolean;
   canReadOffers: boolean;
   canReadProviderCredits: boolean;
+  canReadPackagePurchases: boolean;
 }) {
   const providerCategories = provider.serviceCategories ?? [];
   const visibleCategories = providerCategories.slice(0, 2);
@@ -427,19 +440,25 @@ function ProviderRow({
           )}
         </div>
       </td>
-      <td className="is-num">
-        {creditBalance === 0 ? <span className="cell-muted">0</span> : <strong>{creditBalance}</strong>}
-      </td>
-      <td className="is-num">
-        {activeOffers === 0 ? (
-          <span className="cell-muted">0</span>
-        ) : (
-          <span className="badge badge-good">{activeOffers}</span>
-        )}
-      </td>
-      <td className="is-num">
-        <span className="cell-muted">{packages}</span>
-      </td>
+      {canReadProviderCredits ? (
+        <td className="is-num" data-testid="provider-credit">
+          {creditBalance === 0 ? <span className="cell-muted">0</span> : <strong>{creditBalance}</strong>}
+        </td>
+      ) : null}
+      {canReadOffers ? (
+        <td className="is-num" data-testid="provider-active-offers">
+          {activeOffers === 0 ? (
+            <span className="cell-muted">0</span>
+          ) : (
+            <span className="badge badge-good">{activeOffers}</span>
+          )}
+        </td>
+      ) : null}
+      {canReadPackagePurchases ? (
+        <td className="is-num" data-testid="provider-packages">
+          <span className="cell-muted">{packages}</span>
+        </td>
+      ) : null}
       <td className="col-actions">
         <div className="inline-actions">
           {canReadProviderDetail ? (

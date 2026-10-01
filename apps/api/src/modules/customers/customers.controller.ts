@@ -23,15 +23,15 @@ export class CustomersController {
   @Get()
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CUSTOMERS_READ)
-  list(@Query() query: ListCustomersDto) {
-    return this.customersService.list(query);
+  list(@Query() query: ListCustomersDto, @CurrentUser() user: AuthUser) {
+    return this.customersService.list(query, user);
   }
 
   @Get(':id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CUSTOMERS_READ)
-  detail(@Param('id') id: string) {
-    return this.customersService.detail(id);
+  detail(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.customersService.detail(id, user);
   }
 
   @Get(':id/notes')

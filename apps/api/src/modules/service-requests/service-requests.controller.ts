@@ -44,8 +44,8 @@ export class ServiceRequestsController {
   @Get()
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.REQUESTS_READ)
-  listServiceRequests() {
-    return this.serviceRequestsService.listServiceRequests();
+  listServiceRequests(@CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.listServiceRequests(user);
   }
 
   @Get('my')
@@ -69,8 +69,8 @@ export class ServiceRequestsController {
   @Get(':id')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.REQUESTS_READ)
-  getServiceRequest(@Param('id') id: string) {
-    return this.serviceRequestsService.getServiceRequest(id);
+  getServiceRequest(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.getServiceRequest(id, user);
   }
 
   @Get(':id/offers')

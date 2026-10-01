@@ -219,7 +219,7 @@ export default async function AdminCreditLedgerPage({ searchParams }: AdminCredi
             id="ledger-search"
             name="q"
             type="search"
-            placeholder="İşletme, telefon, e-posta, sebep"
+            placeholder={can('PROVIDERS_READ') ? 'İşletme, telefon, e-posta, sebep' : 'İşletme, sebep'}
             defaultValue={q}
             autoComplete="off"
           />

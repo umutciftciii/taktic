@@ -10,6 +10,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   CreditTransactionType,
   OfferEntitlementSource,
   OfferRefundBlockReason,
@@ -22,6 +23,7 @@ import {
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
 import {
   consumePromoCreditsForSpend,
   readUnsweptExpiredPromoCredits,
@@ -76,7 +78,14 @@ export class OffersService {
     @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
   ) {}
 
-  async listOffers(filters: OfferListFilters) {
+  /**
+   * The operator's offer list (OFFERS_READ). Each row is projected by
+   * {@link toAdminOffer}; the free-text search reaches only the columns the
+   * caller may read, so a phone number it may not see cannot be confirmed by
+   * whether a search for it returns a row.
+   */
+  async listOffers(filters: OfferListFilters, viewer: AuthUser | null = null) {
+    const scope = offerEmbedScope(viewer);
     const status = normalizeOptionalOfferStatus(filters.status);
     const providerId = normalizeNullableString(filters.providerId);
     const requestId = normalizeNullableString(filters.requestId);
@@ -122,14 +131,22 @@ export class OffersService {
               { requestId: { contains: search, mode: 'insensitive' } },
               { providerId: { contains: search, mode: 'insensitive' } },
               { provider: { is: { businessName: { contains: search, mode: 'insensitive' } } } },
-              { provider: { is: { contactName: { contains: search, mode: 'insensitive' } } } },
-              { provider: { is: { phone: { contains: search, mode: 'insensitive' } } } },
-              { request: { is: { customerName: { contains: search, mode: 'insensitive' } } } },
-              { request: { is: { customerPhone: { contains: search, mode: 'insensitive' } } } },
-              { request: { is: { customerEmail: { contains: search, mode: 'insensitive' } } } },
+              ...(scope.providerContact
+                ? ([
+                    { provider: { is: { contactName: { contains: search, mode: 'insensitive' } } } },
+                    { provider: { is: { phone: { contains: search, mode: 'insensitive' } } } },
+                  ] satisfies Prisma.OfferWhereInput[])
+                : []),
+              ...(scope.requestDetail
+                ? ([
+                    { request: { is: { customerName: { contains: search, mode: 'insensitive' } } } },
+                    { request: { is: { customerPhone: { contains: search, mode: 'insensitive' } } } },
+                    { request: { is: { customerEmail: { contains: search, mode: 'insensitive' } } } },
+                  ] satisfies Prisma.OfferWhereInput[])
+                : []),
               { request: { is: { city: { contains: search, mode: 'insensitive' } } } },
               { request: { is: { district: { contains: search, mode: 'insensitive' } } } },
-            ],
+            ] satisfies Prisma.OfferWhereInput[],
           }
         : {}),
     };
@@ -140,10 +157,11 @@ export class OffersService {
       include: offerInclude,
     });
 
-    return offers.map(withRefundEligibility);
+    return offers.map((offer) => toAdminOffer(withRefundEligibility(offer), scope));
   }
 
-  async getOffer(id: string) {
+  /** The operator's offer page (OFFERS_READ), projected by {@link toAdminOffer}. */
+  async getOffer(id: string, viewer: AuthUser | null = null) {
     const offer = await this.prisma.offer.findUnique({
       where: { id },
       include: offerInclude,
@@ -153,7 +171,7 @@ export class OffersService {
       throw new NotFoundException('Offer not found');
     }
 
-    return withRefundEligibility(offer);
+    return toAdminOffer(withRefundEligibility(offer), offerEmbedScope(viewer));
   }
 
   /**
@@ -193,7 +211,7 @@ export class OffersService {
       user,
     );
 
-    return this.getOffer(id);
+    return this.getOffer(id, user);
   }
 
   /**
@@ -296,9 +314,14 @@ export class OffersService {
           throw new NotFoundException('Offer not found');
         }
 
+        // The offer as the offer page shows it to this caller, and the
+        // provider's balance after the refund only to a caller who may read
+        // the ledger: OFFER_REFUND_MANUAL writes one movement, it does not
+        // open the wallet.
+        const scope = offerEmbedScope(user);
         return {
-          offer: withRefundEligibility(updatedOffer),
-          balance: balanceAfter,
+          offer: toAdminOffer(withRefundEligibility(updatedOffer), scope),
+          ...(scope.ledger ? { balance: balanceAfter } : {}),
           refundTransaction,
           /** The net of everything this refund wrote — the same figure the e-mail and the web report. */
           settlement,
@@ -1449,6 +1472,7 @@ const offerInclude = {
     select: {
       id: true,
       requestNumber: true,
+      customerId: true,
       city: true,
       district: true,
       neighborhood: true,
@@ -1471,6 +1495,76 @@ const offerInclude = {
     },
   },
 } satisfies Prisma.OfferInclude;
+
+/**
+ * Which other domains an operator's offer response may carry
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+ */
+type OfferEmbedScope = {
+  /** The provider's contact person, phone and e-mail: the provider list's (PROVIDERS_READ). */
+  providerContact: boolean;
+  /** The request's own columns past its identity, its owner's contact snapshot among them (REQUESTS_READ). */
+  requestDetail: boolean;
+  /** The customer account behind the request (CUSTOMERS_READ). */
+  customerAccount: boolean;
+  /** The provider's balance (FINANCE_LEDGER_READ). */
+  ledger: boolean;
+};
+
+function offerEmbedScope(viewer: AuthUser | null): OfferEmbedScope {
+  return {
+    providerContact: mayEmbed(viewer, AdminPermission.PROVIDERS_READ),
+    requestDetail: mayEmbed(viewer, AdminPermission.REQUESTS_READ),
+    customerAccount: mayEmbed(viewer, AdminPermission.CUSTOMERS_READ),
+    ledger: mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ),
+  };
+}
+
+type AdminOfferRow = Prisma.OfferGetPayload<{ include: typeof offerInclude }> & {
+  refundEligibility: ReturnType<typeof calculateRefundEligibility>;
+};
+
+/**
+ * One offer as an operator holding OFFERS_READ sees it.
+ *
+ * The offer's own columns travel whole. Of the provider and the request it
+ * was made on, the identity travels — ids, the business name, the request
+ * number, category, city, district and status: what makes the offer readable
+ * as "this business's offer on that request". The rest belongs to another
+ * read permission and is absent from the body without it: the provider's
+ * contact (PROVIDERS_READ), the request's detail and its owner's contact
+ * snapshot (REQUESTS_READ), the customer account (CUSTOMERS_READ).
+ * `request.customerId` is the reference, not the account; the status action
+ * needs to know whether the request has an owner (see `updateOfferStatus`).
+ */
+function toAdminOffer(offer: AdminOfferRow, scope: OfferEmbedScope) {
+  const { provider, request, ...rest } = offer;
+  const { contactName, phone, email, ...providerIdentity } = provider;
+  const {
+    neighborhood,
+    qualityScore,
+    customerName,
+    customerPhone,
+    customerEmail,
+    customer,
+    ...requestIdentity
+  } = request;
+
+  return {
+    ...rest,
+    provider: {
+      ...providerIdentity,
+      ...(scope.providerContact ? { contactName, phone, email } : {}),
+    },
+    request: {
+      ...requestIdentity,
+      ...(scope.requestDetail
+        ? { neighborhood, qualityScore, customerName, customerPhone, customerEmail }
+        : {}),
+      ...(scope.customerAccount ? { customer } : {}),
+    },
+  };
+}
 
 const customerOfferInclude = {
   provider: {

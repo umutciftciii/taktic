@@ -129,7 +129,16 @@ export default async function AdminCustomerDetailPage({
   const [{ id }, search] = await Promise.all([params, searchParams]);
   // A tab the session may not open is not a tab at all: `?tab=notlar`
   // without CUSTOMER_NOTES_READ opens the profile, never an empty panel.
-  const tabKeys = canReadNotes ? TAB_KEYS : TAB_KEYS.filter((key) => key !== 'notlar');
+  //
+  // The same for the request and offer history: `GET /customers/:id` carries
+  // those blocks — and the figures that count them — only for a session
+  // holding REQUESTS_READ / OFFERS_READ (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+  const tabKeys = TAB_KEYS.filter(
+    (key) =>
+      (key !== 'notlar' || canReadNotes) &&
+      (key !== 'talepler' || links.requests) &&
+      (key !== 'teklifler' || links.offers),
+  );
   const activeTab = resolveTab<TabKey>(search.tab, tabKeys, '');
 
   // An unknown or malformed id is the 404 screen, as on every other detail
@@ -144,7 +153,14 @@ export default async function AdminCustomerDetailPage({
         : Promise.resolve<CustomerNotesResponse | null>(null),
     ]),
   );
-  const { customer, metrics, recentRequests, recentOffers, acceptedOffers } = response;
+  const { customer, metrics } = response;
+  // Absent, not empty, without the permission; the tabs above are gone then.
+  const recentRequests = response.recentRequests ?? [];
+  const recentOffers = response.recentOffers ?? [];
+  const acceptedOffers = response.acceptedOffers ?? [];
+  const requestCount = metrics.requestCount ?? 0;
+  const offerCount = metrics.offerCount ?? 0;
+  const acceptedOfferCount = metrics.acceptedOfferCount ?? 0;
   const notes = notesResponse?.items ?? [];
   const path = `/customers/${customer.id}`;
 
@@ -159,28 +175,42 @@ export default async function AdminCustomerDetailPage({
 
   const tabs: TabItem[] = [
     { key: '', label: 'Profil ve iletişim', testId: 'customer-tab-profil' },
-    { key: 'talepler', label: 'Talep geçmişi', count: metrics.requestCount, testId: 'customer-tab-talepler' },
-    { key: 'teklifler', label: 'Aldığı teklifler', count: metrics.offerCount, testId: 'customer-tab-teklifler' },
+    ...(links.requests
+      ? [{ key: 'talepler', label: 'Talep geçmişi', count: requestCount, testId: 'customer-tab-talepler' }]
+      : []),
+    ...(links.offers
+      ? [{ key: 'teklifler', label: 'Aldığı teklifler', count: offerCount, testId: 'customer-tab-teklifler' }]
+      : []),
     ...(canReadNotes
       ? [{ key: 'notlar', label: 'Notlar', count: notes.length, testId: 'customer-tab-notlar' }]
       : []),
   ];
 
   const facts: SummaryItem[] = [
-    { label: 'Talep sayısı', value: String(metrics.requestCount), testId: 'customer-fact-requests' },
-    { label: 'Aldığı teklif', value: String(metrics.offerCount) },
-    {
-      label: 'Kabul ettiği teklif',
-      value: String(metrics.acceptedOfferCount),
-      tone: metrics.acceptedOfferCount > 0 ? 'success' : 'neutral',
-    },
-    {
-      label: 'Son talep',
-      value: metrics.lastRequestAt ? formatDateTime(metrics.lastRequestAt) : '—',
-      note: latestRequest
-        ? `${latestRequest.categoryName} · ${latestRequest.district || latestRequest.city}`
-        : 'Henüz talep yok',
-    },
+    ...(links.requests
+      ? [{ label: 'Talep sayısı', value: String(requestCount), testId: 'customer-fact-requests' }]
+      : []),
+    ...(links.offers
+      ? [
+          { label: 'Aldığı teklif', value: String(offerCount), testId: 'customer-fact-offers' },
+          {
+            label: 'Kabul ettiği teklif',
+            value: String(acceptedOfferCount),
+            tone: (acceptedOfferCount > 0 ? 'success' : 'neutral') as SummaryItem['tone'],
+          },
+        ]
+      : []),
+    ...(links.requests
+      ? [
+          {
+            label: 'Son talep',
+            value: metrics.lastRequestAt ? formatDateTime(metrics.lastRequestAt) : '—',
+            note: latestRequest
+              ? `${latestRequest.categoryName} · ${latestRequest.district || latestRequest.city}`
+              : 'Henüz talep yok',
+          },
+        ]
+      : []),
     {
       label: 'Hesap',
       value: customer.isActive ? 'Aktif' : 'Pasif',
@@ -273,15 +303,20 @@ export default async function AdminCustomerDetailPage({
                       </>
                     ),
                   },
-                  {
-                    label: 'Şehir',
-                    value: location ? (
-                      <>
-                        {location}
-                        <div className="cell-muted">Son talebinden</div>
-                      </>
-                    ) : null,
-                  },
+                  // Read from the latest request, so only where the requests are.
+                  ...(links.requests
+                    ? [
+                        {
+                          label: 'Şehir',
+                          value: location ? (
+                            <>
+                              {location}
+                              <div className="cell-muted">Son talebinden</div>
+                            </>
+                          ) : null,
+                        },
+                      ]
+                    : []),
                   { label: 'Kayıt tarihi', value: formatDateTime(customer.createdAt) },
                   {
                     label: 'Son giriş',
@@ -335,11 +370,11 @@ export default async function AdminCustomerDetailPage({
         </div>
       ) : null}
 
-      {activeTab === 'talepler' ? (
+      {activeTab === 'talepler' && links.requests ? (
         <div className="detail-panel" data-testid="customer-panel-talepler">
           <SectionCard
             title="Açtığı talepler"
-            subtitle={metrics.requestCount > 0 ? shownOfTotal(recentRequests.length, metrics.requestCount) : undefined}
+            subtitle={requestCount > 0 ? shownOfTotal(recentRequests.length, requestCount) : undefined}
           >
             {recentRequests.length === 0 ? (
               <EmptyState
@@ -357,13 +392,13 @@ export default async function AdminCustomerDetailPage({
         </div>
       ) : null}
 
-      {activeTab === 'teklifler' ? (
+      {activeTab === 'teklifler' && links.offers ? (
         <div className="detail-panel" data-testid="customer-panel-teklifler">
           <SectionCard
             title="Aldığı teklifler"
             subtitle={
-              metrics.offerCount > 0
-                ? `${metrics.offerCount} teklifin ${metrics.acceptedOfferCount} tanesini kabul etti`
+              offerCount > 0
+                ? `${offerCount} teklifin ${acceptedOfferCount} tanesini kabul etti`
                 : undefined
             }
           >
@@ -374,9 +409,9 @@ export default async function AdminCustomerDetailPage({
               />
             ) : (
               <>
-                {recentOffers.length < metrics.offerCount ? (
+                {recentOffers.length < offerCount ? (
                   <p className="detail-muted-note">
-                    {shownOfTotal(recentOffers.length, metrics.offerCount)}
+                    {shownOfTotal(recentOffers.length, offerCount)}
                   </p>
                 ) : null}
                 <DataTable caption="Aldığı teklifler" columns={OFFER_COLUMNS} minWidth={860} testId="customer-offers">
@@ -391,8 +426,8 @@ export default async function AdminCustomerDetailPage({
           <SectionCard
             title="Kabul ettiği teklifler"
             subtitle={
-              metrics.acceptedOfferCount > 0
-                ? shownOfTotal(acceptedOffers.length, metrics.acceptedOfferCount)
+              acceptedOfferCount > 0
+                ? shownOfTotal(acceptedOffers.length, acceptedOfferCount)
                 : undefined
             }
           >

@@ -11,6 +11,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import {
+  AdminPermission,
   type BusinessRegistrationType,
   CreditTransactionType,
   NumberedEntityType,
@@ -57,6 +58,7 @@ import {
   writeBusinessRegistration,
 } from '../business-registration/business-registration.writer';
 import { isStaff } from '../auth/admin-permissions';
+import { mayEmbed } from '../auth/embedded-permissions';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import {
@@ -423,7 +425,16 @@ export class ProvidersService implements OnModuleInit {
     await this.notify(() => this.mail.sendProviderApplicationReceived(providerId), providerId);
   }
 
-  async listProviders(filters: ProviderListFilters) {
+  /**
+   * The operator's provider list (PROVIDERS_READ).
+   *
+   * The profile columns are this route's own. The per-row figures are not: the
+   * balance is the ledger's (FINANCE_LEDGER_READ), the offer counts are
+   * OFFERS_READ's and the purchase count PACKAGE_PURCHASES_READ's. Each one is
+   * computed and carried only for a caller holding its permission — absent,
+   * not zero, for anyone else (see `mayEmbed`).
+   */
+  async listProviders(filters: ProviderListFilters, viewer: AuthUser | null = null) {
     const status = normalizeOptionalStatus(filters.status);
     const city = normalizeNullableString(filters.city);
     const categoryId = normalizeNullableString(filters.categoryId);
@@ -464,14 +475,23 @@ export class ProvidersService implements OnModuleInit {
     }
 
     const providerIds = providers.map((provider) => provider.id);
-    const metrics = await this.getProviderListMetrics(providerIds);
+    const scope = providerEmbedScope(viewer);
+    const metrics = await this.getProviderListMetrics(providerIds, scope);
 
     return providers.map((provider) => ({
       ...toProviderListRecord(provider),
-      creditBalance: metrics.creditBalance.get(provider.id) ?? 0,
-      activeOffersCount: metrics.activeOffers.get(provider.id) ?? 0,
-      totalOffersCount: metrics.totalOffers.get(provider.id) ?? 0,
-      packagePurchasesCount: metrics.packagePurchases.get(provider.id) ?? 0,
+      ...(metrics.creditBalance
+        ? { creditBalance: metrics.creditBalance.get(provider.id) ?? 0 }
+        : {}),
+      ...(metrics.activeOffers && metrics.totalOffers
+        ? {
+            activeOffersCount: metrics.activeOffers.get(provider.id) ?? 0,
+            totalOffersCount: metrics.totalOffers.get(provider.id) ?? 0,
+          }
+        : {}),
+      ...(metrics.packagePurchases
+        ? { packagePurchasesCount: metrics.packagePurchases.get(provider.id) ?? 0 }
+        : {}),
     }));
   }
 
@@ -528,19 +548,40 @@ export class ProvidersService implements OnModuleInit {
     return { ...toProviderRecord(provider), visibility };
   }
 
-  async getAdminProviderDetail(id: string) {
+  /**
+   * The operator's provider page (PROVIDERS_READ_DETAIL).
+   *
+   * The profile, its claim state and the masked registration are this route's.
+   * The balance, the offers and the package purchases are three other domains,
+   * and each block is read and carried only for a caller holding that domain's
+   * read permission: FINANCE_LEDGER_READ, OFFERS_READ, PACKAGE_PURCHASES_READ —
+   * the same permissions that open `/admin/providers/:id/credits`, `/offers`
+   * and `/package-purchases`. A block the caller may not read is absent from
+   * the body, never `0` or `[]` (see `mayEmbed`). SUPER_ADMIN reads them all.
+   */
+  async getAdminProviderDetail(id: string, viewer: AuthUser | null = null) {
     const provider = await this.getProvider(id);
+    const scope = providerEmbedScope(viewer);
 
-    const [
-      creditBalance,
-      activeOffersCount,
-      totalOffersCount,
-      packagePurchasesCount,
-      recentOffers,
-      recentPackagePurchases,
+    const [credit, offers, packagePurchases, claim] = await Promise.all([
+      scope.credit ? this.getProviderCreditBalance(id) : Promise.resolve(null),
+      scope.offers ? this.getAdminProviderOffers(id) : Promise.resolve(null),
+      scope.packagePurchases ? this.getAdminProviderPackagePurchases(id) : Promise.resolve(null),
+      this.providerClaim.getClaimSummary(id),
+    ]);
+
+    return {
+      ...toProviderRecord(provider),
+      ...(credit !== null ? { creditBalance: credit } : {}),
+      ...(offers ?? {}),
+      ...(packagePurchases ?? {}),
       claim,
-    ] = await Promise.all([
-      this.getProviderCreditBalance(id),
+      claimEnabled: isProviderClaimEnabled(),
+    };
+  }
+
+  private async getAdminProviderOffers(id: string) {
+    const [activeOffersCount, totalOffersCount, recentOffers] = await Promise.all([
       this.prisma.offer.count({
         where: {
           providerId: id,
@@ -553,7 +594,6 @@ export class ProvidersService implements OnModuleInit {
         },
       }),
       this.prisma.offer.count({ where: { providerId: id } }),
-      this.prisma.packagePurchase.count({ where: { providerId: id } }),
       this.prisma.offer.findMany({
         where: { providerId: id },
         orderBy: { submittedAt: 'desc' },
@@ -574,6 +614,14 @@ export class ProvidersService implements OnModuleInit {
           },
         },
       }),
+    ]);
+
+    return { activeOffersCount, totalOffersCount, recentOffers };
+  }
+
+  private async getAdminProviderPackagePurchases(id: string) {
+    const [packagePurchasesCount, recentPackagePurchases] = await Promise.all([
+      this.prisma.packagePurchase.count({ where: { providerId: id } }),
       this.prisma.packagePurchase.findMany({
         where: { providerId: id },
         orderBy: { createdAt: 'desc' },
@@ -593,20 +641,9 @@ export class ProvidersService implements OnModuleInit {
           refundedAt: true,
         },
       }),
-      this.providerClaim.getClaimSummary(id),
     ]);
 
-    return {
-      ...toProviderRecord(provider),
-      creditBalance,
-      activeOffersCount,
-      totalOffersCount,
-      packagePurchasesCount,
-      recentOffers,
-      recentPackagePurchases,
-      claim,
-      claimEnabled: isProviderClaimEnabled(),
-    };
+    return { packagePurchasesCount, recentPackagePurchases };
   }
 
   /**
@@ -753,53 +790,66 @@ export class ProvidersService implements OnModuleInit {
     return this.providerClaim.resendForProvider(providerId, actor.id, meta);
   }
 
-  private async getProviderListMetrics(providerIds: string[]) {
+  /**
+   * The list's per-row figures, each read only when the caller may carry it.
+   * A `null` map means "not this caller's to see", and the row leaves the
+   * field out.
+   */
+  private async getProviderListMetrics(providerIds: string[], scope: ProviderEmbedScope) {
     const [latestTransactions, activeOffersGroups, totalOffersGroups, packagePurchasesGroups] =
       await Promise.all([
-        this.prisma.providerCreditTransaction.findMany({
-          where: { providerId: { in: providerIds } },
-          orderBy: [{ providerId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
-          distinct: ['providerId'],
-          select: { providerId: true, balanceAfter: true },
-        }),
-        this.prisma.offer.groupBy({
-          by: ['providerId'],
-          where: {
-            providerId: { in: providerIds },
-            status: {
-              in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
-            },
-            request: {
-              offers: { none: { status: OfferStatus.ACCEPTED } },
-            },
-          },
-          _count: { _all: true },
-        }),
-        this.prisma.offer.groupBy({
-          by: ['providerId'],
-          where: { providerId: { in: providerIds } },
-          _count: { _all: true },
-        }),
-        this.prisma.packagePurchase.groupBy({
-          by: ['providerId'],
-          where: { providerId: { in: providerIds } },
-          _count: { _all: true },
-        }),
+        scope.credit
+          ? this.prisma.providerCreditTransaction.findMany({
+              where: { providerId: { in: providerIds } },
+              orderBy: [{ providerId: 'asc' }, { createdAt: 'desc' }, { id: 'desc' }],
+              distinct: ['providerId'],
+              select: { providerId: true, balanceAfter: true },
+            })
+          : null,
+        scope.offers
+          ? this.prisma.offer.groupBy({
+              by: ['providerId'],
+              where: {
+                providerId: { in: providerIds },
+                status: {
+                  in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
+                },
+                request: {
+                  offers: { none: { status: OfferStatus.ACCEPTED } },
+                },
+              },
+              _count: { _all: true },
+            })
+          : null,
+        scope.offers
+          ? this.prisma.offer.groupBy({
+              by: ['providerId'],
+              where: { providerId: { in: providerIds } },
+              _count: { _all: true },
+            })
+          : null,
+        scope.packagePurchases
+          ? this.prisma.packagePurchase.groupBy({
+              by: ['providerId'],
+              where: { providerId: { in: providerIds } },
+              _count: { _all: true },
+            })
+          : null,
       ]);
 
     return {
-      creditBalance: new Map(
-        latestTransactions.map((row) => [row.providerId, row.balanceAfter]),
-      ),
-      activeOffers: new Map(
-        activeOffersGroups.map((row) => [row.providerId, row._count._all]),
-      ),
-      totalOffers: new Map(
-        totalOffersGroups.map((row) => [row.providerId, row._count._all]),
-      ),
-      packagePurchases: new Map(
-        packagePurchasesGroups.map((row) => [row.providerId, row._count._all]),
-      ),
+      creditBalance: latestTransactions
+        ? new Map(latestTransactions.map((row) => [row.providerId, row.balanceAfter]))
+        : null,
+      activeOffers: activeOffersGroups
+        ? new Map(activeOffersGroups.map((row) => [row.providerId, row._count._all]))
+        : null,
+      totalOffers: totalOffersGroups
+        ? new Map(totalOffersGroups.map((row) => [row.providerId, row._count._all]))
+        : null,
+      packagePurchases: packagePurchasesGroups
+        ? new Map(packagePurchasesGroups.map((row) => [row.providerId, row._count._all]))
+        : null,
     };
   }
 
@@ -2114,6 +2164,21 @@ function withVisibleServiceCategories<
   };
 }
 
+/**
+ * Which other domains an operator's provider response may carry
+ * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001): each flag is the read
+ * permission of the route that owns that data on its own.
+ */
+type ProviderEmbedScope = { credit: boolean; offers: boolean; packagePurchases: boolean };
+
+function providerEmbedScope(viewer: AuthUser | null): ProviderEmbedScope {
+  return {
+    credit: mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ),
+    offers: mayEmbed(viewer, AdminPermission.OFFERS_READ),
+    packagePurchases: mayEmbed(viewer, AdminPermission.PACKAGE_PURCHASES_READ),
+  };
+}
+
 export type ProviderVisibility = 'public' | 'owner' | 'admin';
 
 function resolveProviderVisibility(
@@ -2134,7 +2199,11 @@ function resolveProviderVisibility(
    * which is the drift the single permission source exists to prevent.
    */
   if (isStaff(user)) {
-    return 'admin';
+    // The operator's projection is the provider list's (PROVIDERS_READ): a
+    // staff account without it — a support or finance role — reads this
+    // public route as the public does, not as the provider screens would
+    // show it (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
+    return mayEmbed(user, AdminPermission.PROVIDERS_READ) ? 'admin' : 'public';
   }
 
   if (user.role === UserRole.PROVIDER && provider.userId && provider.userId === user.id) {

@@ -160,7 +160,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
 
   // What the status endpoint will carry out for this session (see the file
   // comment). The permission is the route's; the rest is the API's own rule.
-  const apiLetsSessionDecide = isSuperAdmin || offer.request.customer === null;
+  const apiLetsSessionDecide = isSuperAdmin || offer.request.customerId === null;
   const offerIsClosed = CLOSED_OFFER_STATUSES.has(offer.status);
   const canOfferStatusActions =
     canUpdateStatus && apiLetsSessionDecide && !offerIsClosed && !DECIDED_OFFER_STATUSES.has(offer.status);
@@ -222,8 +222,9 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
         title={`${price} · ${offer.provider.businessName}`}
         subtitle={
           <>
-            {requestRef} · {offer.request.category.name} · {offer.request.district} · müşteri:{' '}
-            {customerName || '-'}
+            {requestRef} · {offer.request.category.name} · {offer.request.district}
+            {/* The owner's name is the request's (REQUESTS_READ); absent, it is not shown as "-". */}
+            {customerName !== undefined ? <> · müşteri: {customerName || '-'}</> : null}
           </>
         }
         actions={
@@ -326,23 +327,29 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
               <KeyValueList
                 items={[
                   { label: 'İşletme', value: offer.provider.businessName },
-                  { label: 'Yetkili', value: offer.provider.contactName },
-                  {
-                    label: 'Telefon',
-                    value: offer.provider.phone ? (
-                      <a className="cell-link" href={`tel:${offer.provider.phone}`}>
-                        {offer.provider.phone}
-                      </a>
-                    ) : null,
-                  },
-                  {
-                    label: 'E-posta',
-                    value: offer.provider.email ? (
-                      <a className="cell-link" href={`mailto:${offer.provider.email}`}>
-                        {offer.provider.email}
-                      </a>
-                    ) : null,
-                  },
+                  // The provider's contact is the provider list's (PROVIDERS_READ):
+                  // the rows exist only where the API sent it.
+                  ...(offer.provider.contactName !== undefined
+                    ? [
+                        { label: 'Yetkili', value: offer.provider.contactName },
+                        {
+                          label: 'Telefon',
+                          value: offer.provider.phone ? (
+                            <a className="cell-link" href={`tel:${offer.provider.phone}`}>
+                              {offer.provider.phone}
+                            </a>
+                          ) : null,
+                        },
+                        {
+                          label: 'E-posta',
+                          value: offer.provider.email ? (
+                            <a className="cell-link" href={`mailto:${offer.provider.email}`}>
+                              {offer.provider.email}
+                            </a>
+                          ) : null,
+                        },
+                      ]
+                    : []),
                   { label: 'Konum', value: `${offer.provider.city}/${offer.provider.district}` },
                   {
                     label: 'Durum',
@@ -398,24 +405,30 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                       <span className={statusBadgeClass(offer.request.status)}>{statusLabel(offer.request.status)}</span>
                     ),
                   },
-                  { label: 'Kalite', value: `${offer.request.qualityScore}/100` },
-                  { label: 'Müşteri', value: customerName || null },
-                  {
-                    label: 'Telefon',
-                    value: offer.request.customerPhone ? (
-                      <a className="cell-link" href={`tel:${offer.request.customerPhone}`}>
-                        {offer.request.customerPhone}
-                      </a>
-                    ) : null,
-                  },
-                  {
-                    label: 'E-posta',
-                    value: offer.request.customerEmail ? (
-                      <a className="cell-link" href={`mailto:${offer.request.customerEmail}`}>
-                        {offer.request.customerEmail}
-                      </a>
-                    ) : null,
-                  },
+                  // The request's detail and its owner's contact snapshot are
+                  // REQUESTS_READ's; without it the API leaves them out.
+                  ...(offer.request.customerName !== undefined
+                    ? [
+                        { label: 'Kalite', value: `${offer.request.qualityScore}/100` },
+                        { label: 'Müşteri', value: customerName || null },
+                        {
+                          label: 'Telefon',
+                          value: offer.request.customerPhone ? (
+                            <a className="cell-link" href={`tel:${offer.request.customerPhone}`}>
+                              {offer.request.customerPhone}
+                            </a>
+                          ) : null,
+                        },
+                        {
+                          label: 'E-posta',
+                          value: offer.request.customerEmail ? (
+                            <a className="cell-link" href={`mailto:${offer.request.customerEmail}`}>
+                              {offer.request.customerEmail}
+                            </a>
+                          ) : null,
+                        },
+                      ]
+                    : []),
                   ...(offer.request.customer
                     ? [
                         {
