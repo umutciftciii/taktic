@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import {
   AdminPermission,
   CreditTransactionType,
@@ -8,6 +8,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
+import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import {
   FinanceAnalyticsDto,
@@ -118,8 +119,15 @@ function resolveSourceNumber(
 export class FinanceService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  /** The recent rows name their operator; the operator's e-mail per `mayEmbedStaffEmail`. */
+  /**
+   * The finance overview (FINANCE_READ): revenue, purchase counts and credit
+   * totals — aggregates over every provider. The latest ledger rows are the
+   * ledger's (FINANCE_LEDGER_READ) and `recentTransactions` is absent without
+   * it, as on `/finance/credit-ledger` (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+   * The rows name their operator; the operator's e-mail per `mayEmbedStaffEmail`.
+   */
   async summary(viewer: AuthUser | null = null) {
+    const ledgerRows = mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ);
     const now = new Date();
     const todayStart = startOfIstanbulDay(now);
     const monthStart = startOfIstanbulMonth(now);
@@ -161,18 +169,20 @@ export class FinanceService {
         _sum: { amount: true },
       }),
       this.computeActiveProviderCreditBalance(),
-      this.prisma.providerCreditTransaction
-        .findMany({
-          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-          take: RECENT_TRANSACTIONS_LIMIT,
-          include: {
-            provider: {
-              select: { id: true, businessName: true },
-            },
-            createdBy: staffActorSelect(viewer),
-          },
-        })
-        .then((rows) => this.attachSourceNumbers(rows)),
+      ledgerRows
+        ? this.prisma.providerCreditTransaction
+            .findMany({
+              orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+              take: RECENT_TRANSACTIONS_LIMIT,
+              include: {
+                provider: {
+                  select: { id: true, businessName: true },
+                },
+                createdBy: staffActorSelect(viewer),
+              },
+            })
+            .then((rows) => this.attachSourceNumbers(rows))
+        : Promise.resolve(null),
       this.prisma.packagePurchase.findMany({
         orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
         take: RECENT_PURCHASES_LIMIT,
@@ -219,7 +229,7 @@ export class FinanceService {
         totalCreditsAdjusted: creditTotals[CreditTransactionType.ADJUSTMENT],
         totalActiveProviderCreditBalance: activeBalance,
       },
-      recentTransactions,
+      ...(recentTransactions ? { recentTransactions } : {}),
       recentPurchases,
     };
   }
@@ -424,6 +434,14 @@ export class FinanceService {
     const sortBy: ProviderFinanceSortField = filters.sortBy ?? 'lastTransactionAt';
     const sortDir: 'asc' | 'desc' = filters.sortDir ?? 'desc';
     const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
+    // One provider's balance is the ledger's (FINANCE_LEDGER_READ), as on
+    // `/admin/providers/:id/credits`: absent without it, and not a sort key
+    // either — the row order would answer what the missing column does not
+    // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+    const providerBalance = mayEmbed(viewer, AdminPermission.FINANCE_LEDGER_READ);
+    if (sortBy === 'currentBalance' && !providerBalance) {
+      throw new ForbiddenException({ code: INSUFFICIENT_PERMISSION, message: 'Insufficient permission' });
+    }
 
     const providerWhere = buildProviderFinanceWhere(filters, providerContact);
 
@@ -464,14 +482,14 @@ export class FinanceService {
               _max: { createdAt: true },
               where: { providerId: { in: providerIds } },
             }),
-            this.prisma.$queryRaw<
-              { providerId: string; balanceAfter: number | bigint }[]
-            >(Prisma.sql`
+            providerBalance
+              ? this.prisma.$queryRaw<{ providerId: string; balanceAfter: number | bigint }[]>(Prisma.sql`
               SELECT DISTINCT ON ("providerId") "providerId", "balanceAfter"
               FROM "ProviderCreditTransaction"
               WHERE "providerId" IN (${Prisma.join(providerIds)})
               ORDER BY "providerId", "createdAt" DESC, "id" DESC
-            `),
+            `)
+              : Promise.resolve([] as { providerId: string; balanceAfter: number | bigint }[]),
           ]);
 
     const creditSumByProvider = new Map<string, Record<CreditTransactionType, number>>();
@@ -527,7 +545,7 @@ export class FinanceService {
           ...(providerContact ? { phone: provider.phone, email: provider.email } : {}),
           status: provider.status,
         },
-        currentBalance: balanceByProvider.get(provider.id) ?? 0,
+        ...(providerBalance ? { currentBalance: balanceByProvider.get(provider.id) ?? 0 } : {}),
         totalPaidAmount: paid?.totalPaid ?? 0,
         totalCreditsPurchased,
         totalCreditsSpent,
@@ -732,7 +750,8 @@ type ProviderFinanceItem = {
     email?: string | null;
     status: string;
   };
-  currentBalance: number;
+  /** FINANCE_LEDGER_READ's: absent for a caller without it. */
+  currentBalance?: number;
   totalPaidAmount: number;
   totalCreditsPurchased: number;
   totalCreditsSpent: number;
@@ -767,7 +786,7 @@ function compareProviderFinance(
     case 'businessName':
       return a.provider.businessName.localeCompare(b.provider.businessName, 'tr');
     case 'currentBalance':
-      return a.currentBalance - b.currentBalance;
+      return (a.currentBalance ?? 0) - (b.currentBalance ?? 0);
     case 'totalPaidAmount':
       return a.totalPaidAmount - b.totalPaidAmount;
     case 'totalCreditsPurchased':

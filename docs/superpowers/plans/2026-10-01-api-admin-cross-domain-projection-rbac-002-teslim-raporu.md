@@ -1,7 +1,9 @@
 # API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002 — teslim raporu
 
 - **Taban:** `main@309dbcdc`, DB 83 migration. **Migration yok**; Prisma şeması, `.env`, compose değişmedi. Backlog değişmedi.
-- **Kapsam:** RBAC-001'in açık bıraktığı üç least-privilege açığı. `FINANCE_READ` ↔ `FINANCE_LEDGER_READ` iç ayrımına dokunulmadı (ayrı ürün kararı).
+- **Kapsam:** RBAC-001'in açık bıraktığı üç least-privilege açığı + iki ürün kararı (ikinci tur, aynı PR):
+  1. **Finans iç ayrımı:** `FINANCE_READ` = genel/aggregate finans görünümü; sağlayıcı bazlı bakiye ve ledger satırları = `FINANCE_LEDGER_READ`. İkisi birlikteyken görünüm öncekiyle aynı.
+  2. **Sağlayıcı panelinde inceleyen personel:** sağlayıcıya personelin adı/e-postası/kimliği gitmez; karar, not, tarih kalır. Admin tarafı mevcut izin modeliyle aynı.
 - **Mekanizma:** yeni izin mekanizması yok. Hepsi `apps/api/src/modules/auth/embedded-permissions.ts` → `mayEmbed()` üzerinden. Personel e-postası için iki ince yardımcı eklendi: `mayEmbedStaffEmail(user)` = `mayEmbed(user, ADMIN_USERS_READ)` ve `staffActorSelect(user)` = `{ select: { id, name, email: mayEmbedStaffEmail(user) } }`.
 - **Kural (RBAC-001 ile aynı):** izin yoksa anahtar yanıtta **hiç yok** (`null`/`0`/maske değil). SUPER_ADMIN `hasPermission` ile her izni taşır → tam görünüm. Aktörün `id`/`name`'i (audit) her zaman gider; audit satırları değişmedi.
 
@@ -18,7 +20,9 @@
 | `GET /providers/:id/credits(/transactions)` (sahip sağlayıcı / SUPER_ADMIN) | `createdBy` | SUPER_ADMIN | sağlayıcıya aktör hiç gitmez (önceki gibi) |
 | `GET /admin/promotion-eligibility/holds(/:eventId)`, `POST …/decision` (`PROMOTION_ELIGIBILITY_REVIEW`) | `review.decidedBy.email` | `ADMIN_USERS_READ` | `email` yok |
 | `GET /admin/showcase/versions(/:id)`, `GET /admin/showcase/cards(/:id)` + approve/reject/suspend/unsuspend yanıtları | `review.reviewedBy.email` (sürüm, kartın canlı/taslak/reddedilen sürümü, kart geçmişi) | `ADMIN_USERS_READ` | `email` yok |
-| `GET /providers/:id/showcase/cards(/:cardId)` ve sağlayıcı kart yazma yanıtları | `review.reviewedBy.email` | — | **yeni açık kapatıldı:** personel e-postası sağlayıcı paneline gidiyordu; artık hiç gitmez |
+| `GET /providers/:id/showcase/cards(/:cardId)` ve sağlayıcı kart yazma yanıtları | `review.reviewedBy` (id, ad, e-posta) | — | **sağlayıcıya hiç gitmez** (ürün kararı); `review {id, decision, note, createdAt}` kalır |
+| `GET /finance/summary` (`FINANCE_READ`) | `recentTransactions` | `FINANCE_LEDGER_READ` | anahtar yok, sorgu yapılmaz; `revenue`, `packagePurchases`, `credits` (toplam aktif bakiye dahil), `recentPurchases` kalır |
+| `GET /finance/providers` (`FINANCE_READ`) | `items[].currentBalance` | `FINANCE_LEDGER_READ` | anahtar yok, bakiye sorgusu yapılmaz; `sortBy=currentBalance` **403 `INSUFFICIENT_PERMISSION`** (sıralama eksik sütunu cevaplardı) |
 | `GET /service-requests/:id` (`REQUESTS_READ`) | `cancellation.actor.email` | personel aktör → `ADMIN_USERS_READ`; müşteri aktör → `CUSTOMERS_READ` (RBAC-001 hesap bloğu kuralı) | `email` yok; `id/name/role` kalır |
 
 Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade `createdBy/reviewStartedBy/approvedBy/…` ve olay aktörleri, vitrin yerleşim iptal aktörü, şirket ayarları `updatedBy`. `admin-roles` üye listesi SUPER_ADMIN'e özel (`requireSuperAdmin`), `users` modülü `ADMIN_USERS_READ`'in kendisi.
@@ -36,7 +40,9 @@ Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade 
 - Kampanya detayı redemption tablosu: "kalan N" yalnız alan geldiyse; geri alma diyaloğu bakiye yoksa rakamsız genel cümleyi kullanır (mevcut `null` dalı).
 - İade detayı: `supportTicket` gelmezse "Bağlı — içeriği destek okuma yetkisiyle görünür" (`package-refund-ticket-hidden`); geldiyse önceki gibi konu + `/support/:id` bağlantısı. Kullanılmayan `can` kaldırıldı.
 - Defter/aktör hücreleri (`LedgerActorCell`, kredi paneli, müşteri notu, uygunluk, vitrin inceleme, talep iptali) zaten `name ?? email ?? id` kalıbında; e-posta yoksa ad (yoksa id) gösterilir. Vitrin inceleme yedeğine `id` eklendi.
-- Web: `reviewedBy` tipinden `email` kaldırıldı (sağlayıcıya gelmiyor; web bunu hiç çizmiyordu).
+- Web: `ShowcaseCardReviewRecord.reviewedBy` tipten kaldırıldı (sağlayıcıya gelmiyor; web inceleyeni hiç çizmiyordu, bu yüzden "TakTick inceleme ekibi" metnine gerek olmadı, sahte aktör üretilmedi).
+- Finans özeti: "Son kredi hareketleri" kartı yalnız `recentTransactions` geldiyse çizilir; KPI'lar değişmedi.
+- İşletme bakiyeleri: "Bakiye" sütunu ve "Mevcut kredi" sıralama seçeneği yalnız `FINANCE_LEDGER_READ` ile; elle yazılmış `sortBy=currentBalance` izinsizde varsayılana düşer (403 ekranı yok).
 
 ## Test
 
@@ -48,5 +54,5 @@ Değişmeyenler (zaten e-postasız): kampanya `createdBy/actor/revokedBy`, iade 
 ## Yeni açıklar / notlar
 
 - **Kapatıldı (kapsam içi, beklenmedik):** vitrin projeksiyonu inceleyen personelin e-postasını sağlayıcı paneline de gönderiyordu.
-- **Not:** redemption `lot.status` (ör. tükendi) ve geri alınmış satırdaki `spentAtRevoke/revokedCredits` bakiye hakkında dolaylı bilgi verir. İkisi de kampanyanın kendi kaydı (durum/geri alma denetimi) sayıldı ve dokunulmadı; ürün kararı gerekirse ayrı iş.
-- **Not:** sağlayıcı paneli inceleyen personelin **adını** görmeye devam eder (bu iş yalnız e-postayı kapsar).
+- **Karar (değişmedi):** redemption `lot.status`, `spentAtRevoke`, `revokedCredits` kampanya yaşam döngüsü/audit verisi olarak kalır.
+- **Not:** `/finance/providers` satırlarındaki tür bazlı toplamlar (`totalCreditsPurchased/Spent/Refunded/AdminGranted/AdminDeducted/Adjusted`) `FINANCE_READ` ile kalır (karar yalnız `currentBalance`'ı kapsar); kampanya türleri bu toplamlarda yok, yine de bakiyeye yaklaşık bir türetim mümkündür. Gerekirse ayrı ürün kararı.

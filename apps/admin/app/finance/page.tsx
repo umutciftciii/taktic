@@ -796,68 +796,75 @@ export default async function AdminFinanceDashboardPage({
         </div>
       </SectionCard>
 
-      <SectionCard
-        title="Son kredi hareketleri"
-        subtitle={`En son ${recentTransactions.length} işlem`}
-        padded={false}
-        actions={
-          canOpenLedger ? (
-            <Link className="btn btn-link btn-sm" href="/finance/credit-ledger">
-              Tümünü gör
-            </Link>
-          ) : undefined
-        }
-      >
-        {recentTransactions.length === 0 ? (
-          <EmptyState
-            title="Henüz kredi hareketi yok"
-            description="Paket ödendiğinde, teklif gönderildiğinde veya manuel işlem yapıldığında burada görünür."
-          />
-        ) : (
-          <DataTable
-            caption="Son kredi hareketleri"
-            columns={RECENT_TRANSACTION_COLUMNS}
-            minWidth={960}
-            testId="finance-recent-transactions"
-          >
-            {recentTransactions.map((transaction) => {
-              const source = gateLedgerSource(
-                formatLedgerSource(
-                  transaction.referenceType,
-                  transaction.referenceId,
-                  transaction.sourceNumber,
-                ),
-                can,
-              );
-              return (
-                <tr key={transaction.id}>
-                  <td className="cell-nowrap">{formatDateTime(transaction.createdAt)}</td>
-                  <td className="cell-break">
-                    {canOpenLedger ? (
-                      <Link href={`/providers/${transaction.providerId}/credits`}>
-                        {transaction.provider.businessName}
-                      </Link>
-                    ) : (
-                      transaction.provider.businessName
-                    )}
-                  </td>
-                  <td>{creditTxnTypeLabel(transaction.type)}</td>
-                  <td className="is-num">
-                    <SignedCredits amount={transaction.amount} />
-                  </td>
-                  <td className="is-num">{formatCount(transaction.balanceAfter)}</td>
-                  <td>
-                    <LedgerReasonCell reason={transaction.reason} />
-                  </td>
-                  <td>
-                    <LedgerSourceCell source={source} />
-                  </td>
-                </tr>
-              );
-            })}
-          </DataTable>
-        )}
-      </SectionCard>
+      {/*
+        The latest ledger rows are the ledger's (FINANCE_LEDGER_READ): the API
+        sends them only with it, and the card is drawn only when they came
+        (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). The KPIs above are FINANCE_READ's.
+      */}
+      {recentTransactions ? (
+        <SectionCard
+          title="Son kredi hareketleri"
+          subtitle={`En son ${recentTransactions.length} işlem`}
+          padded={false}
+          actions={
+            canOpenLedger ? (
+              <Link className="btn btn-link btn-sm" href="/finance/credit-ledger">
+                Tümünü gör
+              </Link>
+            ) : undefined
+          }
+        >
+          {recentTransactions.length === 0 ? (
+            <EmptyState
+              title="Henüz kredi hareketi yok"
+              description="Paket ödendiğinde, teklif gönderildiğinde veya manuel işlem yapıldığında burada görünür."
+            />
+          ) : (
+            <DataTable
+              caption="Son kredi hareketleri"
+              columns={RECENT_TRANSACTION_COLUMNS}
+              minWidth={960}
+              testId="finance-recent-transactions"
+            >
+              {recentTransactions.map((transaction) => {
+                const source = gateLedgerSource(
+                  formatLedgerSource(
+                    transaction.referenceType,
+                    transaction.referenceId,
+                    transaction.sourceNumber,
+                  ),
+                  can,
+                );
+                return (
+                  <tr key={transaction.id}>
+                    <td className="cell-nowrap">{formatDateTime(transaction.createdAt)}</td>
+                    <td className="cell-break">
+                      {canOpenLedger ? (
+                        <Link href={`/providers/${transaction.providerId}/credits`}>
+                          {transaction.provider.businessName}
+                        </Link>
+                      ) : (
+                        transaction.provider.businessName
+                      )}
+                    </td>
+                    <td>{creditTxnTypeLabel(transaction.type)}</td>
+                    <td className="is-num">
+                      <SignedCredits amount={transaction.amount} />
+                    </td>
+                    <td className="is-num">{formatCount(transaction.balanceAfter)}</td>
+                    <td>
+                      <LedgerReasonCell reason={transaction.reason} />
+                    </td>
+                    <td>
+                      <LedgerSourceCell source={source} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </DataTable>
+          )}
+        </SectionCard>
+      ) : null}
 
       <SectionCard title="Hızlı bağlantılar" subtitle="Sık kullanılan finans ekranları.">
         <div className="inline-actions">

@@ -12,6 +12,7 @@ import {
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
+import { gateColumns } from '../../../lib/cross-domain-projection';
 import { buildHref, parsePage, type QueryParams } from '../../../lib/list-query';
 import { formatCount } from '../../../lib/pagination';
 import { formatSignedCount } from '../../../lib/finance-format';
@@ -83,8 +84,17 @@ type AdminProviderFinancePageProps = {
   searchParams: Promise<RawSearchParams>;
 };
 
-function normalizeSortBy(value: string | undefined): ProviderFinanceSortField {
-  if (value && (PROVIDER_FINANCE_SORT_FIELDS as readonly string[]).includes(value)) {
+/**
+ * A provider's balance is the ledger's (FINANCE_LEDGER_READ): without it the
+ * API leaves `currentBalance` out and refuses it as a sort key (403), so the
+ * screen neither offers nor sends it (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ */
+function sortFields(canReadBalance: boolean): ProviderFinanceSortField[] {
+  return PROVIDER_FINANCE_SORT_FIELDS.filter((field) => canReadBalance || field !== 'currentBalance');
+}
+
+function normalizeSortBy(value: string | undefined, allowed: readonly ProviderFinanceSortField[]): ProviderFinanceSortField {
+  if (value && (allowed as readonly string[]).includes(value)) {
     return value as ProviderFinanceSortField;
   }
   return DEFAULT_SORT_BY;
@@ -108,10 +118,12 @@ export default async function AdminProviderFinancePage({
   // all sit behind FINANCE_LEDGER_READ — a FINANCE_READ-only role sees the
   // balances without links that would land on /yetkisiz.
   const canOpenLedger = can('FINANCE_LEDGER_READ');
+  const allowedSorts = sortFields(canOpenLedger);
+  const columns = gateColumns(COLUMNS, { balance: canOpenLedger });
 
   const params = await searchParams;
   const q = (params.q ?? '').trim();
-  const sortBy = normalizeSortBy(params.sortBy);
+  const sortBy = normalizeSortBy(params.sortBy, allowedSorts);
   const sortDir = normalizeSortDir(params.sortDir);
   const page = parsePage(params.page);
 
@@ -179,7 +191,7 @@ export default async function AdminProviderFinancePage({
         </FilterField>
         <FilterField label="Sıralama" htmlFor="provider-finance-sort">
           <select id="provider-finance-sort" name="sortBy" defaultValue={sortBy}>
-            {PROVIDER_FINANCE_SORT_FIELDS.map((field) => (
+            {allowedSorts.map((field) => (
               <option key={field} value={field}>
                 {SORT_LABEL[field]}
               </option>
@@ -218,7 +230,7 @@ export default async function AdminProviderFinancePage({
             }
           />
         ) : (
-          <DataTable caption="İşletme bakiyeleri" columns={COLUMNS} minWidth={1320} testId="provider-finance-table">
+          <DataTable caption="İşletme bakiyeleri" columns={columns} minWidth={canOpenLedger ? 1320 : 1220} testId="provider-finance-table">
             {response.items.map((item) => (
               <ProviderFinanceRow key={item.provider.id} item={item} canOpenLedger={canOpenLedger} />
             ))}
@@ -243,8 +255,9 @@ export default async function AdminProviderFinancePage({
 
 function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem; canOpenLedger: boolean }) {
   const { provider } = item;
+  const balance = item.currentBalance;
   const balanceClass =
-    item.currentBalance > 0 ? 'badge badge-good' : item.currentBalance < 0 ? 'badge badge-bad' : 'badge badge-muted';
+    balance === undefined ? '' : balance > 0 ? 'badge badge-good' : balance < 0 ? 'badge badge-bad' : 'badge badge-muted';
   const manualNetClass =
     item.manualNetCredits > 0
       ? 'badge badge-good'
@@ -281,11 +294,14 @@ function ProviderFinanceRow({ item, canOpenLedger }: { item: ProviderFinanceItem
       <td>
         <span className={statusBadgeClass(provider.status)}>{statusLabel(provider.status)}</span>
       </td>
-      <td className="is-num">
-        <span className={balanceClass} data-testid="provider-finance-balance">
-          {formatCount(item.currentBalance)}
-        </span>
-      </td>
+      {/* Drawn only when the API sent it (FINANCE_LEDGER_READ), matching the gated column. */}
+      {balance !== undefined ? (
+        <td className="is-num">
+          <span className={balanceClass} data-testid="provider-finance-balance">
+            {formatCount(balance)}
+          </span>
+        </td>
+      ) : null}
       <td className="is-num cell-nowrap">{formatPrice(item.totalPaidAmount)}</td>
       <td className="is-num">{formatCount(item.totalCreditsPurchased)}</td>
       <td className="is-num">{formatCount(item.totalCreditsSpent)}</td>

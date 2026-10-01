@@ -425,4 +425,49 @@ test.describe('RBAC-002 — lot balance, refund ticket, staff e-mail', () => {
       await Promise.all([reader.close(), directory.close(), admin.close()]);
     }
   });
+
+  test('FINANCE_READ is the aggregate view: no provider balance, no latest ledger rows; with the ledger the screens are whole', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(2, { namePrefix: 'E2E Projeksiyon Finans' });
+    const provider = await createProvider({ categoryId: category.id, location, credits: 23 });
+
+    const reader = await openAs(browser, ['FINANCE_READ']);
+    const ledger = await openAs(browser, ['FINANCE_READ', 'FINANCE_LEDGER_READ']);
+    const admin = await openAs(browser, 'super');
+    try {
+      const search = `/finance/providers?q=${encodeURIComponent(provider.businessName)}`;
+
+      await reader.gotoAdmin('/finance');
+      await expectOpen(reader.page);
+      await expect(reader.page.getByTestId('finance-kpi-revenue')).toBeVisible();
+      await expect(reader.page.getByRole('heading', { name: 'Son kredi hareketleri' })).toHaveCount(0);
+      await expect(reader.page.getByTestId('finance-recent-transactions')).toHaveCount(0);
+
+      await reader.gotoAdmin(search);
+      await expectOpen(reader.page);
+      await expect(reader.page.getByTestId('provider-finance-row')).toHaveCount(1);
+      await expect(header(reader.page, 'Bakiye')).toHaveCount(0);
+      await expect(reader.page.getByTestId('provider-finance-balance')).toHaveCount(0);
+      await expect(reader.page.locator('#provider-finance-sort option[value="currentBalance"]')).toHaveCount(0);
+      // A hand-written balance sort falls back to the default instead of a 403 screen.
+      await reader.gotoAdmin(`${search}&sortBy=currentBalance`);
+      await expectOpen(reader.page);
+      await expect(reader.page.getByTestId('provider-finance-row')).toHaveCount(1);
+
+      for (const actor of [ledger, admin]) {
+        await actor.gotoAdmin('/finance');
+        await expectOpen(actor.page);
+        await expect(actor.page.getByRole('heading', { name: 'Son kredi hareketleri' })).toBeVisible();
+
+        await actor.gotoAdmin(`${search}&sortBy=currentBalance`);
+        await expectOpen(actor.page);
+        await expect(header(actor.page, 'Bakiye')).toBeVisible();
+        await expect(actor.page.getByTestId('provider-finance-balance')).toHaveText('23');
+      }
+    } finally {
+      await Promise.all([reader.close(), ledger.close(), admin.close()]);
+    }
+  });
 });

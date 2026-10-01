@@ -301,17 +301,21 @@ describe('staff actor e-mail — ADMIN_USERS_READ', () => {
     }
 
     it.each([
-      ['/finance/credit-ledger', AdminPermission.FINANCE_LEDGER_READ, (body: any) => body.items[0].createdBy],
-      ['/finance/summary', AdminPermission.FINANCE_READ, (body: any) => body.recentTransactions[0].createdBy],
-    ] as const)('%s leaves the operator e-mail out without ADMIN_USERS_READ and adds it with', async (path, permission, pick) => {
+      ['/finance/credit-ledger', [AdminPermission.FINANCE_LEDGER_READ], (body: any) => body.items[0].createdBy],
+      [
+        '/finance/summary',
+        [AdminPermission.FINANCE_READ, AdminPermission.FINANCE_LEDGER_READ],
+        (body: any) => body.recentTransactions[0].createdBy,
+      ],
+    ] as const)('%s leaves the operator e-mail out without ADMIN_USERS_READ and adds it with', async (path, permissions, pick) => {
       const { actor, email } = await ledgerWorld();
 
-      const narrow = await get(path, await sessionWith([permission]));
+      const narrow = await get(path, await sessionWith([...permissions]));
       expect(narrow.status).toBe(200);
       expectActor(pick(narrow.body), actor, email, false);
       expect(JSON.stringify(narrow.body)).not.toContain(email);
 
-      const wide = await get(path, await sessionWith([permission, AdminPermission.ADMIN_USERS_READ]));
+      const wide = await get(path, await sessionWith([...permissions, AdminPermission.ADMIN_USERS_READ]));
       expectActor(pick(wide.body), actor, email, true);
 
       const root = await get(path, await superAdminSession());
@@ -449,18 +453,31 @@ describe('staff actor e-mail — ADMIN_USERS_READ', () => {
       expectActor(one.body.review.reviewedBy, actor, email, true);
     });
 
-    it('never carries the reviewer’s e-mail to the provider’s own panel', async () => {
+    it('never carries the reviewer to the provider’s own panel — no name, no e-mail, no id — but keeps the verdict', async () => {
       const { owner, provider, card, actor, email } = await reviewedCard();
       const cookie = await loginAs(ctx.prisma, owner.id);
 
       const list = await get(`/providers/${provider.id}/showcase/cards`, cookie);
-      expect(list.status).toBe(200);
-      expect(JSON.stringify(list.body)).not.toContain(email);
-      expectActor(list.body[0].liveVersion.review.reviewedBy, actor, email, false);
-
       const one = await get(`/providers/${provider.id}/showcase/cards/${card.id}`, cookie);
+      for (const response of [list, one]) {
+        expect(response.status).toBe(200);
+        const json = JSON.stringify(response.body);
+        expect(json).not.toContain(email);
+        expect(json).not.toContain(actor.name!);
+        expect(json).not.toContain(actor.id);
+        expect(json).not.toContain('reviewedBy');
+      }
+      const review = one.body.liveVersion.review;
+      expect(Object.keys(review).sort()).toEqual(['createdAt', 'decision', 'id', 'note']);
+      expect(review).toMatchObject({ decision: 'APPROVED', note: null });
+      expect(typeof review.createdAt).toBe('string');
+    });
+
+    it('keeps the reviewer’s id and name for an operator holding only the showcase read', async () => {
+      const { version, actor } = await reviewedCard();
+      const one = await get(`/admin/showcase/versions/${version.id}`, await sessionWith([AdminPermission.SHOWCASE_REVIEW_READ]));
       expect(one.status).toBe(200);
-      expect(JSON.stringify(one.body)).not.toContain(email);
+      expect(one.body.review.reviewedBy).toEqual({ id: actor.id, name: actor.name });
     });
   });
 
@@ -524,5 +541,72 @@ describe('staff actor e-mail — ADMIN_USERS_READ', () => {
         expectActor(response.body.cancellation.actor, actor, email, true);
       }
     });
+  });
+});
+
+// ───────────────────────── 4. finance: aggregate vs ledger ─────────────────────────
+
+describe('finance — FINANCE_READ is the aggregate view, FINANCE_LEDGER_READ the per-provider ledger', () => {
+  async function financeWorld() {
+    const owner = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createProviderProfile(ctx.prisma, { userId: owner.id });
+    await ctx.prisma.providerCreditTransaction.create({
+      data: { providerId: provider.id, type: CreditTransactionType.ADMIN_GRANT, amount: 29, balanceAfter: 29, reason: 'Kurulum' },
+    });
+    return { provider };
+  }
+
+  const AGGREGATE_KEYS = ['revenue', 'packagePurchases', 'credits', 'recentPurchases'];
+
+  it('FINANCE_READ alone: summary KPIs without recentTransactions, provider rows without currentBalance', async () => {
+    const { provider } = await financeWorld();
+    const cookie = await sessionWith([AdminPermission.FINANCE_READ]);
+
+    const summary = await get('/finance/summary', cookie);
+    expect(summary.status).toBe(200);
+    for (const key of AGGREGATE_KEYS) expect(summary.body).toHaveProperty(key);
+    expect(summary.body).not.toHaveProperty('recentTransactions');
+    expect(summary.body.credits.totalActiveProviderCreditBalance).toBe(29);
+    expect(summary.body.credits.totalCreditsAdminGranted).toBe(29);
+
+    const providers = await get('/finance/providers', cookie);
+    expect(providers.status).toBe(200);
+    const row = providers.body.items.find((item: { provider: { id: string } }) => item.provider.id === provider.id);
+    expect(row).not.toHaveProperty('currentBalance');
+    expect(JSON.stringify(providers.body)).not.toContain('currentBalance');
+    expect(row.totalCreditsAdminGranted).toBe(29);
+  });
+
+  it('FINANCE_READ alone may not sort the provider rows by balance (403) — the order would answer for the missing column', async () => {
+    await financeWorld();
+    const cookie = await sessionWith([AdminPermission.FINANCE_READ]);
+    const refused = await get('/finance/providers?sortBy=currentBalance', cookie);
+    expect(refused.status).toBe(403);
+    expect(refused.body.code).toBe('INSUFFICIENT_PERMISSION');
+    expect((await get('/finance/providers?sortBy=totalPaidAmount', cookie)).status).toBe(200);
+  });
+
+  it.each([
+    ['FINANCE_READ + FINANCE_LEDGER_READ', () => sessionWith([AdminPermission.FINANCE_READ, AdminPermission.FINANCE_LEDGER_READ])],
+    ['SUPER_ADMIN', () => superAdminSession()],
+  ])('%s: the full view, balance sort included', async (_label, session) => {
+    const { provider } = await financeWorld();
+    const cookie = await session();
+
+    const summary = await get('/finance/summary', cookie);
+    for (const key of AGGREGATE_KEYS) expect(summary.body).toHaveProperty(key);
+    expect(summary.body.recentTransactions).toHaveLength(1);
+    expect(summary.body.recentTransactions[0].amount).toBe(29);
+
+    const providers = await get('/finance/providers?sortBy=currentBalance', cookie);
+    expect(providers.status).toBe(200);
+    const row = providers.body.items.find((item: { provider: { id: string } }) => item.provider.id === provider.id);
+    expect(row.currentBalance).toBe(29);
+  });
+
+  it('FINANCE_LEDGER_READ alone still cannot open the FINANCE_READ routes', async () => {
+    const cookie = await sessionWith([AdminPermission.FINANCE_LEDGER_READ]);
+    expect((await get('/finance/summary', cookie)).status).toBe(403);
+    expect((await get('/finance/providers', cookie)).status).toBe(403);
   });
 });

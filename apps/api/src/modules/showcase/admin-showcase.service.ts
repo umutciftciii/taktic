@@ -571,5 +571,5 @@ export class AdminShowcaseService {
 
 /** An operator's projection: the reviewer's e-mail per `mayEmbedStaffEmail` (ADMIN_USERS_READ). */
 function operatorView(viewer: AuthUser | null): ShowcaseProjectionOptions {
-  return { reviewerEmail: mayEmbedStaffEmail(viewer) };
+  return { audience: 'OPERATOR', reviewerEmail: mayEmbedStaffEmail(viewer) };
 }

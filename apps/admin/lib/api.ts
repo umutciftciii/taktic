@@ -1724,7 +1724,8 @@ export type ProviderFinanceItem = {
     email?: string | null;
     status: ProviderStatus;
   };
-  currentBalance: number;
+  /** FINANCE_LEDGER_READ only; absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+  currentBalance?: number;
   totalPaidAmount: number;
   totalCreditsPurchased: number;
   totalCreditsSpent: number;
@@ -1805,7 +1806,8 @@ export type FinanceSummary = {
     totalCreditsAdjusted: number;
     totalActiveProviderCreditBalance: number;
   };
-  recentTransactions: FinanceSummaryRecentTransaction[];
+  /** The latest ledger rows: FINANCE_LEDGER_READ only; absent otherwise (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). */
+  recentTransactions?: FinanceSummaryRecentTransaction[];
   recentPurchases: FinanceSummaryRecentPurchase[];
 };
 

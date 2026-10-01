@@ -5,12 +5,11 @@ import { describeArea } from '../../common/provider-service-area-scope';
  * What a card, a version and an area look like on the way out — one shape, read
  * by the provider's panel and the operator's queue alike.
  *
- * The two audiences see the same card content on purpose. There is nothing on a
- * version an operator may read and its owner may not: the rejection note is
+ * The two audiences see the same card content on purpose: the rejection note is
  * written *for* the provider, and the review row records a decision the provider
- * is entitled to see. What differs between the two surfaces is which cards they
- * can address at all, and that is settled by the guards, not by hiding fields
- * here.
+ * is entitled to see. What differs is which cards they can address at all —
+ * settled by the guards — and one field: who on the staff decided, which is the
+ * operator's audit and never the provider's (see {@link ShowcaseProjectionOptions}).
  */
 
 export const showcaseAreaSelect = {
@@ -84,27 +83,38 @@ export function toShowcaseArea(area: AreaRow) {
 }
 
 /**
- * Whose eyes a projection is for. The review row names the operator who
- * decided it; the operator's e-mail is the staff directory's (ADMIN_USERS_READ,
- * `mayEmbedStaffEmail`) and travels only when the caller says so — never to a
- * provider, and to an operator only with that permission
- * (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002). The default is the narrow one.
+ * Whose eyes a projection is for (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-002).
+ *
+ * The review row records which operator decided. That is the platform's
+ * internal audit, not part of the verdict: the provider is told the decision,
+ * its note and when — never who on the staff made it, neither name nor
+ * address, so `reviewedBy` is absent from the provider's projection (its
+ * screen speaks for "TakTick inceleme ekibi" instead). An operator sees the
+ * reviewer by id and name; the e-mail is the staff directory's
+ * (ADMIN_USERS_READ, `mayEmbedStaffEmail`). The default is the provider's.
  */
-export type ShowcaseProjectionOptions = { reviewerEmail: boolean };
+export type ShowcaseProjectionOptions =
+  | { audience: 'PROVIDER' }
+  | { audience: 'OPERATOR'; reviewerEmail: boolean };
 
-const PROVIDER_VIEW: ShowcaseProjectionOptions = { reviewerEmail: false };
+const PROVIDER_VIEW: ShowcaseProjectionOptions = { audience: 'PROVIDER' };
 
-function toReviewer(
-  reviewer: { id: string; name: string | null; email: string | null } | null,
-  options: ShowcaseProjectionOptions,
-) {
-  if (!reviewer) {
-    return null;
+function toReview(review: NonNullable<VersionRow['review']>, options: ShowcaseProjectionOptions) {
+  const verdict = {
+    id: review.id,
+    decision: review.decision,
+    note: review.note,
+    createdAt: review.createdAt,
+  };
+  if (options.audience === 'PROVIDER') {
+    return verdict;
   }
+  const reviewer = review.reviewedBy;
   return {
-    id: reviewer.id,
-    name: reviewer.name,
-    ...(options.reviewerEmail ? { email: reviewer.email } : {}),
+    ...verdict,
+    reviewedBy: reviewer
+      ? { id: reviewer.id, name: reviewer.name, ...(options.reviewerEmail ? { email: reviewer.email } : {}) }
+      : null,
   };
 }
 
@@ -130,15 +140,7 @@ export function toShowcaseVersion(version: VersionRow, options: ShowcaseProjecti
     createdAt: version.createdAt,
     updatedAt: version.updatedAt,
     areas: version.areas.map(toShowcaseArea),
-    review: version.review
-      ? {
-          id: version.review.id,
-          decision: version.review.decision,
-          note: version.review.note,
-          createdAt: version.review.createdAt,
-          reviewedBy: toReviewer(version.review.reviewedBy, options),
-        }
-      : null,
+    review: version.review ? toReview(version.review, options) : null,
   };
 }
 
