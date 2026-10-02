@@ -1,10 +1,13 @@
 import { apiFetch, RefundScanResponse, requireAdmin } from '../../lib/api';
+import { parsePage } from '../../lib/list-query';
+import { scanQuery } from './scan-query';
 import { PageHeader } from '../../components/page-header';
 import { RefundScanClient } from './refund-scan-client';
 
 type RefundScanPageProps = {
   searchParams?: Promise<{
     limit?: string;
+    page?: string;
   }>;
 };
 
@@ -21,9 +24,17 @@ type RefundScanPageProps = {
  * promised. The API accepts no such parameter; `limit` is a batch size and
  * changes nothing about who qualifies.
  *
+ * API-REFUND-SCAN-PAGINATION-001: the preview is the API's, a page at a time
+ * (`?page=`, 50 rows), with the API's `total` and credit sum over every
+ * eligible offer — the same predicate as the dashboard's "iade adayı". It used
+ * to be the first `limit` offers and their count, which stopped being the
+ * whole set at 100. `limit` is now only the run's batch size, as on the API.
+ *
  * The design's "Son tarama · 2 saat önce" figure is not drawn: the refund-scan
- * endpoints do not report it, and the scheduler's last run lives in one API
- * process's memory only.
+ * endpoints do not report it. The scheduled job's last run is persisted now
+ * (OPS-SCHEDULER-RUN-PERSISTENCE-001) and shown on the operations settings
+ * screen, behind its own permission; a hand-run from this screen is not a
+ * scheduler run and is not recorded there.
  */
 
 /**
@@ -39,8 +50,8 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
 
   const params = (await searchParams) ?? {};
   const limit = Math.min(readPositiveInt(params.limit, 100), 500);
-  const query = new URLSearchParams({ limit: String(limit) });
-  const scan = await apiFetch<RefundScanResponse>(`/offers/refund-scan?${query.toString()}`);
+  const page = parsePage(params.page);
+  const scan = await apiFetch<RefundScanResponse>(`/offers/refund-scan?${scanQuery(page)}`);
 
   return (
     <main className="refund-scan-page">
@@ -52,6 +63,7 @@ export default async function RefundScanPage({ searchParams }: RefundScanPagePro
 
       <RefundScanClient
         initialLimit={limit}
+        page={page}
         initialScan={scan}
         canExecute={can('OFFER_REFUND_EXECUTE')}
         canOpenOffers={can('OFFERS_READ')}

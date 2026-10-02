@@ -695,6 +695,60 @@ model OperationsSettingsChange {
   @@index([changedById])
 }
 
+/// Where a scheduler run's start came from. Only `SCHEDULER` has a writer
+/// today: every background job starts from its own cron tick. `MANUAL` is the
+/// name a run started by a person would carry; no such trigger exists yet, so
+/// no row carries it (OPS-SCHEDULER-RUN-PERSISTENCE-001).
+enum SchedulerRunTrigger {
+  SCHEDULER
+  MANUAL
+}
+
+/// RUNNING from the moment a run starts until it ends, then SUCCESS or FAILED
+/// — once. A run whose process died mid-way stays RUNNING: its end was never
+/// recorded, and nothing guesses one for it.
+enum SchedulerRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+/// One execution of a background job (OPS-SCHEDULER-RUN-PERSISTENCE-001).
+///
+/// Replaces the process-memory "last run" the operations screen used to read,
+/// which a restart erased and which each API instance held separately. A row
+/// is written when a job that is switched on actually starts work — a tick of
+/// a switched-off job does nothing and writes nothing — and closed when the
+/// work ends.
+///
+/// History, not a slot: every run is its own row, so a FAILED run is never
+/// overwritten by the next SUCCESS. A trigger in the migration allows exactly
+/// one UPDATE per row (RUNNING → SUCCESS/FAILED, identity columns unchanged)
+/// and no DELETE. Nothing before this table existed is backfilled: runs from
+/// before the migration are unknown, and the screen says "no recorded run".
+///
+/// No error text, stack or identifier is stored: `summary` is the counts line
+/// the job already logs, and `errorCode` is the error's class name.
+model SchedulerRun {
+  id         String              @id @default(cuid())
+  /// One of SCHEDULER_JOB_KEYS (scheduler-jobs.ts). Text rather than an enum,
+  /// like OperationsSettingsChange.setting: a new job is added in code.
+  jobKey     String
+  trigger    SchedulerRunTrigger @default(SCHEDULER)
+  status     SchedulerRunStatus  @default(RUNNING)
+  startedAt  DateTime
+  /// NULL exactly while RUNNING (a CHECK says so).
+  finishedAt DateTime?
+  /// Counts only, e.g. "processed=3 refunded=2 skipped=1 failed=0".
+  summary    String?
+  /// The error's class name on a FAILED run; NULL otherwise (a CHECK says so).
+  errorCode  String?
+  createdAt  DateTime            @default(now())
+
+  /// "The last run of this job" is one index probe.
+  @@index([jobKey, startedAt(sort: Desc)])
+}
+
 /// One signed-in session, and the two independent clocks that end it.
 ///
 /// `expiresAt` is the **absolute** lifetime, fixed when the session is created
@@ -1915,6 +1969,9 @@ model PackagePurchase {
   @@index([showcaseCardId])
   @@index([showcasePriceTermsAcceptanceId])
   @@index([showcasePackageTermsAcceptanceId])
+  /// The vitrin package's sales tab: `?showcasePackageId=`, newest first
+  /// (API-SHOWCASE-PACKAGE-PURCHASES-FILTER-001).
+  @@index([showcasePackageId, createdAt])
 }
 
 /// CMP-006 PR-A. Where an act of acceptance came from, as the client declared

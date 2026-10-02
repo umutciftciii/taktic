@@ -73,7 +73,7 @@ export class ShowcaseSchedulerService implements OnModuleInit {
     }
 
     this.isSlaRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('showcase-lead-sla');
 
     try {
       const result = await this.sla.execute({ limit: readShowcaseScanLimit() });
@@ -81,25 +81,14 @@ export class ShowcaseSchedulerService implements OnModuleInit {
         `breached=${result.breached} skipped=${result.skipped} ` +
         `timedOut=${result.timedOut} notified=${result.notified} failed=${result.failed}`;
       this.logger.log(`Vitrin lead SLA summary ${summary}`);
-      this.runs.record('showcase-lead-sla', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary,
-      });
+      await run.succeed(summary);
     } catch (error) {
       this.logger.error(
         'Vitrin lead SLA run failed',
         error instanceof Error ? error.stack : String(error),
       );
-      // The class only. The panel shows this to an operator, and a driver's
-      // error text can carry a connection string.
-      this.runs.record('showcase-lead-sla', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: error instanceof Error ? error.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(error);
     } finally {
       this.isSlaRunning = false;
     }
@@ -117,7 +106,7 @@ export class ShowcaseSchedulerService implements OnModuleInit {
     }
 
     this.isExpiryRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('showcase-placement-expiry');
 
     try {
       const result = await this.expiry.execute({ limit: readShowcaseScanLimit() });
@@ -127,23 +116,14 @@ export class ShowcaseSchedulerService implements OnModuleInit {
         `reminders7d=${result.remindersEnqueued.first} reminders3d=${result.remindersEnqueued.second} ` +
         `noticesSent=${result.notices.sent} noticesFailed=${result.notices.failed}`;
       this.logger.log(`Vitrin placement expiry summary ${summary}`);
-      this.runs.record('showcase-placement-expiry', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary,
-      });
+      await run.succeed(summary);
     } catch (error) {
       this.logger.error(
         'Vitrin placement expiry run failed',
         error instanceof Error ? error.stack : String(error),
       );
-      this.runs.record('showcase-placement-expiry', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: error instanceof Error ? error.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(error);
     } finally {
       this.isExpiryRunning = false;
     }

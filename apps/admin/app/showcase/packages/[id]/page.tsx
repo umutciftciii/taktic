@@ -7,14 +7,18 @@ import {
   getShowcasePackageHistory,
   requireAdmin,
   SHOWCASE_CARD_KIND_LABELS,
+  SHOWCASE_ENTITLEMENT_STATUS_LABELS,
   SHOWCASE_PLACEMENT_STATUS_LABELS,
+  showcaseEntitlementBadgeClass,
   showcasePlacementBadgeClass,
   statusBadgeClass,
   statusLabel,
-  type PackagePurchase,
+  type PackagePurchasePage,
+  type PackagePurchaseSummary,
+  type ShowcaseEntitlementView,
   type ShowcasePackage,
 } from '../../../../lib/api';
-import { formatCount } from '../../../../lib/pagination';
+import { Pagination } from '../../../../components/pagination';
 import { parsePage, resolveTab } from '../../../../lib/list-query';
 import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../../components/audit-timeline';
 import { DataTable, type DataColumn } from '../../../../components/data-table';
@@ -25,6 +29,7 @@ import { EmptyState } from '../../../../components/empty-state';
 import { KeyValueList } from '../../../../components/key-value-list';
 import { SectionCard } from '../../../../components/section-card';
 import { SummaryStrip, type SummaryItem } from '../../../../components/summary-strip';
+import { formatCount } from '../../../../lib/pagination';
 import { Tabs, type TabItem } from '../../../../components/tabs';
 import { updateShowcasePackageAction, updateShowcasePackageStatusAction } from '../actions';
 import { ShowcasePackageEditSubmit } from '../showcase-package-gates';
@@ -35,7 +40,7 @@ import {
   showcasePackageErrorText,
   SORT_ORDER_HELP,
 } from '../showcase-package-fields';
-import { showcasePackageSales } from '../showcase-package-sales';
+import { showcasePackageSalesFacts, showcasePackageSalesQuery } from '../showcase-package-sales';
 
 /**
  * One vitrin package (#21), on the design's tabbed detail screen
@@ -49,12 +54,15 @@ import { showcasePackageSales } from '../showcase-package-sales';
  * - Paket bilgileri (the plain URL): the edit form with SHOWCASE_PACKAGES_WRITE
  *   — the window's fields, the same server action, the slug written once and
  *   shown, never sent — or the values read-only without it.
- * - Satışlar ve yayınlar (PACKAGE_PURCHASES_READ): this package's purchases and
- *   the run each one became. The purchase list has no vitrin-package filter,
- *   so the tab reads the list whole and keeps this package's rows — only when
- *   the tab is open, which is also why its count is drawn only there. A
- *   purchase that is paid but has no run says so; whether its right is still
- *   usable is an entitlement fact no admin read carries, and is not guessed.
+ * - Satışlar ve yayınlar (PACKAGE_PURCHASES_READ): this package's purchases,
+ *   the right each one granted and the run it became — read only when the tab
+ *   is open, which is also why its count is drawn only there. Since
+ *   ADMIN-BACKEND-TRUTH-001 the API does the narrowing: `?showcasePackageId=`
+ *   pages the list on the server with a `total` of the filtered set, and
+ *   `/package-purchases/summary` adds the same set up — counts per status,
+ *   revenue, live runs and the rights by their effective status. Each row's
+ *   right ("Hak") is the API's `showcaseEntitlement.status`, never inferred
+ *   here from the purchase or its run.
  * - Neler oldu: the package's change log (ADMIN-ACTION-AUDIT-001) — each
  *   create, edit and on-sale switch with its field diff and its operator.
  *
@@ -67,6 +75,7 @@ type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     tab?: string;
+    page?: string;
     gecmisSayfa?: string;
     error?: string;
     saved?: string;
@@ -77,13 +86,12 @@ type PageProps = {
 
 type TabKey = '' | 'satislar' | 'gecmis';
 
-const RECENT_SALES = 10;
-
 const SALE_COLUMNS: DataColumn[] = [
   { key: 'purchase', label: 'Satın alma' },
   { key: 'provider', label: 'İşletme' },
   { key: 'card', label: 'Kart' },
   { key: 'payment', label: 'Ödeme' },
+  { key: 'right', label: 'Hak' },
   { key: 'run', label: 'Yayın durumu' },
   { key: 'end', label: 'Yayın bitişi' },
   { key: 'amount', label: 'Tutar', align: 'end' },
@@ -99,7 +107,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
   const canReadTerms = can('SHOWCASE_TERMS_ACCEPTANCES_READ');
 
   const { id } = await params;
-  const { tab, gecmisSayfa, error, saved, activated, deactivated } = await searchParams;
+  const { tab, page: salesPageParam, gecmisSayfa, error, saved, activated, deactivated } = await searchParams;
   const pkg = await fetchOrNotFound(() =>
     apiFetch<ShowcasePackage>(`/admin/showcase/packages/${encodeURIComponent(id)}`),
   );
@@ -113,7 +121,12 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
   // Read only on the tab that shows it: see the header comment.
   const sales =
     activeTab === 'satislar' && canReadPurchases
-      ? showcasePackageSales(pkg.id, await apiFetch<PackagePurchase[]>('/package-purchases'))
+      ? await Promise.all([
+          apiFetch<PackagePurchaseSummary>(`/package-purchases/summary?${showcasePackageSalesQuery(pkg.id)}`),
+          apiFetch<PackagePurchasePage>(
+            `/package-purchases?${showcasePackageSalesQuery(pkg.id, parsePage(salesPageParam))}`,
+          ),
+        ]).then(([summary, list]) => ({ summary, list }))
       : null;
 
   const tabs: TabItem[] = [
@@ -123,7 +136,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
           {
             key: 'satislar',
             label: 'Satışlar ve yayınlar',
-            count: sales ? sales.rows.length : null,
+            count: sales ? sales.summary.total : null,
             testId: 'showcase-package-tab-satislar',
           },
         ]
@@ -461,66 +474,26 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
             className="detail-tab-card"
             testId="showcase-package-sales"
           >
-            {sales.rows.length === 0 ? (
+            {sales.summary.total === 0 ? (
               <EmptyState
                 title="Bu pakete bağlı satın alma yok."
                 description="Bir işletme bu paketi satın aldığında özet burada görünür."
               />
             ) : (
-              <SummaryStrip
-                label="Satış özeti"
-                items={[
-                  {
-                    label: 'Toplam satış',
-                    value: formatCount(sales.rows.length),
-                    note: `${sales.paid} ödenmiş · ${sales.pending} bekleyen`,
-                    testId: 'showcase-sales-total',
-                  },
-                  {
-                    label: 'Toplam ciro',
-                    value:
-                      sales.revenue.length === 0
-                        ? formatMinorAsTurkishLira(0, pkg.currency)
-                        : sales.revenue.length === 1
-                          ? formatMinorAsTurkishLira(sales.revenue[0]![1], sales.revenue[0]![0])
-                          : 'Çoklu para birimi',
-                    note:
-                      sales.revenue.length > 1
-                        ? sales.revenue.map(([cur, amount]) => formatMinorAsTurkishLira(amount, cur)).join(' · ')
-                        : 'ödenmiş satışlar',
-                    testId: 'showcase-sales-revenue',
-                  },
-                  {
-                    label: 'Şu an yayında',
-                    value: formatCount(sales.live),
-                    note: 'kart',
-                    testId: 'showcase-sales-live',
-                  },
-                  {
-                    label: 'Yayına bağlanmamış',
-                    value: formatCount(sales.paidWithoutRun),
-                    note: 'ödenmiş, henüz yayın açılmamış',
-                    testId: 'showcase-sales-unplaced',
-                  },
-                ]}
-              />
+              <SummaryStrip label="Satış özeti" items={showcasePackageSalesFacts(sales.summary, pkg.currency)} />
             )}
           </SectionCard>
 
-          {sales.rows.length > 0 ? (
+          {sales.summary.total > 0 ? (
             <SectionCard
-              title="Son satışlar ve yayınlar"
-              actions={
-                <span className="section-card-meta">
-                  {formatCount(sales.rows.length)} satıştan son {Math.min(RECENT_SALES, sales.rows.length)} kayıt
-                </span>
-              }
+              title="Satışlar ve yayınlar"
+              actions={<span className="section-card-meta">En yeni satış başta</span>}
               padded={false}
               className="detail-tab-card"
               testId="showcase-package-recent-sales"
             >
               <DataTable caption="Son satışlar ve yayınlar" columns={SALE_COLUMNS} minWidth={980}>
-                {sales.rows.slice(0, RECENT_SALES).map((purchase) => (
+                {sales.list.items.map((purchase) => (
                   <tr key={purchase.id} data-testid="showcase-sale-row">
                     <td>
                       <div className="cell-stack">
@@ -559,6 +532,24 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                     <td>
                       <span className={statusBadgeClass(purchase.status)}>{statusLabel(purchase.status)}</span>
                     </td>
+                    <td data-testid="showcase-sale-right">
+                      {purchase.showcaseEntitlement ? (
+                        <div className="cell-stack">
+                          <span className={showcaseEntitlementBadgeClass(purchase.showcaseEntitlement.status)}>
+                            {SHOWCASE_ENTITLEMENT_STATUS_LABELS[purchase.showcaseEntitlement.status]}
+                          </span>
+                          <span className="cell-muted cell-nowrap">
+                            {entitlementDetail(purchase.showcaseEntitlement)}
+                          </span>
+                        </div>
+                      ) : (
+                        /*
+                          No right: an unpaid checkout, or a legacy card-bound
+                          purchase that settled straight into a run.
+                        */
+                        <span className="cell-muted">{purchase.status === 'PAID' ? 'Doğrudan yayın' : '—'}</span>
+                      )}
+                    </td>
                     <td>
                       {purchase.showcasePlacement ? (
                         canOpenPlacement ? (
@@ -585,6 +576,16 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                   </tr>
                 ))}
               </DataTable>
+              <Pagination
+                path={path}
+                params={{ tab: 'satislar' }}
+                page={sales.list.page}
+                pageSize={sales.list.pageSize}
+                total={sales.list.total}
+                hasNextPage={sales.list.hasNextPage}
+                noun="satış"
+                summaryTestId="showcase-sales-count"
+              />
               <div className="detail-card-footer">
                 <p>Kartların onay ve yayın durumları Vitrin menüsünden yönetilir.</p>
                 {canOpenPlacement ? (
@@ -614,4 +615,20 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
       ) : null}
     </main>
   );
+}
+
+/** The second line under a right's badge: only dates the API sent. */
+function entitlementDetail(right: ShowcaseEntitlementView): string {
+  switch (right.status) {
+    case 'AVAILABLE':
+      return `${formatCount(right.remainingDays ?? 0)} gün kaldı · son ${formatDateTime(right.expiresAt)}`;
+    case 'RESERVED':
+      return right.pausedForReview
+        ? 'kart incelemede, süre durdu'
+        : `${formatCount(right.remainingDays ?? 0)} gün kaldı · son ${formatDateTime(right.expiresAt)}`;
+    case 'CONSUMED':
+      return right.usedAt ? `kullanıldı ${formatDateTime(right.usedAt)}` : 'kullanıldı';
+    case 'EXPIRED':
+      return `süresi ${formatDateTime(right.expiresAt)} doldu`;
+  }
 }

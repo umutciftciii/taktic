@@ -729,6 +729,12 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(sale).toContainText('Ödendi');
       await expect(sale).toContainText('Yayında');
       await expect(sale.getByRole('link', { name: 'Yayında' })).toHaveAttribute('href', `/showcase/placements/${run.placement.id}`);
+      // ADMIN-BACKEND-TRUTH-001: the figures and the right are the API's. This
+      // seeded purchase is a legacy card-bound one: it settled straight into a
+      // run and granted no right, which the row says rather than guessing.
+      await expect(sale.getByTestId('showcase-sale-right')).toContainText('Doğrudan yayın');
+      await expect(page.getByTestId('showcase-sales-rights')).toContainText('0');
+      await expect(page.getByTestId('showcase-sales-count')).toContainText('1 satış');
 
       // The single-card link from the consent ledger now shows that card.
       await admin.gotoAdmin(`/showcase/cards?cardId=${revision.card.id}`);

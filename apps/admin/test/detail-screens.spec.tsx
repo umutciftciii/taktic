@@ -13,16 +13,17 @@ import {
   type QuestionActions,
 } from '../app/categories/[slug]/category-sections';
 import { packageSummarySentence, perCreditMinor } from '../app/credit-packages/credit-package-cells';
-import { showcasePackageSales } from '../app/showcase/packages/showcase-package-sales';
+import { showcasePackageSalesFacts, showcasePackageSalesQuery } from '../app/showcase/packages/showcase-package-sales';
 import type {
   AdminAuditEntry,
   AdminAuditPage,
   AdminOfferPackage,
   Category,
-  PackagePurchase,
+  PackagePurchaseSummary,
   ProviderInvite,
   Question,
 } from '../lib/api';
+import { formatMinorAsTurkishLira } from '@taktic/shared';
 
 /**
  * ADMIN-DESIGN-001 Faz 3F.1 — the three catalogue detail screens as tabbed
@@ -343,33 +344,45 @@ describe('credit package summary line and per-credit price', () => {
 });
 
 describe('vitrin package sales', () => {
-  const purchase = (overrides: Partial<PackagePurchase>): PackagePurchase =>
-    ({
-      id: 'p',
-      status: 'PAID',
-      createdAt: '2026-09-01T00:00:00.000Z',
-      priceAmountSnapshot: 240000,
-      currencySnapshot: 'TRY',
-      showcasePackage: { id: 'vp-1' },
-      showcasePlacement: null,
-      ...overrides,
-    }) as PackagePurchase;
+  const summary = (overrides: Partial<PackagePurchaseSummary> = {}): PackagePurchaseSummary => ({
+    total: 4,
+    byStatus: { PENDING: 1, PAID: 3, FAILED: 0, CANCELLED: 0, EXPIRED: 0, REFUNDED: 0 },
+    paidRevenue: [{ currency: 'TRY', amount: 720000 }],
+    activeRuns: 1,
+    entitlements: { AVAILABLE: 1, RESERVED: 0, CONSUMED: 1, EXPIRED: 1 },
+    asOf: '2026-10-02T00:00:00.000Z',
+    ...overrides,
+  });
 
-  it('keeps this package’s rows and counts only what the rows say', () => {
-    const sales = showcasePackageSales('vp-1', [
-      purchase({ id: 'a', showcasePlacement: { id: 'pl-1', status: 'ACTIVE', startAt: '', endAt: '' } }),
-      purchase({ id: 'b', createdAt: '2026-09-02T00:00:00.000Z' }),
-      purchase({ id: 'c', status: 'PENDING' }),
-      purchase({ id: 'd', showcasePackage: { id: 'other' } as PackagePurchase['showcasePackage'] }),
-      purchase({ id: 'e', showcasePackage: null }),
+  it('draws the API’s own totals, rights by their effective status', () => {
+    const facts = showcasePackageSalesFacts(summary(), 'TRY');
+    expect(facts.map((fact) => [fact.testId, fact.value])).toEqual([
+      ['showcase-sales-total', '4'],
+      ['showcase-sales-revenue', formatMinorAsTurkishLira(720000, 'TRY')],
+      ['showcase-sales-live', '1'],
+      ['showcase-sales-rights', '1'],
     ]);
-    // Newest first; a tie is broken by id, newest-looking first, so the order is stable.
-    expect(sales.rows.map((row) => row.id)).toEqual(['b', 'c', 'a']);
-    expect(sales.paid).toBe(2);
-    expect(sales.pending).toBe(1);
-    expect(sales.live).toBe(1);
-    expect(sales.paidWithoutRun).toBe(1);
-    expect(sales.revenue).toEqual([['TRY', 480000]]);
+    expect(facts[0]!.note).toBe('3 ödenmiş · 1 bekleyen');
+    expect(facts[3]!.note).toBe('0 karta bağlı · 1 kullanıldı · 1 süresi doldu');
+  });
+
+  it('says "Çoklu para birimi" rather than adding currencies together', () => {
+    const facts = showcasePackageSalesFacts(
+      summary({ paidRevenue: [{ currency: 'EUR', amount: 100 }, { currency: 'TRY', amount: 200 }] }),
+      'TRY',
+    );
+    expect(facts[1]!.value).toBe('Çoklu para birimi');
+  });
+
+  it('asks the API for one package, paged on the server', () => {
+    expect(showcasePackageSalesQuery('vp-1')).toBe('showcasePackageId=vp-1');
+    expect(showcasePackageSalesQuery('vp-1', 2)).toBe('showcasePackageId=vp-1&page=2&pageSize=10');
+  });
+
+  it('no longer reads the whole purchase list to filter it here', () => {
+    const source = readFileSync(resolve(__dirname, '..', 'app/showcase/packages/[id]/page.tsx'), 'utf8');
+    expect(source).not.toContain("apiFetch<PackagePurchase[]>('/package-purchases')");
+    expect(source).toContain('/package-purchases/summary?');
   });
 });
 

@@ -53,7 +53,7 @@ export class OffersController {
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.OFFER_REFUND_SCAN_READ)
   refundScan(@Query() query: RefundScanQueryDto) {
-    return this.unviewedOfferRefund.dryRun({ limit: query.limit });
+    return this.unviewedOfferRefund.dryRun({ page: query.page, pageSize: query.pageSize });
   }
 
   @Post('refund-scan/execute')

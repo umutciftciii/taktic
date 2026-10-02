@@ -87,7 +87,7 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     }
 
     this.isExpiryRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('request-expiry');
 
     try {
       const limit = readRequestLifecycleScanLimit();
@@ -109,25 +109,14 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
         `publishSent=${publish.sent} reviewInvitationsSent=${invitations.sent} ` +
         `packageRefundNoticesSent=${refundNotices.sent} cancellationNoticesSent=${cancellationNotices.sent}`;
       this.logger.log(`Request expiry summary ${summary}`);
-      this.runs.record('request-expiry', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary,
-      });
+      await run.succeed(summary);
     } catch (error) {
       this.logger.error(
         'Request expiry run failed',
         error instanceof Error ? error.stack : String(error),
       );
-      // The class only. The panel shows this to an operator, and a driver's
-      // error text can carry a connection string.
-      this.runs.record('request-expiry', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: error instanceof Error ? error.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(error);
     } finally {
       this.isExpiryRunning = false;
     }
@@ -145,7 +134,7 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     }
 
     this.isReminderRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('request-reminder');
 
     try {
       const limit = readRequestLifecycleScanLimit();
@@ -154,23 +143,14 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
         `processed=${result.processed} reminded=${result.reminded} ` +
         `skipped=${result.skipped} failedToSend=${result.failedToSend}`;
       this.logger.log(`Request reminder summary ${summary}`);
-      this.runs.record('request-reminder', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary,
-      });
+      await run.succeed(summary);
     } catch (error) {
       this.logger.error(
         'Request reminder run failed',
         error instanceof Error ? error.stack : String(error),
       );
-      this.runs.record('request-reminder', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: error instanceof Error ? error.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(error);
     } finally {
       this.isReminderRunning = false;
     }

@@ -62,7 +62,7 @@ export class UnviewedOfferRefundSchedulerService implements OnModuleInit {
     });
 
     this.isRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('unviewed-offer-refund');
     this.logger.log(`Unviewed-offer refund started limit=${limit}`);
 
     try {
@@ -73,25 +73,14 @@ export class UnviewedOfferRefundSchedulerService implements OnModuleInit {
         `skipped=${result.skipped} failed=${failed}`;
 
       this.logger.log(`Unviewed-offer refund summary ${summary}`);
-      this.runs.record('unviewed-offer-refund', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary,
-      });
+      await run.succeed(summary);
     } catch (err) {
       this.logger.error(
         'Unviewed-offer refund failed',
         err instanceof Error ? err.stack : String(err),
       );
-      // The class only. The panel shows this to an operator, and a driver's
-      // error text can carry a connection string.
-      this.runs.record('unviewed-offer-refund', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: err instanceof Error ? err.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(err);
     } finally {
       this.isRunning = false;
       this.logger.log('Unviewed-offer refund finished');

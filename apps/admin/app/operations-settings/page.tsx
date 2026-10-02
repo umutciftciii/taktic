@@ -12,6 +12,7 @@ import {
   SchedulerSettings,
 } from '../../lib/api';
 import { InfoPopover } from '../../components/info-popover';
+import { describeSchedulerRun } from '../../lib/scheduler-run';
 import { PageHeader } from '../../components/page-header';
 import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
@@ -79,12 +80,6 @@ const OK_MESSAGES: Record<string, string> = {
     'Kampanya motoru açıldı. Bundan sonraki gerçek olaylar (onay, kanıt, ödeme) kaydedilir ve aktif kampanyalar promosyon kredisi verebilir; geçmiş olaylar için hak ediş üretilmez.',
   'campaign-engine-off':
     'Kampanya motoru kapatıldı. Yeni olay kaydedilmez ve değerlendirilmez; verilmiş promosyonların iadesi ve geri alınması aynen sürer.',
-};
-
-const RUN_OUTCOME_LABELS: Record<string, string> = {
-  SUCCESS: 'Tamamlandı',
-  FAILED: 'Hata',
-  SKIPPED: 'Atlandı',
 };
 
 export default async function OperationsSettingsPage({
@@ -359,9 +354,9 @@ export default async function OperationsSettingsPage({
             <InfoPopover label="Zamanlanmış işler nasıl çalışır?" size="sm">
               Her iş kendi cron zamanında uyanır ve o anda bu ayarı okur. Açtığınız bir iş sıradaki cron çalışmasında
               devreye girer, kapattığınız iş sıradaki çalışmada hiçbir şey yapmaz; sunucuyu yeniden başlatmanız gerekmez.
-              Ayar okunamazsa iş kapalı kabul edilir. Elle çalıştırma düğmesi bilinçli olarak yoktur. Son çalışma bilgisi
-              bu API sunucusunun belleğinde tutulur: yeniden başlatmada sıfırlanır ve birden fazla sunucu varsa her biri
-              kendi çalışmasını gösterir.
+              Ayar okunamazsa iş kapalı kabul edilir. Elle çalıştırma düğmesi bilinçli olarak yoktur. Her çalışma veritabanına
+              kaydedilir: son çalışma bilgisi sunucu yeniden başlasa da kaybolmaz ve tüm sunucularda aynıdır. Kayıt
+              tutulmaya başlamadan önceki çalışmalar bilinmez; böyle bir işte “kayıtlı çalışma yok” yazar.
             </InfoPopover>
           }
         >
@@ -381,15 +376,9 @@ export default async function OperationsSettingsPage({
                       <span>
                         cron <code>{job.cron}</code>
                       </span>
-                      {job.lastRun ? (
-                        <span>
-                          son çalışma {formatDateTime(job.lastRun.finishedAt)} ·{' '}
-                          {RUN_OUTCOME_LABELS[job.lastRun.outcome] ?? job.lastRun.outcome}
-                          {job.lastRun.summary ? ` · ${job.lastRun.summary}` : ''}
-                        </span>
-                      ) : (
-                        <span>bu sunucuda çalışmadı</span>
-                      )}
+                      <span data-testid={`scheduler-last-run-${job.key}`}>
+                        {describeSchedulerRun(job.lastRun, formatDateTime, { withSummary: true })}
+                      </span>
                     </>
                   }
                   // Shown before the switch is used, not after: an operator

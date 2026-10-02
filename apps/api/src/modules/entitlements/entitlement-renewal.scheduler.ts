@@ -56,7 +56,7 @@ export class EntitlementRenewalScheduler implements OnModuleInit {
     }
 
     this.isRunning = true;
-    const startedAt = new Date();
+    const run = await this.runs.start('entitlement-renewal');
 
     try {
       const summary = await this.renewals.runDueRenewals();
@@ -68,25 +68,14 @@ export class EntitlementRenewalScheduler implements OnModuleInit {
         this.logger.log(`renewal pass ${line}`);
       }
 
-      this.runs.record('entitlement-renewal', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'SUCCESS',
-        summary: line,
-      });
+      await run.succeed(line);
     } catch (err) {
       this.logger.error(
         'Entitlement renewal pass failed',
         err instanceof Error ? err.stack : String(err),
       );
-      // The class only. The panel shows this to an operator, and a driver's
-      // error text can carry a connection string.
-      this.runs.record('entitlement-renewal', {
-        startedAt,
-        finishedAt: new Date(),
-        outcome: 'FAILED',
-        summary: err instanceof Error ? err.name : 'UnknownError',
-      });
+      // Recorded by error class only (schedulerErrorCode).
+      await run.fail(err);
     } finally {
       this.isRunning = false;
     }

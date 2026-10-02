@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { OfferEntitlementSource, Prisma } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
@@ -19,6 +19,15 @@ type UnviewedOfferRefundOptions = {
    */
   actorId?: string | null;
 };
+
+type RefundScanPageOptions = {
+  page?: number | string;
+  pageSize?: number | string;
+};
+
+/** The preview's page size when none is asked for, and the most one page holds. */
+export const REFUND_SCAN_DEFAULT_PAGE_SIZE = 50;
+export const REFUND_SCAN_MAX_PAGE_SIZE = 100;
 
 type SkippedReason =
   | 'alreadyRefunded'
@@ -99,37 +108,63 @@ export class UnviewedOfferRefundService {
     private readonly operationsSettings: OperationsSettingsService,
   ) {}
 
-  async dryRun(options: UnviewedOfferRefundOptions = {}) {
-    const limit = normalizeLimit(options.limit);
+  /**
+   * The preview of what the worker would refund, one page at a time
+   * (API-REFUND-SCAN-PAGINATION-001).
+   *
+   * `total`, the page and `totalCreditCost` are read from one predicate —
+   * {@link refundCandidateWhere}, the very one `execute` and the dashboard's
+   * "iade adayı" count use — inside one REPEATABLE READ snapshot, so the total
+   * and the rows cannot disagree with each other however the table moves
+   * between the statements. The previous answer was the first `limit` rows
+   * and their count, which stopped being the whole set at 100.
+   *
+   * Oldest submission first, the id breaking ties: the order `execute` works
+   * through, so page 1 is the next batch a run would take.
+   */
+  async dryRun(options: RefundScanPageOptions = {}) {
+    const { page, pageSize } = normalizeScanPaging(options);
     const now = new Date();
-    const offers = await this.prisma.offer.findMany({
-      where: refundCandidateWhere(now),
-      orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
-      take: limit,
-      select: candidateOfferSelect,
-    });
+    const where = refundCandidateWhere(now);
+    const [total, credit, offers] = await this.prisma.$transaction(
+      [
+        this.prisma.offer.count({ where }),
+        this.prisma.offer.aggregate({ where, _sum: { creditCost: true } }),
+        this.prisma.offer.findMany({
+          where,
+          orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: candidateOfferSelect,
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
 
-    const items = [];
-
-    for (const offer of offers) {
+    const items = offers.map((offer) => {
+      // The predicate is the policy's eligibility restated as a query, so every
+      // row it returns is eligible. The verdict is still the policy's own, per
+      // row, so a disagreement would show on the row rather than vanish from a
+      // page whose total already counted it.
       const eligibility = getRefundEligibility(offer, now);
-      if (eligibility.eligible) {
-        items.push({
-          offerId: offer.id,
-          providerId: offer.providerId,
-          requestId: offer.requestId,
-          creditCost: offer.creditCost,
-          submittedAt: offer.submittedAt,
-          hoursSinceSubmitted: eligibility.hoursSinceSubmitted,
-          // Per item, because two offers in the same scan can carry two
-          // different windows once the setting has been changed.
-          windowHours: offer.unviewedRefundWindowHours,
-          eligibleAt: offer.unviewedRefundEligibleAt,
-          reasonCode: eligibility.reasonCode,
-          recommendedAction: eligibility.recommendedAction,
-        });
+      if (!eligibility.eligible) {
+        this.logger.warn(`Refund scan candidate ${offer.id} failed the policy check (${eligibility.skippedReason})`);
       }
-    }
+      return {
+        offerId: offer.id,
+        providerId: offer.providerId,
+        requestId: offer.requestId,
+        creditCost: offer.creditCost,
+        submittedAt: offer.submittedAt,
+        hoursSinceSubmitted: eligibility.hoursSinceSubmitted,
+        // Per item, because two offers in the same scan can carry two
+        // different windows once the setting has been changed.
+        windowHours: offer.unviewedRefundWindowHours,
+        eligibleAt: offer.unviewedRefundEligibleAt,
+        reasonCode: eligibility.eligible ? eligibility.reasonCode : eligibility.skippedReason,
+        recommendedAction: eligibility.eligible ? eligibility.recommendedAction : 'NO_REFUND',
+      };
+    });
 
     const [skippedSummary, currentWindowHours] = await Promise.all([
       this.getSkippedSummary(now),
@@ -142,11 +177,27 @@ export class UnviewedOfferRefundService {
       // applied: the scan applied each offer's own snapshot, which the items
       // report individually.
       currentWindowHours,
-      eligibleCount: items.length,
+      /** Every eligible offer, not this page's. */
+      total,
+      /** The same number under its older name, kept for existing readers. */
+      eligibleCount: total,
+      /** The credit every eligible offer would give back, across all pages. */
+      totalCreditCost: credit._sum.creditCost ?? 0,
+      page,
+      pageSize,
+      hasNextPage: page * pageSize < total,
       skippedCount,
       items,
       skippedSummary,
     };
+  }
+
+  /**
+   * How many offers the worker would refund right now — the dashboard's
+   * "iade adayı" and the scan's `total`, from one predicate.
+   */
+  countCandidates(now = new Date()): Promise<number> {
+    return this.prisma.offer.count({ where: refundCandidateWhere(now) });
   }
 
   async execute(options: UnviewedOfferRefundOptions = {}) {
@@ -439,8 +490,20 @@ function normalizeLimit(value: number | string | undefined) {
  * created with, and `lte` never matches NULL, so an in-policy offer that
  * somehow has no schedule is skipped rather than paid.
  */
-function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
+/**
+ * The offers the worker refunds now: the refund policy's eligibility
+ * (`calculateRefundEligibility`) restated as one query. The single source for
+ * the scan's preview and total, the run's batch and the dashboard's count
+ * (API-REFUND-SCAN-PAGINATION-001) — a number on one screen and a list on
+ * another cannot drift apart while all three read this.
+ */
+export function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
   return {
+    // A period package is never refunded (PERIOD_PACKAGE_NOT_REFUNDABLE). Such
+    // an offer spends no one-time credit, so the clause below already leaves
+    // it out; stated here as well so the query is the policy without relying
+    // on that, and the total cannot count an offer the policy refuses.
+    OR: [{ entitlementSource: null }, { entitlementSource: OfferEntitlementSource.ONE_TIME_CREDIT }],
     ...inPolicyUnrefundedWhere,
     creditSpentTransactionId: { not: null },
     creditCost: { gt: 0 },
@@ -458,3 +521,21 @@ const inPolicyUnrefundedWhere = {
   creditRefundedTransactionId: null,
   creditRefundedAt: null,
 } satisfies Prisma.OfferWhereInput;
+
+function normalizeScanPaging(options: RefundScanPageOptions) {
+  const page = readPositiveInt(options.page, 1, 'page');
+  const pageSize = readPositiveInt(options.pageSize, REFUND_SCAN_DEFAULT_PAGE_SIZE, 'pageSize');
+  if (pageSize > REFUND_SCAN_MAX_PAGE_SIZE) {
+    throw new BadRequestException(`pageSize must be a positive integer up to ${REFUND_SCAN_MAX_PAGE_SIZE}`);
+  }
+  return { page, pageSize };
+}
+
+function readPositiveInt(value: number | string | undefined, fallback: number, name: string) {
+  if (value === undefined) return fallback;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new BadRequestException(`${name} must be a positive integer`);
+  }
+  return parsed;
+}

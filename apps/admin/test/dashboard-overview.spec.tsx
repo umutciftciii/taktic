@@ -39,6 +39,8 @@ const EMPTY: AdminSummary = {
   packagePurchases: 0,
   openSupportTickets: 0,
   openRequestReports: 0,
+  reportedRequests: 0,
+  pendingShowcaseReviews: 0,
 };
 
 const BUSY: AdminSummary = {
@@ -51,7 +53,10 @@ const BUSY: AdminSummary = {
   refundableOffers: 3,
   packagePurchases: 37,
   openSupportTickets: 2,
+  // Three reports on two requests: the cell counts requests.
   openRequestReports: 3,
+  reportedRequests: 2,
+  pendingShowcaseReviews: 1,
 };
 
 const everything = () => true;
@@ -59,21 +64,30 @@ const nothing = () => false;
 const only = (...held: string[]) => (permission: string) => held.includes(permission);
 
 describe('Önce bunlara bak: K2', () => {
-  it('draws başvuru, şikayet and destek for a session that may open all three, in that order', () => {
+  it('draws başvuru, şikayet, destek and vitrin for a session that may open all four, in that order', () => {
     const cells = buildDashboardQueues(buildAdminDashboardMetrics(BUSY), everything);
     expect(cells.map((cell) => [cell.metricKey, cell.value, cell.href])).toEqual([
       ['pendingProviders', 5, '/providers?status=PENDING_REVIEW'],
-      ['openRequestReports', 3, '/requests/reports?state=open'],
+      ['reportedRequests', 2, '/requests/reports?state=open'],
       ['openSupportTickets', 2, '/support?status=OPEN,IN_PROGRESS'],
+      ['pendingShowcaseReviews', 1, '/showcase/reviews'],
     ]);
-    // The design's vitrin cell has no count in the summary.
-    expect(cells.map((cell) => cell.kicker)).toEqual(['Başvuru', 'Şikayet', 'Destek']);
+    expect(cells.map((cell) => cell.kicker)).toEqual(['Başvuru', 'Şikayet', 'Destek', 'Vitrin']);
+    // The report cell counts requests, not reports (API-DASHBOARD-REQUEST-REPORT-COUNT-001).
+    expect(cells[1]!.title).toBe('Karar bekleyen şikayetli talep');
+  });
+
+  it('draws no cell for a queue count the API left out, whatever the session holds', () => {
+    const { reportedRequests: _r, pendingShowcaseReviews: _p, ...withheld } = BUSY;
+    const cells = buildDashboardQueues(buildAdminDashboardMetrics(withheld), everything);
+    expect(cells.map((cell) => cell.metricKey)).toEqual(['pendingProviders', 'openSupportTickets']);
   });
 
   it.each([
     ['PROVIDERS_READ', 'pendingProviders'],
-    ['REQUEST_REPORTS_READ', 'openRequestReports'],
+    ['REQUEST_REPORTS_READ', 'reportedRequests'],
     ['SUPPORT_READ', 'openSupportTickets'],
+    ['SHOWCASE_REVIEW_READ', 'pendingShowcaseReviews'],
   ])('with only %s, only its cell', (permission, key) => {
     const cells = buildDashboardQueues(buildAdminDashboardMetrics(BUSY), only(permission));
     expect(cells.map((cell) => cell.metricKey)).toEqual([key]);
@@ -95,15 +109,16 @@ describe('Önce bunlara bak: K2', () => {
       [0, 'neutral'],
       [0, 'neutral'],
       [0, 'neutral'],
+      [0, 'neutral'],
     ]);
     const busy = buildDashboardQueues(buildAdminDashboardMetrics(BUSY), everything);
     expect(busy.every((cell) => cell.tone === 'warning')).toBe(true);
 
     const markup = html(<DashboardQueues cells={quiet} />);
-    expect(markup.match(/data-testid="dashboard-queue"/g)).toHaveLength(3);
-    expect(markup.match(/data-tone="neutral"/g)).toHaveLength(3);
+    expect(markup.match(/data-testid="dashboard-queue"/g)).toHaveLength(4);
+    expect(markup.match(/data-tone="neutral"/g)).toHaveLength(4);
     expect(markup).not.toContain('data-tone="warning"');
-    expect(markup.match(/data-testid="dashboard-queue-value">0</g)).toHaveLength(3);
+    expect(markup.match(/data-testid="dashboard-queue-value">0</g)).toHaveLength(4);
     expect(markup).not.toMatch(/dikkat/i);
   });
 
@@ -112,9 +127,10 @@ describe('Önce bunlara bak: K2', () => {
     expect(markup).toContain('href="/providers?status=PENDING_REVIEW"');
     expect(markup).toContain('href="/requests/reports?state=open"');
     expect(markup).toContain('href="/support?status=OPEN,IN_PROGRESS"');
+    expect(markup).toContain('href="/showcase/reviews"');
     expect(markup).toContain('aria-labelledby="dashboard-queues-title"');
     expect(markup).toContain('aria-expanded="false"');
-    expect(markup).not.toMatch(/önce güncellendi|Vitrin/);
+    expect(markup).not.toMatch(/önce güncellendi/);
   });
 });
 
@@ -200,17 +216,23 @@ const SNAPSHOT: OperationsSnapshot = {
   schedulers: {
     jobs: [
       job('unviewed-offer-refund', true, {
+        id: 'run-1',
+        status: 'SUCCESS',
+        trigger: 'SCHEDULER',
         startedAt: '2026-09-30T06:00:00.000Z',
         finishedAt: '2026-09-30T06:00:02.000Z',
-        outcome: 'SUCCESS',
         summary: null,
+        errorCode: null,
       }),
       job('request-expiry', false),
       job('request-reminder', true, {
+        id: 'run-2',
+        status: 'FAILED',
+        trigger: 'SCHEDULER',
         startedAt: '2026-09-30T06:00:00.000Z',
         finishedAt: '2026-09-30T06:00:01.000Z',
-        outcome: 'FAILED',
         summary: null,
+        errorCode: 'TypeError',
       }),
     ],
     recentChanges: [],
@@ -238,6 +260,9 @@ describe('Sistem şu anda ne yapıyor', () => {
   it('writes a second line only from a recorded run, never an invented time', () => {
     expect(rows.find((row) => row.key === 'job-unviewed-offer-refund')!.detail).toBe(
       'Son çalışma T(2026-09-30T06:00:02.000Z) · tamamlandı',
+    );
+    expect(rows.find((row) => row.key === 'job-request-reminder')!.detail).toBe(
+      'Son çalışma T(2026-09-30T06:00:01.000Z) · hata verdi (TypeError)',
     );
     expect(rows.find((row) => row.key === 'job-request-expiry')!.detail).toBeNull();
     expect(rows.find((row) => row.key === 'auto-publish')!.detail).toBeNull();
@@ -281,5 +306,35 @@ describe('the page', () => {
     for (const absent of ['Son 7 gün', 'Panelde son yapılanlar', 'güncellendi', 'Hızlı işlemler', 'StatCard']) {
       expect(page).not.toContain(absent);
     }
+  });
+});
+
+describe('a run whose end was never recorded', () => {
+  it('says it started and that its end is not on record, and is not drawn as a failure', () => {
+    const rows = buildSystemActivity(
+      {
+        ...SNAPSHOT,
+        schedulers: {
+          jobs: [
+            job('request-expiry', true, {
+              id: 'run-3',
+              status: 'RUNNING',
+              trigger: 'SCHEDULER',
+              startedAt: '2026-09-30T06:00:00.000Z',
+              finishedAt: null,
+              summary: null,
+              errorCode: null,
+            }),
+          ],
+          recentChanges: [],
+        },
+      },
+      (value) => `T(${value})`,
+    );
+    const row = rows.find((entry) => entry.key === 'job-request-expiry')!;
+    expect(row.tone).toBe('on');
+    expect(row.detail).toBe(
+      'Son çalışma T(2026-09-30T06:00:00.000Z) başladı · bitişi kaydedilmedi (sürüyor ya da yarıda kaldı)',
+    );
   });
 });

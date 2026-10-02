@@ -7,6 +7,8 @@ import {
   PackagePurchase,
   PURCHASE_CREDIT_HOLD_LABELS,
   requireAdmin,
+  SHOWCASE_ENTITLEMENT_STATUS_LABELS,
+  showcaseEntitlementBadgeClass,
   statusBadgeClass,
   statusLabel,
 } from '../../../lib/api';
@@ -40,6 +42,9 @@ type AdminPackagePurchaseDetailPageProps = {
  *   loads anything.
  * - The provider's settlement notices, one per event, with the first refusal
  *   kept after a later delivery settled it.
+ * - "Vitrin hakkı" (API-SHOWCASE-ENTITLEMENT-STATUS-001): for a vitrin purchase
+ *   that granted a right, the right's status as the API derives it — usable,
+ *   bound to a card, used, expired — with its dates. Not computed here.
  * - "Manuel düzeltme": PENDING only, PACKAGE_PURCHASE_STATUS_WRITE only, and
  *   never while a credit hold is OPEN — that purchase was paid, and the API
  *   refuses the write (PURCHASE_CREDIT_HOLD_OPEN) even if a form reached it.
@@ -236,6 +241,48 @@ export default async function AdminPackagePurchaseDetailPage({ params, searchPar
             ]}
           />
         </SectionCard>
+
+        {purchase.showcaseEntitlement ? (
+          <SectionCard
+            title="Vitrin hakkı"
+            subtitle="Bu satın almanın verdiği yayın hakkı; durum hakkın kendi kaydından okunur."
+            testId="purchase-showcase-entitlement"
+          >
+            <KeyValueList
+              items={[
+                {
+                  label: 'Durum',
+                  value: (
+                    <span
+                      className={showcaseEntitlementBadgeClass(purchase.showcaseEntitlement.status)}
+                      data-testid="purchase-entitlement-status"
+                    >
+                      {SHOWCASE_ENTITLEMENT_STATUS_LABELS[purchase.showcaseEntitlement.status]}
+                    </span>
+                  ),
+                },
+                { label: 'Verildi', value: formatDateTime(purchase.showcaseEntitlement.grantedAt) },
+                {
+                  label: 'Son kullanım',
+                  value: purchase.showcaseEntitlement.pausedForReview
+                    ? `${formatDateTime(purchase.showcaseEntitlement.expiresAt)} · kart incelemede, süre durdu`
+                    : formatDateTime(purchase.showcaseEntitlement.expiresAt),
+                },
+                {
+                  label: 'Kalan',
+                  value:
+                    purchase.showcaseEntitlement.remainingDays === null
+                      ? '—'
+                      : `${formatCount(purchase.showcaseEntitlement.remainingDays)} gün`,
+                },
+                {
+                  label: 'Kullanıldı',
+                  value: purchase.showcaseEntitlement.usedAt ? formatDateTime(purchase.showcaseEntitlement.usedAt) : '—',
+                },
+              ]}
+            />
+          </SectionCard>
+        ) : null}
 
         <SectionCard title="Zaman çizgisi">
           <KeyValueList

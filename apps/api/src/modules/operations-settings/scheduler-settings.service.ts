@@ -12,7 +12,7 @@ import {
   SchedulerJobKey,
   SchedulerJobSetting,
 } from './scheduler-jobs';
-import { SchedulerRunRecord, SchedulerRunRegistry } from './scheduler-run-registry.service';
+import { SchedulerRunRegistry, SchedulerRunView } from './scheduler-run-registry.service';
 
 /**
  * Whether each background job may act, as one persistent answer.
@@ -44,8 +44,12 @@ export type SchedulerJobView = {
   cron: string;
   /** Whether switching this on starts a job that moves money or credits. */
   movesMoney: boolean;
-  /** What this instance last saw the job do. Null until it has run here. */
-  lastRun: SchedulerRunRecord | null;
+  /**
+   * The job's most recent recorded run, from the `SchedulerRun` table — the
+   * same answer after a restart and from every instance. Null when no run has
+   * been recorded since runs were persisted (OPS-SCHEDULER-RUN-PERSISTENCE-001).
+   */
+  lastRun: SchedulerRunView | null;
 };
 
 export type SchedulerSettingsView = {
@@ -147,7 +151,7 @@ export class SchedulerSettingsService {
   }
 
   async listForAdmin(): Promise<SchedulerSettingsView> {
-    const [row, changes] = await Promise.all([
+    const [row, changes, lastRuns] = await Promise.all([
       this.prisma.operationsSettings.findUnique({
         where: { id: OPERATIONS_SETTINGS_ID },
         select: flagsSelect,
@@ -165,6 +169,7 @@ export class SchedulerSettingsService {
           changedBy: { select: { id: true, name: true } },
         },
       }),
+      this.runs.lastRuns(),
     ]);
 
     return {
@@ -175,7 +180,7 @@ export class SchedulerSettingsService {
         // reaches this response.
         cron: readSchedulerCron(job),
         movesMoney: SCHEDULER_JOB_MOVES_MONEY[job],
-        lastRun: this.runs.get(job),
+        lastRun: lastRuns[job],
       })),
       recentChanges: changes,
     };

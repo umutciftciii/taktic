@@ -203,6 +203,8 @@ export function resetAuthThrottle(app: INestApplication): void {
 }
 
 const TRUNCATED_TABLES = [
+  // OPS-SCHEDULER-RUN-PERSISTENCE-001: append-only run history, no FK.
+  'SchedulerRun',
   // ADMIN-ACTION-AUDIT-001: append-only audit rows, children of User,
   // ProviderProfile and (by id only) the catalogue. TRUNCATE does not fire the
   // append-only triggers.

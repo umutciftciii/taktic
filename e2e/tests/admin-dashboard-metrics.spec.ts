@@ -52,7 +52,8 @@ function shot(testInfo: TestInfo, name: string): string {
 }
 const SUPPORT_CELL = '[data-testid="dashboard-queue"][data-metric="openSupportTickets"]';
 const PROVIDER_CELL = '[data-testid="dashboard-queue"][data-metric="pendingProviders"]';
-const REPORT_CELL = '[data-testid="dashboard-queue"][data-metric="openRequestReports"]';
+const REPORT_CELL = '[data-testid="dashboard-queue"][data-metric="reportedRequests"]';
+const SHOWCASE_CELL = '[data-testid="dashboard-queue"][data-metric="pendingShowcaseReviews"]';
 
 const BACKLOG = {
   openA: `Dashboard OPEN A ${Date.now()}`,
@@ -104,7 +105,6 @@ async function expectNoUnsourcedDesign(page: Page) {
     'Son 7 gün',
     'Panelde son yapılanlar',
     'güncellendi',
-    'Onay bekleyen vitrin kartı',
     'Hızlı işlemler',
     'Geçen hafta',
   ]) {
@@ -137,8 +137,8 @@ test.describe('admin dashboard (Genel görünüm)', () => {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
       await expect(admin.page.getByTestId('dashboard-date')).toHaveAttribute('datetime', today);
 
-      // A super admin may open everything: three cells, four figures, the list.
-      await expect(admin.page.getByTestId('dashboard-queue')).toHaveCount(3);
+      // A super admin may open everything: four cells, four figures, the list.
+      await expect(admin.page.getByTestId('dashboard-queue')).toHaveCount(4);
       await expect(admin.page.getByTestId('dashboard-kpi')).toHaveCount(4);
       await expect(admin.page.getByTestId('dashboard-system')).toBeVisible();
       await expect(admin.page.getByRole('link', { name: 'Talepleri incele' })).toHaveAttribute('href', '/requests');
@@ -219,16 +219,25 @@ test.describe('admin dashboard (Genel görünüm)', () => {
         expect(status).toBe('PENDING_REVIEW');
       }
 
-      // ---- reports: counted per report, listed per request ---------------
+      // ---- reports: counted per request, as the queue lists them ----------
+      // (API-DASHBOARD-REQUEST-REPORT-COUNT-001: two reports on one request is 1.)
       await admin.gotoAdmin('/');
       const openReports = await openReportCount();
-      expect(openReports).toBeGreaterThanOrEqual(2);
+      const reportedRequests = (
+        await prisma().serviceRequestReport.groupBy({ by: ['requestId'], where: { resolvedAt: null } })
+      ).length;
+      // The request reported twice makes reports outnumber reported requests.
+      expect(openReports).toBeGreaterThan(reportedRequests);
+      expect(reportedRequests).toBeGreaterThanOrEqual(1);
       const reports = admin.page.locator(REPORT_CELL);
-      await expect(reports.getByTestId('dashboard-queue-value')).toHaveText(String(openReports));
+      await expect(reports).toContainText('Karar bekleyen şikayetli talep');
+      await expect(reports.getByTestId('dashboard-queue-value')).toHaveText(String(reportedRequests));
       await expect(reports).toHaveAttribute('data-tone', 'warning');
       await reports.click();
       await expect(admin.page).toHaveURL(/\/requests\/reports\?state=open$/);
       await assertNoErrorScreen(admin.page);
+      // The queue's own total is the cell's number.
+      await expect(admin.page.getByTestId('report-view-open')).toContainText(String(reportedRequests));
       // Two reports on one request: one row, whose "Bildirim" column reads 2.
       const reportedRow = admin.page.locator(
         `[data-testid="report-queue-row"][data-request-id="${reported.id}"]`,
@@ -238,10 +247,24 @@ test.describe('admin dashboard (Genel görünüm)', () => {
       if (
         (await admin.page.getByTestId('pagination-next').evaluate((node) => node.tagName)) !== 'A'
       ) {
-        // One page: the "Bildirim" column adds up to the cell.
+        // One page: one row per counted request, and the "Bildirim" column adds up to the reports.
+        await expect(admin.page.getByTestId('report-queue-row')).toHaveCount(reportedRequests);
         const perRow = await admin.page.getByTestId('report-count').allInnerTexts();
         expect(perRow.reduce((sum, text) => sum + count(text), 0)).toBe(openReports);
       }
+
+      // ---- vitrin: the cell is the review queue's length ------------------
+      await admin.gotoAdmin('/');
+      const pendingVersions = await prisma().showcaseCardVersion.count({ where: { reviewStatus: 'PENDING' } });
+      const showcase = admin.page.locator(SHOWCASE_CELL);
+      await expect(showcase).toContainText('Onay bekleyen vitrin kartı');
+      await expect(showcase.getByTestId('dashboard-queue-value')).toHaveText(String(pendingVersions));
+      await expect(showcase).toHaveAttribute('data-tone', pendingVersions > 0 ? 'warning' : 'neutral');
+      await expect(showcase).toHaveAttribute('href', '/showcase/reviews');
+      await showcase.click();
+      await expect(admin.page).toHaveURL(/\/showcase\/reviews$/);
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByTestId('showcase-review-row')).toHaveCount(pendingVersions);
 
       // ---- KPI notes open the status views they count --------------------
       await admin.gotoAdmin('/');
@@ -371,7 +394,7 @@ test.describe('admin dashboard (Genel görünüm)', () => {
         await expect(trigger).toHaveAttribute('aria-expanded', 'false');
       }
 
-      // 1440: three queues in one row, four figures in one row.
+      // 1440: four queues in one row, four figures in one row.
       const tops = async (selector: string) =>
         new Set(
           await admin.page
