@@ -195,6 +195,42 @@ test.describe('scheduled jobs', () => {
     }
   });
 
+  test('the last run is read from the persisted history, failures and unfinished runs said as such', async ({
+    browser,
+  }) => {
+    // OPS-SCHEDULER-RUN-PERSISTENCE-001. Rows written straight to the table —
+    // what a previous process left behind — are what the screen shows: the
+    // panel has no memory of its own to lose on a restart. Newer than anything
+    // a cron tick could have written, so they are each job's last run.
+    const later = new Date(Date.now() + 60_000);
+    await prisma().schedulerRun.create({
+      data: {
+        jobKey: 'request-expiry',
+        status: 'FAILED',
+        startedAt: later,
+        finishedAt: new Date(later.getTime() + 2_000),
+        errorCode: 'TypeError',
+      },
+    });
+    await prisma().schedulerRun.create({
+      data: { jobKey: 'request-reminder', status: 'RUNNING', startedAt: later },
+    });
+
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    try {
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/operations-settings');
+      await assertNoErrorScreen(admin.page);
+      await expect(admin.page.getByTestId('scheduler-last-run-request-expiry')).toContainText('hata verdi (TypeError)');
+      await expect(admin.page.getByTestId('scheduler-last-run-request-reminder')).toContainText(
+        'bitişi kaydedilmedi (sürüyor ya da yarıda kaldı)',
+      );
+    } finally {
+      await admin.close();
+    }
+  });
+
   test('the panel fits a 320px phone', async ({ browser }) => {
     const adminAccount = await createAdmin();
     const admin = await Actor.open(browser, 'admin', primaryRuntime, {

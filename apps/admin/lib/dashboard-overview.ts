@@ -7,6 +7,7 @@ import type {
   SchedulerSettings,
 } from './api';
 import { SCHEDULER_JOB_COPY } from './api';
+import { describeSchedulerRun } from './scheduler-run';
 import type { AdminDashboardMetric, AdminMetricTone } from './dashboard-metrics';
 
 /**
@@ -26,10 +27,10 @@ import type { AdminDashboardMetric, AdminMetricTone } from './dashboard-metrics'
  *   behind it; one that may not is not shown a number it could not follow.
  * - **K12.** No figure without a source. The design's week-over-week change,
  *   sparklines, "Son 7 gün" chart, "N dakika önce güncellendi", "Panelde son
- *   yapılanlar" feed, vitrin queue and the total of waiting work are not
- *   drawn: the API has no series, no global audit feed and no showcase count
- *   in the summary, and a sum of reports, applications and tickets is not a
- *   number any list shows.
+ *   yapılanlar" feed and the total of waiting work are not drawn: the API has
+ *   no series and no global audit feed, and a sum of reports, applications
+ *   and tickets is not a number any list shows. The vitrin queue is drawn
+ *   since the summary carries its count (ADMIN-BACKEND-TRUTH-001).
  */
 
 /**
@@ -42,6 +43,7 @@ import type { AdminDashboardMetric, AdminMetricTone } from './dashboard-metrics'
  */
 export const DESTINATION_PERMISSIONS: ReadonlyArray<readonly [string, AdminPermission]> = [
   ['/requests/reports', 'REQUEST_REPORTS_READ'],
+  ['/showcase/reviews', 'SHOWCASE_REVIEW_READ'],
   ['/requests', 'REQUESTS_READ'],
   ['/providers', 'PROVIDERS_READ'],
   ['/offers', 'OFFERS_READ'],
@@ -90,14 +92,13 @@ export type DashboardQueueCell = {
 type QueueDefinition = Omit<DashboardQueueCell, 'value' | 'href' | 'tone'>;
 
 /**
- * The queues the summary counts, in the design's order. The design's fourth
- * cell, "Onay bekleyen vitrin kartı", is not here: the summary has no showcase
- * count, and the cell stays out until the endpoint carries one.
+ * The queues the summary counts, in the design's order.
  *
- * Each description says what the number counts in the list's own terms. The
- * report cell says so twice over, because its number is reports while its list
- * is requests: three providers reporting one request is 3 here and one row
- * there, whose "Bildirim" column reads 3.
+ * Each description says what the number counts in the list's own terms, and
+ * each number is the API's count of exactly the rows its list shows
+ * (ADMIN-BACKEND-TRUTH-001): the report cell counts *requests* with an
+ * undecided report — three providers reporting one request is 1 here and one
+ * row there — and the vitrin cell counts card versions waiting on an operator.
  */
 const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
   {
@@ -107,17 +108,23 @@ const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
     description: 'Karar verilene kadar iş alamazlar. Liste “İnceleme bekliyor” görünümünde açılır.',
   },
   {
-    metricKey: 'openRequestReports',
+    metricKey: 'reportedRequests',
     kicker: 'Şikayet',
-    title: 'Karar bekleyen talep bildirimi',
+    title: 'Karar bekleyen şikayetli talep',
     description:
-      'Bildirim başına sayılır; aynı talebe gelen bildirimler listede tek satırda, “Bildirim” sütununda toplanır.',
+      'Talep başına sayılır; aynı talebe gelen birden çok bildirim tek talep olarak, listede tek satırda görünür.',
   },
   {
     metricKey: 'openSupportTickets',
     kicker: 'Destek',
     title: 'Açık destek talebi',
     description: 'Yanıt bekleyen ve üzerinde çalışılan talepler; çözülen ve kapanan sayılmaz.',
+  },
+  {
+    metricKey: 'pendingShowcaseReviews',
+    kicker: 'Vitrin',
+    title: 'Onay bekleyen vitrin kartı',
+    description: 'İncelemeye gönderilmiş, karar bekleyen kart sürümleri. Liste en eski gönderim başta açılır.',
   },
 ];
 
@@ -131,7 +138,10 @@ export function buildDashboardQueues(
   can: Can,
 ): DashboardQueueCell[] {
   return QUEUE_DEFINITIONS.flatMap((definition) => {
-    const metric = requireMetric(metrics, definition.metricKey);
+    // A queue count the API left out (its list is not this session's to read)
+    // has no metric: no cell, as for a list the session cannot open.
+    const metric = metrics.find((candidate) => candidate.key === definition.metricKey);
+    if (!metric) return [];
     const href = linkIfAllowed(metric.href, can);
     if (!href) return [];
     return [{ ...definition, value: metric.value, href, tone: metric.tone }];
@@ -285,12 +295,6 @@ export type OperationsSnapshot = {
   engine: CampaignEngineSettings;
 };
 
-const RUN_OUTCOME: Record<'SUCCESS' | 'FAILED' | 'SKIPPED', string> = {
-  SUCCESS: 'tamamlandı',
-  FAILED: 'hata verdi',
-  SKIPPED: 'atlandı',
-};
-
 /**
  * The design's "what is the platform doing on its own" list, derived from the
  * operations settings reads (K12) — the same five endpoints the operations
@@ -356,16 +360,16 @@ export function buildSystemActivity(
 
   for (const job of snapshot.schedulers.jobs) {
     const copy = SCHEDULER_JOB_COPY[job.key];
-    const failed = job.lastRun?.outcome === 'FAILED';
+    const failed = job.lastRun?.status === 'FAILED';
     rows.push({
       key: `job-${job.key}`,
       name: copy?.name ?? job.key,
       description: copy?.impact ?? '',
       state: failed ? 'Son çalışma hata' : job.enabled ? 'Açık' : 'Kapalı',
       tone: failed ? 'failed' : job.enabled ? 'on' : 'off',
-      detail: job.lastRun
-        ? `Son çalışma ${formatDateTime(job.lastRun.finishedAt)} · ${RUN_OUTCOME[job.lastRun.outcome]}`
-        : null,
+      // From the persisted run history (OPS-SCHEDULER-RUN-PERSISTENCE-001);
+      // no line at all for a job with no recorded run.
+      detail: job.lastRun ? describeSchedulerRun(job.lastRun, formatDateTime) : null,
     });
   }
 

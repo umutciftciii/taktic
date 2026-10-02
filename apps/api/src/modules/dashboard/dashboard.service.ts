@@ -1,12 +1,34 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ProviderStatus, ServiceRequestStatus, SupportTicketStatus } from '@prisma/client';
+import { AdminPermission, ProviderStatus, ServiceRequestStatus, SupportTicketStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
+import { refundCandidateWhere } from '../offers/unviewed-offer-refund.service';
+import { reportedRequestWhere } from '../request-reports/request-report-queue';
+import { showcaseReviewQueueWhere } from '../showcase/showcase-review-queue';
 
 @Injectable()
 export class DashboardService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async adminSummary() {
+  /**
+   * The dashboard's counts (DASHBOARD_READ).
+   *
+   * ADMIN-BACKEND-TRUTH-001: every action count is read from the predicate its
+   * target list reads, so a number and the list it links to cannot disagree —
+   * `refundableOffers` is the refund scan's `total`, `reportedRequests` the
+   * open report queue's `total`, `pendingShowcaseReviews` the vitrin review
+   * queue's length.
+   *
+   * The two queue counts added here are facts about lists behind their own
+   * read permissions, so they follow the cross-domain projection rule
+   * (`mayEmbed`): a caller without the list's permission gets no key at all,
+   * not a zero. The older fields keep their shape.
+   */
+  async adminSummary(viewer: AuthUser | null = null) {
+    const now = new Date();
+    const mayReadShowcaseQueue = mayEmbed(viewer, AdminPermission.SHOWCASE_REVIEW_READ);
+    const mayReadReportQueue = mayEmbed(viewer, AdminPermission.REQUEST_REPORTS_READ);
     const [
       totalRequests,
       pendingRequests,
@@ -18,6 +40,8 @@ export class DashboardService {
       packagePurchases,
       openSupportTickets,
       openRequestReports,
+      reportedRequests,
+      pendingShowcaseReviews,
     ] = await Promise.all([
       this.prisma.serviceRequest.count(),
       this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
@@ -25,23 +49,11 @@ export class DashboardService {
       this.prisma.providerProfile.count({ where: { status: ProviderStatus.APPROVED } }),
       this.prisma.providerProfile.count({ where: { status: ProviderStatus.PENDING_REVIEW } }),
       this.prisma.offer.count(),
-      // Offers the unviewed-offer worker will actually pay out on: inside the
-      // policy, unviewed, unrefunded and past their own eligibility moment.
-      // Each offer's moment, never the current setting — the same snapshot the
-      // worker reads, so this figure and the worker cannot disagree. Without
-      // those clauses this counted every fresh offer nobody had opened yet, and
-      // every offer written before the policy existed — a figure labelled
-      // "refundable" that named things that would never be refunded.
-      this.prisma.offer.count({
-        where: {
-          unviewedRefundPolicy: true,
-          creditSpentTransactionId: { not: null },
-          creditRefundedTransactionId: null,
-          creditRefundedAt: null,
-          viewedAt: null,
-          unviewedRefundEligibleAt: { lte: new Date() },
-        },
-      }),
+      // Offers the unviewed-offer worker will actually pay out on — the
+      // refund scan's own predicate, so this is the scan's `total` and the
+      // run's candidate set (API-REFUND-SCAN-PAGINATION-001). Each offer's own
+      // eligibility moment, never the current setting.
+      this.prisma.offer.count({ where: refundCandidateWhere(now) }),
       this.prisma.packagePurchase.count(),
       // The support queue's backlog: the two statuses a ticket sits in while it
       // is still somebody's job. RESOLVED and CLOSED are deliberately outside
@@ -53,10 +65,20 @@ export class DashboardService {
           status: { in: [SupportTicketStatus.OPEN, SupportTicketStatus.IN_PROGRESS] },
         },
       }),
-      // The report queue's backlog: reports nobody has decided on. Counted per
-      // report rather than per request, which is the figure the nav badge
-      // shows; the queue itself groups them.
+      // Reports nobody has decided on, counted per *report*. Kept as it was;
+      // the dashboard's queue cell reads `reportedRequests` below, which
+      // counts in the queue's own unit.
       this.prisma.serviceRequestReport.count({ where: { resolvedAt: null } }),
+      // Requests with at least one undecided report, each counted once — the
+      // open report queue's rows (API-DASHBOARD-REQUEST-REPORT-COUNT-001).
+      mayReadReportQueue
+        ? this.prisma.serviceRequest.count({ where: reportedRequestWhere('open') })
+        : Promise.resolve(null),
+      // Card versions waiting on an operator — the vitrin review queue's rows
+      // (API-DASHBOARD-SHOWCASE-QUEUE-001).
+      mayReadShowcaseQueue
+        ? this.prisma.showcaseCardVersion.count({ where: showcaseReviewQueueWhere() })
+        : Promise.resolve(null),
     ]);
 
     return {
@@ -70,6 +92,8 @@ export class DashboardService {
       packagePurchases,
       openSupportTickets,
       openRequestReports,
+      ...(reportedRequests === null ? {} : { reportedRequests }),
+      ...(pendingShowcaseReviews === null ? {} : { pendingShowcaseReviews }),
     };
   }
 }

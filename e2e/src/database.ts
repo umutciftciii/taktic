@@ -11,6 +11,8 @@ import { requireE2eDatabaseUrl } from './database-url';
  * framework into the test runner.
  */
 const TRUNCATED_TABLES = [
+  // OPS-SCHEDULER-RUN-PERSISTENCE-001: append-only run history, no FK.
+  'SchedulerRun',
   'ServiceCategoryRouterRule',
   'ServiceRequestQuestionCondition',
   'Message',

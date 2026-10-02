@@ -16,6 +16,7 @@ import {
   PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
+  ShowcasePlacementStatus,
   UserRole,
   SourceChannel,
 } from '@prisma/client';
@@ -38,15 +39,28 @@ import { mayEmbed } from '../auth/embedded-permissions';
 import { purchaseTermsEvidenceOmit } from '../purchase-terms/purchase-terms.projection';
 import { PurchaseTermsService } from '../purchase-terms/purchase-terms.service';
 import { ShowcaseEntitlementService } from '../showcase/showcase-entitlement.service';
+import {
+  SHOWCASE_ENTITLEMENT_EFFECTIVE_STATUSES,
+  type ShowcaseEntitlementEffectiveStatus,
+  showcaseEntitlementEffectiveWhere,
+  showcaseEntitlementViewSelect,
+  toShowcaseEntitlementView,
+} from '../showcase/showcase-entitlement-status';
 import { ShowcasePlacementService } from '../showcase/showcase-placement.service';
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
 
-type AdminPurchaseFilters = {
+export type AdminPurchaseFilters = {
   status?: PackagePurchaseStatus;
   providerId?: string;
   packageId?: string;
+  /**
+   * API-SHOWCASE-PACKAGE-PURCHASES-FILTER-001: the vitrin package a purchase
+   * bought. `packageId` is the credit package's; the two never match the same
+   * row (a CHECK makes a purchase exactly one kind).
+   */
+  showcasePackageId?: string;
   /**
    * API-HARDENING-001: `OPEN` lists only captured payments whose credit is
    * held; `ANY` every purchase that ever had a hold. Anything else is refused.
@@ -55,6 +69,12 @@ type AdminPurchaseFilters = {
 };
 
 export const PURCHASE_CREDIT_HOLD_OPEN = 'PURCHASE_CREDIT_HOLD_OPEN';
+
+/** The admin list's page size when one is asked for without a size, and the most a page holds. */
+export const PACKAGE_PURCHASE_PAGE_DEFAULT_SIZE = 25;
+export const PACKAGE_PURCHASE_PAGE_MAX_SIZE = 100;
+
+export type AdminPurchasePaging = { page?: number; pageSize?: number };
 
 @Injectable()
 export class PackagePurchasesService implements OnModuleInit {
@@ -493,30 +513,130 @@ export class PackagePurchasesService implements OnModuleInit {
    * The operator's purchase list (PACKAGE_PURCHASES_READ). The provider is
    * named by the purchase; its contact person and e-mail are the provider
    * list's (PROVIDERS_READ) — see {@link toAdminPurchase}.
+   *
+   * Without `paging` the answer is the whole filtered list, as it always was.
+   * With it (`?page=` and/or `?pageSize=`) the answer is one page of the same
+   * filtered set and its `total`, counted with the same predicate
+   * ({@link adminPurchaseWhere}) — the vitrin package screen pages its sales
+   * this way instead of reading every purchase and filtering them itself
+   * (API-SHOWCASE-PACKAGE-PURCHASES-FILTER-001).
    */
   async listAdminPurchases(filters: AdminPurchaseFilters, viewer: AuthUser | null = null) {
-    const status = normalizeOptionalPurchaseStatus(filters.status);
-    const providerId = normalizeNullableString(filters.providerId);
-    const packageId = normalizeNullableString(filters.packageId);
-    const creditHold = normalizeNullableString(filters.creditHold);
-    if (creditHold !== null && creditHold !== 'OPEN' && creditHold !== 'ANY') {
-      throw new BadRequestException('creditHold must be OPEN or ANY');
-    }
-
+    const where = adminPurchaseWhere(filters);
     const purchases = await this.prisma.packagePurchase.findMany({
-      where: {
-        ...(status ? { status } : {}),
-        ...(providerId ? { providerId } : {}),
-        ...(packageId ? { packageId } : {}),
-        ...(creditHold === 'OPEN' ? { creditHold: { is: { status: PackagePurchaseCreditHoldStatus.OPEN } } } : {}),
-        ...(creditHold === 'ANY' ? { creditHold: { isNot: null } } : {}),
-      },
+      where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
-      include: packagePurchaseInclude,
+      include: adminPurchaseInclude,
       omit: packagePurchaseOmit,
     });
     const scope = adminPurchaseEmbedScope(viewer);
-    return purchases.map((purchase) => toAdminPurchase(purchase, scope));
+    const now = new Date();
+    return purchases.map((purchase) => toAdminPurchase(purchase, scope, now));
+  }
+
+  async listAdminPurchasesPage(
+    filters: AdminPurchaseFilters,
+    paging: AdminPurchasePaging,
+    viewer: AuthUser | null = null,
+  ) {
+    const where = adminPurchaseWhere(filters);
+    const page = paging.page ?? 1;
+    const pageSize = paging.pageSize ?? PACKAGE_PURCHASE_PAGE_DEFAULT_SIZE;
+    const [total, purchases] = await this.prisma.$transaction(
+      [
+        this.prisma.packagePurchase.count({ where }),
+        this.prisma.packagePurchase.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: adminPurchaseInclude,
+          omit: packagePurchaseOmit,
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    const scope = adminPurchaseEmbedScope(viewer);
+    const now = new Date();
+    return {
+      items: purchases.map((purchase) => toAdminPurchase(purchase, scope, now)),
+      total,
+      page,
+      pageSize,
+      hasNextPage: page * pageSize < total,
+    };
+  }
+
+  /**
+   * The figures a filtered purchase list adds up to, counted by the database
+   * over the same predicate as the list (PACKAGE_PURCHASES_READ). The vitrin
+   * package's "Satış özeti" reads this with `?showcasePackageId=`: totals that
+   * used to be summed in the browser over whatever rows it had fetched.
+   *
+   * - `byStatus` — purchases per payment status; their sum is `total`.
+   * - `paidRevenue` — the purchase-time price of every PAID purchase, per
+   *   currency. The same snapshot the list shows on each row.
+   * - `activeRuns` — purchases whose run is ACTIVE and inside its window now.
+   * - `entitlements` — vitrin rights granted by these purchases, by their
+   *   effective status ({@link effectiveShowcaseEntitlementStatus}); a legacy
+   *   card-bound purchase settled straight into a run and has none.
+   *
+   * One REPEATABLE READ snapshot, one `now`: the figures describe one moment.
+   */
+  async summarizeAdminPurchases(filters: AdminPurchaseFilters) {
+    const where = adminPurchaseWhere(filters);
+    const now = new Date();
+    const entitlementWhere = (status: ShowcaseEntitlementEffectiveStatus): Prisma.ShowcaseEntitlementWhereInput => ({
+      AND: [{ purchase: where }, showcaseEntitlementEffectiveWhere(status, now)],
+    });
+    const [total, byStatus, revenue, activeRuns, ...entitlementCounts] = await this.prisma.$transaction(
+      [
+        this.prisma.packagePurchase.count({ where }),
+        this.prisma.packagePurchase.groupBy({ by: ['status'], where, _count: { _all: true }, orderBy: { status: 'asc' } }),
+        this.prisma.packagePurchase.groupBy({
+          by: ['currencySnapshot'],
+          where: { AND: [where, { status: PackagePurchaseStatus.PAID }] },
+          _sum: { priceAmountSnapshot: true },
+          orderBy: { currencySnapshot: 'asc' },
+        }),
+        this.prisma.packagePurchase.count({
+          where: {
+            AND: [
+              where,
+              {
+                showcasePlacement: {
+                  is: { status: ShowcasePlacementStatus.ACTIVE, startAt: { lte: now }, endAt: { gt: now } },
+                },
+              },
+            ],
+          },
+        }),
+        ...SHOWCASE_ENTITLEMENT_EFFECTIVE_STATUSES.map((status) =>
+          this.prisma.showcaseEntitlement.count({ where: entitlementWhere(status) }),
+        ),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    const statusCounts = Object.fromEntries(
+      Object.values(PackagePurchaseStatus).map((status) => [status, 0]),
+    ) as Record<PackagePurchaseStatus, number>;
+    for (const row of byStatus as Array<{ status: PackagePurchaseStatus; _count: { _all: number } }>) {
+      statusCounts[row.status] = row._count._all;
+    }
+
+    return {
+      total,
+      byStatus: statusCounts,
+      paidRevenue: (revenue as Array<{ currencySnapshot: string; _sum: { priceAmountSnapshot: number | null } }>).map(
+        (row) => ({ currency: row.currencySnapshot, amount: row._sum.priceAmountSnapshot ?? 0 }),
+      ),
+      activeRuns,
+      entitlements: Object.fromEntries(
+        SHOWCASE_ENTITLEMENT_EFFECTIVE_STATUSES.map((status, index) => [status, entitlementCounts[index] as number]),
+      ) as Record<ShowcaseEntitlementEffectiveStatus, number>,
+      asOf: now,
+    };
   }
 
   /**
@@ -528,7 +648,7 @@ export class PackagePurchasesService implements OnModuleInit {
   async getAdminPurchase(id: string, viewer: AuthUser | null = null) {
     const purchase = await this.prisma.packagePurchase.findUnique({
       where: { id },
-      include: packagePurchaseInclude,
+      include: adminPurchaseInclude,
       omit: packagePurchaseOmit,
     });
 
@@ -540,7 +660,7 @@ export class PackagePurchasesService implements OnModuleInit {
     const creditHold = await this.readCreditHoldForAdmin(id);
 
     return {
-      ...toAdminPurchase(purchase, scope),
+      ...toAdminPurchase(purchase, scope, new Date()),
       webhookEvents: await this.readWebhookAttempts(id),
       creditHold: creditHold && !scope.ledger ? withoutBalanceAtOpen(creditHold) : creditHold,
     };
@@ -650,7 +770,7 @@ export class PackagePurchasesService implements OnModuleInit {
         ...(status === PackagePurchaseStatus.CANCELLED ? { cancelledAt: now } : {}),
         ...(status === PackagePurchaseStatus.EXPIRED ? { expiredAt: now } : {}),
       },
-      include: packagePurchaseInclude,
+      include: adminPurchaseInclude,
       omit: packagePurchaseOmit,
     });
 
@@ -665,7 +785,7 @@ export class PackagePurchasesService implements OnModuleInit {
       await this.mail.sendShowcasePackagePaymentFailed(updated.id);
     }
 
-    return toAdminPurchase(updated, adminPurchaseEmbedScope(viewer));
+    return toAdminPurchase(updated, adminPurchaseEmbedScope(viewer), now);
   }
 
   private async ensureProviderExists(providerId: string) {
@@ -694,13 +814,50 @@ function adminPurchaseEmbedScope(viewer: AuthUser | null): AdminPurchaseEmbedSco
   };
 }
 
-function toAdminPurchase<T extends { provider: { contactName: string; email: string | null } }>(
-  purchase: T,
-  scope: AdminPurchaseEmbedScope,
-) {
-  if (scope.providerContact) return purchase;
+/**
+ * The operator's projection of one purchase: the provider's contact only with
+ * PROVIDERS_READ, and the vitrin right this purchase granted — if it granted
+ * one — as its effective status (API-SHOWCASE-ENTITLEMENT-STATUS-001), never
+ * the stored row. `showcaseEntitlement` is null for a credit package and for a
+ * legacy card-bound vitrin purchase, which settled straight into a run.
+ */
+function toAdminPurchase<
+  T extends {
+    provider: { contactName: string; email: string | null };
+    showcaseEntitlement: Parameters<typeof toShowcaseEntitlementView>[0] | null;
+  },
+>(purchase: T, scope: AdminPurchaseEmbedScope, now: Date) {
+  const showcaseEntitlement = purchase.showcaseEntitlement
+    ? toShowcaseEntitlementView(purchase.showcaseEntitlement, now)
+    : null;
+  if (scope.providerContact) return { ...purchase, showcaseEntitlement };
   const { contactName: _contactName, email: _email, ...provider } = purchase.provider;
-  return { ...purchase, provider };
+  return { ...purchase, provider, showcaseEntitlement };
+}
+
+/**
+ * The one filter behind the admin list, its page, its total and its summary.
+ * Values are normalised here, so a blank parameter means "no filter" in all
+ * four the same way.
+ */
+export function adminPurchaseWhere(filters: AdminPurchaseFilters): Prisma.PackagePurchaseWhereInput {
+  const status = normalizeOptionalPurchaseStatus(filters.status);
+  const providerId = normalizeNullableString(filters.providerId);
+  const packageId = normalizeNullableString(filters.packageId);
+  const showcasePackageId = normalizeNullableString(filters.showcasePackageId);
+  const creditHold = normalizeNullableString(filters.creditHold);
+  if (creditHold !== null && creditHold !== 'OPEN' && creditHold !== 'ANY') {
+    throw new BadRequestException('creditHold must be OPEN or ANY');
+  }
+
+  return {
+    ...(status ? { status } : {}),
+    ...(providerId ? { providerId } : {}),
+    ...(packageId ? { packageId } : {}),
+    ...(showcasePackageId ? { showcasePackageId } : {}),
+    ...(creditHold === 'OPEN' ? { creditHold: { is: { status: PackagePurchaseCreditHoldStatus.OPEN } } } : {}),
+    ...(creditHold === 'ANY' ? { creditHold: { isNot: null } } : {}),
+  };
 }
 
 function withoutBalanceAtOpen<T extends { balanceAtOpen: unknown }>(hold: T): Omit<T, 'balanceAtOpen'> {
@@ -788,6 +945,12 @@ const packagePurchaseInclude = {
       resolvedAt: true,
     },
   },
+} satisfies Prisma.PackagePurchaseInclude;
+
+/** The operator's include: the shared one, plus the vitrin right's status columns. */
+const adminPurchaseInclude = {
+  ...packagePurchaseInclude,
+  showcaseEntitlement: { select: showcaseEntitlementViewSelect },
 } satisfies Prisma.PackagePurchaseInclude;
 
 /**

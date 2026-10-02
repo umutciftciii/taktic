@@ -674,8 +674,20 @@ export type RefundScanResponse = {
    * individually.
    */
   currentWindowHours: number;
+  /**
+   * Every eligible offer, across all pages (API-REFUND-SCAN-PAGINATION-001) —
+   * the same predicate as the dashboard's "iade adayı".
+   */
+  total: number;
+  /** `total` under its older name. */
   eligibleCount: number;
+  /** The credit every eligible offer would give back, across all pages. */
+  totalCreditCost: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
   skippedCount: number;
+  /** This page's offers, oldest submission first. */
   items: RefundScanItem[];
   skippedSummary: RefundScanSkippedSummary;
 };
@@ -951,6 +963,12 @@ export type PackagePurchase = {
     startAt: string;
     endAt: string;
   } | null;
+  /**
+   * The vitrin right this purchase granted, by its effective status
+   * (API-SHOWCASE-ENTITLEMENT-STATUS-001). Null for a credit package and for a
+   * legacy card-bound vitrin purchase, which settled straight into a run.
+   */
+  showcaseEntitlement?: ShowcaseEntitlementView | null;
   /**
    * What the payment provider's settlement notices did to this purchase. Only
    * present on the detail endpoint.
@@ -1336,6 +1354,69 @@ export function userRoleBadgeClass(role: UserRole): string {
   }
 }
 
+/**
+ * A vitrin right's status as the API derives it from its row — never computed
+ * here. AVAILABLE: unused and inside its window. RESERVED: bound to a card
+ * (the clock is stopped while the card is with an operator). CONSUMED: the
+ * card was approved and the right became a run. EXPIRED: the window closed.
+ */
+export type ShowcaseEntitlementStatus = 'AVAILABLE' | 'RESERVED' | 'CONSUMED' | 'EXPIRED';
+
+export type ShowcaseEntitlementView = {
+  id: string;
+  status: ShowcaseEntitlementStatus;
+  storedStatus: ShowcaseEntitlementStatus;
+  grantedAt: string;
+  expiresAt: string;
+  reservedAt: string | null;
+  usedAt: string | null;
+  pausedForReview: boolean;
+  /** Whole days left, rounded up; null when no clock runs (used, expired, paused). */
+  remainingDays: number | null;
+  placementId: string | null;
+};
+
+export const SHOWCASE_ENTITLEMENT_STATUS_LABELS: Record<ShowcaseEntitlementStatus, string> = {
+  AVAILABLE: 'Kullanılabilir',
+  RESERVED: 'Karta bağlı',
+  CONSUMED: 'Kullanıldı',
+  EXPIRED: 'Süresi doldu',
+};
+
+export function showcaseEntitlementBadgeClass(status: ShowcaseEntitlementStatus): string {
+  switch (status) {
+    case 'AVAILABLE':
+      return 'badge badge-good';
+    case 'RESERVED':
+      return 'badge badge-info';
+    case 'CONSUMED':
+      return 'badge badge-muted';
+    case 'EXPIRED':
+      return 'badge badge-warn';
+  }
+}
+
+/** `GET /package-purchases` with `page`/`pageSize`: one page and the filtered total. */
+export type PackagePurchasePage = {
+  items: PackagePurchase[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
+/** `GET /package-purchases/summary`: the filtered set, added up by the API. */
+export type PackagePurchaseSummary = {
+  total: number;
+  byStatus: Record<PackagePurchaseStatus, number>;
+  /** PAID purchases' purchase-time prices, per currency. */
+  paidRevenue: Array<{ currency: string; amount: number }>;
+  /** Purchases whose run is ACTIVE and inside its window now. */
+  activeRuns: number;
+  entitlements: Record<ShowcaseEntitlementStatus, number>;
+  asOf: string;
+};
+
 export type AdminSummary = {
   totalRequests: number;
   pendingRequests: number;
@@ -1347,8 +1428,15 @@ export type AdminSummary = {
   packagePurchases: number;
   /** OPEN + IN_PROGRESS tickets — the support backlog, never RESOLVED or CLOSED. */
   openSupportTickets: number;
-  /** Requests with at least one undecided provider report — the report queue. */
+  /** Undecided provider reports, counted per report (not per request). */
   openRequestReports: number;
+  /**
+   * Requests with at least one undecided report, each once — the open report
+   * queue's `total`. Absent without REQUEST_REPORTS_READ.
+   */
+  reportedRequests?: number;
+  /** Card versions waiting on an operator — the vitrin review queue. Absent without SHOWCASE_REVIEW_READ. */
+  pendingShowcaseReviews?: number;
 };
 
 export type FinanceSummaryRecentTransaction = {
@@ -2392,12 +2480,22 @@ export const SCHEDULER_JOB_KEYS = [
 
 export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
 
+/**
+ * One recorded execution of a job, from the API's `SchedulerRun` table
+ * (OPS-SCHEDULER-RUN-PERSISTENCE-001) — the same after a restart and from
+ * every instance. RUNNING with no `finishedAt` is a run in progress, or one
+ * whose process stopped before its end was recorded.
+ */
 export type SchedulerRunRecord = {
+  id: string;
+  status: 'RUNNING' | 'SUCCESS' | 'FAILED';
+  trigger: 'SCHEDULER' | 'MANUAL';
   startedAt: string;
-  finishedAt: string;
-  outcome: 'SUCCESS' | 'FAILED' | 'SKIPPED';
+  finishedAt: string | null;
   /** Counts only — never an id, an address or a provider's error text. */
   summary: string | null;
+  /** The error's class name on a FAILED run. */
+  errorCode: string | null;
 };
 
 export type SchedulerJob = {
@@ -2407,7 +2505,7 @@ export type SchedulerJob = {
   cron: string;
   /** True for the two jobs whose passes move credits. */
   movesMoney: boolean;
-  /** What the API instance that answered last saw this job do, or null. */
+  /** The job's most recent recorded run, or null when none has been recorded. */
   lastRun: SchedulerRunRecord | null;
 };
 
@@ -2744,6 +2842,8 @@ export type RequestReportQueueItem = {
 export type RequestReportQueue = {
   items: RequestReportQueueItem[];
   nextCursor: string | null;
+  /** Every request in this view, not this page's — the dashboard's `reportedRequests` for the open view. */
+  total: number;
 };
 
 /** One report of one request, as the detail page lists them. Operator-only. */

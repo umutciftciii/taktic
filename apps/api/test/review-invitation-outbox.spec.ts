@@ -327,8 +327,8 @@ describe('ReviewInvitationOutbox', () => {
     expect(logs).toHaveLength(1);
     expect(logs[0]!.status).toBe(NotificationStatus.SENT);
     expect(ctx.notifications.ofTemplate('review-invitation')).toHaveLength(1);
-    const run = ctx.app.get(SchedulerRunRegistry).get('request-expiry');
-    expect(run?.outcome).toBe('SUCCESS');
+    const run = (await ctx.app.get(SchedulerRunRegistry).lastRuns())['request-expiry'];
+    expect(run?.status).toBe('SUCCESS');
     expect(run?.summary).toContain('reviewInvitationsSent=1');
   });
 });

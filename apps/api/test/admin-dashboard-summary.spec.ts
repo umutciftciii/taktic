@@ -160,6 +160,9 @@ describe('who may read the summary', () => {
       packagePurchases: 0,
       openSupportTickets: 0,
       openRequestReports: 0,
+      // ADMIN-BACKEND-TRUTH-001: queue counts a super admin may follow.
+      reportedRequests: 0,
+      pendingShowcaseReviews: 0,
     });
   });
 

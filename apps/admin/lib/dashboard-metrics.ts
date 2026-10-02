@@ -2,11 +2,14 @@ import type { AdminSummary } from './api';
 import { OPEN_SUPPORT_TICKETS_HREF } from './support-ticket-filter';
 
 /**
- * The report queue's open tab. Its rows are *requests* and each row carries its
- * own "Bildirim" count; the card counts reports, so the number on the card is
- * the sum of that column across the tab, not the number of rows in it.
+ * The report queue's open tab. Its rows are *requests*, and its `total` is
+ * `reportedRequests` — the queue cell's number (API-DASHBOARD-REQUEST-REPORT-COUNT-001).
+ * `openRequestReports` counts reports, the sum of the tab's "Bildirim" column.
  */
 export const OPEN_REQUEST_REPORTS_HREF = '/requests/reports?state=open';
+
+/** The vitrin review queue: every card version waiting on an operator (API-DASHBOARD-SHOWCASE-QUEUE-001). */
+export const SHOWCASE_REVIEWS_HREF = '/showcase/reviews';
 
 /**
  * The status views the action cards open. Each is the list's own `?status=`
@@ -58,7 +61,13 @@ type AdminMetricDefinition = {
   key: string;
   label: string;
   href: string;
-  read: (summary: AdminSummary) => number;
+  read: (summary: AdminSummary) => number | undefined;
+  /**
+   * A count the API sends only to a session that may read its list
+   * (`mayEmbed`). Absent, the metric is not built at all; a required field
+   * that goes missing still reads as zero.
+   */
+  permissioned?: true;
   /**
    * Set only on a metric that names outstanding work. Left off deliberately for
    * totals and standing counts — see rule 1 above.
@@ -123,6 +132,22 @@ const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
     read: (s) => s.openRequestReports,
     actionTone: 'warning',
   },
+  {
+    key: 'reportedRequests',
+    label: 'Şikayetli talep',
+    href: OPEN_REQUEST_REPORTS_HREF,
+    read: (s) => s.reportedRequests,
+    actionTone: 'warning',
+    permissioned: true,
+  },
+  {
+    key: 'pendingShowcaseReviews',
+    label: 'Onay bekleyen vitrin kartı',
+    href: SHOWCASE_REVIEWS_HREF,
+    read: (s) => s.pendingShowcaseReviews,
+    actionTone: 'warning',
+    permissioned: true,
+  },
 ];
 
 /**
@@ -141,18 +166,26 @@ export function resolveMetricTone(
   return actionTone;
 }
 
-/** Every dashboard card, in display order, with its badge already resolved. */
+/**
+ * Every dashboard card the summary carries, in display order, with its badge
+ * already resolved. A permissioned count the API left out (a queue this
+ * session may not read) yields no metric — never a zero standing in for "not
+ * yours to see".
+ */
 export function buildAdminDashboardMetrics(summary: AdminSummary): AdminDashboardMetric[] {
-  return ADMIN_DASHBOARD_METRICS.map((definition) => {
+  return ADMIN_DASHBOARD_METRICS.flatMap((definition) => {
     const raw = definition.read(summary);
-    const value = Number.isFinite(raw) ? raw : 0;
+    if (raw === undefined && definition.permissioned) return [];
+    const value = typeof raw === 'number' && Number.isFinite(raw) ? raw : 0;
 
-    return {
-      key: definition.key,
-      label: definition.label,
-      value,
-      href: definition.href,
-      tone: resolveMetricTone(value, definition.actionTone),
-    };
+    return [
+      {
+        key: definition.key,
+        label: definition.label,
+        value,
+        href: definition.href,
+        tone: resolveMetricTone(value, definition.actionTone),
+      },
+    ];
   });
 }

@@ -11,12 +11,15 @@ import { SectionCard } from '../../components/section-card';
 import { SummaryStrip } from '../../components/summary-strip';
 import type { RefundScanExecuteResponse, RefundScanExecuteResult, RefundScanResponse } from '../../lib/api';
 import { formatCount } from '../../lib/pagination';
+import { Pagination } from '../../components/pagination';
 import { executeRefundScanAction, refreshRefundScanAction } from './actions';
 import { CONFIRMATION_PROOF_FIELD } from '../../lib/confirmation-proof-keys';
 
 type RefundScanClientProps = {
   initialScan: RefundScanResponse;
   initialLimit: number;
+  /** The preview page on screen (`?page=`). */
+  page: number;
   /** OFFER_REFUND_EXECUTE, decided on the server; the API refuses regardless. */
   canExecute: boolean;
   /** Read permissions of the screens a row can link to. */
@@ -52,44 +55,46 @@ const RESULT_LABELS: Record<RefundScanExecuteResult['status'], string> = {
 /**
  * The scan screen's interactive half.
  *
- * Two calls, both the endpoints they always were: the preview
- * (`GET /offers/refund-scan?limit`) and the run
+ * Two calls: the preview (`GET /offers/refund-scan?page&pageSize`) and the run
  * (`POST /offers/refund-scan/execute {limit}`), made through this app's server
- * (./actions.ts). What this adds is the step the design asks for in between —
- * the run starts only after a confirmation that says what it will do — and one
- * rule that keeps that confirmation honest: the run always uses the limit the
- * preview on screen was made with. Change the limit and the run stays closed
- * until the preview is refreshed, so the number in the dialog is never about a
- * different batch.
+ * (./actions.ts). The run starts only after a confirmation that says what it
+ * will do.
+ *
+ * API-REFUND-SCAN-PAGINATION-001: the preview no longer depends on the limit.
+ * It is one page of every eligible offer, and its `total` and credit sum are
+ * the API's over all of them, so the figures on screen are the whole set. The
+ * limit is only the run's batch size: the run takes the oldest `limit`
+ * candidates — the first rows of page 1 — and the dialog says so with the
+ * limit typed now, so there is no stale preview to refresh before running.
  */
 export function RefundScanClient({
   initialScan,
   initialLimit,
+  page,
   canExecute,
   canOpenOffers,
   canOpenRequests,
   canOpenProviders,
 }: RefundScanClientProps) {
   const [limit, setLimit] = useState(initialLimit);
-  const [scannedLimit, setScannedLimit] = useState(initialLimit);
   const [scan, setScan] = useState(initialScan);
   const [executeResult, setExecuteResult] = useState<RefundScanExecuteResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const previewCredits = scan.items.reduce((total, item) => total + item.creditCost, 0);
-  const limitChanged = limit !== scannedLimit;
-  const eligible = scan.eligibleCount;
+  const eligible = scan.total;
+  const limitValid = Number.isInteger(limit) && limit >= 1 && limit <= 500;
+  /** How many offers a run with this limit would take now: the oldest of the eligible set. */
+  const batch = limitValid ? Math.min(limit, eligible) : 0;
 
-  /** Reads the preview for `nextLimit`; false (with the message shown) when it was refused. */
-  async function loadPreview(nextLimit: number): Promise<boolean> {
-    const preview = await refreshRefundScanAction(nextLimit);
+  /** Reads this page of the preview again; false (with the message shown) when it was refused. */
+  async function loadPreview(): Promise<boolean> {
+    const preview = await refreshRefundScanAction(page);
     if (!preview.ok) {
       setError(preview.error);
       return false;
     }
     setScan(preview.data);
-    setScannedLimit(nextLimit);
     return true;
   }
 
@@ -97,15 +102,15 @@ export function RefundScanClient({
     startTransition(async () => {
       setError(null);
       setExecuteResult(null);
-      await loadPreview(limit);
+      await loadPreview();
     });
   }
 
   function executeScan(event: FormEvent<HTMLFormElement>) {
     // The confirmation submits this form; nothing here posts it as a page.
     event.preventDefault();
-    if (limitChanged || eligible === 0) return;
-    const runLimit = scannedLimit;
+    if (!limitValid || eligible === 0) return;
+    const runLimit = limit;
     // The dialog's proof rides in the form for this one submission; it is read
     // here, synchronously, and handed to the action.
     const proof = new FormData(event.currentTarget).get(CONFIRMATION_PROOF_FIELD);
@@ -118,7 +123,7 @@ export function RefundScanClient({
       }
       setExecuteResult(run.data);
       // The preview after the run, so the screen shows what is left.
-      await loadPreview(runLimit);
+      await loadPreview();
     });
   }
 
@@ -130,14 +135,14 @@ export function RefundScanClient({
           {
             label: 'İade edilecek',
             value: `${formatCount(eligible)} teklif`,
-            note: `İlk ${formatCount(scannedLimit)} aday içinde, müşteri hiç görmedi`,
+            note: 'Tüm uygun adaylar, müşteri hiç görmedi',
             tone: eligible > 0 ? 'success' : 'neutral',
             testId: 'refund-scan-eligible',
           },
           {
             label: 'Geri verilecek kredi',
-            value: formatCount(previewCredits),
-            note: 'Önizlemedeki tekliflerin toplamı',
+            value: formatCount(scan.totalCreditCost),
+            note: 'Tüm uygun adayların toplamı',
             testId: 'refund-scan-credits',
           },
           {
@@ -182,18 +187,20 @@ export function RefundScanClient({
             <form onSubmit={executeScan} data-testid="refund-scan-execute-form">
               <ConfirmDialog
                 proof="refund-scan.execute"
-                triggerLabel={`${formatCount(eligible)} teklifin iadesini onayla`}
+                triggerLabel={`${formatCount(batch)} teklifin iadesini onayla`}
                 triggerClassName="btn btn-primary btn-sm"
-                disabled={isPending || eligible === 0 || limitChanged}
-                title={`${formatCount(eligible)} teklifin kredisi iade edilsin mi?`}
+                disabled={isPending || eligible === 0 || !limitValid}
+                title={`${formatCount(batch)} teklifin kredisi iade edilsin mi?`}
                 consequence={
                   <>
                     <p>
-                      Önizlemede {formatCount(eligible)} teklif için toplam {formatCount(previewCredits)} kredi iade
-                      edilecek görünüyor.
+                      Şu anda {formatCount(eligible)} teklif iadeye uygun; hepsinin kredisi toplam{' '}
+                      {formatCount(scan.totalCreditCost)}. Bu çalıştırma bunların en eskisinden başlayarak{' '}
+                      {formatCount(batch)} tanesini işler
+                      {eligible > batch ? `; kalan ${formatCount(eligible - batch)} teklif sonraki çalıştırmaya kalır` : ''}.
                     </p>
                     <p>
-                      Onaylarsanız en fazla {formatCount(scannedLimit)} aday yeniden sorgulanır ve her teklif o anda
+                      Onaylarsanız en fazla {formatCount(limit)} aday yeniden sorgulanır ve her teklif o anda
                       yeniden değerlendirilir: arada müşterinin açtığı teklif atlanır, yeni uygun hâle gelen teklif
                       iade edilebilir. Sonuç bu yüzden önizlemeden farklı olabilir; aşağıda teklif teklif gösterilir.
                     </p>
@@ -211,12 +218,12 @@ export function RefundScanClient({
           ) : null}
         </div>
         <p className="detail-muted-note" id="refund-scan-limit-note">
-          Limit yalnız bu çalıştırmada işlenecek en eski aday sayısını sınırlar (1–500); kimin iade alacağını
-          değiştirmez. Her teklif oluşturulduğu andaki kendi süresine göre değerlendirilir.
+          Limit yalnız bu çalıştırmada işlenecek en eski aday sayısını sınırlar (1–500); kimin iade alacağını ve
+          önizlemeyi değiştirmez. Her teklif oluşturulduğu andaki kendi süresine göre değerlendirilir.
         </p>
-        {canExecute && limitChanged ? (
-          <p className="refund-scan-stale" role="status" data-testid="refund-scan-stale">
-            Limit değişti. İadeyi onaylamadan önce “Yeniden tara” ile önizlemeyi güncelleyin.
+        {canExecute && !limitValid ? (
+          <p className="refund-scan-stale" role="status" data-testid="refund-scan-limit-invalid">
+            Limit 1 ile 500 arasında bir tam sayı olmalı.
           </p>
         ) : null}
         {error ? (
@@ -266,14 +273,21 @@ export function RefundScanClient({
 
       <SectionCard
         title="Önizleme"
-        subtitle={`${formatCount(scan.items.length)} teklif · en eski aday başta`}
+        subtitle="Tüm uygun teklifler, en eski aday başta; çalıştırma bu sırayla işler."
         padded={scan.items.length === 0}
       >
         {scan.items.length === 0 ? (
-          <EmptyState
-            title="Bu taramada uygun teklif yok."
-            description="Müşterinin açmadığı bir teklifin iade süresi dolduğunda burada görünür."
-          />
+          scan.total > 0 ? (
+            <EmptyState
+              title="Bu sayfada aday yok."
+              description={`Toplam ${formatCount(scan.total)} uygun teklif var; önceki sayfalara dönün.`}
+            />
+          ) : (
+            <EmptyState
+              title="Bu taramada uygun teklif yok."
+              description="Müşterinin açmadığı bir teklifin iade süresi dolduğunda burada görünür."
+            />
+          )
         ) : (
           <DataTable caption="İade önizlemesi" columns={PREVIEW_COLUMNS} minWidth={1100} testId="refund-scan-preview">
             {scan.items.map((item) => (
@@ -302,6 +316,18 @@ export function RefundScanClient({
             ))}
           </DataTable>
         )}
+        {scan.total > 0 ? (
+          <Pagination
+            path="/refund-scan"
+            params={{ limit: limit === 100 || !limitValid ? '' : String(limit) }}
+            page={scan.page}
+            pageSize={scan.pageSize}
+            total={scan.total}
+            hasNextPage={scan.hasNextPage}
+            noun="aday"
+            summaryTestId="refund-scan-count"
+          />
+        ) : null}
       </SectionCard>
 
       <SectionCard title="Neden atlandı" subtitle="Kural dışında kalan teklifler, tüm kayıtlarda.">

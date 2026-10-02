@@ -16,6 +16,7 @@ import { PageHeader } from '../../../components/page-header';
 import { CursorPagination } from '../../../components/pagination';
 import { SavedViewTabs, type TabItem } from '../../../components/tabs';
 import { buildHref } from '../../../lib/list-query';
+import { formatCount } from '../../../lib/pagination';
 
 /**
  * Şikayet edilen talepler (#4), design `list:complaints` (ADMIN-DESIGN-001 Faz 3A).
@@ -91,20 +92,22 @@ export default async function RequestReportsQueuePage({ searchParams }: ReportQu
     }).toString()}`,
   );
 
-  // Only the open view's rows are on this page; the other view has no count.
+  // The API counts the whole view in its own unit — requests, not reports —
+  // with the predicate the dashboard's "şikayetli talep" reads
+  // (API-DASHBOARD-REQUEST-REPORT-COUNT-001). Only the active view is read.
   const views: TabItem[] = [
     { key: 'open', label: 'Açık', testId: 'report-view-open' },
     { key: 'resolved', label: 'Çözülen', testId: 'report-view-resolved' },
-  ].map((view) => (view.key === state && !cursor && !queue.nextCursor ? { ...view, count: queue.items.length } : view));
+  ].map((view) => (view.key === state ? { ...view, count: queue.total } : view));
 
   const summary =
     state === 'open'
-      ? queue.items.length === 0
+      ? queue.total === 0
         ? 'Karar bekleyen talep yok'
-        : `${queue.nextCursor ? 'Bu sayfada ' : ''}${queue.items.length} talep karar bekliyor · en eski bildirim başta`
-      : queue.items.length === 0
+        : `${formatCount(queue.total)} şikayetli talep karar bekliyor · en eski bildirim başta`
+      : queue.total === 0
         ? 'Henüz karar verilmiş talep yok'
-        : `${queue.nextCursor ? 'Bu sayfada ' : ''}${queue.items.length} talep hakkında karar verildi`;
+        : `${formatCount(queue.total)} talep hakkında karar verildi`;
 
   return (
     <main className="request-reports-page">

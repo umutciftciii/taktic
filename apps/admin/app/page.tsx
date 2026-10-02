@@ -33,7 +33,7 @@ import { filterNavMenu } from '../lib/nav';
  * block shows, links and colours is decided in `lib/dashboard-overview.ts` on
  * top of `lib/dashboard-metrics.ts`; see there for K2 (a queue only for a
  * session that may open it) and K12 (no figure without a source: no change
- * figures, sparklines, 7-day chart, "son yapılanlar" feed or vitrin queue).
+ * figures, sparklines, 7-day chart or "son yapılanlar" feed).
  */
 
 export const dynamic = 'force-dynamic';

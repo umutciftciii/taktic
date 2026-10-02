@@ -4,12 +4,14 @@ import { ApiError, apiFetch, type RefundScanExecuteResponse, type RefundScanResp
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
+import { scanQuery } from './scan-query';
 
 /**
  * The refund scan's two calls, made from this server rather than the browser.
  *
  * The endpoints, the bodies and the permissions are the ones the screen always
- * used — `GET /offers/refund-scan?limit` (OFFER_REFUND_SCAN_READ) and
+ * used — `GET /offers/refund-scan?page&pageSize` (OFFER_REFUND_SCAN_READ; paged
+ * since API-REFUND-SCAN-PAGINATION-001) and
  * `POST /offers/refund-scan/execute {limit}` (OFFER_REFUND_EXECUTE). What moved
  * is the caller. The browser used to call the API directly at an address
  * inlined when the app was built, which is the one place this panel did so:
@@ -23,10 +25,9 @@ import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof
 
 export type RefundScanActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export async function refreshRefundScanAction(limit: number): Promise<RefundScanActionResult<RefundScanResponse>> {
+export async function refreshRefundScanAction(page: number): Promise<RefundScanActionResult<RefundScanResponse>> {
   try {
-    const query = new URLSearchParams({ limit: String(limit) });
-    return { ok: true, data: await apiFetch<RefundScanResponse>(`/offers/refund-scan?${query.toString()}`) };
+    return { ok: true, data: await apiFetch<RefundScanResponse>(`/offers/refund-scan?${scanQuery(page)}`) };
   } catch (error) {
     return refusal(error, 'Tarama başarısız');
   }

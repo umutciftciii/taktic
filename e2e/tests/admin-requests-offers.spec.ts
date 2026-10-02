@@ -438,14 +438,19 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await expect(page.getByTestId('refund-scan-row').filter({ hasText: offer.id })).toHaveCount(1);
       await page.screenshot({ path: shot(testInfo, 'refund-scan-1440'), fullPage: false });
 
-      // A changed limit closes the run until the preview matches it again.
+      // The preview is the API's whole eligible set, paged, with its total
+      // under the table (API-REFUND-SCAN-PAGINATION-001).
+      await expect(page.getByTestId('refund-scan-count')).toContainText('aday');
+
+      // The limit is only the run's batch size: changing it needs no new
+      // preview, and a value outside 1–500 closes the run.
       const execute = page.getByTestId('refund-scan-execute');
       await expect(execute).toBeEnabled();
-      await page.getByLabel('Limit').fill('400');
+      await page.getByLabel('Limit').fill('0');
       await expect(execute).toBeDisabled();
-      await expect(page.getByTestId('refund-scan-stale')).toBeVisible();
-      await page.getByRole('button', { name: 'Yeniden tara' }).click();
-      await expect(page.getByTestId('refund-scan-stale')).toHaveCount(0);
+      await expect(page.getByTestId('refund-scan-limit-invalid')).toBeVisible();
+      await page.getByLabel('Limit').fill('400');
+      await expect(page.getByTestId('refund-scan-limit-invalid')).toHaveCount(0);
       await expect(execute).toBeEnabled();
       actionCalls = 0;
 

@@ -7,6 +7,7 @@ import {
   ShowcaseVersionChangeTrigger,
   ShowcaseVersionReview,
 } from '@prisma/client';
+import { showcaseReviewQueueWhere } from './showcase-review-queue';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -78,7 +79,9 @@ export class AdminShowcaseService {
     const view = operatorView(viewer);
     const versions = await this.prisma.showcaseCardVersion.findMany({
       where: {
-        reviewStatus: filters.reviewStatus ?? ShowcaseVersionReview.PENDING,
+        // The default view is the queue itself, from the predicate the
+        // dashboard's count also reads (showcase-review-queue.ts).
+        ...(filters.reviewStatus ? { reviewStatus: filters.reviewStatus } : showcaseReviewQueueWhere()),
         ...(filters.providerId ? { card: { providerId: filters.providerId } } : {}),
       },
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],

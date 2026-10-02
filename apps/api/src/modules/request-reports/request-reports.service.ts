@@ -16,6 +16,7 @@ import { ServiceRequestsService } from '../service-requests/service-requests.ser
 import { CreateRequestReportDto } from './dto/create-request-report.dto';
 import { ResolveRequestReportsDto } from './dto/resolve-request-reports.dto';
 import { rejectionReasonForRemoval } from './request-report-copy';
+import { type ReportQueueState, reportedRequestWhere, reportQueueStateWhere } from './request-report-queue';
 import {
   REPORT_ALREADY_EXISTS_CODE, REPORT_MAX_PER_PROVIDER_PER_DAY, REPORT_RATE_LIMITED_CODE,
 } from './request-reports.constants';
@@ -30,7 +31,7 @@ const QUEUE_EXCERPT_LENGTH = 160;
 const QUEUE_DEFAULT_LIMIT = 50;
 const QUEUE_MAX_LIMIT = 100;
 
-export type ReportQueueState = 'open' | 'resolved';
+export type { ReportQueueState } from './request-report-queue';
 
 @Injectable()
 export class RequestReportsService {
@@ -100,23 +101,27 @@ export class RequestReportsService {
    */
   async listForAdmin(state: ReportQueueState, cursor: string | null, limit = QUEUE_DEFAULT_LIMIT) {
     const pageSize = Math.min(Math.max(1, Math.trunc(limit)), QUEUE_MAX_LIMIT);
-    const inState: Prisma.ServiceRequestReportWhereInput =
-      state === 'open' ? { resolvedAt: null } : { resolvedAt: { not: null } };
+    const inState = reportQueueStateWhere(state);
 
-    const grouped = await this.prisma.serviceRequestReport.groupBy({
-      by: ['requestId'],
-      where: inState,
-      _count: { _all: true },
-      _min: { createdAt: true },
-      having: await this.afterCursor(cursor, inState),
-      orderBy: [{ _min: { createdAt: 'asc' } }, { requestId: 'asc' }],
-      take: pageSize + 1,
-    });
+    const [grouped, total] = await Promise.all([
+      this.prisma.serviceRequestReport.groupBy({
+        by: ['requestId'],
+        where: inState,
+        _count: { _all: true },
+        _min: { createdAt: true },
+        having: await this.afterCursor(cursor, inState),
+        orderBy: [{ _min: { createdAt: 'asc' } }, { requestId: 'asc' }],
+        take: pageSize + 1,
+      }),
+      // The whole view's size in its own unit — requests, not reports — from
+      // the predicate the dashboard's `reportedRequests` reads.
+      this.prisma.serviceRequest.count({ where: reportedRequestWhere(state) }),
+    ]);
 
     const page = grouped.slice(0, pageSize);
     const requestIds = page.map((group) => group.requestId);
     if (requestIds.length === 0) {
-      return { items: [], nextCursor: null };
+      return { items: [], nextCursor: null, total };
     }
 
     const [requests, reports] = await Promise.all([
@@ -182,6 +187,7 @@ export class RequestReportsService {
         };
       }),
       nextCursor: grouped.length > pageSize ? page[page.length - 1]!.requestId : null,
+      total,
     };
   }
 

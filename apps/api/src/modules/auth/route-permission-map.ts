@@ -174,6 +174,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/operations-settings/schedulers', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
   { method: 'PUT', path: '/operations-settings/schedulers/:job', permission: AdminPermission.SCHEDULERS_WRITE },
   { method: 'GET', path: '/package-purchases', permission: AdminPermission.PACKAGE_PURCHASES_READ },
+  { method: 'GET', path: '/package-purchases/summary', permission: AdminPermission.PACKAGE_PURCHASES_READ },
   { method: 'GET', path: '/package-purchases/:id', permission: AdminPermission.PACKAGE_PURCHASES_READ },
   { method: 'PATCH', path: '/package-purchases/:id/status', permission: AdminPermission.PACKAGE_PURCHASE_STATUS_WRITE },
   { method: 'GET', path: '/payments/config', permission: AdminPermission.PAYMENTS_CONFIG_READ },

@@ -1,6 +1,6 @@
 import { UserRole } from '@prisma/client';
 import request from 'supertest';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EntitlementRenewalScheduler } from '../src/modules/entitlements/entitlement-renewal.scheduler';
 import {
   SCHEDULER_JOB_KEYS,
@@ -9,6 +9,7 @@ import {
 } from '../src/modules/operations-settings/scheduler-jobs';
 import { SchedulerRunRegistry } from '../src/modules/operations-settings/scheduler-run-registry.service';
 import { SchedulerSettingsService } from '../src/modules/operations-settings/scheduler-settings.service';
+import { UnviewedOfferRefundService } from '../src/modules/offers/unviewed-offer-refund.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { RequestLifecycleSchedulerService } from '../src/modules/request-lifecycle/request-lifecycle-scheduler.service';
 import { ShowcaseSchedulerService } from '../src/modules/showcase/showcase-scheduler.service';
@@ -362,7 +363,7 @@ describe('fail-closed', () => {
           },
         },
       } as unknown as PrismaService,
-      new SchedulerRunRegistry(),
+      new SchedulerRunRegistry({} as PrismaService),
     );
 
     for (const job of SCHEDULER_JOB_KEYS) {
@@ -460,18 +461,20 @@ describe('the natural tick', () => {
   for (const job of SCHEDULER_JOB_KEYS) {
     it(`runs its pass on a tick once ${job} is on`, async () => {
       const { cookie } = await superAdminCookie();
-      const runs = ctx.app.get(SchedulerRunRegistry);
       await toggle(cookie, job, true).expect(200);
 
       await TICKS[job]();
 
       // Every job records the pass it completed, which is the observable a
-      // scheduler that skipped its work cannot produce.
-      expect(runs.get(job)?.outcome).toBe('SUCCESS');
+      // scheduler that skipped its work cannot produce — now as a row.
+      const rows = await ctx.prisma.schedulerRun.findMany({ where: { jobKey: job } });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ status: 'SUCCESS', trigger: 'SCHEDULER', errorCode: null });
+      expect(rows[0]!.finishedAt).not.toBeNull();
     });
   }
 
-  it('reports what this instance last saw a job do', async () => {
+  it('reports the last recorded run of a job', async () => {
     const { cookie } = await superAdminCookie();
     await toggle(cookie, 'request-expiry', true).expect(200);
     await overdueRequest();
@@ -481,9 +484,145 @@ describe('the natural tick', () => {
     const job = (await list(cookie).expect(200)).body.jobs.find(
       (entry: { key: string }) => entry.key === 'request-expiry',
     );
-    expect(job.lastRun.outcome).toBe('SUCCESS');
+    expect(job.lastRun.status).toBe('SUCCESS');
+    expect(job.lastRun.trigger).toBe('SCHEDULER');
+    expect(job.lastRun.errorCode).toBeNull();
+    expect(new Date(job.lastRun.finishedAt).getTime()).toBeGreaterThanOrEqual(
+      new Date(job.lastRun.startedAt).getTime(),
+    );
     // Counts only — no request id, no address, no error text.
     expect(job.lastRun.summary).toContain('expired=1');
     expect(job.lastRun.summary).not.toMatch(/@|http|[a-z0-9]{20,}/);
+  });
+});
+
+/**
+ * OPS-SCHEDULER-RUN-PERSISTENCE-001: the run history is the database's, not a
+ * process's. A fresh registry — what a restarted process has — reads exactly
+ * what the previous one wrote, a FAILED run stays on record after the next
+ * success, and a closed row can be neither rewritten nor deleted.
+ */
+describe('persisted run history', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function lastRun(cookie: string, key: string) {
+    const body = (await list(cookie).expect(200)).body as {
+      jobs: Array<{ key: string; lastRun: Record<string, unknown> | null }>;
+    };
+    return body.jobs.find((entry) => entry.key === key)!.lastRun;
+  }
+
+  it('answers "no recorded run" for every job that never ran — not a guessed date', async () => {
+    const { cookie } = await superAdminCookie();
+    for (const job of SCHEDULER_JOB_KEYS) {
+      expect(await lastRun(cookie, job)).toBeNull();
+    }
+    expect(await ctx.prisma.schedulerRun.count()).toBe(0);
+  });
+
+  it('writes nothing on a tick of a switched-off job', async () => {
+    await refund.runScheduledRefund();
+    await lifecycle.runScheduledExpiry();
+    expect(await ctx.prisma.schedulerRun.count()).toBe(0);
+  });
+
+  it('survives a restart: a fresh registry reads the run the old one wrote', async () => {
+    const { cookie } = await superAdminCookie();
+    await toggle(cookie, 'request-expiry', true).expect(200);
+    await lifecycle.runScheduledExpiry();
+
+    const restarted = new SchedulerRunRegistry(ctx.prisma);
+    const runs = await restarted.lastRuns();
+    expect(runs['request-expiry']).toMatchObject({ status: 'SUCCESS', trigger: 'SCHEDULER' });
+    expect(runs['request-reminder']).toBeNull();
+
+    // The screen reads the same row.
+    expect(await lastRun(cookie, 'request-expiry')).toMatchObject({
+      id: runs['request-expiry']!.id,
+      status: 'SUCCESS',
+    });
+  });
+
+  it('records a failure by error class only and keeps it after the next success', async () => {
+    const { cookie } = await superAdminCookie();
+    await toggle(cookie, 'unviewed-offer-refund', true).expect(200);
+    vi.spyOn(ctx.app.get(UnviewedOfferRefundService), 'execute').mockRejectedValueOnce(
+      new TypeError('connection to postgres://user:secret@db/taktic refused'),
+    );
+
+    await refund.runScheduledRefund();
+    const failed = await lastRun(cookie, 'unviewed-offer-refund');
+    expect(failed).toMatchObject({ status: 'FAILED', errorCode: 'TypeError', summary: null });
+    expect(JSON.stringify(failed)).not.toMatch(/postgres|secret/);
+
+    await refund.runScheduledRefund();
+    expect(await lastRun(cookie, 'unviewed-offer-refund')).toMatchObject({ status: 'SUCCESS' });
+
+    const history = await ctx.prisma.schedulerRun.findMany({
+      where: { jobKey: 'unviewed-offer-refund' },
+      orderBy: { startedAt: 'asc' },
+    });
+    expect(history.map((row) => row.status)).toEqual(['FAILED', 'SUCCESS']);
+    expect(history[0]!.id).not.toBe(history[1]!.id);
+  });
+
+  it('shows a run whose end was never recorded as RUNNING with no finish time', async () => {
+    const { cookie } = await superAdminCookie();
+    // What a process killed mid-run leaves behind: the opening row only.
+    await ctx.prisma.schedulerRun.create({
+      data: { jobKey: 'request-reminder', status: 'RUNNING', startedAt: new Date() },
+    });
+    expect(await lastRun(cookie, 'request-reminder')).toMatchObject({
+      status: 'RUNNING',
+      finishedAt: null,
+    });
+  });
+
+  it('refuses to rewrite a closed run, to reopen it, or to delete any run', async () => {
+    const closed = await ctx.prisma.schedulerRun.create({
+      data: {
+        jobKey: 'request-expiry',
+        status: 'FAILED',
+        startedAt: new Date(Date.now() - 1000),
+        finishedAt: new Date(),
+        errorCode: 'Error',
+      },
+    });
+    await expect(
+      ctx.prisma.schedulerRun.update({ where: { id: closed.id }, data: { status: 'SUCCESS', errorCode: null } }),
+    ).rejects.toThrow();
+    await expect(
+      ctx.prisma.schedulerRun.update({ where: { id: closed.id }, data: { status: 'RUNNING', finishedAt: null, errorCode: null } }),
+    ).rejects.toThrow();
+    await expect(ctx.prisma.schedulerRun.delete({ where: { id: closed.id } })).rejects.toThrow();
+
+    const open = await ctx.prisma.schedulerRun.create({
+      data: { jobKey: 'request-expiry', status: 'RUNNING', startedAt: new Date() },
+    });
+    await expect(
+      ctx.prisma.schedulerRun.update({ where: { id: open.id }, data: { jobKey: 'request-reminder' } }),
+    ).rejects.toThrow();
+    // The one legal move: RUNNING → terminal, once.
+    await ctx.prisma.schedulerRun.update({
+      where: { id: open.id },
+      data: { status: 'SUCCESS', finishedAt: new Date() },
+    });
+    await expect(ctx.prisma.schedulerRun.delete({ where: { id: open.id } })).rejects.toThrow();
+    expect(await ctx.prisma.schedulerRun.count()).toBe(2);
+  });
+
+  it('refuses a row whose end does not match its status', async () => {
+    await expect(
+      ctx.prisma.schedulerRun.create({
+        data: { jobKey: 'request-expiry', status: 'SUCCESS', startedAt: new Date() },
+      }),
+    ).rejects.toThrow();
+    await expect(
+      ctx.prisma.schedulerRun.create({
+        data: { jobKey: 'request-expiry', status: 'RUNNING', startedAt: new Date(), errorCode: 'Error' },
+      }),
+    ).rejects.toThrow();
   });
 });

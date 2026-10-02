@@ -197,8 +197,8 @@ describe('RequestPublishOutbox', () => {
       'request-available',
       'request-published',
     ]);
-    const run = ctx.app.get(SchedulerRunRegistry).get('request-expiry');
-    expect(run?.outcome).toBe('SUCCESS');
+    const run = (await ctx.app.get(SchedulerRunRegistry).lastRuns())['request-expiry'];
+    expect(run?.status).toBe('SUCCESS');
     expect(run?.summary).toContain('publishSent=2');
   });
 });
