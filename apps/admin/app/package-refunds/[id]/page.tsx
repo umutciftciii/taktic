@@ -131,9 +131,10 @@ export default async function PackageRefundDetailPage({ params, searchParams }: 
                   kaydı yapılabilir.
                 </p>
               ) : null}
-              {refund.exceptionBlockedByMakerChecker ? (
+              {refund.approvalBlockedByMakerChecker || refund.exceptionBlockedByMakerChecker ? (
                 <p className="notice notice-warning" data-testid="package-refund-maker-checker">
-                  Bu isteği siz açtınız veya işleme aldınız. İstisna onayını ikinci bir yetkili vermelidir.
+                  Bu isteği siz açtınız veya işleme aldınız. Onayı (normal ya da istisna) ikinci bir yetkili vermelidir;
+                  reddetmek için bu kural aranmaz.
                 </p>
               ) : null}
               {refund.status === 'APPROVED_PENDING_SETTLEMENT' ? (

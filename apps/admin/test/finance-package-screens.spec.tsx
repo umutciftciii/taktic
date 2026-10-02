@@ -79,15 +79,18 @@ describe('refund controls come from allowedActions alone', () => {
     expect(html).not.toMatch(/iade tamamlandı olarak|tamamlandı olarak işaretle|SETTLED/);
   });
 
-  it('asks before every decision, and not before taking a request into review', () => {
+  it('asks before every decision, and before taking a request into review (Paket A)', () => {
     // A ConfirmDialog trigger opens a dialog: aria-haspopup on the button.
-    const decisions = ['approveNormal', 'approveException', 'reject', 'markSettlementFailed'] as const;
+    const decisions = ['take', 'approveNormal', 'approveException', 'reject', 'markSettlementFailed'] as const;
     for (const flag of decisions) {
       const html = renderActions({ [flag]: true });
       expect(html, flag).toContain('aria-haspopup="dialog"');
       expect(html, flag).toContain('<dialog');
     }
-    expect(renderActions({ take: true })).not.toContain('aria-haspopup="dialog"');
+    const take = renderActions({ take: true });
+    expect(take).toContain('İade isteği işleme alınsın mı?');
+    expect(take).toContain('e-posta gider');
+    expect(take).toContain('Para ya da kredi hareket etmez.');
   });
 
   it('keeps the fields the API reads, with the same names', () => {
@@ -108,9 +111,10 @@ describe('refund controls come from allowedActions alone', () => {
     expect(html).toContain('Onay geri alınamaz');
   });
 
-  it('states the maker ≠ checker rule on the exception dialog without deciding it', () => {
-    const html = renderActions({ approveException: true });
-    expect(html).toContain('İsteği açan ya da işleme alan kişi istisnayı onaylayamaz');
+  it('states the maker ≠ checker rule on both approval dialogs without deciding it', () => {
+    for (const flag of ['approveNormal', 'approveException'] as const) {
+      expect(renderActions({ [flag]: true }), flag).toContain('İsteği açan ya da işleme alan kişi onay veremez');
+    }
   });
 
   it('labels every decision by its outcome, never "Kaydet" or "Tamam"', () => {

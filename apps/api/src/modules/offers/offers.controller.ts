@@ -59,8 +59,10 @@ export class OffersController {
   @Post('refund-scan/execute')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.OFFER_REFUND_EXECUTE)
-  executeRefundScan(@Body() dto: ExecuteRefundScanDto) {
-    return this.unviewedOfferRefund.execute(dto);
+  executeRefundScan(@Body() dto: ExecuteRefundScanDto, @CurrentUser() user: AuthUser) {
+    // The operator is the session, never the body: each ledger row the run
+    // writes names who ran it, and the scheduler's rows stay actor-less.
+    return this.unviewedOfferRefund.execute({ limit: dto.limit, actorId: user.id });
   }
 
   @Get(':id')

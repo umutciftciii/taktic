@@ -24,6 +24,8 @@ import { SectionCard } from '../../../components/section-card';
 import { SummaryStrip, type SummaryItem } from '../../../components/summary-strip';
 import { Tabs, type TabItem } from '../../../components/tabs';
 import { updateCreditPackageAction, updateCreditPackageStatusAction } from '../actions';
+import { CreditPackageEditSubmit } from '../credit-package-gates';
+import { creditPackageTerms } from '../package-changes';
 import {
   PACKAGE_TYPE_DESCRIPTION,
   PACKAGE_TYPE_LABEL,
@@ -221,9 +223,8 @@ export default async function CreditPackageDetailPage({
                 </Link>
               ) : null}
               {/*
-                The old side panel's switch, where the design puts it. Not a
-                confirmation: deactivating closes new sales and nothing else,
-                and is undone by the same button.
+                The old side panel's switch, where the design puts it. Both
+                directions ask first (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
               */}
               {canChangeStatus ? (
                 <span data-testid="credit-package-status-panel">
@@ -388,7 +389,7 @@ export default async function CreditPackageDetailPage({
                     </select>
                     <span className="help-text">
                       Pasif paket yeni satışa kapanır; satılmışlar ve yüklenmiş krediler etkilenmez. İstediğiniz zaman
-                      geri açabilirsiniz.
+                      geri açabilirsiniz. Durum değişikliği kaydederken onay ister.
                     </span>
                   </label>
                   <label className="field field-4">
@@ -434,9 +435,19 @@ export default async function CreditPackageDetailPage({
                 </div>
 
                 <DetailFormFooter note="Değişiklikler satılmış paketleri etkilemez; her satın alma paketin o anki adını, kredisini ve fiyatını saklar.">
-                  <button className="btn btn-primary" type="submit">
-                    Değişiklikleri kaydet
-                  </button>
+                  {/*
+                    Asks only when the save changes the price, the credits, the
+                    scope or the status (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+                  */}
+                  <CreditPackageEditSubmit
+                    stored={{
+                      name: creditPackage.name,
+                      isActive: creditPackage.isActive,
+                      ...creditPackageTerms(creditPackage),
+                    }}
+                    statusEditable={canChangeStatus}
+                    categoryNames={Object.fromEntries(scopeOptions.map((category) => [category.id, category.name]))}
+                  />
                 </DetailFormFooter>
               </form>
             ) : (

@@ -2420,7 +2420,18 @@ export type SchedulerSettings = {
  */
 export const SCHEDULER_JOB_COPY: Record<
   SchedulerJobKey,
-  { name: string; impact: string; confirmation?: string }
+  {
+    name: string;
+    impact: string;
+    confirmation?: string;
+    /**
+     * What switching the job *off* holds back, for the jobs whose silence
+     * costs somebody money or credit (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+     * Paket A). A job with this sentence asks before it is switched off, and
+     * `toggleSchedulerAction` demands the `scheduler.disable` proof for it.
+     */
+    disableConfirmation?: string;
+  }
 > = {
   'entitlement-renewal': {
     name: 'Paket yenileme',
@@ -2429,6 +2440,10 @@ export const SCHEDULER_JOB_COPY: Record<
     confirmation:
       'Bu iş para hareketi üretir: açtığınızda, dönem sonu gelen paketler için yenileme ' +
       'denemesi başlar ve hizmet verenlerin erişim süresi buna göre değişir.',
+    disableConfirmation:
+      'Kapattığınızda yenileme tahsilatı, dönem yenileme ve süre sonu işleri durur: iş yeniden ' +
+      'açılana kadar dönem sonu gelen paketler için tahsilat denenmez, paketler yenilenmez ve ' +
+      'sona erdirilmez.',
   },
   'unviewed-offer-refund': {
     name: 'Görüntülenmeyen teklif iadesi',
@@ -2437,6 +2452,10 @@ export const SCHEDULER_JOB_COPY: Record<
     confirmation:
       'Bu iş kredi hareketi üretir: açtığınızda, iade süresi dolmuş görüntülenmemiş teklifler ' +
       'için krediler hizmet verenlere geri yüklenir ve iade e-postası gönderilir.',
+    disableConfirmation:
+      'Kapattığınızda görüntülenmeyen teklifler için hak edilen kredi iadeleri otomatik yapılmaz; ' +
+      'iş yeniden açılana kadar gecikir. Bu sürede iadeler yalnız “İade taraması” ekranından ' +
+      'elle çalıştırılabilir.',
   },
   'request-expiry': {
     name: 'Talep süresi dolumu',
@@ -3060,6 +3079,12 @@ export type PackageRefundDetail = PackageRefundListItem & {
     markSettlementFailed: boolean;
   };
   exceptionBlockedByMakerChecker: boolean;
+  /**
+   * True when only maker ≠ checker keeps this viewer from approving — a normal
+   * approval as well as an exception (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+   * Optional for an API that predates it.
+   */
+  approvalBlockedByMakerChecker?: boolean;
 };
 
 export function packageRefundStatusBadgeClass(status: PackageRefundRequestStatus): string {

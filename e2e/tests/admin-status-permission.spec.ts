@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough } from '../src/confirm-dialog';
 import {
   createAdmin,
   createCategory,
@@ -101,7 +102,7 @@ test.describe('status permission on edit screens', () => {
       await assertNoErrorScreen(switcher.page);
       await expect(switcher.page.getByRole('button', { name: 'Değişiklikleri kaydet' })).toHaveCount(0);
       await expect(switcher.page.getByTestId('credit-package-read-only')).toBeVisible();
-      await switcher.page.getByRole('button', { name: 'Paketi pasifleştir' }).click();
+      await confirmThrough(switcher.page.getByRole('button', { name: 'Paketi pasifleştir' }), 'Evet, pasifleştir');
       await expect
         .poll(async () => (await prisma().offerCreditPackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive)
         .toBe(false);

@@ -30,8 +30,9 @@ export type RefundFormActions = {
  * what the API really does (read from the service and the notice outbox):
  * none of them moves money or credit in TakTic, each one mails the provider a
  * status notice without any reason or note, and none can be undone from here.
- * Taking a request into review is not a decision and goes straight through, as
- * before. The form actions are passed in, so this renders on its own in a
+ * Taking a request into review asks too since ADMIN-DESTRUCTIVE-CONFIRMATION-001
+ * Paket A (`package-refund.take`): it mails the provider and makes the taker
+ * ineligible to approve. The form actions are passed in, so this renders on its own in a
  * test; the page passes the real server actions.
  */
 export function RefundActions({
@@ -52,9 +53,27 @@ export function RefundActions({
       {actions.take ? (
         <form action={formActions.take}>
           <input type="hidden" name="id" value={refundId} />
-          <button className="btn btn-primary btn-sm" type="submit" data-testid="package-refund-take">
-            İşleme al
-          </button>
+          <ConfirmDialog
+            proof="package-refund.take"
+            triggerLabel="İşleme al"
+            triggerClassName="btn btn-primary btn-sm"
+            tone="primary"
+            title="İade isteği işleme alınsın mı?"
+            consequence={
+              <>
+                <p>
+                  İstek “İnceleniyor” olur ve işleme alan olarak adınız kaydedilir. Hizmet verene isteğin durumunu bildiren
+                  bir <strong>e-posta gider</strong>.
+                </p>
+                <p>
+                  <strong>Para ya da kredi hareket etmez.</strong> İşleme aldığınız isteği siz onaylayamazsınız; onayı ikinci
+                  bir yetkili verir. Reddetmek için bu kural aranmaz.
+                </p>
+              </>
+            }
+            confirmLabel="Evet, işleme al"
+            testId="package-refund-take"
+          />
         </form>
       ) : null}
 
@@ -203,11 +222,9 @@ function ApproveConsequence({ priceLabel, exception }: { priceLabel: string; exc
         hiçbir şey yazılmaz.
       </p>
       {exception ? (
-        <p>
-          İstisna gerekçesi ve açıklaması onaylayan olarak adınızla denetim kaydına yazılır. İsteği açan ya da işleme
-          alan kişi istisnayı onaylayamaz.
-        </p>
+        <p>İstisna gerekçesi ve açıklaması onaylayan olarak adınızla denetim kaydına yazılır.</p>
       ) : null}
+      <p>İsteği açan ya da işleme alan kişi onay veremez; sunucu da bunu reddeder.</p>
       <p>
         Onay geri alınamaz; iade yapılamazsa yalnız “Ödeme iadesi tamamlanamadı” kaydı düşülebilir. Hizmet verene
         isteğin durumunu bildiren bir e-posta gider.

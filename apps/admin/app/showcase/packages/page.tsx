@@ -14,6 +14,7 @@ import { PageHeader } from '../../../components/page-header';
 import { WholeListFooter } from '../../../components/pagination';
 import { RouteDialog } from '../../../components/route-dialog';
 import { createShowcasePackageAction } from './actions';
+import { ShowcasePackageCreateSubmit } from './showcase-package-gates';
 import { PriceField, showcasePackageErrorText, SORT_ORDER_HELP } from './showcase-package-fields';
 
 type PackagesPageProps = {
@@ -304,9 +305,8 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
               <Link className="btn btn-secondary" href={PATH} scroll={false}>
                 Vazgeç
               </Link>
-              <button className="btn btn-primary" type="submit">
-                Paketi oluştur
-              </button>
+              {/* On sale the moment it exists, with a permanent slug: asks first. */}
+              <ShowcasePackageCreateSubmit />
             </div>
           </form>
         </RouteDialog>

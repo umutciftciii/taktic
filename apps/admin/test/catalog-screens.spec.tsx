@@ -274,13 +274,28 @@ describe('credit package cells', () => {
     expect(last.match(/<button[^>]*data-testid="package-move-down"[^>]*>/)![0]).toContain('disabled');
   });
 
-  it('flips the status the way the action reads it', () => {
-    const row = html(<PackageStatusForm pkg={pkg} redirectTo="/credit-packages" action={noop} />);
+  it('flips the status the way the action reads it, and asks first in both directions', () => {
+    const sold = {
+      ...pkg,
+      type: 'ONE_TIME_CREDITS' as const,
+      priceAmount: 14990,
+      currency: 'TRY',
+      creditAmount: 50,
+      quotaCredits: null,
+      dailyOfferLimit: null,
+    };
+    const row = html(<PackageStatusForm pkg={sold} redirectTo="/credit-packages" action={noop} />);
     expect(row).toContain('name="isActive" value="false"');
     expect(row).toContain('name="redirectTo" value="/credit-packages"');
     expect(row).toContain('Pasifleştir');
-    const panel = html(<PackageStatusForm pkg={{ ...pkg, isActive: false }} redirectTo="/credit-packages/p1" action={noop} variant="panel" />);
+    expect(row).toContain('data-testid="package-status-toggle-dialog"');
+    expect(row).toContain('yeni satışa kapanır');
+    expect(row).toContain('değişmez');
+    const panel = html(<PackageStatusForm pkg={{ ...sold, isActive: false }} redirectTo="/credit-packages/p1" action={noop} variant="panel" />);
     expect(panel).toContain('Paketi aktifleştir');
+    expect(panel).toContain('₺149,90');
+    expect(panel).toContain('50 kredi (tek seferlik)');
+    expect(panel).toContain('satışa açılır');
   });
 
   it('names the three types and what each sells', () => {

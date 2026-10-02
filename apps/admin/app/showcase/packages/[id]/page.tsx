@@ -17,6 +17,7 @@ import { formatCount } from '../../../../lib/pagination';
 import { resolveTab } from '../../../../lib/list-query';
 import { ActivityLog, NO_CHANGE_HISTORY_NOTE, recordLifecycleEntries } from '../../../../components/activity-log';
 import { DataTable, type DataColumn } from '../../../../components/data-table';
+import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { DetailFormFooter, LockedField } from '../../../../components/detail-form-footer';
 import { DetailHeader } from '../../../../components/detail-header';
 import { EmptyState } from '../../../../components/empty-state';
@@ -25,6 +26,7 @@ import { SectionCard } from '../../../../components/section-card';
 import { SummaryStrip, type SummaryItem } from '../../../../components/summary-strip';
 import { Tabs, type TabItem } from '../../../../components/tabs';
 import { updateShowcasePackageAction, updateShowcasePackageStatusAction } from '../actions';
+import { ShowcasePackageEditSubmit } from '../showcase-package-gates';
 import {
   areaText,
   cardKindText,
@@ -180,13 +182,55 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                 <form action={updateShowcasePackageStatusAction}>
                   <input type="hidden" name="packageId" value={pkg.id} />
                   <input type="hidden" name="isActive" value={String(!pkg.isActive)} />
-                  <button
-                    className={pkg.isActive ? 'btn btn-destructive' : 'btn btn-primary'}
-                    type="submit"
-                    data-testid="showcase-package-status-toggle"
-                  >
-                    {pkg.isActive ? 'Satıştan kaldır' : 'Satışa aç'}
-                  </button>
+                  {pkg.isActive ? (
+                    <ConfirmDialog
+                      proof="showcase-package.deactivate"
+                      triggerLabel="Satıştan kaldır"
+                      triggerClassName="btn btn-destructive"
+                      tone="primary"
+                      title={`“${pkg.name}” satıştan kaldırılsın mı?`}
+                      consequence={
+                        <>
+                          <p>
+                            Paket <strong>yeni satın almaya kapanır</strong>; işletmelerin satın alma ekranında görünmez.
+                          </p>
+                          <p>
+                            Satılmış haklar, incelemedeki kartlar ve yayındaki yerleşimler <strong>değişmez</strong>;
+                            yayındaki kartlar süreleri bitene kadar kalır. Paket aynı düğmeyle yeniden satışa açılabilir.
+                          </p>
+                        </>
+                      }
+                      confirmLabel="Evet, satıştan kaldır"
+                      testId="showcase-package-status-toggle"
+                    />
+                  ) : (
+                    <ConfirmDialog
+                      proof="showcase-package.activate"
+                      triggerLabel="Satışa aç"
+                      triggerClassName="btn btn-primary"
+                      tone="primary"
+                      title={`“${pkg.name}” satışa açılsın mı?`}
+                      consequence={
+                        <>
+                          <dl className="confirm-dialog-facts">
+                            <div>
+                              <dt>Yayın bedeli</dt>
+                              <dd>{formatMinorAsTurkishLira(pkg.priceAmount, pkg.currency)}</dd>
+                            </div>
+                            <div>
+                              <dt>Yayın süresi</dt>
+                              <dd>{pkg.durationDays} gün</dd>
+                            </div>
+                          </dl>
+                          <p>
+                            Paket bu <strong>mevcut bedel ve süreyle</strong> yeniden satın alınabilir hâle gelir.
+                          </p>
+                        </>
+                      }
+                      confirmLabel="Evet, satışa aç"
+                      testId="showcase-package-status-toggle"
+                    />
+                  )}
                 </form>
               ) : null}
             </>
@@ -329,9 +373,19 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                   </label>
                 </div>
                 <DetailFormFooter note="Değişiklikler yalnız bundan sonraki satın almaları etkiler; satılmış her yayın kendi kopyasını taşır.">
-                  <button className="btn btn-primary" type="submit">
-                    Kaydet
-                  </button>
+                  {/* Asks only when the price, the run or "Durum" changes (Paket A). */}
+                  <ShowcasePackageEditSubmit
+                    stored={{
+                      name: pkg.name,
+                      isActive: pkg.isActive,
+                      priceAmount: pkg.priceAmount,
+                      currency: pkg.currency,
+                      durationDays: pkg.durationDays,
+                      activationWindowDays: pkg.activationWindowDays,
+                      allowedCardKind: pkg.allowedCardKind,
+                      maxAreas: pkg.maxAreas,
+                    }}
+                  />
                 </DetailFormFooter>
               </form>
             ) : (

@@ -152,12 +152,14 @@ describe('who reaches what', () => {
     await checker.approve(refund.id, { kind: 'NORMAL' }).expect(200);
   });
 
-  it('SUPER_ADMIN holds all three without an assignment', async () => {
+  it('SUPER_ADMIN holds all three without an assignment — and is still held to maker ≠ checker', async () => {
     const { refund } = await scenario();
     const root = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     const admin = adminCall(ctx, await loginAs(ctx.prisma, root.id));
     await admin.take(refund.id).expect(200);
-    await admin.approve(refund.id, { kind: 'NORMAL' }).expect(200);
+    expect((await admin.approve(refund.id, { kind: 'NORMAL' }).expect(409)).body.code).toBe('PACKAGE_REFUND_MAKER_CHECKER');
+    const second = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    await adminCall(ctx, await loginAs(ctx.prisma, second.id)).approve(refund.id, { kind: 'NORMAL' }).expect(200);
   });
 });
 

@@ -10,6 +10,14 @@ import { refundOfferCreditInTransaction } from './offers.service';
 
 type UnviewedOfferRefundOptions = {
   limit?: number | string;
+  /**
+   * The operator who ran the scan by hand (`POST /offers/refund-scan/execute`),
+   * written as `createdById` on every ledger row the run writes — the column a
+   * manual refund already fills (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+   * The scheduler passes nothing, so its rows keep `createdById = null` and a
+   * hand-run batch can be told apart from the automatic one.
+   */
+  actorId?: string | null;
 };
 
 type SkippedReason =
@@ -184,6 +192,7 @@ export class UnviewedOfferRefundService {
               tx,
               currentOffer,
               UNVIEWED_OFFER_REFUND_REASON,
+              { createdById: options.actorId ?? null },
             );
 
             return {

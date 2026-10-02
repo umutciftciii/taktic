@@ -1,4 +1,7 @@
+import { formatMinorAsTurkishLira } from '@taktic/shared';
 import type { AdminOfferPackage, OfferPackageType } from '../../lib/api';
+import { ConfirmDialog } from '../../components/confirm-dialog';
+import { creditPackageOfferText } from './package-changes';
 
 /**
  * The pieces of the credit-package screens (ADMIN-DESIGN-001 Faz 3F) that
@@ -145,9 +148,15 @@ export function PackageOrderCell({
 }
 
 /**
- * Aktifleştir / Pasifleştir, with CREDIT_PACKAGES_STATUS only. Not a
- * confirmation: deactivating closes new sales and nothing else, and is undone
- * by the same button.
+ * Aktifleştir / Pasifleştir, with CREDIT_PACKAGES_STATUS only.
+ *
+ * ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A: both directions ask first, in
+ * the list row and on the detail screen alike — activating puts the package
+ * on sale at its price (`credit-package.activate`, with the price and what it
+ * sells in the dialog); deactivating closes new sales and changes nothing
+ * already bought (`credit-package.deactivate`). The form, its three fields
+ * and the action are unchanged; the action demands the proof of the direction
+ * it is asked for.
  */
 export function PackageStatusForm({
   pkg,
@@ -155,7 +164,10 @@ export function PackageStatusForm({
   action,
   variant = 'row',
 }: {
-  pkg: Pick<AdminOfferPackage, 'id' | 'isActive'>;
+  pkg: Pick<
+    AdminOfferPackage,
+    'id' | 'name' | 'isActive' | 'type' | 'priceAmount' | 'currency' | 'creditAmount' | 'quotaCredits' | 'dailyOfferLimit'
+  >;
   redirectTo: string;
   action: FormAction;
   /** `row` in the list, `panel` in the detail screen's summary card. */
@@ -181,9 +193,57 @@ export function PackageStatusForm({
       <input type="hidden" name="id" value={pkg.id} />
       <input type="hidden" name="isActive" value={String(!pkg.isActive)} />
       <input type="hidden" name="redirectTo" value={redirectTo} />
-      <button className={className} type="submit" data-testid="package-status-toggle">
-        {label}
-      </button>
+      {pkg.isActive ? (
+        <ConfirmDialog
+          proof="credit-package.deactivate"
+          triggerLabel={label}
+          triggerClassName={className}
+          tone="primary"
+          title={`“${pkg.name}” pasifleştirilsin mi?`}
+          consequence={
+            <>
+              <p>
+                Paket <strong>yeni satışa kapanır</strong>: hizmet verenlerin satın alma ekranında görünmez ve satın
+                alınamaz.
+              </p>
+              <p>
+                Mevcut satın almalar, yüklenmiş krediler ve devam eden dönemler <strong>değişmez</strong>. Paket aynı
+                düğmeyle yeniden aktifleştirilebilir.
+              </p>
+            </>
+          }
+          confirmLabel="Evet, pasifleştir"
+          testId="package-status-toggle"
+        />
+      ) : (
+        <ConfirmDialog
+          proof="credit-package.activate"
+          triggerLabel={label}
+          triggerClassName={className}
+          tone="primary"
+          title={`“${pkg.name}” aktifleştirilsin mi?`}
+          consequence={
+            <>
+              <dl className="confirm-dialog-facts">
+                <div>
+                  <dt>Fiyat</dt>
+                  <dd>{formatMinorAsTurkishLira(pkg.priceAmount, pkg.currency)}</dd>
+                </div>
+                <div>
+                  <dt>Satılan</dt>
+                  <dd>{creditPackageOfferText(pkg)}</dd>
+                </div>
+              </dl>
+              <p>
+                Paket onaydan hemen sonra <strong>satışa açılır</strong>: hizmet verenler bu fiyatla satın alabilir.
+                Satın alma anındaki fiyat ve kredi o satın almaya kopyalanır.
+              </p>
+            </>
+          }
+          confirmLabel="Evet, aktifleştir"
+          testId="package-status-toggle"
+        />
+      )}
     </form>
   );
 }

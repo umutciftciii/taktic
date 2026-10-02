@@ -10,6 +10,9 @@ import {
   apiFetch,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE, type ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
+import { hasConfirmationProof, hasConfirmationProofs } from '../../lib/confirmation-proof-server';
+import { creditPackageTerms, creditPackageTermsChanges, type CreditPackageTerms } from './package-changes';
 
 const ALLOWED_CURRENCIES = ['TRY', 'USD', 'EUR'] as const;
 type AllowedCurrency = (typeof ALLOWED_CURRENCIES)[number];
@@ -53,6 +56,13 @@ export async function createCreditPackageAction(formData: FormData) {
   if (validationError) {
     redirect(buildNewUrl(draft, validationError));
   }
+  // An active package is on sale the moment it exists: asked in a dialog,
+  // whose proof is checked before anything is sent. An inactive one is not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A). The API's own rule — an
+  // active create needs CREDIT_PACKAGES_STATUS as well — is unchanged.
+  if (draft.isActive && !(await hasConfirmationProof(formData, 'credit-package.create-active'))) {
+    redirect(buildNewUrl(draft, CONFIRMATION_PROOF_REFUSAL_MESSAGE));
+  }
 
   let created: OfferCreditPackage | null = null;
   let errorMessage: string | null = null;
@@ -87,6 +97,17 @@ export async function updateCreditPackageAction(formData: FormData) {
     redirect(`/credit-packages/${id}?error=${encodeURIComponent(validationError)}`);
   }
 
+  // What this save changes is judged here against the package as the API has
+  // it now, never on the form's word: a change to what a purchase buys or
+  // costs needs `credit-package.update-commercial`, a status moved by the
+  // form's own select needs the same proof as the header button. A save of
+  // the name, slug, description or order needs none
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+  const required = await requiredEditProofs(id, draft, { statusLocked });
+  if (required.length > 0 && !(await hasConfirmationProofs(formData, required))) {
+    redirect(`/credit-packages/${id}?error=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
+  }
+
   let errorMessage: string | null = null;
   try {
     await apiFetch<OfferCreditPackage>(`/credit-packages/${id}`, {
@@ -115,6 +136,11 @@ export async function updateCreditPackageStatusAction(formData: FormData) {
   // as every other `redirectTo` in the product; the listing is the fallback.
   // See @taktic/shared's safe-redirect.
   const redirectTo = safeRedirectPath(readFormString(formData, 'redirectTo'), '/credit-packages');
+  // Both directions are asked in a dialog, in the list and on the detail
+  // screen alike; the proof is the one for the direction asked for.
+  if (!(await hasConfirmationProof(formData, isActive ? 'credit-package.activate' : 'credit-package.deactivate'))) {
+    redirect(appendQuery(redirectTo, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
+  }
 
   let errorMessage: string | null = null;
   try {
@@ -198,6 +224,43 @@ export async function moveCreditPackageAction(formData: FormData) {
     if (partialFailure) qs.set('partial', '1');
     redirect(`/credit-packages?${qs.toString()}`);
   }
+}
+
+/**
+ * The proofs an edit needs, from the stored package. A package that cannot be
+ * read is treated as changing everything the save could change: the edit is
+ * refused unless the operator confirmed it, never let through unasked.
+ */
+async function requiredEditProofs(
+  id: string,
+  draft: PackageDraft,
+  options: { statusLocked: boolean },
+): Promise<ConfirmationProofKey[]> {
+  const statusKey: ConfirmationProofKey = draft.isActive ? 'credit-package.activate' : 'credit-package.deactivate';
+  let stored: AdminOfferPackage;
+  try {
+    stored = await apiFetch<AdminOfferPackage>(`/admin/offer-packages/${encodeURIComponent(id)}`);
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return options.statusLocked ? ['credit-package.update-commercial'] : ['credit-package.update-commercial', statusKey];
+  }
+  const keys: ConfirmationProofKey[] = [];
+  const next: CreditPackageTerms = {
+    type: stored.type,
+    priceAmount: draft.priceAmount,
+    currency: draft.currency,
+    creditAmount: draft.creditAmount,
+    quotaCredits: draft.quotaCredits,
+    dailyOfferLimit: draft.dailyOfferLimit > 0 ? draft.dailyOfferLimit : null,
+    scopeCategoryIds: draft.scopeCategoryIds,
+  };
+  if (creditPackageTermsChanges(creditPackageTerms(stored), next).length > 0) {
+    keys.push('credit-package.update-commercial');
+  }
+  if (!options.statusLocked && draft.isActive !== stored.isActive) {
+    keys.push(statusKey);
+  }
+  return keys;
 }
 
 function readDraft(formData: FormData): PackageDraft {

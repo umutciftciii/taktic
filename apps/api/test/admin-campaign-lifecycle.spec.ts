@@ -72,8 +72,8 @@ async function draft(cookie: string, definition: Record<string, unknown>, key = 
   return created.body as { campaign: { id: string; status: string; activeVersionId: string | null }; currentVersion: { id: string; versionNumber: number } };
 }
 
-const activate = (cookie: string, id: string, versionNumber: number) =>
-  request(ctx.server).post(`/admin/campaigns/${id}/versions/${versionNumber}/activate`).set('Cookie', cookie).send({});
+const activate = (cookie: string, id: string, versionNumber: number, body: Record<string, unknown> = {}) =>
+  request(ctx.server).post(`/admin/campaigns/${id}/versions/${versionNumber}/activate`).set('Cookie', cookie).send(body);
 const transition = (cookie: string, id: string, verb: 'pause' | 'resume' | 'end', reason = 'operatör kararı') =>
   request(ctx.server).post(`/admin/campaigns/${id}/${verb}`).set('Cookie', cookie).send({ reason });
 
@@ -258,11 +258,61 @@ describe('with the engine switch on', () => {
     // Only the first activation changed the status.
     expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id, action: CampaignAuditAction.ACTIVATED } })).toBe(1);
 
-    // Activating a version on a PAUSED campaign swaps and resumes in one go.
+    // Activating a version on a PAUSED campaign swaps and resumes in one go —
+    // and, being a resumption, takes the reason a plain resume takes
+    // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
     await transition(cookie, campaign.id, 'pause').expect(201);
-    const resumedBySwap = await activate(cookie, campaign.id, 1).expect(201);
+    const before = await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } });
+    for (const body of [{}, { reason: '' }, { reason: '   ab   ' }]) {
+      const refused = await activate(cookie, campaign.id, 1, body).expect(400);
+      expect(refused.body.code).toBe('CAMPAIGN_RESUME_REASON_REQUIRED');
+    }
+    expect(await ctx.prisma.campaign.findUniqueOrThrow({ where: { id: campaign.id }, select: { status: true } })).toEqual({ status: 'PAUSED' });
+    expect(await ctx.prisma.campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(before);
+
+    const resumedBySwap = await activate(cookie, campaign.id, 1, { reason: '  sezon yeniden açıldı  ' }).expect(201);
     expect(resumedBySwap.body.campaign).toMatchObject({ status: 'ACTIVE', activeVersionId: currentVersion.id });
     expect((await auditActions(campaign.id)).slice(-2)).toEqual([CampaignAuditAction.VERSION_ACTIVATED, CampaignAuditAction.RESUMED]);
+    const resumedRow = await ctx.prisma.campaignAuditLog.findFirstOrThrow({
+      where: { campaignId: campaign.id, action: CampaignAuditAction.RESUMED },
+      orderBy: { createdAt: 'desc' },
+    });
+    expect(resumedRow.summary).toEqual({ versionNumber: 1, reason: 'sezon yeniden açıldı', fromStatus: 'PAUSED' });
+  });
+
+  it('a plain resume refuses a reason of spaces, like the version route', async () => {
+    const { cookie } = await adminCookie();
+    const { campaign, currentVersion } = await draft(cookie, K2);
+    await activate(cookie, campaign.id, currentVersion.versionNumber).expect(201);
+    await transition(cookie, campaign.id, 'pause').expect(201);
+    expect((await transition(cookie, campaign.id, 'resume', '     ').expect(400)).body.code).toBe('CAMPAIGN_RESUME_REASON_REQUIRED');
+    expect((await transition(cookie, campaign.id, 'resume', 'x').expect(400)).body.message).toEqual(
+      expect.arrayContaining(['reason en az 3 karakter olmalı']),
+    );
+    await transition(cookie, campaign.id, 'resume', 'yeniden açıldı').expect(201);
+  });
+
+  it('expectedStatus: what the operator confirmed against must still be the status, or nothing is written', async () => {
+    const { cookie } = await adminCookie();
+    const { campaign, currentVersion } = await draft(cookie, K2);
+    // Confirmed as a first activation, but it is a DRAFT: goes through.
+    await activate(cookie, campaign.id, currentVersion.versionNumber, { expectedStatus: 'DRAFT' }).expect(201);
+    const revised = await request(ctx.server)
+      .post(`/admin/campaigns/${campaign.id}/versions`)
+      .set('Cookie', cookie)
+      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 9, expiresInDays: 30 } } })
+      .expect(201);
+    const v2 = revised.body.currentVersion.versionNumber as number;
+    // Someone paused it after the operator read "ACTIVE" and confirmed a switch.
+    await transition(cookie, campaign.id, 'pause').expect(201);
+    const before = await snapshot();
+    const refused = await activate(cookie, campaign.id, v2, { expectedStatus: 'ACTIVE', reason: 'geçiş' }).expect(409);
+    expect(refused.body).toMatchObject({ code: 'CAMPAIGN_STATUS_CHANGED', expected: 'ACTIVE', actual: 'PAUSED' });
+    expect(await snapshot()).toEqual(before);
+    // Confirmed as a resumption, with its reason: goes through.
+    await activate(cookie, campaign.id, v2, { expectedStatus: 'PAUSED', reason: 'yeni kural ile' }).expect(201);
+    // A value outside the enum is a validation error, not a silent skip.
+    await activate(cookie, campaign.id, v2, { expectedStatus: 'BOGUS' }).expect(400);
   });
 
   it('FACT_SOURCE_UNAVAILABLE: a version whose fact source has no PROVIDER writer cannot be activated or resumed', async () => {

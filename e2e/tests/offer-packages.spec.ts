@@ -350,7 +350,8 @@ test.describe('what other people may see', () => {
       await admin.loginToAdmin(adminAccount.email, adminAccount.password);
 
       await admin.gotoAdmin('/credit-packages');
-      await expect(admin.page.getByText(pkg.name)).toBeVisible();
+      // The row's link: the package's name is also in its (closed) status dialog.
+      await expect(admin.page.getByRole('link', { name: pkg.name })).toBeVisible();
       // Scoped to the package's row: the screen's ⓘ names the three types too.
       await expect(
         admin.page.getByTestId('credit-package-row').filter({ hasText: pkg.name }),

@@ -481,7 +481,7 @@ export class PackageRefundRequestsService {
           flowOpen &&
           hasEvidence &&
           can(AdminPermission.PACKAGE_REFUND_REQUEST_CREATE),
-        approveNormal: approveReady && currentEligibility.recommendation === 'REFUNDABLE',
+        approveNormal: approveReady && currentEligibility.recommendation === 'REFUNDABLE' && !isMakerOrReviewer,
         approveException:
           approveReady && currentEligibility.recommendation === 'EXCEPTION_ONLY' && !isMakerOrReviewer,
         reject: underReview && can(AdminPermission.PACKAGE_REFUND_APPROVE),
@@ -492,6 +492,15 @@ export class PackageRefundRequestsService {
       /** True when only the maker-checker rule keeps this viewer from an exception approval. */
       exceptionBlockedByMakerChecker:
         approveReady && currentEligibility.recommendation === 'EXCEPTION_ONLY' && isMakerOrReviewer,
+      /**
+       * True when only the maker-checker rule keeps this viewer from approving
+       * at all — a normal approval since ADMIN-DESTRUCTIVE-CONFIRMATION-001
+       * Paket A, an exception as before.
+       */
+      approvalBlockedByMakerChecker:
+        approveReady &&
+        (currentEligibility.recommendation === 'REFUNDABLE' || currentEligibility.recommendation === 'EXCEPTION_ONLY') &&
+        isMakerOrReviewer,
     };
   }
 
@@ -678,13 +687,15 @@ export class PackageRefundRequestsService {
         if (kind === PackageRefundApprovalKind.NORMAL && eligibility.recommendation !== 'REFUNDABLE') {
           throw refundNotNormallyEligible(eligibility.blockingCodes);
         }
-        if (kind === PackageRefundApprovalKind.EXCEPTION) {
-          if (eligibility.recommendation === 'REFUNDABLE') {
-            throw refundExceptionNotNeeded();
-          }
-          if (admin.id === request.createdById || admin.id === request.reviewStartedById) {
-            throw refundMakerChecker();
-          }
+        if (kind === PackageRefundApprovalKind.EXCEPTION && eligibility.recommendation === 'REFUNDABLE') {
+          throw refundExceptionNotNeeded();
+        }
+        // Maker ≠ checker for every approval, normal or exception
+        // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A): whoever opened the
+        // request or took it into review cannot be the one who approves it.
+        // A rejection is not held to this.
+        if (admin.id === request.createdById || admin.id === request.reviewStartedById) {
+          throw refundMakerChecker(kind);
         }
 
         const swapped = await tx.packageRefundRequest.updateMany({

@@ -1,5 +1,6 @@
 import { expect, test, type Browser } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { clickBeforeHydration, confirmThrough } from '../src/confirm-dialog';
 import { createCategory, createProvider, createStaffAdmin, prisma, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime, purchaseTermsRuntime, type Runtime } from '../src/runtime';
 
@@ -92,7 +93,9 @@ test.describe('package refund request', () => {
       browserName,
     );
     const staff = await createStaffAdmin(REFUND_PERMISSIONS);
+    const second = await createStaffAdmin(REFUND_PERMISSIONS);
     const admin = await Actor.open(browser, 'staff', purchaseTermsRuntime);
+    const checker = await Actor.open(browser, 'staff', purchaseTermsRuntime);
 
     try {
       expect(purchase.termsAcceptanceRequired).toBe(true);
@@ -159,24 +162,50 @@ test.describe('package refund request', () => {
       );
       await expect(admin.page.getByTestId('package-refund-evidence')).toContainText(acceptance.documentVersion);
 
-      await admin.page.getByTestId('package-refund-take').click();
+      // Paket A: taking it into review asks first — a click before hydration
+      // carries no proof and changes nothing; the dialog says a mail goes out
+      // and no money moves.
+      const detailUrl = admin.page.url();
+      await clickBeforeHydration(admin.page, detailUrl, admin.page.getByTestId('package-refund-take'));
+      await expect(admin.page).toHaveURL(/error=/);
+      expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe('SUBMITTED');
+      await admin.gotoAdmin(`/package-refunds/${refund.id}`);
+      await confirmThrough(admin.page.getByTestId('package-refund-take'), 'Evet, işleme al', async (takeDialog) => {
+        await expect(takeDialog).toContainText('e-posta gider');
+        await expect(takeDialog).toContainText('Para ya da kredi hareket etmez');
+      });
       await expect(admin.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
-      // Faz 3D: the approval asks first. Closing the dialog writes nothing;
-      // confirming sends the approval exactly once.
-      await admin.page.getByTestId('package-refund-approve-normal').click();
-      const approveDialog = admin.page.getByTestId('package-refund-approve-normal-dialog');
+      // Maker ≠ checker for a normal approval too: the taker has no approve
+      // button and is told why; a reject is still theirs.
+      await expect(admin.page.getByTestId('package-refund-maker-checker')).toBeVisible();
+      await expect(admin.page.getByTestId('package-refund-approve-normal')).toHaveCount(0);
+      await expect(admin.page.getByTestId('package-refund-reject-form')).toBeVisible();
+
+      // A second operator approves. Faz 3D: the approval asks first. Closing
+      // the dialog writes nothing; confirming sends the approval exactly once.
+      await signInStaff(checker, second);
+      await checker.gotoAdmin(`/package-refunds/${refund.id}`);
+      await assertNoErrorScreen(checker.page);
+      await expect(checker.page.getByTestId('package-refund-maker-checker')).toHaveCount(0);
+      await checker.page.getByTestId('package-refund-approve-normal').click();
+      const approveDialog = checker.page.getByTestId('package-refund-approve-normal-dialog');
       await expect(approveDialog).toBeVisible();
       await expect(approveDialog).toContainText('para ya da kredi hareket etmez');
       await approveDialog.getByRole('button', { name: 'Vazgeç' }).click();
       await expect(approveDialog).toBeHidden();
-      await admin.page.getByTestId('package-refund-approve-normal').click();
-      await admin.page.keyboard.press('Escape');
+      await checker.page.getByTestId('package-refund-approve-normal').click();
+      await checker.page.keyboard.press('Escape');
       await expect(approveDialog).toBeHidden();
       expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe(
         'UNDER_REVIEW',
       );
-      await admin.page.getByTestId('package-refund-approve-normal').click();
+      await checker.page.getByTestId('package-refund-approve-normal').click();
       await approveDialog.getByRole('button', { name: 'Evet, iadeyi onayla' }).click();
+      await expect(checker.page.getByTestId('package-refund-status')).toHaveAttribute(
+        'data-status',
+        'APPROVED_PENDING_SETTLEMENT',
+      );
+      await admin.gotoAdmin(`/package-refunds/${refund.id}`);
       await expect(admin.page.getByTestId('package-refund-status')).toHaveAttribute(
         'data-status',
         'APPROVED_PENDING_SETTLEMENT',
@@ -211,6 +240,7 @@ test.describe('package refund request', () => {
     } finally {
       await provider.close();
       await admin.close();
+      await checker.close();
     }
   });
 
@@ -287,7 +317,7 @@ test.describe('package refund request', () => {
       await makerActor.page.locator('#support-refund-purchase').selectOption(purchase.id);
       await makerActor.page.getByTestId('support-refund-open').click();
       await expect(makerActor.page).toHaveURL(/\/package-refunds\/[^/?]+\?done=created$/);
-      await makerActor.page.getByTestId('package-refund-take').click();
+      await confirmThrough(makerActor.page.getByTestId('package-refund-take'), 'Evet, işleme al');
       await expect(makerActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
       await expect(makerActor.page.getByTestId('package-refund-maker-checker')).toBeVisible();
       await expect(makerActor.page.getByTestId('package-refund-exception-form')).toHaveCount(0);
@@ -386,7 +416,7 @@ test.describe('package refund request', () => {
 
       await signInStaff(operatorActor, operator);
       await operatorActor.gotoAdmin(detailPath);
-      await operatorActor.page.getByTestId('package-refund-take').click();
+      await confirmThrough(operatorActor.page.getByTestId('package-refund-take'), 'Evet, işleme al');
       await expect(operatorActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
 
       // The dialog opens only once the form is valid: an empty reason is the

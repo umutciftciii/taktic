@@ -186,6 +186,59 @@ function writes() {
   return apiFetch.mock.calls.filter(([, init]) => init && (init as { method?: string }).method && (init as { method: string }).method !== 'GET');
 }
 
+/** A one-time credit package as the form posts it, unchanged from STORED_CREDIT_PACKAGE. */
+const CREDIT_PACKAGE_FIELDS = {
+  name: 'Başlangıç',
+  slug: 'baslangic',
+  type: 'ONE_TIME_CREDITS',
+  creditAmount: '50',
+  priceAmount: '149,90',
+  currency: 'TRY',
+  sortOrder: '1',
+  isActive: 'true',
+};
+const STORED_CREDIT_PACKAGE = {
+  id: 'cp-1',
+  name: 'Başlangıç',
+  slug: 'baslangic',
+  type: 'ONE_TIME_CREDITS',
+  creditAmount: 50,
+  quotaCredits: null,
+  dailyOfferLimit: null,
+  priceAmount: 14990,
+  currency: 'TRY',
+  sortOrder: 1,
+  isActive: true,
+  scopeCategories: [],
+};
+
+/** A vitrin package as the edit form posts it, unchanged from STORED_SHOWCASE_PACKAGE. */
+const SHOWCASE_PACKAGE_FIELDS = {
+  name: 'Vitrin 30',
+  priceAmount: '499,90',
+  durationDays: '30',
+  activationWindowDays: '90',
+  allowedCardKind: '',
+  maxAreas: '',
+  description: 'Açıklama',
+  isActive: 'on',
+  sortOrder: '0',
+};
+const STORED_SHOWCASE_PACKAGE = {
+  id: 'sp-1',
+  name: 'Vitrin 30',
+  slug: 'vitrin-30',
+  priceAmount: 49990,
+  currency: 'TRY',
+  durationDays: 30,
+  activationWindowDays: 90,
+  allowedCardKind: null,
+  maxAreas: null,
+  description: 'Açıklama',
+  isActive: true,
+  sortOrder: 0,
+};
+
 type Case = {
   name: string;
   key: (typeof CONFIRMATION_PROOF_KEYS)[number];
@@ -464,6 +517,210 @@ const CASES: Case[] = [
     },
     refused: refusedRedirect('/requests/rq-1?tab=sikayet&reportError=confirmation'),
   },
+  // ── Paket A: campaign lifecycle ──
+  {
+    name: 'campaigns: duraklat',
+    key: 'campaign.pause',
+    run: async (proof) => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      return campaignLifecycleAction({ status: 'idle' } as never, form({ intent: 'pause', campaignId: 'c-1', reason: 'Bütçe kontrolü' }, proof));
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'campaigns: devam ettir',
+    key: 'campaign.resume',
+    run: async (proof) => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      return campaignLifecycleAction({ status: 'idle' } as never, form({ intent: 'resume', campaignId: 'c-1', reason: 'Kontrol bitti' }, proof));
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'campaigns: sürümü etkinleştir (DRAFT)',
+    key: 'campaign.version-activate',
+    read: { campaign: { status: 'DRAFT' } },
+    run: async (proof) => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      return campaignLifecycleAction({ status: 'idle' } as never, form({ intent: 'activate', campaignId: 'c-1', versionNumber: '1' }, proof));
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'campaigns: başka sürüme geç (ACTIVE)',
+    key: 'campaign.version-switch',
+    read: { campaign: { status: 'ACTIVE' } },
+    run: async (proof) => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      return campaignLifecycleAction({ status: 'idle' } as never, form({ intent: 'activate', campaignId: 'c-1', versionNumber: '2' }, proof));
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'campaigns: yeni sürümle devam ettir (PAUSED)',
+    key: 'campaign.version-resume',
+    read: { campaign: { status: 'PAUSED' } },
+    run: async (proof) => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      return campaignLifecycleAction(
+        { status: 'idle' } as never,
+        form({ intent: 'activate', campaignId: 'c-1', versionNumber: '2', reason: 'Yeni kural ile' }, proof),
+      );
+    },
+    refused: refusedState,
+  },
+  // ── Paket A: operations settings ──
+  {
+    name: 'operations: otomatik yayını aç',
+    key: 'operations.auto-publish-enable',
+    run: async (proof) => {
+      const { toggleAutoPublishAction } = await import('../app/operations-settings/actions');
+      return toggleAutoPublishAction(form({ enabled: 'true' }, proof));
+    },
+    refused: refusedRedirect('#otomatik-yayin'),
+  },
+  {
+    name: 'operations: değerlendirmeleri aç',
+    key: 'operations.reviews-enable',
+    run: async (proof) => {
+      const { toggleProviderReviewsAction } = await import('../app/operations-settings/actions');
+      return toggleProviderReviewsAction(form({ enabled: 'true' }, proof));
+    },
+    refused: refusedRedirect('#degerlendirmeler'),
+  },
+  {
+    name: 'operations: değerlendirmeleri kapat',
+    key: 'operations.reviews-disable',
+    run: async (proof) => {
+      const { toggleProviderReviewsAction } = await import('../app/operations-settings/actions');
+      return toggleProviderReviewsAction(form({ enabled: 'false' }, proof));
+    },
+    refused: refusedRedirect('#degerlendirmeler'),
+  },
+  {
+    name: 'operations: paket yenilemeyi kapat',
+    key: 'scheduler.disable',
+    run: async (proof) => {
+      const { toggleSchedulerAction } = await import('../app/operations-settings/actions');
+      return toggleSchedulerAction(form({ job: 'entitlement-renewal', enabled: 'false' }, proof));
+    },
+    refused: refusedRedirect('#zamanlanmis-isler'),
+  },
+  {
+    name: 'operations: görüntülenmeyen teklif iadesini kapat',
+    key: 'scheduler.disable',
+    run: async (proof) => {
+      const { toggleSchedulerAction } = await import('../app/operations-settings/actions');
+      return toggleSchedulerAction(form({ job: 'unviewed-offer-refund', enabled: 'false' }, proof));
+    },
+    refused: refusedRedirect('#zamanlanmis-isler'),
+  },
+  // ── Paket A: credit packages ──
+  {
+    name: 'credit packages: aktif oluştur',
+    key: 'credit-package.create-active',
+    run: async (proof) => {
+      const { createCreditPackageAction } = await import('../app/credit-packages/actions');
+      return createCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, isActive: 'true' }, proof));
+    },
+    refused: refusedRedirect('/credit-packages/new?error='),
+  },
+  {
+    name: 'credit packages: aktifleştir (liste/detay)',
+    key: 'credit-package.activate',
+    run: async (proof) => {
+      const { updateCreditPackageStatusAction } = await import('../app/credit-packages/actions');
+      return updateCreditPackageStatusAction(form({ id: 'cp-1', isActive: 'true', redirectTo: '/credit-packages' }, proof));
+    },
+    refused: refusedRedirect('/credit-packages?error='),
+  },
+  {
+    name: 'credit packages: pasifleştir (liste/detay)',
+    key: 'credit-package.deactivate',
+    run: async (proof) => {
+      const { updateCreditPackageStatusAction } = await import('../app/credit-packages/actions');
+      return updateCreditPackageStatusAction(form({ id: 'cp-1', isActive: 'false', redirectTo: '/credit-packages/cp-1' }, proof));
+    },
+    refused: refusedRedirect('/credit-packages/cp-1?error='),
+  },
+  {
+    name: 'credit packages: fiyat değişikliği',
+    key: 'credit-package.update-commercial',
+    read: STORED_CREDIT_PACKAGE,
+    run: async (proof) => {
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      return updateCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', priceAmount: '199,90' }, proof));
+    },
+    refused: refusedRedirect('/credit-packages/cp-1?error='),
+  },
+  {
+    name: 'credit packages: formdaki durum seçimiyle pasifleştirme',
+    key: 'credit-package.deactivate',
+    read: STORED_CREDIT_PACKAGE,
+    run: async (proof) => {
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      return updateCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', isActive: 'false' }, proof));
+    },
+    refused: refusedRedirect('/credit-packages/cp-1?error='),
+  },
+  // ── Paket A: vitrin packages ──
+  {
+    name: 'showcase packages: oluştur (hemen satışta)',
+    key: 'showcase-package.create-active',
+    run: async (proof) => {
+      const { createShowcasePackageAction } = await import('../app/showcase/packages/actions');
+      return createShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, slug: 'vitrin-yeni-30' }, proof));
+    },
+    refused: refusedRedirect('error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'showcase packages: bedel değişikliği',
+    key: 'showcase-package.update-commercial',
+    read: STORED_SHOWCASE_PACKAGE,
+    run: async (proof) => {
+      const { updateShowcasePackageAction } = await import('../app/showcase/packages/actions');
+      return updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1', priceAmount: '600' }, proof));
+    },
+    refused: refusedRedirect('/showcase/packages/sp-1?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'showcase packages: satıştan kaldır',
+    key: 'showcase-package.deactivate',
+    run: async (proof) => {
+      const { updateShowcasePackageStatusAction } = await import('../app/showcase/packages/actions');
+      return updateShowcasePackageStatusAction(form({ packageId: 'sp-1', isActive: 'false' }, proof));
+    },
+    refused: refusedRedirect('/showcase/packages/sp-1?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'showcase packages: satışa aç',
+    key: 'showcase-package.activate',
+    run: async (proof) => {
+      const { updateShowcasePackageStatusAction } = await import('../app/showcase/packages/actions');
+      return updateShowcasePackageStatusAction(form({ packageId: 'sp-1', isActive: 'true' }, proof));
+    },
+    refused: refusedRedirect('/showcase/packages/sp-1?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'showcase packages: formdaki durumla satıştan kaldırma',
+    key: 'showcase-package.deactivate',
+    read: STORED_SHOWCASE_PACKAGE,
+    run: async (proof) => {
+      const { updateShowcasePackageAction } = await import('../app/showcase/packages/actions');
+      return updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1', isActive: 'off' }, proof));
+    },
+    refused: refusedRedirect('/showcase/packages/sp-1?error=CONFIRMATION_REQUIRED'),
+  },
+  // ── Paket A: package refunds ──
+  {
+    name: 'package refunds: işleme al',
+    key: 'package-refund.take',
+    run: async (proof) => {
+      const { takePackageRefundAction } = await import('../app/package-refunds/actions');
+      return takePackageRefundAction(form({ id: 'pr-1' }, proof));
+    },
+    refused: refusedRedirect('/package-refunds/pr-1?error='),
+  },
 ];
 
 describe('guarded server actions refuse a submission without a good proof, and write nothing', () => {
@@ -527,7 +784,7 @@ describe('guarded server actions refuse a submission without a good proof, and w
     const { approveShowcaseVersionAction } = await import('../app/showcase/reviews/[versionId]/actions');
     await outcome(() => approveShowcaseVersionAction(form({ versionId: 'v-2' })));
     const { toggleSchedulerAction } = await import('../app/operations-settings/actions');
-    await outcome(() => toggleSchedulerAction(form({ job: 'entitlement-renewal', enabled: 'false' })));
+    await outcome(() => toggleSchedulerAction(form({ job: 'request-expiry', enabled: 'false' })));
     expect(writes()).toHaveLength(3);
   });
 
@@ -688,6 +945,208 @@ describe('guarded server actions refuse a submission without a good proof, and w
     expect(writes()).toEqual([]);
   });
 
+  describe('Paket A: the campaign activation key comes from the status the API reports', () => {
+    const sent = () => writes().map(([path, init]) => [path, JSON.parse((init as { body: string }).body) as unknown]);
+
+    it('a neighbouring version key does not open this move, and the status confirmed is sent along', async () => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      primeReads({ campaign: { status: 'PAUSED' } });
+      for (const key of ['campaign.version-switch', 'campaign.version-activate', 'campaign.resume'] as const) {
+        refusedState({
+          value: await campaignLifecycleAction(
+            { status: 'idle' } as never,
+            form({ intent: 'activate', campaignId: 'c-1', versionNumber: '2', reason: 'Yeni kural' }, await issueConfirmationProof(key)),
+          ),
+        });
+      }
+      expect(writes()).toEqual([]);
+
+      primeReads({ campaign: { status: 'ACTIVE' } });
+      await outcome(async () =>
+        campaignLifecycleAction(
+          { status: 'idle' } as never,
+          form({ intent: 'activate', campaignId: 'c-1', versionNumber: '2' }, await issueConfirmationProof('campaign.version-switch')),
+        ),
+      );
+      expect(sent()).toEqual([['/admin/campaigns/c-1/versions/2/activate', { expectedStatus: 'ACTIVE' }]]);
+    });
+
+    it('resuming with a version needs a reason, proof or not, and sends it', async () => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      primeReads({ campaign: { status: 'PAUSED' } });
+      const refused = await campaignLifecycleAction(
+        { status: 'idle' } as never,
+        form({ intent: 'activate', campaignId: 'c-1', versionNumber: '2', reason: ' a ' }, await issueConfirmationProof('campaign.version-resume')),
+      );
+      expect(JSON.stringify(refused)).toContain('gerekçe en az 3 karakter');
+      expect(writes()).toEqual([]);
+      await outcome(async () =>
+        campaignLifecycleAction(
+          { status: 'idle' } as never,
+          form(
+            { intent: 'activate', campaignId: 'c-1', versionNumber: '2', reason: '  Yeni kural  ' },
+            await issueConfirmationProof('campaign.version-resume'),
+          ),
+        ),
+      );
+      expect(sent()).toEqual([['/admin/campaigns/c-1/versions/2/activate', { expectedStatus: 'PAUSED', reason: 'Yeni kural' }]]);
+    });
+
+    it('a campaign that cannot be read, or has ended, is not activated', async () => {
+      const { campaignLifecycleAction } = await import('../app/campaigns/actions');
+      apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) => {
+        if (!init?.method || init.method === 'GET') throw new Error('unreadable');
+        return {};
+      });
+      const unreadable = await campaignLifecycleAction(
+        { status: 'idle' } as never,
+        form({ intent: 'activate', campaignId: 'c-1', versionNumber: '1' }, await issueConfirmationProof('campaign.version-activate')),
+      );
+      expect(JSON.stringify(unreadable)).toContain('okunamadı');
+      primeReads({ campaign: { status: 'ENDED' } });
+      const ended = await campaignLifecycleAction(
+        { status: 'idle' } as never,
+        form({ intent: 'activate', campaignId: 'c-1', versionNumber: '1' }, await issueConfirmationProof('campaign.version-activate')),
+      );
+      expect(JSON.stringify(ended)).toContain('Sona ermiş');
+      expect(writes()).toEqual([]);
+    });
+  });
+
+  describe('Paket A: a package edit asks only for the risky delta, judged against the stored package', () => {
+    it('a credit-package save of the name, slug, description or order needs no proof', async () => {
+      primeReads(STORED_CREDIT_PACKAGE);
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      const result = await outcome(() =>
+        updateCreditPackageAction(
+          form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', name: 'Başlangıç+', slug: 'baslangic-2', description: 'Yeni metin', sortOrder: '5' }),
+        ),
+      );
+      expect(result.redirect).toBe('/credit-packages/cp-1?ok=saved');
+      expect(writes()).toHaveLength(1);
+    });
+
+    it('a form that only claims "nothing changed" is not believed: the price is compared to the stored one', async () => {
+      primeReads(STORED_CREDIT_PACKAGE);
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      for (const fields of [{ priceAmount: '149,91' }, { creditAmount: '60' }, { currency: 'USD' }]) {
+        refusedRedirect('/credit-packages/cp-1?error=')(
+          await outcome(() => updateCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', commercialChanged: '0', ...fields }))),
+        );
+      }
+      expect(writes()).toEqual([]);
+    });
+
+    it('a price change and a status change together need both proofs; either alone is refused', async () => {
+      primeReads(STORED_CREDIT_PACKAGE);
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      const fields = { ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', priceAmount: '199,90', isActive: 'false' };
+      for (const key of ['credit-package.update-commercial', 'credit-package.deactivate'] as const) {
+        refusedRedirect('/credit-packages/cp-1?error=')(
+          await outcome(async () => updateCreditPackageAction(form(fields, await issueConfirmationProof(key)))),
+        );
+      }
+      expect(writes()).toEqual([]);
+      const both = form(fields, await issueConfirmationProof('credit-package.update-commercial'));
+      both.append(CONFIRMATION_PROOF_FIELD, (await issueConfirmationProof('credit-package.deactivate'))!);
+      expect((await outcome(() => updateCreditPackageAction(both))).redirect).toBe('/credit-packages/cp-1?ok=saved');
+      expect(writes()).toHaveLength(1);
+    });
+
+    it('without the status permission the status is not sent and not asked about', async () => {
+      primeReads({ ...STORED_CREDIT_PACKAGE, isActive: true });
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      const result = await outcome(() =>
+        updateCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1', isActive: '', statusLocked: '1', name: 'Yeni ad' })),
+      );
+      expect(result.redirect).toBe('/credit-packages/cp-1?ok=saved');
+    });
+
+    it('a package that cannot be read is refused without a proof', async () => {
+      apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) => {
+        if (!init?.method || init.method === 'GET') throw new Error('unreadable');
+        return {};
+      });
+      const { updateCreditPackageAction } = await import('../app/credit-packages/actions');
+      const { updateShowcasePackageAction } = await import('../app/showcase/packages/actions');
+      refusedRedirect('/credit-packages/cp-1?error=')(
+        await outcome(() => updateCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, id: 'cp-1' }))),
+      );
+      refusedRedirect('error=CONFIRMATION_REQUIRED')(
+        await outcome(() => updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1' }))),
+      );
+      expect(writes()).toEqual([]);
+    });
+
+    it('an inactive credit package is created without a proof', async () => {
+      primeReads(undefined);
+      apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) =>
+        !init?.method || init.method === 'GET' ? undefined : { id: 'cp-9' },
+      );
+      const { createCreditPackageAction } = await import('../app/credit-packages/actions');
+      const result = await outcome(() => createCreditPackageAction(form({ ...CREDIT_PACKAGE_FIELDS, isActive: 'false' })));
+      expect(result.redirect).toBe('/credit-packages/cp-9?ok=created');
+      expect(writes()).toHaveLength(1);
+    });
+
+    it('a vitrin-package save of the name, description or order needs no proof; the run length does', async () => {
+      primeReads(STORED_SHOWCASE_PACKAGE);
+      const { updateShowcasePackageAction } = await import('../app/showcase/packages/actions');
+      const cosmetic = await outcome(() =>
+        updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1', name: 'Vitrin 30+', description: 'Yeni', sortOrder: '3' })),
+      );
+      expect(cosmetic.redirect).toBe('/showcase/packages/sp-1?saved=1');
+      expect(writes()).toHaveLength(1);
+      for (const fields of [{ durationDays: '45' }, { activationWindowDays: '60' }, { allowedCardKind: 'SERVICE' }, { maxAreas: '3' }]) {
+        refusedRedirect('error=CONFIRMATION_REQUIRED')(
+          await outcome(() => updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1', ...fields }))),
+        );
+      }
+      expect(writes()).toHaveLength(1);
+    });
+  });
+
+  it('Paket A: the off switches that stay one tap, and the reviews switch keys each direction', async () => {
+    const { toggleAutoPublishAction, toggleProviderReviewsAction } = await import('../app/operations-settings/actions');
+    await outcome(() => toggleAutoPublishAction(form({ enabled: 'false' })));
+    expect(writes()).toHaveLength(1);
+    refusedRedirect('#degerlendirmeler')(
+      await outcome(async () => toggleProviderReviewsAction(form({ enabled: 'false' }, await issueConfirmationProof('operations.reviews-enable')))),
+    );
+    refusedRedirect('#degerlendirmeler')(
+      await outcome(async () => toggleProviderReviewsAction(form({ enabled: 'true' }, await issueConfirmationProof('operations.reviews-disable')))),
+    );
+    expect(writes()).toHaveLength(1);
+  });
+
+  it('Paket A: a manual offer refund without a chosen reason is refused before anything else', async () => {
+    const { refundOfferCreditAction } = await import('../app/offers/actions');
+    const result = await outcome(async () =>
+      refundOfferCreditAction(form({ id: 'o-1', reasonCode: '' }, await issueConfirmationProof('offer.refund'))),
+    );
+    expect(result.redirect).toBe('/offers/o-1?tab=kredi&refundError=reasonRequired');
+    expect(writes()).toEqual([]);
+  });
+
+  it('several proofs: each covers one key, and one minted for another key is not spent by trying it', async () => {
+    const { hasConfirmationProofs } = await import('../lib/confirmation-proof-server');
+    const a = (await issueConfirmationProof('credit-package.activate'))!;
+    const b = (await issueConfirmationProof('credit-package.update-commercial'))!;
+    const data = new FormData();
+    data.append(CONFIRMATION_PROOF_FIELD, a);
+    data.append(CONFIRMATION_PROOF_FIELD, b);
+    // Only one key asked: `a` is tried for it first, refused on scope, and stays good.
+    expect(await hasConfirmationProofs(data, ['credit-package.update-commercial'])).toBe(true);
+    const onlyA = new FormData();
+    onlyA.append(CONFIRMATION_PROOF_FIELD, a);
+    expect(await hasConfirmationProofs(onlyA, ['credit-package.activate'])).toBe(true);
+    // One token cannot stand for two keys, and nothing asked is nothing needed.
+    const one = new FormData();
+    one.append(CONFIRMATION_PROOF_FIELD, (await issueConfirmationProof('credit-package.activate'))!);
+    expect(await hasConfirmationProofs(one, ['credit-package.activate', 'credit-package.update-commercial'])).toBe(false);
+    expect(await hasConfirmationProofs(new FormData(), [])).toBe(true);
+  });
+
   it('the mint action hands out a proof only for a known key and a session', async () => {
     expect(await mintConfirmationProof('credits.grant')).toEqual(expect.stringMatching(/^[\w-]+\.[\w-]+$/));
     expect(await mintConfirmationProof('not-a-key')).toBeNull();
@@ -721,8 +1180,15 @@ describe('every ConfirmDialog is guarded on the server', () => {
 
   it('every key is used by a dialog and checked by an action before it writes', () => {
     const dialogs = tsx.map((path) => read(path)).join('\n');
+    // A ConfirmGate (Paket A) names its proofs in its `evaluate` decision, in a
+    // client file that renders <ConfirmGate.
+    const gates = tsx
+      .map((path) => read(path))
+      .filter((source) => source.includes('<ConfirmGate'))
+      .join('\n');
     for (const key of CONFIRMATION_PROOF_KEYS) {
-      expect(dialogs, `no dialog asks for ${key}`).toContain(`proof="${key}"`);
+      const asked = dialogs.includes(`proof="${key}"`) || gates.includes(`'${key}'`);
+      expect(asked, `no dialog asks for ${key}`).toBe(true);
       expect(actions, `no action checks ${key}`).toContain(`'${key}'`);
     }
   });

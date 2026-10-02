@@ -417,9 +417,21 @@ export default async function OperationsSettingsPage({
                             {copy.confirmation ? <p>{copy.confirmation}</p> : null}
                             <p>
                               İş, kendi cron zamanındaki (<code>{job.cron}</code>) ilk çalışmasından itibaren devreye girer.
-                              Değişiklik adınızla kayda geçer; kapatmak onay istemez.
+                              Değişiklik adınızla kayda geçer
+                              {copy.disableConfirmation ? '.' : '; kapatmak onay istemez.'}
                             </p>
                           </>
+                        }
+                        disableConsequence={
+                          copy.disableConfirmation ? (
+                            <>
+                              <p>{copy.disableConfirmation}</p>
+                              <p>
+                                Sıradaki cron çalışmasından (<code>{job.cron}</code>) itibaren geçerlidir; sunucuyu yeniden
+                                başlatmaya gerek yoktur. Değişiklik adınızla kayda geçer.
+                              </p>
+                            </>
+                          ) : undefined
                         }
                       />
                     ) : null

@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { PackageRefundApprovalKind } from '@prisma/client';
 import type { PackageRefundReasonCode } from './package-refund-eligibility';
 
 /**
@@ -85,11 +86,13 @@ export function refundExceptionNotNeeded() {
   });
 }
 
-export function refundMakerChecker() {
+export function refundMakerChecker(kind: PackageRefundApprovalKind = PackageRefundApprovalKind.EXCEPTION) {
   return new ConflictException({
     code: PACKAGE_REFUND_MAKER_CHECKER,
     message:
-      'İstisna onayını, talebi açan veya işleme alan yönetici veremez. İkinci bir yetkili onaylamalı.',
+      kind === PackageRefundApprovalKind.EXCEPTION
+        ? 'İstisna onayını, talebi açan veya işleme alan yönetici veremez. İkinci bir yetkili onaylamalı.'
+        : 'İade onayını, talebi açan veya işleme alan yönetici veremez. İkinci bir yetkili onaylamalı.',
   });
 }
 

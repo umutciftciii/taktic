@@ -376,6 +376,36 @@ describe('the 48-hour refund', () => {
   });
 });
 
+describe('who ran the scan (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A)', () => {
+  it('a hand-run scan names the operator on its ledger row; the scheduler leaves it empty', async () => {
+    const byHand = await policyFixture();
+    await ageBeyondWindow(byHand.offerId);
+    const operator = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    const run = await request(ctx.server)
+      .post('/offers/refund-scan/execute')
+      .set('Cookie', await loginAs(ctx.prisma, operator.id))
+      // An actor in the body is not accepted: the operator is the session.
+      .send({ limit: 50, actorId: 'someone-else' })
+      .expect(400);
+    expect(run.body.message).toEqual(expect.arrayContaining(['property actorId should not exist']));
+    await request(ctx.server)
+      .post('/offers/refund-scan/execute')
+      .set('Cookie', await loginAs(ctx.prisma, operator.id))
+      .send({ limit: 50 })
+      .expect(201);
+    const manual = await refundRows(byHand.offerId);
+    expect(manual).toHaveLength(1);
+    expect(manual[0]).toMatchObject({ reason: 'UNVIEWED_OFFER_48H', createdById: operator.id });
+
+    const automatic = await policyFixture();
+    await ageBeyondWindow(automatic.offerId);
+    await worker().execute();
+    const scheduled = await refundRows(automatic.offerId);
+    expect(scheduled).toHaveLength(1);
+    expect(scheduled[0]).toMatchObject({ reason: 'UNVIEWED_OFFER_48H', createdById: null });
+  });
+});
+
 describe('offers from before the policy', () => {
   it('are never refunded, however unviewed and however old', async () => {
     const { provider, offerId } = await policyFixture();

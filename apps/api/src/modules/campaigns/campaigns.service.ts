@@ -29,6 +29,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed } from '../auth/embedded-permissions';
 import { OPERATIONS_SETTINGS_ID } from '../operations-settings/operations-settings.service';
 import { CampaignEngineSettingsService } from './campaign-engine-settings.service';
+import { CAMPAIGN_TRANSITION_REASON_MIN_LENGTH } from './dto/campaign-transition.dto';
 import { CAMPAIGN_LIST_DEFAULT_LIMIT } from './dto/list-campaigns.dto';
 import { istanbulDay } from './engine/campaign-engine.repository';
 import { requiredSourceChannel } from './engine/campaign-channel';
@@ -90,6 +91,8 @@ export const CAMPAIGN_NOT_FOUND = 'CAMPAIGN_NOT_FOUND';
 export const CAMPAIGN_VERSION_NOT_FOUND = 'CAMPAIGN_VERSION_NOT_FOUND';
 export const CAMPAIGN_ENDED = 'CAMPAIGN_ENDED';
 export const CAMPAIGN_INVALID_TRANSITION = 'CAMPAIGN_INVALID_TRANSITION';
+export const CAMPAIGN_STATUS_CHANGED = 'CAMPAIGN_STATUS_CHANGED';
+export const CAMPAIGN_RESUME_REASON_REQUIRED = 'CAMPAIGN_RESUME_REASON_REQUIRED';
 export const CAMPAIGN_ENGINE_DISABLED = 'CAMPAIGN_ENGINE_DISABLED';
 export const CAMPAIGN_ACTIVATION_REFUSED = 'CAMPAIGN_ACTIVATION_REFUSED';
 export const CAMPAIGN_REDEMPTION_NOT_FOUND = 'CAMPAIGN_REDEMPTION_NOT_FOUND';
@@ -633,11 +636,22 @@ export class CampaignsService {
    * and resumes. Every path writes VERSION_ACTIVATED, and the status change,
    * when there is one, its own row.
    */
-  async activateVersion(campaignId: string, versionNumber: number, actorId: string) {
+  async activateVersion(
+    campaignId: string,
+    versionNumber: number,
+    actorId: string,
+    options: { reason?: string; expectedStatus?: CampaignStatus } = {},
+  ) {
+    const reason = options.reason?.trim() ?? '';
     await runSerializable(
       this.prisma,
       async (tx) => {
         const campaign = await this.lockCampaign(tx, campaignId);
+        // Judged under the lock: what the operator confirmed must still be
+        // what is there (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+        if (options.expectedStatus !== undefined && campaign.status !== options.expectedStatus) {
+          throw statusChanged(campaign.status, options.expectedStatus);
+        }
         if (campaign.status === CampaignStatus.ENDED) {
           throw invalidTransition(campaign.status, CampaignStatus.ACTIVE);
         }
@@ -649,6 +663,12 @@ export class CampaignsService {
         });
         if (!version) {
           throw versionNotFound();
+        }
+        // A PAUSED campaign activated with a version is resumed by it, so it
+        // takes the reason a plain resume takes — whichever route turns it
+        // back on.
+        if (campaign.status === CampaignStatus.PAUSED && reason.length < CAMPAIGN_TRANSITION_REASON_MIN_LENGTH) {
+          throw resumeReasonRequired();
         }
 
         await this.judgeActivation(tx, campaign, version, new Date());
@@ -674,18 +694,22 @@ export class CampaignsService {
               benefitExpiresInDays: version.benefitExpiresInDays,
               maxRedemptionsPerProvider: version.maxRedemptionsPerProvider,
               channel: version.channel,
+              ...(reason ? { reason } : {}),
             },
           },
         });
         if (becomesActive) {
+          const resumed = campaign.status === CampaignStatus.PAUSED;
           await tx.campaignAuditLog.create({
             data: {
               campaignId,
-              action:
-                campaign.status === CampaignStatus.PAUSED ? CampaignAuditAction.RESUMED : CampaignAuditAction.ACTIVATED,
+              action: resumed ? CampaignAuditAction.RESUMED : CampaignAuditAction.ACTIVATED,
               campaignVersionId: version.id,
               actorId,
-              summary: { versionNumber: version.versionNumber },
+              // A resumption says why, in the same shape a plain resume does.
+              summary: resumed
+                ? { versionNumber: version.versionNumber, reason, fromStatus: campaign.status }
+                : { versionNumber: version.versionNumber },
             },
           });
         }
@@ -721,6 +745,11 @@ export class CampaignsService {
 
   private async transition(campaignId: string, to: CampaignStatus, reason: string, actorId: string) {
     const trimmed = reason.trim();
+    // The DTO counts the raw string; a reason of spaces is not a reason. The
+    // same rule the version route applies to a resumption.
+    if (to === CampaignStatus.ACTIVE && trimmed.length < CAMPAIGN_TRANSITION_REASON_MIN_LENGTH) {
+      throw resumeReasonRequired();
+    }
     await runSerializable(
       this.prisma,
       async (tx) => {
@@ -1349,6 +1378,26 @@ function campaignEnded() {
     error: 'Conflict',
     code: CAMPAIGN_ENDED,
     message: 'Sona ermiş bir kampanyaya revizyon eklenemez.',
+  });
+}
+
+function statusChanged(actual: CampaignStatus, expected: CampaignStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: CAMPAIGN_STATUS_CHANGED,
+    message: `Kampanyanın durumu siz onaylarken değişti (${expected} → ${actual}). Sayfayı yenileyip yeniden değerlendirin.`,
+    expected,
+    actual,
+  });
+}
+
+function resumeReasonRequired() {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: CAMPAIGN_RESUME_REASON_REQUIRED,
+    message: `Duraklatılmış kampanya devam ettirilirken gerekçe zorunludur (en az ${CAMPAIGN_TRANSITION_REASON_MIN_LENGTH} karakter).`,
   });
 }
 
