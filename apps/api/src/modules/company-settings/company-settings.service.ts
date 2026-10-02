@@ -1,6 +1,21 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import {
+  AdminAuditEntry,
+  AdminAuditPage,
+  AUDIT_ORDER,
+  AuditPageQueryDto,
+  auditPage,
+  auditPaging,
+  diffAuditFields,
+  readAuditChanges,
+  toAuditActor,
+  toAuditJson,
+} from '../../common/admin-audit';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { staffActorSelect } from '../auth/embedded-permissions';
 import { SaveCompanySettingsDto } from './dto/save-company-settings.dto';
 import { isDeliverableSupportEmail, isPublishableCompanyName } from './company-settings.rules';
 
@@ -77,27 +92,82 @@ export class CompanySettingsService {
   /**
    * Writes the row and returns what the screen should now show.
    *
-   * `updatedById` is the acting operator. It is recorded rather than trusted
-   * from the payload — the caller passes the authenticated user, and the column
-   * is SetNull so removing that account later does not delete the settings.
+   * `actorId` is the acting operator. It is recorded rather than trusted from
+   * the payload — the caller passes the authenticated user.
+   *
+   * ADMIN-ACTION-AUDIT-001: the save reads the stored values inside the same
+   * serializable transaction, writes only when one of the three fields
+   * actually differs, and records exactly those fields old → new in
+   * CompanySettingsChange. A save that changes nothing writes nothing — not
+   * the row (so `updatedBy` keeps naming whoever last changed it) and not an
+   * audit row.
    */
-  async save(dto: SaveCompanySettingsDto, updatedById: string | null): Promise<CompanySettingsView> {
-    const data = {
+  async save(dto: SaveCompanySettingsDto, actorId: string): Promise<CompanySettingsView> {
+    const next = {
       legalName: dto.legalName,
       supportEmail: dto.supportEmail,
       postalAddress: dto.postalAddress ?? null,
-      updatedById,
     };
 
-    await this.prisma.companySettings.upsert({
-      where: { id: COMPANY_SETTINGS_ID },
-      create: { id: COMPANY_SETTINGS_ID, ...data },
-      update: data,
-    });
+    await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const current = await tx.companySettings.findUnique({
+          where: { id: COMPANY_SETTINGS_ID },
+          select: { legalName: true, supportEmail: true, postalAddress: true },
+        });
+        const changes = diffAuditFields(current, next, COMPANY_SETTINGS_AUDIT_FIELDS);
+        if (changes.length === 0) {
+          return;
+        }
+
+        const data = { ...next, updatedById: actorId };
+        await tx.companySettings.upsert({
+          where: { id: COMPANY_SETTINGS_ID },
+          create: { id: COMPANY_SETTINGS_ID, ...data },
+          update: data,
+        });
+        await tx.companySettingsChange.create({
+          data: { changes: toAuditJson(changes), actorId },
+          select: { id: true },
+        });
+      },
+      { label: 'companySettings.save' },
+    );
 
     return this.getForAdmin();
   }
+
+  /** The recorded saves, newest first, each with only the fields it changed. */
+  async listChanges(query: AuditPageQueryDto | undefined, viewer: AuthUser): Promise<AdminAuditPage> {
+    const { page, pageSize, skip } = auditPaging(query);
+    const [total, rows] = await Promise.all([
+      this.prisma.companySettingsChange.count(),
+      this.prisma.companySettingsChange.findMany({
+        orderBy: [...AUDIT_ORDER],
+        skip,
+        take: pageSize,
+        select: { id: true, changes: true, createdAt: true, actor: staffActorSelect(viewer) },
+      }),
+    ]);
+    const items = rows.map(
+      (row): AdminAuditEntry => ({
+        id: row.id,
+        domain: 'COMPANY_SETTINGS',
+        action: 'UPDATED',
+        actor: toAuditActor(row.actor),
+        target: { type: 'COMPANY_SETTINGS', id: COMPANY_SETTINGS_ID },
+        changes: readAuditChanges(row.changes),
+        reason: null,
+        createdAt: row.createdAt,
+      }),
+    );
+    return auditPage(items, total, page, pageSize);
+  }
 }
+
+/** The three business facts, and nothing technical (no transport, key or sender). */
+export const COMPANY_SETTINGS_AUDIT_FIELDS = ['legalName', 'supportEmail', 'postalAddress'] as const;
 
 /**
  * Turns a row — or its absence — into the screen's view, including why it is

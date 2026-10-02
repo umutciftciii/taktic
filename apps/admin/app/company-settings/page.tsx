@@ -3,8 +3,11 @@ import {
   COMPANY_SETTINGS_ISSUE_LABELS,
   CompanySettings,
   formatDateTime,
+  getCompanySettingsHistory,
   requireAdmin,
 } from '../../lib/api';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../components/audit-timeline';
+import { parsePage } from '../../lib/list-query';
 import { DetailFormFooter } from '../../components/detail-form-footer';
 import { CompanySettingsSubmit } from './company-settings-submit';
 import { KeyValueList } from '../../components/key-value-list';
@@ -36,8 +39,11 @@ import { saveCompanySettingsAction } from './actions';
  * the sticky bar: a rejected save redirects with the typed values in the URL,
  * so the bar's "unsaved changes" state could not tell the truth after it.
  * Not drawn: the design's "faturalarda ve yasal metinlerde" (these values are
- * the e-mail footer only) and its "— destek e-postası güncellendi" (no change
- * log records which field changed).
+ * the e-mail footer only).
+ *
+ * "Son değişiklikler" (ADMIN-ACTION-AUDIT-001) is the field log behind the
+ * form: each save that changed something, with only the fields it changed,
+ * their old and new values, the operator and the moment.
  */
 
 export const dynamic = 'force-dynamic';
@@ -49,6 +55,7 @@ type CompanySettingsPageProps = {
     legalName?: string;
     supportEmail?: string;
     postalAddress?: string;
+    gecmisSayfa?: string;
   }>;
 };
 
@@ -66,7 +73,11 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const settings = await apiFetch<CompanySettings>('/company-settings');
+  const historyPage = parsePage(params.gecmisSayfa);
+  const [settings, history] = await Promise.all([
+    apiFetch<CompanySettings>('/company-settings'),
+    getCompanySettingsHistory(historyPage),
+  ]);
 
   // A rejected save carries the operator's own values back in the query, so the
   // form re-hydrates with what they typed rather than with what is stored.
@@ -221,6 +232,16 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
           </SectionCard>
         </div>
       </div>
+
+      <AuditTimeline
+        page={history}
+        title="Son değişiklikler"
+        meta="Değişen alan, eski ve yeni değer"
+        empty="Kayıt tutulmaya başladığından beri bu bilgiler değiştirilmedi."
+        footnote={`${AUDIT_SINCE_NOTE} Değer değiştirmeyen kayıtlar listelenmez.`}
+        testId="company-settings-history"
+        pager={{ path: '/company-settings', params: {}, pageParam: 'gecmisSayfa' }}
+      />
     </main>
   );
 }

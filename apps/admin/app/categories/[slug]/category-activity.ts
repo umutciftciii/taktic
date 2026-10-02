@@ -1,56 +1,24 @@
-import { recordLifecycleEntries, type ActivityEntry } from '../../../components/activity-log';
-import type { Category, ProviderInvite, Question } from '../../../lib/api';
+import type { ActivityEntry } from '../../../components/activity-log';
+import type { ProviderInvite } from '../../../lib/api';
 
 /**
- * A category's "Neler oldu" (ADMIN-DESIGN-001 Faz 3F.1), built from the
- * instants its own rows carry and nothing else:
+ * A category's invitation history, from the instants and the operators the
+ * invitation rows record (ADMIN-ACTION-AUDIT-001):
  *
- * - the category's creation and its last save (`createdAt` / `updatedAt`);
- * - each question's creation and last save — only when the session may read
- *   questions, because the list comes from that read;
- * - each invitation: issued (by whom, when the row names them), used,
- *   withdrawn, or run out — only when the invitation history was read.
+ * - issued, by whom when the row names them;
+ * - used, by the applying business;
+ * - withdrawn, by the operator `revokedBy` names — or "Bilinmiyor" for a link
+ *   withdrawn before the withdrawing operator was recorded;
+ * - run out, by the clock.
  *
- * There is no change log for categories or questions, so no entry claims to
- * know what changed or who changed it; the screen's footnote says so.
+ * The category's own changes are not built here any more: they come from the
+ * catalogue audit (`GET /admin/categories/:slug/history`), with their field
+ * diffs and their operators, instead of the record's `createdAt`/`updatedAt`.
  */
-export function categoryActivity({
-  category,
-  questions,
-  invites,
-}: {
-  category: Category;
-  /** `null` without QUESTIONS_READ. */
-  questions: Question[] | null;
-  /** `null` when the invitation history is not read on this screen. */
-  invites: ProviderInvite[] | null;
-}): ActivityEntry[] {
+export function inviteActivity(invites: ProviderInvite[]): ActivityEntry[] {
   const entries: ActivityEntry[] = [];
 
-  if (category.createdAt && category.updatedAt) {
-    entries.push(
-      ...recordLifecycleEntries({
-        createdAt: category.createdAt,
-        updatedAt: category.updatedAt,
-        created: 'Kategori oluşturuldu',
-        updated: 'Kategori son güncellendi',
-      }).map((entry) => ({ ...entry, key: `category-${entry.key}` })),
-    );
-  }
-
-  for (const question of questions ?? []) {
-    if (!question.createdAt || !question.updatedAt) continue;
-    entries.push(
-      ...recordLifecycleEntries({
-        createdAt: question.createdAt,
-        updatedAt: question.updatedAt,
-        created: `"${question.label}" sorusu eklendi`,
-        updated: `"${question.label}" sorusu son güncellendi`,
-      }).map((entry) => ({ ...entry, key: `question-${question.id}-${entry.key}` })),
-    );
-  }
-
-  for (const invite of invites ?? []) {
+  for (const invite of invites) {
     entries.push({
       key: `invite-${invite.id}-issued`,
       at: invite.createdAt,
@@ -71,7 +39,7 @@ export function categoryActivity({
         key: `invite-${invite.id}-revoked`,
         at: invite.revokedAt,
         title: 'Davet bağlantısı iptal edildi',
-        actor: null,
+        actor: invite.revokedBy ? (invite.revokedBy.name ?? `Hesap #${invite.revokedBy.id}`) : 'Bilinmiyor',
       });
     }
     if (invite.state === 'EXPIRED') {

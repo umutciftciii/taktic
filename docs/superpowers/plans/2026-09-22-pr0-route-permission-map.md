@@ -935,3 +935,25 @@ bağlıdır (`PROVIDERS_READ` → kategori bağları, `PROVIDER_REVIEWS_READ` �
 | (İnceleme + hassas, detay yok) | ✅ | 403 | 403 | **403** | 0 |
 | (Detay + hassas, inceleme yok) | 403 | ✅ | 403 | **403** | 0 |
 | İzinsiz `ADMIN` | 403 | 403 | 403 | 403 | 0 |
+
+## 16. ADMIN-ACTION-AUDIT-001 eklemesi (2026-10-02)
+
+İzin sayısı değişmez (**84**); yeni izin yok. Her audit okuması, kaydın kendi okuma izniyle açılır — audit, verinin
+kendisinden daha geniş bir kapı değildir. Aktörün e-postası `staffActorSelect` kuralına uyar (yalnız
+`ADMIN_USERS_READ` ile; yoksa anahtar yok).
+
+| Metot | Yol | İzin | Kaynak tablo |
+| --- | --- | --- | --- |
+| GET | `/admin/roles/:id/audit` | **KÖK — `@Roles(SUPER_ADMIN)`** | `AdminRoleAuditLog` (rol) |
+| GET | `/admin/users/:userId/role-audit` | **KÖK — `@Roles(SUPER_ADMIN)`** | `AdminRoleAuditLog` (hedef hesap) |
+| GET | `/users/:id/status-history` | `ADMIN_USERS_READ` | `AccountStatusChange` (personel) |
+| GET | `/customers/:id/status-history` | `CUSTOMERS_READ` | `AccountStatusChange` (müşteri) |
+| GET | `/providers/:providerId/status-history` | `PROVIDERS_READ_DETAIL` | `ProviderStatusChange` |
+| GET | `/company-settings/history` | `COMPANY_SETTINGS_READ` | `CompanySettingsChange` |
+| GET | `/admin/categories/:slug/history` | `CATALOG_READ` | `CatalogAuditLog` (CATEGORY) |
+| GET | `/admin/offer-packages/:id/history` | `CREDIT_PACKAGES_READ` | `CatalogAuditLog` (CREDIT_PACKAGE) |
+| GET | `/admin/showcase/packages/:packageId/history` | `SHOWCASE_PACKAGES_READ` | `CatalogAuditLog` (SHOWCASE_PACKAGE) |
+
+Rol audit'i kök yetkidir, çünkü rollerin kendisi kök yetkidir; delege edilebilir bir izinle açılmaz.
+`/admin/categories/:slug/history`, `CATALOG_READ`'in yayımlanmamış kataloğu taşıyan üçüncü rotasıdır
+(`admin-catalog-visibility.spec.ts` bunu sabitler): detay rotasının zaten gösterdiği değerlerin geçmişini taşır.

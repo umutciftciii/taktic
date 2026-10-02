@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ActivityLog, NO_CHANGE_HISTORY_NOTE, recordLifecycleEntries } from '../components/activity-log';
+import { ActivityLog } from '../components/activity-log';
+import { AuditTimeline, describeAuditEntry, formatAuditValue } from '../components/audit-timeline';
 import { DetailFormFooter, LockedField } from '../components/detail-form-footer';
-import { categoryActivity } from '../app/categories/[slug]/category-activity';
+import { inviteActivity } from '../app/categories/[slug]/category-activity';
 import {
   QuestionSetSection,
   ReleaseChecklistSection,
@@ -13,12 +14,21 @@ import {
 } from '../app/categories/[slug]/category-sections';
 import { packageSummarySentence, perCreditMinor } from '../app/credit-packages/credit-package-cells';
 import { showcasePackageSales } from '../app/showcase/packages/showcase-package-sales';
-import type { AdminOfferPackage, Category, PackagePurchase, ProviderInvite, Question } from '../lib/api';
+import type {
+  AdminAuditEntry,
+  AdminAuditPage,
+  AdminOfferPackage,
+  Category,
+  PackagePurchase,
+  ProviderInvite,
+  Question,
+} from '../lib/api';
 
 /**
  * ADMIN-DESIGN-001 Faz 3F.1 — the three catalogue detail screens as tabbed
- * pages. Pinned here: "Neler oldu" is built only from instants the records
- * carry; the question table says when a question is asked in the option's own
+ * pages. Pinned here: "Neler oldu" draws the catalogue audit as recorded
+ * (ADMIN-ACTION-AUDIT-001) and the invitation instants with their operators;
+ * the question table says when a question is asked in the option's own
  * words; the vitrin package reads its sales without inventing an entitlement
  * state; and every route and section gate is where it was.
  */
@@ -87,78 +97,154 @@ function invite(overrides: Partial<ProviderInvite> = {}): ProviderInvite {
     usedAt: null,
     revokedAt: null,
     createdBy: { id: 'u-1', name: 'Seda Kaya' },
+    revokedBy: null,
     ...overrides,
   };
 }
 
-describe('Neler oldu: only the instants the records carry', () => {
-  it('draws "Oluşturuldu", and "Son güncellendi" only when the row was saved later', () => {
-    const same = recordLifecycleEntries({
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-01-01T00:00:00.000Z',
-      created: 'Paket oluşturuldu',
-      updated: 'Paket son güncellendi',
-    });
-    expect(same.map((entry) => entry.title)).toEqual(['Paket oluşturuldu']);
-    const later = recordLifecycleEntries({
-      createdAt: '2026-01-01T00:00:00.000Z',
-      updatedAt: '2026-02-01T00:00:00.000Z',
-      created: 'Paket oluşturuldu',
-      updated: 'Paket son güncellendi',
-    });
-    expect(later.map((entry) => entry.title)).toEqual(['Paket oluşturuldu', 'Paket son güncellendi']);
-    // Nobody is named where nobody is recorded.
-    expect(later.every((entry) => entry.actor === null)).toBe(true);
+function auditEntry(overrides: Partial<AdminAuditEntry> = {}): AdminAuditEntry {
+  return {
+    id: 'a-1',
+    domain: 'CATEGORY',
+    action: 'UPDATED',
+    actor: { id: 'u-1', name: 'Seda Kaya' },
+    target: { type: 'CATEGORY', id: 'cat-1' },
+    changes: [{ field: 'name', from: 'Kombi', to: 'Kombi servisi' }],
+    reason: null,
+    createdAt: '2026-10-01T09:00:00.000Z',
+    ...overrides,
+  };
+}
+
+function auditPage(items: AdminAuditEntry[], overrides: Partial<AdminAuditPage> = {}): AdminAuditPage {
+  return { items, total: items.length, page: 1, pageSize: 20, hasNextPage: false, ...overrides };
+}
+
+describe('Neler oldu: the recorded audit, drawn as recorded (ADMIN-ACTION-AUDIT-001)', () => {
+  it('draws each field diff old → new, in the API order, with the operator', () => {
+    const out = html(
+      <AuditTimeline
+        page={auditPage([
+          auditEntry({ id: 'a-2', action: 'STATUS_CHANGED', changes: [{ field: 'status', from: 'DRAFT', to: 'ACTIVE' }] }),
+          auditEntry({
+            id: 'a-1',
+            action: 'CREATED',
+            createdAt: '2026-09-01T09:00:00.000Z',
+            changes: [{ field: 'parent', from: null, to: { id: 'g-1', name: 'Isıtma' } }],
+          }),
+        ])}
+        testId="log"
+      />,
+    );
+    expect(out.indexOf('Durumu değişti')).toBeLessThan(out.indexOf('Oluşturuldu'));
+    expect(out).toContain('Taslak');
+    expect(out).toContain('Yayında');
+    expect(out).toContain('Üst kategori:');
+    expect(out).toContain('Isıtma');
+    expect(out).toContain('Seda Kaya');
+    expect(out).not.toContain('geçmişi tutulmuyor');
   });
 
-  it('builds a category log from the category, its questions and its invitations', () => {
-    const entries = categoryActivity({
-      category: category(),
-      questions: [question()],
-      invites: [
-        invite(),
-        invite({ id: 'inv-2', state: 'USED', usedAt: '2026-09-18T11:20:00.000Z' }),
-        invite({ id: 'inv-3', state: 'REVOKED', revokedAt: '2026-09-04T10:45:00.000Z', createdBy: null }),
-        invite({ id: 'inv-4', state: 'EXPIRED', expiresAt: '2026-09-09T07:00:00.000Z' }),
-      ],
-    });
+  it('says "Bilinmiyor" for no actor and falls back to the id for a nameless one — never a made-up name', () => {
+    const out = html(
+      <AuditTimeline
+        page={auditPage([
+          auditEntry({ id: 'a-1', actor: null }),
+          auditEntry({ id: 'a-2', actor: { id: 'u-gone', name: null } }),
+        ])}
+      />,
+    );
+    expect(out).toContain('Bilinmiyor');
+    expect(out).toContain('Hesap #u-gone');
+  });
+
+  it('shows the empty state and pages on its own parameter', () => {
+    expect(html(<AuditTimeline page={auditPage([])} empty="Henüz yok." />)).toContain('Henüz yok.');
+    const paged = html(
+      <AuditTimeline
+        page={auditPage([auditEntry()], { total: 45, page: 2, hasNextPage: true })}
+        pager={{ path: '/categories/kombi', params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
+      />,
+    );
+    expect(paged).toContain('href="/categories/kombi?tab=gecmis"');
+    expect(paged).toContain('href="/categories/kombi?tab=gecmis&amp;gecmisSayfa=3"');
+  });
+
+  it('formats values by field: money, on/off, references and empty', () => {
+    expect(formatAuditValue('CREDIT_PACKAGE', 'isActive', false)).toBe('Pasif');
+    expect(formatAuditValue('CATEGORY', 'unlimitedPackageEligible', true)).toBe('Evet');
+    expect(formatAuditValue('CREDIT_PACKAGE', 'scopeCategories', [])).toBe('—');
+    expect(formatAuditValue('CREDIT_PACKAGE', 'scopeCategories', [{ id: 'k', name: 'Klima' }])).toBe('Klima');
+    expect(formatAuditValue('PROVIDER', 'status', 'PENDING_REVIEW')).toBe('İnceleme bekliyor');
+    expect(formatAuditValue('CATEGORY', 'status', 'INACTIVE')).toBe('Kapalı');
+    expect(formatAuditValue('SHOWCASE_PACKAGE', 'priceAmount', 49_900)).toMatch(/499/);
+    expect(formatAuditValue('COMPANY_SETTINGS', 'postalAddress', null)).toBe('—');
+  });
+
+  it('a role edit says which fields changed and that their old values are not recorded', () => {
+    const { note } = describeAuditEntry(
+      auditEntry({ domain: 'ADMIN_ROLE', action: 'ROLE_UPDATED', changes: [], payload: { key: 'r', changed: ['name'], isActive: true } }),
+    );
+    const out = html(<>{note}</>);
+    expect(out).toContain('Değişen alan: ad');
+    expect(out).toContain('eski değer kaydedilmez');
+  });
+
+  it('a provider transition carries its rejection reason and its note, not a fake diff of the note', () => {
+    const { title, note } = describeAuditEntry(
+      auditEntry({
+        domain: 'PROVIDER',
+        action: 'STATUS_CHANGED',
+        changes: [{ field: 'status', from: 'APPROVED', to: 'REJECTED' }],
+        reason: 'Belge eksik',
+        note: 'Arandı',
+      }),
+    );
+    expect(title).toBe('Durum: Onaylandı → Reddedildi');
+    const out = html(<>{note}</>);
+    expect(out).toContain('Ret gerekçesi: Belge eksik');
+    expect(out).toContain('Moderasyon notu: Arandı');
+  });
+});
+
+describe('invitation history: recorded instants and operators', () => {
+  it('names who withdrew a link, and "Bilinmiyor" for one withdrawn before that was recorded', () => {
+    const entries = inviteActivity([
+      invite(),
+      invite({ id: 'inv-2', state: 'USED', usedAt: '2026-09-18T11:20:00.000Z' }),
+      invite({
+        id: 'inv-3',
+        state: 'REVOKED',
+        revokedAt: '2026-09-04T10:45:00.000Z',
+        revokedBy: { id: 'u-2', name: 'Ali Veli' },
+      }),
+      invite({ id: 'inv-5', state: 'REVOKED', revokedAt: '2026-09-02T10:45:00.000Z', createdBy: null }),
+      invite({ id: 'inv-4', state: 'EXPIRED', expiresAt: '2026-09-09T07:00:00.000Z' }),
+    ]);
     const titles = entries.map((entry) => entry.title);
-    expect(titles).toContain('Kategori oluşturuldu');
-    expect(titles).toContain('Kategori son güncellendi');
-    expect(titles).toContain('"Ne tür bir hizmet?" sorusu eklendi');
-    // Stamped with its creation's instant: not an edit.
-    expect(titles).not.toContain('"Ne tür bir hizmet?" sorusu son güncellendi');
-    expect(titles.filter((title) => title === 'Davet bağlantısı oluşturuldu')).toHaveLength(4);
+    expect(titles.filter((title) => title === 'Davet bağlantısı oluşturuldu')).toHaveLength(5);
     expect(titles).toContain('Davet bağlantısı kullanıldı');
-    expect(titles).toContain('Davet bağlantısı iptal edildi');
     expect(titles).toContain('Davet bağlantısının süresi doldu');
-    // Only the issuing is attributed, and only when the row names somebody.
-    const issued = entries.filter((entry) => entry.title === 'Davet bağlantısı oluşturuldu');
-    expect(issued.map((entry) => entry.actor)).toEqual(['Seda Kaya', 'Seda Kaya', null, 'Seda Kaya']);
-    expect(entries.find((entry) => entry.title === 'Davet bağlantısı iptal edildi')!.actor).toBeNull();
+    const revoked = entries.filter((entry) => entry.title === 'Davet bağlantısı iptal edildi');
+    expect(revoked.map((entry) => entry.actor)).toEqual(['Ali Veli', 'Bilinmiyor']);
+    // The category's own create/save instants are no longer drawn from timestamps.
+    expect(titles).not.toContain('Kategori son güncellendi');
   });
 
-  it('leaves out what the session did not read', () => {
-    const entries = categoryActivity({ category: category(), questions: null, invites: null });
-    expect(entries.map((entry) => entry.title)).toEqual(['Kategori oluşturuldu', 'Kategori son güncellendi']);
-  });
-
-  it('renders newest first, says "Kayıtlı değil" for an unknown actor, and carries the footnote', () => {
+  it('ActivityLog renders newest first and says "Kayıtlı değil" for an unknown issuer', () => {
     const out = html(
       <ActivityLog
         entries={[
           { key: 'a', at: '2026-01-01T00:00:00.000Z', title: 'Eski', actor: null },
           { key: 'b', at: '2026-03-01T00:00:00.000Z', title: 'Yeni', actor: 'Seda Kaya' },
         ]}
-        footnote={NO_CHANGE_HISTORY_NOTE}
+        footnote="Not"
         testId="log"
       />,
     );
     expect(out.indexOf('Yeni')).toBeLessThan(out.indexOf('Eski'));
     expect(out).toContain('Kayıtlı değil');
-    expect(out).toContain('Seda Kaya');
     expect(out).toContain('data-testid="log-footnote"');
-    expect(out).toContain('geçmişi tutulmuyor');
   });
 });
 

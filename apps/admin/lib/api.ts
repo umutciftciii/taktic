@@ -498,6 +498,11 @@ export type ProviderInvite = {
   usedAt: string | null;
   revokedAt: string | null;
   createdBy: { id: string; name: string | null } | null;
+  /**
+   * Who withdrew it (ADMIN-ACTION-AUDIT-001). `null` when it is not withdrawn,
+   * and on every link withdrawn before the actor was recorded.
+   */
+  revokedBy: { id: string; name: string | null } | null;
 };
 
 export type ProviderInviteList = {
@@ -4007,4 +4012,86 @@ export function adminPermissionLabel(permission: AdminPermission): {
   const area = AREAS[parts[0] ?? ''] ?? parts[0] ?? permission;
   const action = ACTIONS[parts[parts.length - 1] ?? ''] ?? permission;
   return { area, action };
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN-ACTION-AUDIT-001 — the audit read contract
+// (apps/api/src/common/admin-audit.ts). One entry shape for every domain.
+// ---------------------------------------------------------------------------
+
+export type AdminAuditDomain =
+  | 'ADMIN_ROLE'
+  | 'STAFF_ACCOUNT'
+  | 'CUSTOMER'
+  | 'PROVIDER'
+  | 'COMPANY_SETTINGS'
+  | 'CATEGORY'
+  | 'CREDIT_PACKAGE'
+  | 'SHOWCASE_PACKAGE';
+
+export type AuditRef = { id: string; name: string | null };
+export type AuditValue = string | number | boolean | null | AuditRef | AuditRef[] | string[];
+export type AuditChange = { field: string; from: AuditValue; to: AuditValue };
+
+export type AdminAuditEntry = {
+  id: string;
+  domain: AdminAuditDomain;
+  action: string;
+  /** `email` is absent unless the viewer holds ADMIN_USERS_READ (RBAC-002). */
+  actor: { id: string; name: string | null; email?: string | null } | null;
+  target: { type: AdminAuditDomain; id: string; label?: string | null } | null;
+  changes: AuditChange[];
+  reason: string | null;
+  note?: string | null;
+  createdAt: string;
+  targetUser?: { id: string; name: string | null; email?: string | null } | null;
+  payload?: Record<string, unknown>;
+};
+
+export type AdminAuditPage = {
+  items: AdminAuditEntry[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
+
+function auditQuery(page: number | undefined): string {
+  return page && page > 1 ? `?page=${page}` : '';
+}
+
+export function getAdminRoleAudit(roleId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/admin/roles/${roleId}/audit${auditQuery(page)}`);
+}
+
+export function getAdminUserRoleAudit(userId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/admin/users/${userId}/role-audit${auditQuery(page)}`);
+}
+
+export function getStaffStatusHistory(userId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/users/${userId}/status-history${auditQuery(page)}`);
+}
+
+export function getCustomerStatusHistory(customerId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/customers/${customerId}/status-history${auditQuery(page)}`);
+}
+
+export function getProviderStatusHistory(providerId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/providers/${providerId}/status-history${auditQuery(page)}`);
+}
+
+export function getCompanySettingsHistory(page?: number) {
+  return apiFetch<AdminAuditPage>(`/company-settings/history${auditQuery(page)}`);
+}
+
+export function getCategoryHistory(slug: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/admin/categories/${encodeURIComponent(slug)}/history${auditQuery(page)}`);
+}
+
+export function getCreditPackageHistory(packageId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/admin/offer-packages/${packageId}/history${auditQuery(page)}`);
+}
+
+export function getShowcasePackageHistory(packageId: string, page?: number) {
+  return apiFetch<AdminAuditPage>(`/admin/showcase/packages/${packageId}/history${auditQuery(page)}`);
 }

@@ -275,7 +275,10 @@ function describeDeadline(invite: ProviderInvite): string {
   }
 
   if (invite.revokedAt) {
-    return `iptal: ${formatDateTime(invite.revokedAt)}`;
+    // ADMIN-ACTION-AUDIT-001: who withdrew it, when recorded; links withdrawn
+    // before that say so rather than naming anybody.
+    const by = invite.revokedBy ? (invite.revokedBy.name ?? `Hesap #${invite.revokedBy.id}`) : 'Bilinmiyor';
+    return `iptal: ${formatDateTime(invite.revokedAt)} · iptal eden: ${by}`;
   }
 
   return '';

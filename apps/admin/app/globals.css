@@ -8840,3 +8840,29 @@ a.dashboard-kpi-note {
 .info-popover.is-sm .info-popover-trigger::after {
   inset: -4px;
 }
+
+/* ADMIN-ACTION-AUDIT-001 — field diffs in a "Neler oldu" row. */
+.audit-changes {
+  margin: 0.25rem 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 0.125rem;
+}
+
+.audit-change-field {
+  color: var(--muted);
+}
+
+.audit-change-from {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.audit-change-to {
+  font-weight: 600;
+}
+
+.audit-pagination {
+  padding: 0.75rem 1rem;
+}

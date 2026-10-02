@@ -1,7 +1,10 @@
 import { Controller, Get, Inject, Param, Query, UseGuards } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
+import { CurrentUser } from '../auth/auth.decorators';
+import { AuthUser } from '../auth/auth.types';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { CategoriesService } from './categories.service';
@@ -52,5 +55,16 @@ export class AdminCategoriesController {
       includeInactive: true,
       isSuperAdmin: true,
     });
+  }
+
+  /**
+   * ADMIN-ACTION-AUDIT-001: the category's recorded creates, edits and status
+   * changes, each with its field diff and its operator. Same permission as
+   * the category itself — every value in it is one the detail already shows.
+   */
+  @Get(':slug/history')
+  @RequiresPermission(AdminPermission.CATALOG_READ)
+  getCategoryHistory(@Param('slug') slug: string, @Query() query: AuditPageQueryDto, @CurrentUser() user: AuthUser) {
+    return this.categoriesService.getCategoryHistory(slug, query, user);
   }
 }

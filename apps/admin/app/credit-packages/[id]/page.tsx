@@ -4,6 +4,7 @@ import {
   apiFetch,
   fetchOrNotFound,
   formatDateTime,
+  getCreditPackageHistory,
   formatPrice,
   AdminOfferPackage,
   PackagePurchase,
@@ -13,8 +14,8 @@ import {
   statusLabel,
 } from '../../../lib/api';
 import { formatCount } from '../../../lib/pagination';
-import { resolveTab } from '../../../lib/list-query';
-import { ActivityLog, NO_CHANGE_HISTORY_NOTE, recordLifecycleEntries } from '../../../components/activity-log';
+import { parsePage, resolveTab } from '../../../lib/list-query';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailFormFooter, LockedField } from '../../../components/detail-form-footer';
 import { DetailHeader } from '../../../components/detail-header';
@@ -47,7 +48,8 @@ import {
  *   would have been.
  * - Satışlar (PACKAGE_PURCHASES_READ, F9): the sales summary and the latest
  *   purchases, with the provider link behind PROVIDERS_READ_DETAIL.
- * - Neler oldu: the package's own instants. No change log exists for it.
+ * - Neler oldu: the package's change log (ADMIN-ACTION-AUDIT-001) — each
+ *   create, edit and status switch with its field diff and its operator.
  *
  * Unchanged: the form's fields and the payload it posts (the type rides along
  * as a hidden field and is never editable; `statusLocked` without
@@ -68,7 +70,7 @@ const PURCHASE_COLUMNS: DataColumn[] = [
 
 type CreditPackageDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string; tab?: string }>;
+  searchParams: Promise<{ error?: string; ok?: string; tab?: string; gecmisSayfa?: string }>;
 };
 
 type TabKey = '' | 'satislar' | 'gecmis';
@@ -95,7 +97,7 @@ export default async function CreditPackageDetailPage({
   const canReadPurchases = can('PACKAGE_PURCHASES_READ');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const { id } = await params;
-  const { error: rawError, ok: rawOk, tab } = await searchParams;
+  const { error: rawError, ok: rawOk, tab, gecmisSayfa } = await searchParams;
   const errorMessage = (rawError ?? '').trim();
   const okKey = (rawOk ?? '').trim();
   const okMessage = okKey ? OK_MESSAGES[okKey] ?? null : null;
@@ -191,6 +193,8 @@ export default async function CreditPackageDetailPage({
     tabs.map((item) => item.key as TabKey),
     '',
   );
+  const historyPage = parsePage(gecmisSayfa);
+  const history = activeTab === 'gecmis' ? await getCreditPackageHistory(creditPackage.id, historyPage) : null;
 
   return (
     <main className="catalog-page catalog-detail-page">
@@ -603,18 +607,15 @@ export default async function CreditPackageDetailPage({
         </div>
       ) : null}
 
-      {activeTab === 'gecmis' ? (
+      {activeTab === 'gecmis' && history ? (
         <div className="detail-tab-panel" data-testid="credit-package-panel-gecmis">
-          <ActivityLog
-            entries={recordLifecycleEntries({
-              createdAt: creditPackage.createdAt,
-              updatedAt: creditPackage.updatedAt,
-              created: 'Paket oluşturuldu',
-              updated: 'Paket son güncellendi',
-            })}
-            meta="Paket kaydının zamanları"
-            footnote={NO_CHANGE_HISTORY_NOTE}
+          <AuditTimeline
+            page={history}
+            meta={`Paket ${formatDateTime(creditPackage.createdAt)} tarihinde oluşturuldu`}
+            empty="Kayıt tutulmaya başladığından beri bu pakette değişiklik yapılmadı."
+            footnote={AUDIT_SINCE_NOTE}
             testId="credit-package-activity"
+            pager={{ path: `/credit-packages/${creditPackage.id}`, params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
           />
         </div>
       ) : null}

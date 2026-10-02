@@ -1,6 +1,15 @@
 import { ConflictException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ShowcaseCardKind } from '@prisma/client';
+import { CatalogAuditEntity, Prisma, ShowcaseCardKind } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
+import {
+  readCatalogAudit,
+  recordCatalogAudit,
+  showcasePackageAuditSelect,
+  showcasePackageAuditSnapshot,
+} from '../../common/catalog-audit';
+import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
 import {
   CreateShowcasePackageDto,
   UpdateShowcasePackageDto,
@@ -93,7 +102,7 @@ export class ShowcasePackagesService {
     return pkg;
   }
 
-  async create(dto: CreateShowcasePackageDto) {
+  async create(dto: CreateShowcasePackageDto, actor: Pick<AuthUser, 'id'>) {
     const slug = dto.slug.trim();
 
     // The DTO's pattern already covers this; checked again because the pattern
@@ -104,20 +113,31 @@ export class ShowcasePackagesService {
     }
 
     try {
-      return await this.prisma.showcasePackage.create({
-        data: {
-          name: dto.name.trim(),
-          slug,
-          priceAmount: dto.priceAmount,
-          durationDays: dto.durationDays,
-          allowedCardKind: dto.allowedCardKind ?? null,
-          maxAreas: dto.maxAreas ?? null,
-          description: normalizeOptional(dto.description),
-          isActive: dto.isActive ?? true,
-          sortOrder: dto.sortOrder ?? 0,
-          activationWindowDays: dto.activationWindowDays ?? 90,
-        },
-        select: adminPackageSelect,
+      // ADMIN-ACTION-AUDIT-001: the package and its CREATED audit entry commit together.
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.showcasePackage.create({
+          data: {
+            name: dto.name.trim(),
+            slug,
+            priceAmount: dto.priceAmount,
+            durationDays: dto.durationDays,
+            allowedCardKind: dto.allowedCardKind ?? null,
+            maxAreas: dto.maxAreas ?? null,
+            description: normalizeOptional(dto.description),
+            isActive: dto.isActive ?? true,
+            sortOrder: dto.sortOrder ?? 0,
+            activationWindowDays: dto.activationWindowDays ?? 90,
+          },
+          select: adminPackageSelect,
+        });
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.SHOWCASE_PACKAGE,
+          entityId: created.id,
+          before: null,
+          after: await readShowcasePackageAuditSnapshot(tx, created.id),
+          actorId: actor.id,
+        });
+        return created;
       });
     } catch (error) {
       if (isUniqueViolation(error)) {
@@ -142,29 +162,57 @@ export class ShowcasePackagesService {
    * keep them apart, which is why `undefined` is filtered out rather than
    * coalesced.
    */
-  async update(id: string, dto: UpdateShowcasePackageDto) {
+  async update(id: string, dto: UpdateShowcasePackageDto, actor: Pick<AuthUser, 'id'>) {
     await this.getForAdmin(id);
 
-    return this.prisma.showcasePackage.update({
-      where: { id },
-      data: {
-        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
-        ...(dto.priceAmount !== undefined ? { priceAmount: dto.priceAmount } : {}),
-        ...(dto.durationDays !== undefined ? { durationDays: dto.durationDays } : {}),
-        ...(dto.allowedCardKind !== undefined ? { allowedCardKind: dto.allowedCardKind } : {}),
-        ...(dto.maxAreas !== undefined ? { maxAreas: dto.maxAreas } : {}),
-        ...(dto.description !== undefined
-          ? { description: normalizeOptional(dto.description) }
-          : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
-        ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-        ...(dto.activationWindowDays !== undefined
-          ? { activationWindowDays: dto.activationWindowDays }
-          : {}),
+    // ADMIN-ACTION-AUDIT-001: before and after this write, in one serializable
+    // transaction with it; a save that changed nothing records nothing.
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const before = await readShowcasePackageAuditSnapshot(tx, id);
+        const updated = await tx.showcasePackage.update({
+          where: { id },
+          data: {
+            ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+            ...(dto.priceAmount !== undefined ? { priceAmount: dto.priceAmount } : {}),
+            ...(dto.durationDays !== undefined ? { durationDays: dto.durationDays } : {}),
+            ...(dto.allowedCardKind !== undefined ? { allowedCardKind: dto.allowedCardKind } : {}),
+            ...(dto.maxAreas !== undefined ? { maxAreas: dto.maxAreas } : {}),
+            ...(dto.description !== undefined
+              ? { description: normalizeOptional(dto.description) }
+              : {}),
+            ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+            ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
+            ...(dto.activationWindowDays !== undefined
+              ? { activationWindowDays: dto.activationWindowDays }
+              : {}),
+          },
+          select: adminPackageSelect,
+        });
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.SHOWCASE_PACKAGE,
+          entityId: id,
+          before,
+          after: await readShowcasePackageAuditSnapshot(tx, id),
+          actorId: actor.id,
+        });
+        return updated;
       },
-      select: adminPackageSelect,
-    });
+      { label: 'showcasePackages.update' },
+    );
   }
+
+  /** A showcase package's catalogue history, newest first (ADMIN-ACTION-AUDIT-001). */
+  async history(id: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    await this.getForAdmin(id);
+    return readCatalogAudit(this.prisma, CatalogAuditEntity.SHOWCASE_PACKAGE, id, query, viewer);
+  }
+}
+
+async function readShowcasePackageAuditSnapshot(tx: Prisma.TransactionClient, id: string) {
+  const row = await tx.showcasePackage.findUniqueOrThrow({ where: { id }, select: showcasePackageAuditSelect });
+  return showcasePackageAuditSnapshot(row);
 }
 
 /**

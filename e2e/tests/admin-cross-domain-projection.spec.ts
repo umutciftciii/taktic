@@ -100,7 +100,7 @@ test.describe('provider screens', () => {
       await reader.gotoAdmin(`/providers/${provider.id}`);
       await expectOpen(reader.page);
       const readerTabs = reader.page.getByRole('navigation', { name: 'Hizmet veren sekmeleri' });
-      await expect(readerTabs.getByRole('link')).toHaveText(['İşletme bilgileri']);
+      await expect(readerTabs.getByRole('link')).toHaveText(['İşletme bilgileri', 'Neler oldu']);
       for (const testId of ['provider-fact-credit', 'provider-fact-open-offers', 'provider-fact-purchases']) {
         await expect(reader.page.getByTestId(testId)).toHaveCount(0);
       }
@@ -163,7 +163,7 @@ test.describe('customer screens', () => {
       await reader.gotoAdmin(`/customers/${customer.id}`);
       await expectOpen(reader.page);
       const tabs = reader.page.getByRole('navigation', { name: 'Müşteri sekmeleri' });
-      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim']);
+      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim', 'Neler oldu']);
       await expect(reader.page.getByTestId('customer-fact-requests')).toHaveCount(0);
       await expect(reader.page.getByTestId('customer-fact-offers')).toHaveCount(0);
 
@@ -174,7 +174,7 @@ test.describe('customer screens', () => {
       await expect(requests.page.getByTestId('customer-request-count')).toContainText('1');
       await requests.gotoAdmin(`/customers/${customer.id}`);
       const requestTabs = requests.page.getByRole('navigation', { name: 'Müşteri sekmeleri' });
-      await expect(requestTabs.getByRole('link')).toHaveText(['Profil ve iletişim', /Talep geçmişi/]);
+      await expect(requestTabs.getByRole('link')).toHaveText(['Profil ve iletişim', /Talep geçmişi/, 'Neler oldu']);
       await expect(requests.page.getByTestId('customer-fact-requests')).toContainText('1');
 
       await admin.gotoAdmin(`/customers/${customer.id}`);
@@ -184,6 +184,7 @@ test.describe('customer screens', () => {
         /Talep geçmişi/,
         /Aldığı teklifler/,
         /Notlar/,
+        'Neler oldu',
       ]);
       await expect(admin.page.getByTestId('customer-fact-offers')).toContainText('1');
     } finally {

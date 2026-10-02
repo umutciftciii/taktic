@@ -178,9 +178,12 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await expect(page.getByTestId('category-panel-bilgiler')).toBeVisible();
       await expect(page.getByTestId('question-set-card')).toHaveCount(0);
       await reader.gotoAdmin(`${servicePath}?tab=gecmis`);
-      await expect(page.getByTestId('category-activity')).toContainText('Kategori oluşturuldu');
-      await expect(page.getByTestId('category-activity')).not.toContainText('sorusu eklendi');
-      await expect(page.getByTestId('category-activity-footnote')).toContainText('geçmişi tutulmuyor');
+      // ADMIN-ACTION-AUDIT-001: a category seeded straight into the database
+      // has no recorded change, and the tab says so instead of inventing one
+      // from its timestamps.
+      await expect(page.getByTestId('category-activity')).toContainText('değişiklik yapılmadı');
+      await expect(page.getByTestId('category-activity')).not.toContainText('Kategori oluşturuldu');
+      await expect(page.getByTestId('category-activity-footnote')).toContainText('kaydedilmediği için');
 
       await reader.gotoAdmin(`/categories/${router.slug}`);
       await expect(page.getByTestId('router-explainer')).toBeVisible();
@@ -271,13 +274,23 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await admin.gotoAdmin(`${servicePath}?tab=davetler`);
       await expect(page.getByTestId('provider-invite-create')).toBeVisible();
       // The revoked link is a row with its state, and "Neler oldu" names who
-      // issued it — and only that: nobody is recorded for the withdrawal.
+      // issued it and — since ADMIN-ACTION-AUDIT-001 — who withdrew it.
+      const revokedRow = await prisma().providerInviteToken.findUniqueOrThrow({
+        where: { id: invite.id },
+        select: { revokedBy: { select: { name: true } } },
+      });
+      expect(revokedRow.revokedBy?.name).toBeTruthy();
       await expect(page.getByTestId(`provider-invite-${invite.id}`)).toContainText('İptal edildi');
+      await expect(page.getByTestId(`provider-invite-${invite.id}`)).toContainText(
+        `iptal eden: ${revokedRow.revokedBy!.name}`,
+      );
       await admin.gotoAdmin(`${servicePath}?tab=gecmis`);
-      const log = page.getByTestId('category-activity');
+      // The category's own change log is the audit, not the record's timestamps.
+      await expect(page.getByTestId('category-activity')).toBeVisible();
+      const log = page.getByTestId('category-invite-activity');
       await expect(log).toContainText('Davet bağlantısı oluşturuldu');
       await expect(log).toContainText('Davet bağlantısı iptal edildi');
-      await expect(log).toContainText('sorusu eklendi');
+      await expect(log).toContainText(revokedRow.revokedBy!.name!);
       await admin.gotoAdmin('/categories');
       await expect(page.getByTestId('category-new-link')).toHaveText('Yeni kategori ekle');
     } finally {
@@ -340,7 +353,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await reader.gotoAdmin(`/credit-packages/${unlimited.id}?tab=satislar`);
       await expect(page.getByTestId('credit-package-panel-bilgiler')).toBeVisible();
       await reader.gotoAdmin(`/credit-packages/${unlimited.id}?tab=gecmis`);
-      await expect(page.getByTestId('credit-package-activity')).toContainText('Paket oluşturuldu');
+      await expect(page.getByTestId('credit-package-activity')).toContainText('değişiklik yapılmadı');
 
       // ---- WRITE: ↑/↓ and the new-package form, no status switch ------------
       page = writer.page;

@@ -9,10 +9,18 @@ import {
   AdminPermission,
   CreditTransactionType,
   OfferPackageType,
+  CatalogAuditEntity,
   Prisma,
   ServiceCategoryStatus,
 } from '@prisma/client';
 import { CREDIT_LEDGER_INTEGER_MAX, creditBalanceLimitExceeded, fitsCreditLedger } from '../../common/credit-limits';
+import { AuditPageQueryDto } from '../../common/admin-audit';
+import {
+  creditPackageAuditSelect,
+  creditPackageAuditSnapshot,
+  readCatalogAudit,
+  recordCatalogAudit,
+} from '../../common/catalog-audit';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -123,7 +131,7 @@ export class CreditsService {
    * package needs WRITE alone. An absent `isActive` still means active — the
    * contract every existing client was written against — and so needs both.
    */
-  async createCreditPackage(dto: CreateCreditPackageDto, actor: Pick<AuthUser, 'role' | 'permissions'>) {
+  async createCreditPackage(dto: CreateCreditPackageDto, actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>) {
     assertDeltaPermissions(
       actor,
       { business: true, status: resolveCreatedPackageIsActive(dto) },
@@ -137,18 +145,29 @@ export class CreditsService {
     const scopeCategoryIds = await this.readScopeSelection(type, dto.scopeCategoryIds);
 
     try {
-      return await this.prisma.offerCreditPackage.create({
-        data: {
-          ...creditPackageCreatePayload(dto, type),
-          ...(scopeCategoryIds.length > 0
-            ? {
-                scopeCategories: {
-                  create: scopeCategoryIds.map((categoryId) => ({ categoryId })),
-                },
-              }
-            : {}),
-        },
-        include: adminPackageInclude,
+      // ADMIN-ACTION-AUDIT-001: the package and its CREATED audit entry commit together.
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.offerCreditPackage.create({
+          data: {
+            ...creditPackageCreatePayload(dto, type),
+            ...(scopeCategoryIds.length > 0
+              ? {
+                  scopeCategories: {
+                    create: scopeCategoryIds.map((categoryId) => ({ categoryId })),
+                  },
+                }
+              : {}),
+          },
+          include: adminPackageInclude,
+        });
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.CREDIT_PACKAGE,
+          entityId: created.id,
+          before: null,
+          after: await readCreditPackageAuditSnapshot(tx, created.id),
+          actorId: actor.id,
+        });
+        return created;
       });
     } catch (error) {
       handleCreditPackageWriteError(error);
@@ -172,7 +191,7 @@ export class CreditsService {
   async updateCreditPackage(
     id: string,
     dto: UpdateCreditPackageDto,
-    actor: Pick<AuthUser, 'role' | 'permissions'>,
+    actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>,
   ) {
     const existing = await this.prisma.offerCreditPackage.findUnique({
       where: { id },
@@ -229,7 +248,8 @@ export class CreditsService {
             },
           );
 
-          return tx.offerCreditPackage.update({
+          const before = await readCreditPackageAuditSnapshot(tx, id);
+          const updated = await tx.offerCreditPackage.update({
             where: { id },
             data: {
               ...businessPayload,
@@ -249,6 +269,18 @@ export class CreditsService {
             },
             include: adminPackageInclude,
           });
+
+          // ADMIN-ACTION-AUDIT-001: before and after this write, scope
+          // included; an echo of unchanged values records nothing.
+          await recordCatalogAudit(tx, {
+            entityType: CatalogAuditEntity.CREDIT_PACKAGE,
+            entityId: id,
+            before,
+            after: await readCreditPackageAuditSnapshot(tx, id),
+            actorId: actor.id,
+          });
+
+          return updated;
         },
         { label: 'creditPackages.update' },
       );
@@ -318,13 +350,36 @@ export class CreditsService {
     return requested;
   }
 
-  async updateCreditPackageStatus(id: string, isActive: boolean) {
+  async updateCreditPackageStatus(id: string, isActive: boolean, actor: Pick<AuthUser, 'id'>) {
     await this.ensureCreditPackageExists(id);
 
-    return this.prisma.offerCreditPackage.update({
-      where: { id },
-      data: { isActive },
-    });
+    // ADMIN-ACTION-AUDIT-001: the switch and its audit row commit together;
+    // switching a package to the state it is already in records nothing.
+    return runSerializable(
+      this.prisma,
+      async (tx) => {
+        const before = await readCreditPackageAuditSnapshot(tx, id);
+        const updated = await tx.offerCreditPackage.update({
+          where: { id },
+          data: { isActive },
+        });
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.CREDIT_PACKAGE,
+          entityId: id,
+          before,
+          after: await readCreditPackageAuditSnapshot(tx, id),
+          actorId: actor.id,
+        });
+        return updated;
+      },
+      { label: 'creditPackages.updateStatus' },
+    );
+  }
+
+  /** A credit package's catalogue history, newest first (ADMIN-ACTION-AUDIT-001). */
+  async getCreditPackageHistory(id: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    await this.ensureCreditPackageExists(id);
+    return readCatalogAudit(this.prisma, CatalogAuditEntity.CREDIT_PACKAGE, id, query, viewer);
   }
 
   /**
@@ -802,4 +857,9 @@ function handleCreditPackageWriteError(error: unknown): never {
   }
 
   throw error;
+}
+
+async function readCreditPackageAuditSnapshot(tx: Prisma.TransactionClient, id: string) {
+  const row = await tx.offerCreditPackage.findUniqueOrThrow({ where: { id }, select: creditPackageAuditSelect });
+  return creditPackageAuditSnapshot(row);
 }

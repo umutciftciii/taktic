@@ -9,9 +9,11 @@ import {
   Patch,
   Post,
   Put,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UserRole } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { AdminRolesService } from './admin-roles.service';
 import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { AuthGuard } from '../auth/auth.guard';
@@ -66,6 +68,12 @@ export class AdminRolesController {
     return this.roles.detail(id);
   }
 
+  /** The role's audit trail (ADMIN-ACTION-AUDIT-001), root-only like the role it describes. */
+  @Get('roles/:id/audit')
+  audit(@Param('id') id: string, @Query() query: AuditPageQueryDto) {
+    return this.roles.listAudit(id, query);
+  }
+
   @Patch('roles/:id')
   update(@Param('id') id: string, @Body() dto: UpdateAdminRoleDto, @CurrentUser() user: AuthUser) {
     return this.roles.update(id, dto, requireActor(user));
@@ -83,6 +91,12 @@ export class AdminRolesController {
   @Get('users/:userId/roles')
   listForUser(@Param('userId') userId: string) {
     return this.roles.listForUser(userId);
+  }
+
+  /** The role rows about one staff account: who granted or revoked which role. */
+  @Get('users/:userId/role-audit')
+  roleAuditForUser(@Param('userId') userId: string, @Query() query: AuditPageQueryDto) {
+    return this.roles.listAuditForUser(userId, query);
   }
 
   @Post('users/:userId/roles')

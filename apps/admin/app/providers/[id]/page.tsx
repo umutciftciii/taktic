@@ -10,6 +10,7 @@ import {
   formatDate,
   formatDateTime,
   formatPrice,
+  getProviderStatusHistory,
   listCatalogueForFilter,
   ProviderProfile,
   ProviderRecentPackagePurchase,
@@ -24,6 +25,7 @@ import {
   STATUS_LABELS as CATEGORY_STATUS_LABELS,
   statusBadgeClass as categoryStatusBadgeClass,
 } from '../../categories/category-taxonomy';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
@@ -40,7 +42,7 @@ import {
   eligibilitySignalLabel,
   type PromotionEligibilityHoldView,
 } from '../../../lib/business-registration';
-import { resolveTab } from '../../../lib/list-query';
+import { parsePage, resolveTab } from '../../../lib/list-query';
 import {
   addProviderServiceCategoryAction,
   removeProviderServiceCategoryAction,
@@ -84,6 +86,8 @@ type ProviderDetailPageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     tab?: string;
+    /** ADMIN-ACTION-AUDIT-001: the status history's own page. */
+    gecmisSayfa?: string;
     claimInvite?: string;
     categoryQuery?: string;
     categoryNotice?: string;
@@ -92,7 +96,7 @@ type ProviderDetailPageProps = {
   }>;
 };
 
-type TabKey = '' | 'kredi' | 'degerlendirmeler' | 'teklifler';
+type TabKey = '' | 'kredi' | 'degerlendirmeler' | 'teklifler' | 'gecmis';
 
 /** Said once the status form has been sent (updateProviderStatusAction). */
 const STATUS_ERRORS: Record<string, string> = {
@@ -268,8 +272,12 @@ export default async function ProviderDetailPage({
     ...(canReadCredits ? (['kredi'] as const) : []),
     ...(canReadReviews ? (['degerlendirmeler'] as const) : []),
     ...(hasActivityTab ? (['teklifler'] as const) : []),
+    // ADMIN-ACTION-AUDIT-001: the page's own permission reads it.
+    'gecmis',
   ];
   const activeTab = resolveTab<TabKey>(search.tab, tabKeys, '');
+  const historyPage = parsePage(search.gecmisSayfa);
+  const statusHistory = activeTab === 'gecmis' ? await getProviderStatusHistory(id, historyPage) : null;
   const path = `/providers/${provider.id}`;
 
   const [serviceCategories, categories, reviews, eligibility, credits] = await Promise.all([
@@ -386,6 +394,7 @@ export default async function ProviderDetailPage({
           },
         ]
       : []),
+    { key: 'gecmis', label: 'Neler oldu', testId: 'provider-tab-gecmis' },
   ];
 
   // Each figure only where the session may read its domain: the API carries
@@ -1096,6 +1105,18 @@ export default async function ProviderDetailPage({
               )}
             </SectionCard>
           ) : null}
+        </div>
+      ) : null}
+      {activeTab === 'gecmis' && statusHistory ? (
+        <div className="detail-panel" data-testid="provider-panel-gecmis">
+          <AuditTimeline
+            page={statusHistory}
+            meta="Başvuru ve hesap durumu değişiklikleri"
+            empty="Bu işletmenin durumu kayıt tutulmaya başladığından beri değiştirilmedi."
+            footnote={`${AUDIT_SINCE_NOTE} Yalnız durum değişiklikleri görünür; e-posta ve kampanya olayları burada yer almaz.`}
+            testId="provider-status-history"
+            pager={{ path, params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
+          />
         </div>
       ) : null}
     </main>

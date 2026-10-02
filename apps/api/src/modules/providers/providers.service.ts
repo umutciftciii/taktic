@@ -42,6 +42,14 @@ import {
   matchesProviderArea,
   phoneVerifiedRequestFilter,
 } from '../../common/provider-request-matching';
+import {
+  AdminAuditEntry,
+  AUDIT_ORDER,
+  AuditPageQueryDto,
+  auditPage,
+  auditPaging,
+  toAuditActor,
+} from '../../common/admin-audit';
 import { runSerializable } from '../../common/serializable-transaction';
 import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
@@ -58,7 +66,7 @@ import {
   writeBusinessRegistration,
 } from '../business-registration/business-registration.writer';
 import { isStaff } from '../auth/admin-permissions';
-import { mayEmbed } from '../auth/embedded-permissions';
+import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import {
@@ -559,6 +567,47 @@ export class ProvidersService implements OnModuleInit {
    * and `/package-purchases`. A block the caller may not read is absent from
    * the body, never `0` or `[]` (see `mayEmbed`). SUPER_ADMIN reads them all.
    */
+  /** A provider's admin status transitions, newest first (ADMIN-ACTION-AUDIT-001). */
+  async getProviderStatusHistory(id: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    await this.ensureProviderExists(id);
+    const { page, pageSize, skip } = auditPaging(query);
+    const where = { providerId: id } satisfies Prisma.ProviderStatusChangeWhereInput;
+    const [total, rows] = await Promise.all([
+      this.prisma.providerStatusChange.count({ where }),
+      this.prisma.providerStatusChange.findMany({
+        where,
+        orderBy: [...AUDIT_ORDER],
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          fromStatus: true,
+          toStatus: true,
+          moderationNote: true,
+          rejectionReason: true,
+          createdAt: true,
+          actor: staffActorSelect(viewer),
+        },
+      }),
+    ]);
+    const items = rows.map(
+      (row): AdminAuditEntry => ({
+        id: row.id,
+        domain: 'PROVIDER',
+        action: 'STATUS_CHANGED',
+        actor: toAuditActor(row.actor),
+        target: { type: 'PROVIDER', id },
+        changes: [{ field: 'status', from: row.fromStatus, to: row.toStatus }],
+        // A rejection reason is the transition's reason; the moderation note
+        // is the note written with it.
+        reason: row.rejectionReason,
+        note: row.moderationNote,
+        createdAt: row.createdAt,
+      }),
+    );
+    return auditPage(items, total, page, pageSize);
+  }
+
   async getAdminProviderDetail(id: string, viewer: AuthUser | null = null) {
     const provider = await this.getProvider(id);
     const scope = providerEmbedScope(viewer);
@@ -1070,7 +1119,7 @@ export class ProvidersService implements OnModuleInit {
     }
   }
 
-  async updateProviderStatus(id: string, dto: UpdateProviderStatusDto) {
+  async updateProviderStatus(id: string, dto: UpdateProviderStatusDto, actor: AuthUser) {
     const existing = await this.ensureProviderExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
@@ -1088,6 +1137,11 @@ export class ProvidersService implements OnModuleInit {
     const provider = await runSerializable(
       this.prisma,
       async (tx) => {
+        // ADMIN-ACTION-AUDIT-001: the status this transaction replaces, read
+        // inside it, so the audit row's `fromStatus` is the value the update
+        // actually overwrote even when another save landed in between.
+        const before = await tx.providerProfile.findUniqueOrThrow({ where: { id }, select: { status: true } });
+
         const updated = await tx.providerProfile.update({
           where: { id },
           data: {
@@ -1100,6 +1154,23 @@ export class ProvidersService implements OnModuleInit {
           },
           include: providerInclude,
         });
+
+        // Only a real transition is a status change: re-saving the same status
+        // to edit the note records nothing. The note and the reason are the
+        // values this request wrote, exactly as stored.
+        if (before.status !== dto.status) {
+          await tx.providerStatusChange.create({
+            data: {
+              providerId: id,
+              fromStatus: before.status,
+              toStatus: dto.status,
+              moderationNote: updated.moderationNote,
+              rejectionReason: updated.rejectionReason,
+              actorId: actor.id,
+            },
+            select: { id: true },
+          });
+        }
 
         // A link mailed while the application was under review must not outlive
         // its rejection or suspension. Same transaction as the status change, so
