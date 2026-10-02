@@ -7,6 +7,7 @@ import { CurrentUser } from '../auth/auth.decorators';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
+import { CreateCustomerActivationLinkDto } from '../customer-activation/dto/create-customer-activation-link.dto';
 import { CustomersService } from './customers.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import { ListCustomersDto } from './dto/list-customers.dto';
@@ -62,7 +63,11 @@ export class CustomersController {
   @Post(':id/activation-link')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CUSTOMER_ACTIVATION_LINK_ISSUE)
-  createActivationLink(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.activationService.createForCustomer(id, user.id);
+  createActivationLink(
+    @Param('id') id: string,
+    @Body() dto: CreateCustomerActivationLinkDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.activationService.createForCustomer(id, user.id, { replaceExisting: dto.replaceExisting === true });
   }
 }

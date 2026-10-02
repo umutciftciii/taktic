@@ -149,9 +149,11 @@ describe('an operator-generated link (POST /customers/:id/activation-link)', () 
     await ctx.app.get(CustomerActivationService).issueForAutoCreatedCustomer(customer.id);
     const mailed = ctx.notifications.lastOfTemplate('customer-activation')?.actionUrl as string;
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
+    // Over a live link the operator must say so (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Faz 2).
     const issued = await request(ctx.server)
       .post(`/customers/${customer.id}/activation-link`)
       .set('Cookie', await loginAs(ctx.prisma, admin.id))
+      .send({ replaceExisting: true })
       .expect(201);
 
     expect((await tokensOf(customer.id)).map((token) => [token.delivery, token.usedAt !== null])).toEqual([

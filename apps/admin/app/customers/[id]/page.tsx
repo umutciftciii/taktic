@@ -32,6 +32,7 @@ import { customerVerificationBadges, verificationBadgeClass } from '../../../lib
 import { resolveTab } from '../../../lib/list-query';
 import { createCustomerNoteAction, updateCustomerStatusAction } from '../actions';
 import { ActivationLinkForm } from './activation-link-form';
+import { CustomerActivateConsequence } from './customer-activate-consequence';
 
 /**
  * Hizmet alan detayı (#8), design `customerDetail` (ADMIN-DESIGN-001 Faz 3B,
@@ -256,7 +257,7 @@ export default async function AdminCustomerDetailPage({
                 Not ekle
               </Link>
             ) : null}
-            {canChangeStatus ? <CustomerStatusAction customerId={customer.id} isActive={customer.isActive} /> : null}
+            {canChangeStatus ? <CustomerStatusAction customerId={customer.id} isActive={customer.isActive} hasPassword={customer.hasPassword} /> : null}
           </>
         }
         facts={facts}
@@ -507,11 +508,19 @@ export default async function AdminCustomerDetailPage({
 }
 
 /**
- * "Hesabı pasife al" behind a confirmation; turning an account back on is not
- * destructive and goes straight through. Both are the same form and action as
+ * "Hesabı pasife al" and "Hesabı etkinleştir", each behind its own
+ * confirmation and its own proof key. Both are the same form and action as
  * before.
  */
-function CustomerStatusAction({ customerId, isActive }: { customerId: string; isActive: boolean }) {
+function CustomerStatusAction({
+  customerId,
+  isActive,
+  hasPassword,
+}: {
+  customerId: string;
+  isActive: boolean;
+  hasPassword: boolean;
+}) {
   return (
     <form action={updateCustomerStatusAction}>
       <input type="hidden" name="customerId" value={customerId} />
@@ -527,9 +536,16 @@ function CustomerStatusAction({ customerId, isActive }: { customerId: string; is
           testId="customer-passivate"
         />
       ) : (
-        <button type="submit" className="btn btn-primary btn-sm" data-testid="customer-activate">
-          Hesabı etkinleştir
-        </button>
+        <ConfirmDialog
+          proof="customer.activate"
+          triggerLabel="Hesabı etkinleştir"
+          triggerClassName="btn btn-primary btn-sm"
+          title="Hesap etkinleştirilsin mi?"
+          consequence={<CustomerActivateConsequence hasPassword={hasPassword} />}
+          confirmLabel="Evet, etkinleştir"
+          tone="primary"
+          testId="customer-activate"
+        />
       )}
     </form>
   );

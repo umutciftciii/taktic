@@ -48,7 +48,7 @@ import {
   updateProviderStatusAction,
 } from '../actions';
 import { TransactionsPanel } from './credits/transactions-panel';
-import { providerStatusConsequence } from './provider-status-consequence';
+import { providerApproveConsequence, providerStatusConsequence } from './provider-status-consequence';
 import { ProviderStatusForm } from './provider-status-form';
 import { RawRegistrationReveal } from './raw-registration-reveal';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
@@ -1104,8 +1104,9 @@ export default async function ProviderDetailPage({
 
 /**
  * The design's "İş almasını durdur" and its counterparts, in the header: the
- * one move each status most often needs. Suspending asks first; approving and
- * re-activating give and go straight through. Every other move is the status
+ * one move each status most often needs. Suspending asks first; so do
+ * approving and re-activating since Faz 2 (they mail the business, resume its
+ * vitrin and may fire a campaign reward). Every other move is the status
  * form's, under "Durum yönetimi".
  */
 function ProviderQuickStatus({ provider }: { provider: ProviderProfile }): ReactNode {
@@ -1135,13 +1136,21 @@ function ProviderQuickStatus({ provider }: { provider: ProviderProfile }): React
     );
   }
 
+  const reactivate = provider.status === 'SUSPENDED';
   return (
     <form action={updateProviderStatusAction}>
       {hidden}
       <input type="hidden" name="status" value="APPROVED" />
-      <button type="submit" className="btn btn-primary btn-sm" data-testid="provider-approve">
-        {provider.status === 'SUSPENDED' ? 'Tekrar aktif et' : 'Onayla'}
-      </button>
+      <ConfirmDialog
+        proof="provider.approve"
+        triggerLabel={reactivate ? 'Tekrar aktif et' : 'Onayla'}
+        triggerClassName="btn btn-primary btn-sm"
+        title={reactivate ? 'Hizmet veren tekrar aktif edilsin mi?' : 'Hizmet veren onaylansın mı?'}
+        consequence={providerApproveConsequence(provider.status)}
+        confirmLabel={reactivate ? 'Evet, tekrar aktif et' : 'Evet, onayla'}
+        tone="primary"
+        testId="provider-approve"
+      />
     </form>
   );
 }

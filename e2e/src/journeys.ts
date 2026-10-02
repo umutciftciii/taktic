@@ -1,5 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from './actors';
+import { confirmThrough } from './confirm-dialog';
 import type { SeededCategory, UrgencyCode } from './fixtures';
 
 /**
@@ -284,7 +285,8 @@ export async function fillLeadContact(
  */
 export async function approveRequest(admin: Actor, requestId: string): Promise<void> {
   await admin.gotoAdmin(`/requests/${requestId}`);
-  await admin.page.getByRole('button', { name: 'Onayla' }).click();
+  // Publishing asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2).
+  await confirmThrough(admin.page.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
   await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
   await assertNoErrorScreen(admin.page);
 
@@ -298,7 +300,7 @@ export async function expectApprovalBlockedByPhoneGate(
   requestId: string,
 ): Promise<void> {
   await admin.gotoAdmin(`/requests/${requestId}`);
-  await admin.page.getByRole('button', { name: 'Onayla' }).click();
+  await confirmThrough(admin.page.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
 
   // A readable refusal on the request screen, not the generic error boundary.
   await expect(admin.page.getByTestId('status-error')).toBeVisible();
@@ -557,7 +559,7 @@ export async function resolveReports(
   await expect(admin.page.getByTestId('report-decisions')).toBeVisible();
 
   if (resolution === 'DISMISSED') {
-    await admin.page.getByTestId('report-dismiss').click();
+    await confirmThrough(admin.page.getByTestId('report-dismiss'), 'Evet, uygun bulundu');
     await expect(admin.page.getByTestId('report-decisions')).toHaveCount(0);
   } else {
     await admin.page
@@ -584,7 +586,7 @@ export async function resolveReports(
  */
 export async function reopenRequest(admin: Actor, requestId: string): Promise<void> {
   await admin.gotoAdmin(`/requests/${requestId}?tab=sikayet`);
-  await admin.page.getByTestId('report-reopen').click();
+  await confirmThrough(admin.page.getByTestId('report-reopen'), 'Evet, geri aç');
   await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
   await expect(admin.page.getByTestId('report-reopen')).toHaveCount(0);
   await assertNoErrorScreen(admin.page);

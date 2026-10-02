@@ -11,7 +11,7 @@ import {
   ProviderStatus,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
-import { providerStatusConsequence } from './[id]/provider-status-consequence';
+import { providerStatusProofKey, type ProviderStatusProofKey } from './[id]/provider-status-proof';
 import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 
 /**
@@ -27,14 +27,14 @@ export async function updateProviderStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const status = readFormString(formData, 'status') as ProviderStatus;
 
-  // The moves the screen asks about (`providerStatusConsequence`: suspending,
-  // rejecting, taking an approved business out of approval) need the dialog's
-  // proof; the rest go straight through (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
-  // Judged against the stored status, not one the form says it had.
-  if (await providerStatusNeedsConfirmation(id, status)) {
-    if (!(await hasConfirmationProof(formData, 'provider.status'))) {
-      redirect(`/providers/${id}?statusError=confirmation#durum-yonetimi`);
-    }
+  // The moves the screen asks about (`providerStatusProofKey`: suspending,
+  // rejecting, taking an approved business out of approval — Faz 1; approving
+  // and moving into DRAFT — Faz 2) need the dialog's proof for that move; the
+  // rest go straight through (ADMIN-DESTRUCTIVE-CONFIRMATION-001). Judged
+  // against the stored status, not one the form says it had.
+  const proofKey = await providerStatusProofKeyFor(id, status);
+  if (proofKey && !(await hasConfirmationProof(formData, proofKey))) {
+    redirect(`/providers/${id}?statusError=confirmation#durum-yonetimi`);
   }
 
   try {
@@ -114,19 +114,20 @@ export async function removeProviderServiceCategoryAction(formData: FormData) {
 }
 
 /**
- * Whether moving this provider to `to` is one of the moves the screen confirms.
- * A provider that cannot be read is treated as needing confirmation: the
- * refusal is the safe answer, and the screen that posts here reads it anyway.
+ * The proof moving this provider to `to` needs, or null for a direct move. A
+ * provider that cannot be read is treated as needing the Faz 1 confirmation
+ * (or the approval's, for a move into APPROVED): the refusal is the safe
+ * answer, and the screen that posts here reads it anyway.
  */
-async function providerStatusNeedsConfirmation(id: string, to: ProviderStatus): Promise<boolean> {
-  let from: ProviderStatus | null = null;
+async function providerStatusProofKeyFor(id: string, to: ProviderStatus): Promise<ProviderStatusProofKey | null> {
+  let from: ProviderStatus;
   try {
     from = (await apiFetch<ProviderProfile>(`/providers/${id}`)).status;
   } catch (error) {
     rethrowNextControlFlow(error);
-    return true;
+    return to === 'APPROVED' ? 'provider.approve' : to === 'DRAFT' ? 'provider.draft' : 'provider.status';
   }
-  return providerStatusConsequence(from, to) !== null;
+  return providerStatusProofKey(from, to);
 }
 
 function providerCategoryUrl(id: string, query: string, notice: string): string {

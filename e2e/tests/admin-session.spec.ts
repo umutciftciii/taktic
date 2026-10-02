@@ -10,6 +10,7 @@ import {
 import { createRequest } from '../src/journeys';
 import { prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * Scenario 7 — the admin panel's own Server Actions.
@@ -66,7 +67,7 @@ test.describe('admin session', () => {
       await assertNoErrorScreen(admin.page);
 
       // ---- a real admin action on that page ------------------------------
-      await admin.page.getByRole('button', { name: 'Onayla' }).click();
+      await confirmThrough(admin.page.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
       await expect(admin.page.getByTestId('request-status')).toHaveText('Onaylandı');
       await assertNoErrorScreen(admin.page);
 

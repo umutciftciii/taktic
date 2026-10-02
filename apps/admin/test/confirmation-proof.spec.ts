@@ -378,6 +378,92 @@ const CASES: Case[] = [
     },
     refused: refusedState,
   },
+  // ── Faz 2: customer / provider / request lifecycle ──
+  {
+    name: 'customers: Hesabı etkinleştir',
+    key: 'customer.activate',
+    run: async (proof) => {
+      const { updateCustomerStatusAction } = await import('../app/customers/actions');
+      return updateCustomerStatusAction(form({ customerId: 'c-1', isActive: 'true' }, proof));
+    },
+    refused: refusedRedirect('/customers/c-1?statusError='),
+  },
+  {
+    name: 'providers: Onayla (PENDING_REVIEW → APPROVED)',
+    key: 'provider.approve',
+    read: { status: 'PENDING_REVIEW' },
+    run: async (proof) => {
+      const { updateProviderStatusAction } = await import('../app/providers/actions');
+      return updateProviderStatusAction(form({ id: 'p-1', status: 'APPROVED' }, proof));
+    },
+    refused: refusedRedirect('/providers/p-1?statusError=confirmation'),
+  },
+  {
+    name: 'providers: Tekrar aktif et (SUSPENDED → APPROVED)',
+    key: 'provider.approve',
+    read: { status: 'SUSPENDED' },
+    run: async (proof) => {
+      const { updateProviderStatusAction } = await import('../app/providers/actions');
+      return updateProviderStatusAction(form({ id: 'p-1', status: 'APPROVED' }, proof));
+    },
+    refused: refusedRedirect('/providers/p-1?statusError=confirmation'),
+  },
+  {
+    name: 'providers: taslağa al (REJECTED → DRAFT)',
+    key: 'provider.draft',
+    read: { status: 'REJECTED' },
+    run: async (proof) => {
+      const { updateProviderStatusAction } = await import('../app/providers/actions');
+      return updateProviderStatusAction(form({ id: 'p-1', status: 'DRAFT', rejectionReason: 'eski' }, proof));
+    },
+    refused: refusedRedirect('/providers/p-1?statusError=confirmation'),
+  },
+  {
+    name: 'requests: Onayla (yayına al)',
+    key: 'request.approve',
+    run: async (proof) => {
+      const { updateRequestStatusAction } = await import('../app/requests/actions');
+      return updateRequestStatusAction(form({ id: 'rq-1', status: 'APPROVED' }, proof));
+    },
+    refused: refusedRedirect('/requests/rq-1?statusError=confirmationRequired'),
+  },
+  {
+    name: 'requests: yayındaki talebi incelemeye al',
+    key: 'request.unpublish',
+    read: { status: 'APPROVED' },
+    run: async (proof) => {
+      const { updateRequestStatusAction } = await import('../app/requests/actions');
+      return updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' }, proof));
+    },
+    refused: refusedRedirect('/requests/rq-1?statusError=confirmationRequired'),
+  },
+  {
+    name: 'requests: Hizmeti tamamlandı işaretle',
+    key: 'request.complete',
+    run: async (proof) => {
+      const { completeRequestAction } = await import('../app/requests/actions');
+      return completeRequestAction(form({ id: 'rq-1' }, proof));
+    },
+    refused: refusedRedirect('/requests/rq-1?statusError=confirmationRequired'),
+  },
+  {
+    name: 'requests: Talebi geri aç',
+    key: 'request.reopen',
+    run: async (proof) => {
+      const { reopenRequestAction } = await import('../app/requests/actions');
+      return reopenRequestAction(form({ id: 'rq-1' }, proof));
+    },
+    refused: refusedRedirect('/requests/rq-1?tab=sikayet&reportError=confirmation'),
+  },
+  {
+    name: 'requests: şikayet “Uygun bulundu”',
+    key: 'request.report-dismiss',
+    run: async (proof) => {
+      const { resolveReportsAction } = await import('../app/requests/actions');
+      return resolveReportsAction(form({ id: 'rq-1', resolution: 'DISMISSED', resolutionNote: 'Sorun yok' }, proof));
+    },
+    refused: refusedRedirect('/requests/rq-1?tab=sikayet&reportError=confirmation'),
+  },
 ];
 
 describe('guarded server actions refuse a submission without a good proof, and write nothing', () => {
@@ -443,6 +529,153 @@ describe('guarded server actions refuse a submission without a good proof, and w
     const { toggleSchedulerAction } = await import('../app/operations-settings/actions');
     await outcome(() => toggleSchedulerAction(form({ job: 'entitlement-renewal', enabled: 'false' })));
     expect(writes()).toHaveLength(3);
+  });
+
+  it('Faz 2: the low-risk branches of the same actions stay direct — no proof asked, one write each', async () => {
+    const { updateRequestStatusAction } = await import('../app/requests/actions');
+    const { updateProviderStatusAction } = await import('../app/providers/actions');
+    const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+
+    // A new request into review: the queue's first step.
+    primeReads({ status: 'SUBMITTED' });
+    await outcome(() => updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' })));
+    expect(writes()).toHaveLength(1);
+
+    // A provider out of DRAFT into review, and out of REJECTED/SUSPENDED into review.
+    for (const from of ['DRAFT', 'REJECTED', 'SUSPENDED']) {
+      primeReads({ status: from });
+      const result = await outcome(() => updateProviderStatusAction(form({ id: 'p-1', status: 'PENDING_REVIEW' })));
+      expect(result.redirect).toBe('/providers/p-1?statusSaved=1#durum-yonetimi');
+    }
+    expect(writes()).toHaveLength(4);
+
+    // The first access link.
+    primeReads(undefined);
+    const issued = await outcome(() => createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' })));
+    expect(JSON.stringify(issued)).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+    expect(writes()).toHaveLength(5);
+  });
+
+  it('Faz 2: a proof for the neighbouring move does not open this one', async () => {
+    const { updateRequestStatusAction } = await import('../app/requests/actions');
+    const { updateProviderStatusAction } = await import('../app/providers/actions');
+    const { updateCustomerStatusAction } = await import('../app/customers/actions');
+
+    primeReads({ status: 'APPROVED' });
+    for (const key of ['request.approve', 'request.reject'] as const) {
+      const result = await outcome(async () =>
+        updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' }, await issueConfirmationProof(key))),
+      );
+      expect(result.redirect).toContain('statusError=confirmationRequired');
+    }
+    primeReads({ status: 'PENDING_REVIEW' });
+    for (const [status, key] of [
+      ['APPROVED', 'provider.status'],
+      ['APPROVED', 'provider.draft'],
+      ['DRAFT', 'provider.approve'],
+      ['SUSPENDED', 'provider.approve'],
+    ] as const) {
+      const result = await outcome(async () =>
+        updateProviderStatusAction(form({ id: 'p-1', status }, await issueConfirmationProof(key))),
+      );
+      expect(result.redirect, `${status} with ${key}`).toContain('statusError=confirmation');
+    }
+    const activate = await outcome(async () =>
+      updateCustomerStatusAction(form({ customerId: 'c-1', isActive: 'true' }, await issueConfirmationProof('customer.status'))),
+    );
+    expect(activate.redirect).toContain('statusError=');
+    const passivate = await outcome(async () =>
+      updateCustomerStatusAction(form({ customerId: 'c-1', isActive: 'false' }, await issueConfirmationProof('customer.activate'))),
+    );
+    expect(passivate.redirect).toContain('statusError=');
+    expect(writes()).toEqual([]);
+  });
+
+  describe('Faz 2: the access link — the API decides "reissue", the proof only grants consent', () => {
+    const bodies = () =>
+      writes().map(([path, init]) => [path, JSON.parse((init as { body: string }).body) as unknown]);
+
+    it('no proof: asks the API without consent to replace, whatever the form or the previous state claims', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const issued = { kind: 'issued', activationUrl: 'https://x.test/a?token=t', expiresAt: '2026-10-05T00:00:00.000Z' } as const;
+      await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }));
+      await createCustomerActivationLinkAction(issued, form({ customerId: 'c-1', replaces: '1' }));
+      await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1', replaces: '0', replaceExisting: 'true' }));
+      expect(bodies()).toEqual([
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+      ]);
+    });
+
+    it('a made-up, foreign-key or other-session proof is refused before any request', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const proofs = ['yes', 'eyJrIjoieCJ9.Zm9yZ2Vk', await issueConfirmationProof('customer.activate')];
+      const theirs = await issueConfirmationProof('customer.activation-link-reissue');
+      for (const proof of proofs) {
+        expect(await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof))).toEqual({
+          kind: 'error',
+          message: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+          reissue: true,
+        });
+      }
+      cookieValue = 'someone-else';
+      refusedState({ value: await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, theirs)) });
+      expect(writes()).toEqual([]);
+    });
+
+    it('a real proof gives consent exactly once; its replay is refused', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const proof = await issueConfirmationProof('customer.activation-link-reissue');
+      const first = await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof));
+      expect(JSON.stringify(first)).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+      refusedState({ value: await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof)) });
+      expect(bodies()).toEqual([['/customers/c-1/activation-link', { replaceExisting: true }]]);
+    });
+  });
+
+  it('Faz 2: "İncelemeye al" carries the status it was decided against (compare-and-set)', async () => {
+    const { updateRequestStatusAction } = await import('../app/requests/actions');
+    const sent = () => writes().map(([, init]) => JSON.parse((init as { body: string }).body) as Record<string, unknown>);
+
+    // A new request: no proof, and the API is told it must still be SUBMITTED.
+    primeReads({ status: 'SUBMITTED' });
+    await outcome(() => updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' })));
+    // A live one: the proof, and the API is told it must still be APPROVED.
+    primeReads({ status: 'APPROVED' });
+    await outcome(async () =>
+      updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' }, await issueConfirmationProof('request.unpublish'))),
+    );
+    // Approve and reject are confirmed whatever the status: no compare-and-set needed.
+    await outcome(async () =>
+      updateRequestStatusAction(form({ id: 'rq-1', status: 'APPROVED' }, await issueConfirmationProof('request.approve'))),
+    );
+    expect(sent().map((body) => [body.status, body.expectedCurrentStatus])).toEqual([
+      ['IN_REVIEW', 'SUBMITTED'],
+      ['IN_REVIEW', 'APPROVED'],
+      ['APPROVED', undefined],
+    ]);
+  });
+
+  it('Faz 2: a provider or request that cannot be read is treated as needing the confirmation', async () => {
+    apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) => {
+      if (!init?.method || init.method === 'GET') throw new Error('unreadable');
+      return {};
+    });
+    const { updateRequestStatusAction } = await import('../app/requests/actions');
+    const { updateProviderStatusAction } = await import('../app/providers/actions');
+    refusedRedirect('statusError=confirmationRequired')(
+      await outcome(() => updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' }))),
+    );
+    for (const status of ['APPROVED', 'DRAFT', 'SUSPENDED']) {
+      refusedRedirect('statusError=confirmation')(
+        await outcome(() => updateProviderStatusAction(form({ id: 'p-1', status }))),
+      );
+    }
+    expect(writes()).toEqual([]);
   });
 
   it('a revision approval whose version cannot be read is treated as a first one, and refused without a proof', async () => {

@@ -17,6 +17,7 @@ import {
 } from '../src/fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * ADMIN-DESIGN-001 Faz 3B — Kişiler ve destek: /customers, /customers/[id],
@@ -387,8 +388,8 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
         .poll(async () => (await prisma().user.findUniqueOrThrow({ where: { id: filled.id } })).isActive)
         .toBe(false);
 
-      // Turning it back on gives, and goes straight through.
-      await page.getByTestId('customer-activate').click();
+      // Turning it back on asks too, since Faz 2.
+      await confirmThrough(page.getByTestId('customer-activate'), 'Evet, etkinleştir');
       await expect(page.getByTestId('customer-status')).toHaveText('Aktif hesap');
       await expect
         .poll(async () => (await prisma().user.findUniqueOrThrow({ where: { id: filled.id } })).isActive)
@@ -450,7 +451,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expect(page.getByTestId('provider-status-saved')).toBeVisible();
       expect(await statusOf()).toBe('SUSPENDED');
 
-      await page.getByTestId('provider-approve').click();
+      await confirmThrough(page.getByTestId('provider-approve'), 'Evet, tekrar aktif et');
       await expect(page.getByTestId('provider-status')).toHaveText('Onaylandı');
       expect(await statusOf()).toBe('APPROVED');
 
