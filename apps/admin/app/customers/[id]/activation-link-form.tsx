@@ -19,9 +19,11 @@ import { ACTIVATION_LINK_IDLE } from '../activation-link-state';
  * "Bağlantıyı kopyala" writes that same string to the operator's clipboard and
  * nowhere else — no request, no URL, no log. Issuing again replaces the link:
  * the API marks every unused earlier link as used, so "Yeni bağlantı oluştur"
- * asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2) and posts
- * `replaces=1`, which makes the action demand the dialog's proof. The first
- * link goes straight through.
+ * asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Faz 2). Which of the two
+ * buttons is drawn is display only: the API decides whether a live link
+ * exists, refuses to replace one without the dialog's proof (the action then
+ * switches this form to the reissue button), and issues a first link
+ * straight away.
  *
  * It still works without JavaScript: `useActionState` forms submit normally
  * and React renders the returned state on the server.
@@ -33,8 +35,8 @@ export function ActivationLinkForm({ customerId }: { customerId: string }) {
   );
   const [copied, setCopied] = useState<string | null>(null);
   const issued = state.kind === 'issued';
-  // A refused or failed reissue keeps the reissue button: the link handed out
-  // before may still be live, and the next press would void it too.
+  // A refused reissue — or an issue the API refused because a live link
+  // exists — shows the reissue button: the next press would void that link.
   const reissue = issued || (state.kind === 'error' && state.reissue === true);
 
   async function copy(url: string) {
@@ -81,20 +83,17 @@ export function ActivationLinkForm({ customerId }: { customerId: string }) {
         <form action={submit}>
           <input type="hidden" name="customerId" value={customerId} />
           {reissue ? (
-            <>
-              <input type="hidden" name="replaces" value="1" />
-              <ConfirmDialog
-                proof="customer.activation-link-reissue"
-                triggerLabel="Yeni bağlantı oluştur"
-                triggerClassName="btn btn-link btn-sm"
-                title="Yeni bağlantı oluşturulsun mu?"
-                consequence={ACTIVATION_LINK_REISSUE_CONSEQUENCE}
-                confirmLabel="Evet, yeni bağlantı oluştur"
-                tone="primary"
-                disabled={pending}
-                testId="customer-activation-issue"
-              />
-            </>
+            <ConfirmDialog
+              proof="customer.activation-link-reissue"
+              triggerLabel="Yeni bağlantı oluştur"
+              triggerClassName="btn btn-link btn-sm"
+              title="Yeni bağlantı oluşturulsun mu?"
+              consequence={ACTIVATION_LINK_REISSUE_CONSEQUENCE}
+              confirmLabel="Evet, yeni bağlantı oluştur"
+              tone="primary"
+              disabled={pending}
+              testId="customer-activation-issue"
+            />
           ) : (
             <button
               type="submit"

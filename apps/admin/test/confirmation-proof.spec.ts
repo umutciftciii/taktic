@@ -389,15 +389,6 @@ const CASES: Case[] = [
     refused: refusedRedirect('/customers/c-1?statusError='),
   },
   {
-    name: 'customers: Yeni aktivasyon bağlantısı',
-    key: 'customer.activation-link-reissue',
-    run: async (proof) => {
-      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
-      return createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1', replaces: '1' }, proof));
-    },
-    refused: refusedState,
-  },
-  {
     name: 'providers: Onayla (PENDING_REVIEW → APPROVED)',
     key: 'provider.approve',
     read: { status: 'PENDING_REVIEW' },
@@ -600,17 +591,73 @@ describe('guarded server actions refuse a submission without a good proof, and w
     expect(writes()).toEqual([]);
   });
 
-  it('Faz 2: a reissue is recognised from the previous state too, and a refused one keeps saying "reissue"', async () => {
-    primeReads(undefined);
-    const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
-    const afterIssue = await createCustomerActivationLinkAction(
-      { kind: 'issued', activationUrl: 'https://x.test/a?token=t', expiresAt: '2026-10-05T00:00:00.000Z' },
-      form({ customerId: 'c-1' }),
+  describe('Faz 2: the access link — the API decides "reissue", the proof only grants consent', () => {
+    const bodies = () =>
+      writes().map(([path, init]) => [path, JSON.parse((init as { body: string }).body) as unknown]);
+
+    it('no proof: asks the API without consent to replace, whatever the form or the previous state claims', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const issued = { kind: 'issued', activationUrl: 'https://x.test/a?token=t', expiresAt: '2026-10-05T00:00:00.000Z' } as const;
+      await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }));
+      await createCustomerActivationLinkAction(issued, form({ customerId: 'c-1', replaces: '1' }));
+      await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1', replaces: '0', replaceExisting: 'true' }));
+      expect(bodies()).toEqual([
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+        ['/customers/c-1/activation-link', { replaceExisting: false }],
+      ]);
+    });
+
+    it('a made-up, foreign-key or other-session proof is refused before any request', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const proofs = ['yes', 'eyJrIjoieCJ9.Zm9yZ2Vk', await issueConfirmationProof('customer.activate')];
+      const theirs = await issueConfirmationProof('customer.activation-link-reissue');
+      for (const proof of proofs) {
+        expect(await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof))).toEqual({
+          kind: 'error',
+          message: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+          reissue: true,
+        });
+      }
+      cookieValue = 'someone-else';
+      refusedState({ value: await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, theirs)) });
+      expect(writes()).toEqual([]);
+    });
+
+    it('a real proof gives consent exactly once; its replay is refused', async () => {
+      primeReads(undefined);
+      const { createCustomerActivationLinkAction } = await import('../app/customers/actions');
+      const proof = await issueConfirmationProof('customer.activation-link-reissue');
+      const first = await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof));
+      expect(JSON.stringify(first)).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+      refusedState({ value: await createCustomerActivationLinkAction({ kind: 'idle' }, form({ customerId: 'c-1' }, proof)) });
+      expect(bodies()).toEqual([['/customers/c-1/activation-link', { replaceExisting: true }]]);
+    });
+  });
+
+  it('Faz 2: "İncelemeye al" carries the status it was decided against (compare-and-set)', async () => {
+    const { updateRequestStatusAction } = await import('../app/requests/actions');
+    const sent = () => writes().map(([, init]) => JSON.parse((init as { body: string }).body) as Record<string, unknown>);
+
+    // A new request: no proof, and the API is told it must still be SUBMITTED.
+    primeReads({ status: 'SUBMITTED' });
+    await outcome(() => updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' })));
+    // A live one: the proof, and the API is told it must still be APPROVED.
+    primeReads({ status: 'APPROVED' });
+    await outcome(async () =>
+      updateRequestStatusAction(form({ id: 'rq-1', status: 'IN_REVIEW' }, await issueConfirmationProof('request.unpublish'))),
     );
-    expect(afterIssue).toEqual({ kind: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, reissue: true });
-    const afterRefusal = await createCustomerActivationLinkAction(afterIssue, form({ customerId: 'c-1' }));
-    expect(afterRefusal).toEqual(afterIssue);
-    expect(writes()).toEqual([]);
+    // Approve and reject are confirmed whatever the status: no compare-and-set needed.
+    await outcome(async () =>
+      updateRequestStatusAction(form({ id: 'rq-1', status: 'APPROVED' }, await issueConfirmationProof('request.approve'))),
+    );
+    expect(sent().map((body) => [body.status, body.expectedCurrentStatus])).toEqual([
+      ['IN_REVIEW', 'SUBMITTED'],
+      ['IN_REVIEW', 'APPROVED'],
+      ['APPROVED', undefined],
+    ]);
   });
 
   it('Faz 2: a provider or request that cannot be read is treated as needing the confirmation', async () => {

@@ -42,6 +42,7 @@ describe('request status conflicts', () => {
     ['REQUEST_NOT_REMOVABLE', 'notRemovable'],
     ['REQUEST_STATUS_TRANSITION_NOT_ALLOWED', 'transitionNotAllowed'],
     ['REQUEST_STATUS_NOT_MODERATION_TARGET', 'notModerationTarget'],
+    ['REQUEST_STATUS_CHANGED', 'statusChanged'],
   ])('maps the moderation refusal %s to %s', (code, key) => {
     expect(requestModerationErrorKey(code)).toBe(key);
   });

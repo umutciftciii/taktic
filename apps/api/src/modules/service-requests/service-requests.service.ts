@@ -231,6 +231,20 @@ const reviewSourceStatuses = [
   ServiceRequestStatus.APPROVED,
 ] as const;
 
+/** Machine-readable code for a save whose `expectedCurrentStatus` no longer holds. */
+export const REQUEST_STATUS_CHANGED_CODE = 'REQUEST_STATUS_CHANGED';
+
+function requestStatusChangedException(expected: ServiceRequestStatus, actual: ServiceRequestStatus) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: REQUEST_STATUS_CHANGED_CODE,
+    message: `Talep bu sırada ${expected} durumundan ${actual} durumuna geçti; işlem eski duruma göre verildiği için uygulanmadı.`,
+    expectedStatus: expected,
+    currentStatus: actual,
+  });
+}
+
 /** Machine-readable code for a moderation save the request's state no longer allows. */
 export const REQUEST_STATUS_TRANSITION_NOT_ALLOWED_CODE = 'REQUEST_STATUS_TRANSITION_NOT_ALLOWED';
 
@@ -999,6 +1013,14 @@ export class ServiceRequestsService {
           where: { id },
           select: { status: true, directShowcaseProviderId: true, matchedOfferId: true },
         });
+
+        // The caller's compare-and-set (ADMIN-DESTRUCTIVE-CONFIRMATION-001,
+        // Faz 2): a decision made against another status is not applied to
+        // this one. Under Serializable, a status that moves after this read
+        // fails the commit and the replay lands here again with the new value.
+        if (dto.expectedCurrentStatus && current.status !== dto.expectedCurrentStatus) {
+          throw requestStatusChangedException(dto.expectedCurrentStatus, current.status);
+        }
 
         if (reviewTargetStatuses.has(dto.status)) {
           const allowedSources: ServiceRequestStatus[] = [

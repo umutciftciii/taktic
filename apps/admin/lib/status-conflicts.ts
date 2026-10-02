@@ -75,7 +75,8 @@ export type RequestStatusErrorKey =
   | 'withholdReasonRequired'
   | 'notCompletable'
   | 'creditBalanceLimit'
-  | 'confirmationRequired';
+  | 'confirmationRequired'
+  | 'statusChanged';
 
 export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string> = {
   phoneNotVerified:
@@ -101,6 +102,10 @@ export const REQUEST_STATUS_ERROR_MESSAGES: Record<RequestStatusErrorKey, string
   creditBalanceLimit:
     'İşlem yapılmadı. Bir teklifin kredisini iade etmek hizmet verenin bakiyesini üst sınırın üzerine çıkaracaktı; talep, teklifler ve krediler değişmedi. Hizmet verenin bakiyesi düştükten sonra yeniden deneyin.',
   confirmationRequired: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+  // ADMIN-DESTRUCTIVE-CONFIRMATION-001 Faz 2: the compare-and-set refused a
+  // move decided against a status the request no longer has.
+  statusChanged:
+    'Durum değiştirilmedi. Talep bu sayfa açıldıktan sonra başka bir duruma geçti (örneğin yayına alındı); işlem eski duruma göre verildiği için uygulanmadı. Yukarıda güncel durum görünüyor; gerekiyorsa yeniden deneyin.',
 };
 
 /** API-HARDENING-001: the ledger bound refused a refund inside the operation. */
@@ -131,6 +136,8 @@ export function requestModerationErrorKey(code: string | null): RequestStatusErr
       return 'transitionNotAllowed';
     case 'REQUEST_STATUS_NOT_MODERATION_TARGET':
       return 'notModerationTarget';
+    case 'REQUEST_STATUS_CHANGED':
+      return 'statusChanged';
     default:
       return null;
   }

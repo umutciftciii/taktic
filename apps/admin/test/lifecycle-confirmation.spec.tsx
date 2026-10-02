@@ -60,12 +60,11 @@ describe('customer: Hesabı etkinleştir', () => {
 });
 
 describe('customer: Yeni bağlantı oluştur', () => {
-  it('the first link is a plain button; only a reissue is a confirmation that posts replaces=1', () => {
+  it('the first link is a plain button; a reissue is a confirmation; the form carries no "reissue" claim', () => {
     const source = read('app/customers/[id]/activation-link-form.tsx');
     expect(source).toContain('Şifre belirleme bağlantısı oluştur');
-    expect(source).toMatch(
-      /<input type="hidden" name="replaces" value="1" \/>\s*<ConfirmDialog\s+proof="customer.activation-link-reissue"\s+triggerLabel="Yeni bağlantı oluştur"/,
-    );
+    expect(source).toMatch(/<ConfirmDialog\s+proof="customer.activation-link-reissue"\s+triggerLabel="Yeni bağlantı oluştur"/);
+    expect(source).not.toContain('name="replaces"');
     expect(source).toContain("const reissue = issued || (state.kind === 'error' && state.reissue === true);");
   });
 
@@ -273,8 +272,9 @@ describe('request lifecycle: the screen asks on exactly the risky moves', () => 
 
   it('the action applies the same rule to IN_REVIEW, judged against the stored status', () => {
     const actions = read('app/requests/actions.ts');
-    expect(actions).toContain(
-      "return (await isPublished(id)) ? hasConfirmationProof(formData, 'request.unpublish') : true;",
+    expect(actions).toMatch(
+      /if \(current === null \|\| current === 'APPROVED'\) \{\s*return \{\s*confirmed: await hasConfirmationProof\(formData, 'request.unpublish'\),\s*expectedCurrentStatus: current \?\? undefined,/,
     );
+    expect(actions).toContain('return { confirmed: true, expectedCurrentStatus: current };');
   });
 });

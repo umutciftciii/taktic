@@ -127,7 +127,7 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
     }
   });
 
-  test('customer access link: the first goes straight through, a new one asks first', async ({ browser }) => {
+  test('customer access link: the first goes straight through, a new one asks first — decided by the API', async ({ browser }) => {
     const customer = await createClaimableCustomer('E2E Faz2 Aktivasyon');
     const unused = () =>
       prisma().customerActivationToken.count({ where: { customerId: customer.id, usedAt: null } });
@@ -156,6 +156,24 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       await expect(url).not.toHaveText(firstUrl!);
       await expect(url).toContainText('token=');
       expect(await prisma().customerActivationToken.count({ where: { customerId: customer.id } })).toBe(2);
+      expect(await unused()).toBe(1);
+
+      // A fresh page forgets the link it showed and offers the plain first
+      // issue again — but the API knows a live link exists: it refuses,
+      // writes nothing, and the form turns into the confirmed reissue.
+      await admin.gotoAdmin(`/customers/${customer.id}`);
+      const plain = page.getByTestId('customer-activation-issue');
+      await waitForHydration(plain);
+      await expect(plain).toHaveText('Şifre belirleme bağlantısı oluştur');
+      await plain.click();
+      await expect(page.getByTestId('customer-activation-error')).toContainText(
+        'henüz kullanılmamış, geçerli bir şifre belirleme bağlantısı var',
+      );
+      expect(await prisma().customerActivationToken.count({ where: { customerId: customer.id } })).toBe(2);
+      expect(await unused()).toBe(1);
+      await confirmThrough(page.getByTestId('customer-activation-issue'), 'Evet, yeni bağlantı oluştur');
+      await expect(url).toContainText('token=');
+      expect(await prisma().customerActivationToken.count({ where: { customerId: customer.id } })).toBe(3);
       expect(await unused()).toBe(1);
     } finally {
       await admin.close();
@@ -306,6 +324,22 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       await expect(page.getByTestId('request-status')).toHaveText('İncelemede');
       expect((await requestRow(request.id)).status).toBe('IN_REVIEW');
       await assertNoErrorScreen(page);
+
+      // Drawn as a new request, published before the click: the screen's
+      // direct "İncelemeye al" is judged against the request as it is now —
+      // refused for want of the unpublish confirmation, nothing written.
+      const { request: stale } = await seedRequest('SUBMITTED');
+      await admin.gotoAdmin(`/requests/${stale.id}`);
+      const staleIntoReview = moves.getByRole('button', { name: 'İncelemeye al' });
+      await waitForHydration(staleIntoReview);
+      await expect(staleIntoReview).not.toHaveAttribute('aria-haspopup', 'dialog');
+      await prisma().serviceRequest.update({
+        where: { id: stale.id },
+        data: { status: 'APPROVED', approvedAt: new Date() },
+      });
+      await staleIntoReview.click();
+      await expect(page.getByTestId('status-error')).toContainText('onay penceresinden onay alınamadı');
+      expect((await requestRow(stale.id)).status).toBe('APPROVED');
     } finally {
       await admin.close();
     }

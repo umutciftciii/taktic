@@ -14,7 +14,8 @@ export async function updateRequestStatusAction(formData: FormData) {
   // Rejecting (Faz 1), approving and taking a published request back into
   // review (Faz 2) are confirmed in a dialog, each with its own key; taking a
   // new request into review is not (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
-  if (!(await hasModerationProof(formData, id, status))) {
+  const decision = await moderationDecision(formData, id, status);
+  if (!decision.confirmed) {
     redirect(statusErrorHref(id, 'confirmationRequired'));
   }
 
@@ -25,6 +26,10 @@ export async function updateRequestStatusAction(formData: FormData) {
         status,
         moderationNote: readOptionalFormString(formData, 'moderationNote'),
         rejectionReason: readOptionalFormString(formData, 'rejectionReason'),
+        // The status the decision above was made against: the API applies the
+        // move only if the request still has it, inside the save's own
+        // transaction (409 REQUEST_STATUS_CHANGED otherwise, nothing written).
+        ...(decision.expectedCurrentStatus ? { expectedCurrentStatus: decision.expectedCurrentStatus } : {}),
       }),
     });
   } catch (error) {
@@ -52,31 +57,50 @@ export async function updateRequestStatusAction(formData: FormData) {
 }
 
 /**
- * Whether a moderation submission carries the proof its move needs, spending
- * it when it does. IN_REVIEW is judged against the stored status: out of
- * APPROVED it unpublishes the request and is confirmed, out of SUBMITTED it is
- * the queue's first step and goes straight through. A request that cannot be
- * read is treated as published — the refusal is the safe answer.
+ * Whether a moderation submission carries the proof its move needs (spending
+ * it when it does), and the status that decision was made against.
+ *
+ * IN_REVIEW depends on where the request is: out of APPROVED it unpublishes
+ * the request and is confirmed (`request.unpublish`), out of SUBMITTED it is
+ * the queue's first step and goes straight through. The stored status is read
+ * here and sent back as `expectedCurrentStatus`, so a request that went live
+ * between this read and the save is refused by the API rather than taken off
+ * the market on a "no proof needed" decision made for a new one. A request
+ * that cannot be read is treated as published — the refusal is the safe
+ * answer — and, with a proof, is saved without a compare-and-set: the proof
+ * already covers the riskiest case.
  */
-async function hasModerationProof(formData: FormData, id: string, status: ServiceRequestStatus): Promise<boolean> {
+async function moderationDecision(
+  formData: FormData,
+  id: string,
+  status: ServiceRequestStatus,
+): Promise<{ confirmed: boolean; expectedCurrentStatus?: ServiceRequestStatus }> {
   switch (status) {
     case 'REJECTED':
-      return hasConfirmationProof(formData, 'request.reject');
+      return { confirmed: await hasConfirmationProof(formData, 'request.reject') };
     case 'APPROVED':
-      return hasConfirmationProof(formData, 'request.approve');
-    case 'IN_REVIEW':
-      return (await isPublished(id)) ? hasConfirmationProof(formData, 'request.unpublish') : true;
+      return { confirmed: await hasConfirmationProof(formData, 'request.approve') };
+    case 'IN_REVIEW': {
+      const current = await storedStatus(id);
+      if (current === null || current === 'APPROVED') {
+        return {
+          confirmed: await hasConfirmationProof(formData, 'request.unpublish'),
+          expectedCurrentStatus: current ?? undefined,
+        };
+      }
+      return { confirmed: true, expectedCurrentStatus: current };
+    }
     default:
-      return true;
+      return { confirmed: true };
   }
 }
 
-async function isPublished(id: string): Promise<boolean> {
+async function storedStatus(id: string): Promise<ServiceRequestStatus | null> {
   try {
-    return (await apiFetch<ServiceRequest>(`/service-requests/${id}`)).status === 'APPROVED';
+    return (await apiFetch<ServiceRequest>(`/service-requests/${id}`)).status;
   } catch (error) {
     rethrowNextControlFlow(error);
-    return true;
+    return null;
   }
 }
 

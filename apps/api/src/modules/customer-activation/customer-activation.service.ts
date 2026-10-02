@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
@@ -18,6 +19,9 @@ import {
   getWebAppBaseUrl,
 } from './customer-activation.constants';
 import { SubmitCustomerActivationDto } from './dto/submit-customer-activation.dto';
+
+/** 409 code: an operator link was asked for over a live one without `replaceExisting`. */
+export const ACTIVATION_LINK_ALREADY_ACTIVE_CODE = 'ACTIVATION_LINK_ALREADY_ACTIVE';
 
 type CustomerSummary = {
   id: string;
@@ -125,7 +129,19 @@ export class CustomerActivationService {
     @Inject(NotificationDispatcher) private readonly notifications: NotificationDispatcher,
   ) {}
 
-  async createForCustomer(customerId: string, createdById: string | null) {
+  /**
+   * The operator's link. Issuing over a live one (unused, unexpired — mailed
+   * or handed out) voids it, so that needs `replaceExisting`; without it the
+   * call is refused with 409 ACTIVATION_LINK_ALREADY_ACTIVE and nothing is
+   * written. The check runs inside the issue's own transaction, under the
+   * per-customer issue lock (`issueToken`), so two concurrent first issues
+   * cannot both see "no live link".
+   */
+  async createForCustomer(
+    customerId: string,
+    createdById: string | null,
+    options: { replaceExisting?: boolean } = {},
+  ) {
     const customer = await this.prisma.user.findUnique({
       where: { id: customerId },
       select: {
@@ -165,6 +181,8 @@ export class CustomerActivationService {
       customer.id,
       createdById,
       CustomerActivationDelivery.ADMIN_LINK,
+      null,
+      { refuseOverLiveToken: options.replaceExisting !== true },
     );
 
     return {
@@ -331,12 +349,16 @@ export class CustomerActivationService {
    * by an operator — and it is written here, once, because it is the one fact
    * consumption reads to decide whether the mailbox was proven. It is not
    * derived from `createdById`: who issued a link is not how it travelled.
+   *
+   * `refuseOverLiveToken` (the operator's link without consent) makes a live
+   * token a refusal instead of something to void; decided under the lock.
    */
   private async issueToken(
     customerId: string,
     createdById: string | null,
     delivery: CustomerActivationDelivery,
     redirectTo: string | null = null,
+    options: { refuseOverLiveToken?: boolean } = {},
   ) {
     const rawToken = generateRawToken();
     const tokenHash = hashToken(rawToken);
@@ -346,6 +368,29 @@ export class CustomerActivationService {
     const now = new Date();
 
     await this.prisma.$transaction(async (tx) => {
+      // One issue per customer at a time. Without it two concurrent issues
+      // each void the (still uncommitted) other's row they cannot see and
+      // both commit a live token; with it the second waits, then voids the
+      // first's. An advisory lock rather than `SELECT … FOR UPDATE` on the
+      // user row: consuming a token locks the token row and then the user
+      // row, and taking them in the other order here could deadlock. Released
+      // with the transaction.
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`customer-activation-issue:${customerId}`}, 0))`;
+
+      if (options.refuseOverLiveToken) {
+        const live = await tx.customerActivationToken.count({
+          where: { customerId, usedAt: null, expiresAt: { gt: now } },
+        });
+        if (live > 0) {
+          throw new ConflictException({
+            statusCode: HttpStatus.CONFLICT,
+            error: 'Conflict',
+            code: ACTIVATION_LINK_ALREADY_ACTIVE_CODE,
+            message: 'Müşterinin henüz kullanılmamış geçerli bir aktivasyon bağlantısı var; yenisi eskisini geçersiz kılar ve açık onay ister.',
+          });
+        }
+      }
+
       await tx.customerActivationToken.updateMany({
         where: {
           customerId,
