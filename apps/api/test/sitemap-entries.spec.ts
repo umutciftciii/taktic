@@ -279,7 +279,12 @@ describe('GET /sitemap/entries — what never travels', () => {
     // Nothing a page would print and nothing a person could be reached by —
     // and nothing the eligibility rule read on the way (the description, the
     // scope, the count) either.
-    expect(response.text).not.toMatch(/İşletme|Yetkili|0555|example\.test|Kadıköy|Gizli Başlık|1500|moderasyon|Kapı no|Filtre|klima bakımı/);
+    // The ids and timestamps are blanked first: a random cuid can carry
+    // "1500" or "0555" by chance, and those are not business content.
+    const text = response.text
+      .replace(/"(id|cardId)":"[^"]*"/g, '"$1":""')
+      .replace(/"updatedAt":"[^"]*"/g, '"updatedAt":""');
+    expect(text).not.toMatch(/İşletme|Yetkili|0555|example\.test|Kadıköy|Gizli Başlık|1500|moderasyon|Kapı no|Filtre|klima bakımı/);
   });
 
   it('answers the same body to a visitor, a customer, a provider and an operator', async () => {
