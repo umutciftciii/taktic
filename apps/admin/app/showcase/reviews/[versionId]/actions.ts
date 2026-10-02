@@ -45,11 +45,14 @@ export async function approveShowcaseVersionAction(formData: FormData) {
     readFailed = true;
   }
 
-  // The first approval is the publication and is confirmed in a dialog; a
-  // revision approval is not (Faz 4). A version that could not be read is
-  // treated as a first one: refusing is the safe answer
+  // Both approvals are confirmed in a dialog, each with its own proof: the
+  // first one is the publication, a revision replaces what every run of the
+  // card shows (Paket B). Which one this is comes from the version as the API
+  // has it, never from the form. A version that could not be read is treated
+  // as a first one: refusing is the safe answer
   // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
-  if ((isFirstPublication || readFailed) && !(await hasConfirmationProof(formData, 'showcase.approve-first'))) {
+  const proofKey = isFirstPublication || readFailed ? 'showcase.approve-first' : 'showcase.revision-approve';
+  if (!(await hasConfirmationProof(formData, proofKey))) {
     redirect(withParams(`/showcase/reviews/${versionId}`, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 

@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { createCategoryAction } from '../actions';
+import { CategoryCreateSubmit } from '../category-gates';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 import { CategoryImageUploader } from '../category-image-uploader';
 import { apiFetch, CATEGORY_ICON_KEYS, Category, requireAdmin } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
@@ -19,7 +21,12 @@ import {
  * list, the title with its ⓘ — which now carries what the side cards said —
  * and the form, whose twelve fields, names and action are unchanged.
  */
-export default async function NewCategoryPage() {
+export default async function NewCategoryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error } = await searchParams;
   const { can } = await requireAdmin('CATALOG_READ', 'CATEGORIES_WRITE');
   const canUpload = can('UPLOADS_WRITE');
   // Creating straight into ACTIVE or INACTIVE is a status decision, so the API
@@ -50,6 +57,12 @@ export default async function NewCategoryPage() {
           </span>
         }
       />
+
+      {error === 'CONFIRMATION_REQUIRED' ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="category-error">
+          {CONFIRMATION_PROOF_REFUSAL_MESSAGE}
+        </div>
+      ) : null}
 
       <div className="catalog-stack">
         <SectionCard
@@ -178,9 +191,12 @@ export default async function NewCategoryPage() {
             </div>
 
             <div className="compact-actions">
-              <button className="btn btn-primary btn-sm" type="submit">
-                Kategoriyi oluştur
-              </button>
+              {/*
+                A DRAFT goes straight through; ACTIVE or INACTIVE asks first
+                (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B), and the action
+                refuses it without the dialog's proof.
+              */}
+              <CategoryCreateSubmit />
               <Link className="btn btn-secondary btn-sm" href="/categories">
                 Vazgeç
               </Link>

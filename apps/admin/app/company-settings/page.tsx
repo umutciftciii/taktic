@@ -6,6 +6,7 @@ import {
   requireAdmin,
 } from '../../lib/api';
 import { DetailFormFooter } from '../../components/detail-form-footer';
+import { CompanySettingsSubmit } from './company-settings-submit';
 import { KeyValueList } from '../../components/key-value-list';
 import { PageHeader } from '../../components/page-header';
 import { SectionCard } from '../../components/section-card';
@@ -165,9 +166,13 @@ export default async function CompanySettingsPage({ searchParams }: CompanySetti
                   </label>
                 </div>
                 <DetailFormFooter note={lastSaveNote}>
-                  <button className="btn btn-primary" type="submit">
-                    Değişiklikleri kaydet
-                  </button>
+                  <CompanySettingsSubmit
+                    stored={{
+                      legalName: settings.legalName,
+                      supportEmail: settings.supportEmail,
+                      postalAddress: settings.postalAddress,
+                    }}
+                  />
                 </DetailFormFooter>
               </form>
             ) : (

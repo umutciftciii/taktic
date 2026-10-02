@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch } from '../../../lib/api';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
-import { isPlacementCancelNoteValid } from './placement-cancel';
+import { isPlacementCancelNoteValid, isPlacementSuspendNoteValid } from './placement-cancel';
 import { hasConfirmationProof } from '../../../lib/confirmation-proof-server';
 
 /**
@@ -26,6 +26,17 @@ import { hasConfirmationProof } from '../../../lib/confirmation-proof-server';
 export async function suspendShowcasePlacementAction(formData: FormData) {
   const placementId = readString(formData, 'placementId');
   const target = `/showcase/placements/${placementId}`;
+  // Required, as the API requires it (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket
+  // B): the provider is not mailed, so the note is the record of why. Refused
+  // here before any request, with the API's own code.
+  const note = readString(formData, 'note');
+  if (!isPlacementSuspendNoteValid(note)) {
+    redirect(`${target}?error=SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED`);
+  }
+  // Confirmed in a dialog; without its proof nothing is taken off the air.
+  if (!(await hasConfirmationProof(formData, 'showcase.placement-suspend'))) {
+    redirect(`${target}?error=CONFIRMATION_REQUIRED`);
+  }
 
   try {
     await apiFetch(`/admin/showcase/placements/${placementId}/suspend`, {
@@ -34,7 +45,7 @@ export async function suspendShowcasePlacementAction(formData: FormData) {
       // reason the form could choose could name one that does not stop the
       // clock — an operator quietly billing a provider for days the platform
       // took away.
-      body: JSON.stringify({ note: readOptional(formData, 'note') }),
+      body: JSON.stringify({ note }),
     });
   } catch (error) {
     rethrowNextControlFlow(error);
@@ -98,11 +109,6 @@ export async function cancelShowcasePlacementAction(formData: FormData) {
 function readString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === 'string' ? value.trim() : '';
-}
-
-function readOptional(formData: FormData, key: string): string | null {
-  const value = readString(formData, key);
-  return value.length > 0 ? value : null;
 }
 
 function errorCode(error: unknown): string {

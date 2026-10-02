@@ -59,7 +59,8 @@ test.describe('status permission on edit screens', () => {
       const panel = switcher.page.getByTestId('category-status-panel');
       await expect(panel.getByRole('heading', { name: 'Kategori durumu' })).toBeVisible();
       await panel.locator('select[name="status"]').selectOption('INACTIVE');
-      await panel.getByRole('button', { name: 'Durumu güncelle' }).click();
+      // Closing asks first (Paket B).
+      await confirmThrough(panel.getByTestId('category-status-submit'), 'Evet, kapalı yap');
       await expect
         .poll(async () => (await prisma().serviceCategory.findUniqueOrThrow({ where: { id: category.id } })).status)
         .toBe('INACTIVE');
@@ -125,7 +126,10 @@ test.describe('status permission on edit screens', () => {
       });
       await form.locator('input[name="name"]').fill(`${category.name} SA`);
       await form.locator('select[name="status"]').selectOption('INACTIVE');
-      await form.getByRole('button', { name: 'Kategoriyi kaydet' }).click();
+      // The status move asks; the name rides along in the same save (Paket B).
+      await confirmThrough(form.getByTestId('category-save'), 'Evet, kaydet', async (dialog) => {
+        await expect(dialog.getByTestId('category-status-deactivate')).toContainText('Yayında → Kapalı');
+      });
       await expect
         .poll(async () => (await prisma().serviceCategory.findUniqueOrThrow({ where: { id: category.id } })).status)
         .toBe('INACTIVE');

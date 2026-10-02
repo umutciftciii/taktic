@@ -14,6 +14,7 @@ import {
 } from '../src/fixtures';
 import { completeContactStep, fillRequestForm } from '../src/journeys';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * The category expansion, through the browser.
@@ -90,7 +91,10 @@ test.describe('draft categories', () => {
         .locator('form')
         .filter({ has: admin.page.getByRole('button', { name: 'Durumu güncelle' }) });
       await statusForm.locator('select[name="status"]').selectOption('ACTIVE');
-      await statusForm.getByRole('button', { name: 'Durumu güncelle' }).click();
+      // Into the catalogue asks first (Paket B).
+      await confirmThrough(statusForm.getByTestId('category-status-submit'), 'Evet, yayına al', async (dialog) => {
+        await expect(dialog.getByTestId('category-status-activate')).toContainText('Müşteri kataloğunda yayına çıkar');
+      });
 
       await expect(admin.page.getByTestId('draft-explainer')).toHaveCount(0);
       await assertNoErrorScreen(admin.page);
@@ -397,7 +401,10 @@ test.describe('admin category management', () => {
         .locator('form')
         .filter({ has: admin.page.getByRole('button', { name: 'Yönlendirmeyi kaydet' }) });
       await routingForm.locator('select[name="routerTargetSlug"]').selectOption(target.slug);
-      await routingForm.getByRole('button', { name: 'Yönlendirmeyi kaydet' }).click();
+      // A new destination asks first, option by option (Paket B).
+      await confirmThrough(routingForm.getByTestId('router-rules-save'), 'Evet, yönlendirmeyi kaydet', async (dialog) => {
+        await expect(dialog.getByTestId('router-rules-changes')).toContainText('Hedef hizmet');
+      });
       await assertNoErrorScreen(admin.page);
 
       /*

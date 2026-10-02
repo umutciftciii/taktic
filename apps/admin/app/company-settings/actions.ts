@@ -4,6 +4,9 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { apiFetch, CompanySettings } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
+import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
+import { companySettingsChanges, type CompanySettingsValues } from './settings-changes';
 
 /**
  * Saves the company footer.
@@ -24,6 +27,16 @@ export async function saveCompanySettingsAction(formData: FormData) {
   const clientError = validate(draft);
   if (clientError) {
     redirect(buildUrl(draft, { error: clientError }));
+  }
+
+  // A save that really changes a value is confirmed in a dialog; what
+  // changes is judged against the settings as the API has them now, never on
+  // the form's word (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). Settings
+  // that cannot be read are treated as changed.
+  const stored = await readStoredSettings();
+  const changed = stored === null || companySettingsChanges(stored, draft).length > 0;
+  if (changed && !(await hasConfirmationProof(formData, 'company-settings.update'))) {
+    redirect(buildUrl(draft, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   let errorMessage: string | null = null;
@@ -49,6 +62,15 @@ export async function saveCompanySettingsAction(formData: FormData) {
 
   revalidatePath('/company-settings');
   redirect('/company-settings?ok=saved');
+}
+
+async function readStoredSettings(): Promise<CompanySettingsValues | null> {
+  try {
+    return await apiFetch<CompanySettings>('/company-settings');
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
 }
 
 function validate(draft: { legalName: string; supportEmail: string }): string | null {

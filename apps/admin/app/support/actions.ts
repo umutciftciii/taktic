@@ -59,9 +59,12 @@ export async function changeSupportTicketStatusAction(formData: FormData) {
     redirect('/support');
   }
 
-  // Closing is confirmed in a dialog; the other transitions are not
-  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
-  if (status === 'CLOSED' && !(await hasConfirmationProof(formData, 'support.status'))) {
+  // Closing and resolving are confirmed in a dialog, each with its own proof;
+  // taking a ticket in hand or handing it back is not
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Paket B). The status asked for is
+  // what the API applies, so the proof is keyed on it.
+  const proofKey = status === 'CLOSED' ? 'support.status' : status === 'RESOLVED' ? 'support.resolve' : null;
+  if (proofKey && !(await hasConfirmationProof(formData, proofKey))) {
     redirect(withParams(`/support/${id}`, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 

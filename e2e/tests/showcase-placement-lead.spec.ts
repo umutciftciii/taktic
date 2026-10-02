@@ -9,6 +9,7 @@ import {
   requestFormValues,
   uniqueLocation,
 } from '../src/fixtures';
+import { confirmThrough } from '../src/confirm-dialog';
 import { waitForLatestSmsCode } from '../src/outbox';
 import { completeContactStep, fillLeadContact, settleIdentityGate } from '../src/journeys';
 import { primaryRuntime } from '../src/runtime';
@@ -883,11 +884,13 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       await expect(admin.page.getByRole('heading', { name: 'E2E Durdurulacak Kart' })).toBeVisible();
 
-      await admin.page
-        .getByRole('textbox', { name: 'Not' })
-        .first()
-        .fill('İnceleme için geçici durdurma.');
-      await admin.page.getByRole('button', { name: 'Yerleşimi durdur' }).click();
+      await admin.page.getByTestId('placement-suspend-note').fill('İnceleme için geçici durdurma.');
+      // Confirmed in a dialog that says the clock stops and no mail goes out
+      // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+      await confirmThrough(admin.page.getByTestId('placement-suspend'), 'Evet, yayından kaldır', async (dialog) => {
+        await expect(dialog.getByTestId('placement-suspend-impact')).toContainText('Yayın süresi durur');
+        await expect(dialog.getByTestId('placement-suspend-impact')).toContainText('Hizmet verene e-posta gitmez');
+      });
       await assertNoErrorScreen(admin.page);
 
       // The screen says what the clock did, because that is the operationally

@@ -169,7 +169,7 @@ describe('the clock stops for the platform', () => {
     const suspended = await request(ctx.server)
       .post(`/admin/showcase/placements/${placement.id}/suspend`)
       .set('Cookie', adminCookie)
-      .send({ note: 'İnceleme' });
+      .send({ note: 'İnceleme için durduruldu' });
     expect(suspended.status).toBe(200);
 
     await backdateSuspension(placement.id, 3);
@@ -340,7 +340,7 @@ describe('the database half of the clock rule', () => {
     await request(ctx.server)
       .post(`/admin/showcase/placements/${placement.id}/suspend`)
       .set('Cookie', adminCookie)
-      .send({});
+      .send({ note: 'İnceleme için durduruldu' });
 
     await expect(
       ctx.prisma.showcasePlacementSuspension.create({

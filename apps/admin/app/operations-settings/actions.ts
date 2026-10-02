@@ -34,6 +34,15 @@ export async function saveOperationsSettingsAction(formData: FormData) {
     redirect(buildUrl(raw, { error: clientError }));
   }
 
+  // A new window is confirmed in a dialog; whether it is new is judged
+  // against the setting as the API has it now, never on the form's word
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A setting that cannot be
+  // read is treated as changed.
+  const storedHours = await readStoredRefundWindow();
+  if (storedHours !== Number(raw) && !(await hasConfirmationProof(formData, 'operations.refund-window-update'))) {
+    redirect(buildUrl(raw, { error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
+  }
+
   let errorMessage: string | null = null;
   try {
     await apiFetch<OperationsSettings>('/operations-settings', {
@@ -295,6 +304,15 @@ function validate(raw: string): string | null {
     return 'Kredi iade süresi en fazla 720 saat olabilir.';
   }
   return null;
+}
+
+async function readStoredRefundWindow(): Promise<number | null> {
+  try {
+    return (await apiFetch<OperationsSettings>('/operations-settings')).unviewedOfferRefundWindowHours;
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
 }
 
 function buildUrl(raw: string, extra: Record<string, string>): string {

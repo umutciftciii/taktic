@@ -6,7 +6,6 @@ import {
   ApiError,
   apiFetch,
   Category,
-  CategoryKind,
   CategoryStatus,
   IssuedProviderInvite,
   ProviderInviteRevokeResult,
@@ -16,14 +15,36 @@ import {
   QuestionType,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import type { ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
+import { hasConfirmationProof, hasConfirmationProofs } from '../../lib/confirmation-proof-server';
+import {
+  categoryChanges,
+  categoryCreateNeedsProof,
+  categoryPayload,
+  categoryProofKeys,
+  categoryStatusProofKey,
+  readRouterRules,
+  routerRuleChanges,
+  type CategoryPayload,
+  type CategoryStored,
+} from './category-changes';
 import type { ProviderInviteFormState } from './category-taxonomy';
 
 const optionQuestionTypes = new Set<QuestionType>(['SELECT', 'MULTI_SELECT']);
 
 export async function createCategoryAction(formData: FormData) {
+  const payload = categoryPayload(formData);
+  // Created straight into ACTIVE (the catalogue) or INACTIVE is a status
+  // decision, asked in a dialog whose proof is checked before anything is sent
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A DRAFT goes straight through.
+  if (categoryCreateNeedsProof(payload) && !(await hasConfirmationProof(formData, 'category.create-published'))) {
+    redirect(`/categories/new?error=${CONFIRMATION_REQUIRED}`);
+  }
+
   const category = await apiFetch<Category>('/categories', {
     method: 'POST',
-    body: JSON.stringify(categoryPayload(formData)),
+    body: JSON.stringify(payload),
   });
 
   revalidatePath('/categories');
@@ -33,10 +54,22 @@ export async function createCategoryAction(formData: FormData) {
 export async function updateCategoryAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const slug = readFormString(formData, 'slug');
+  const payload = categoryPayload(formData);
+
+  // What this save changes is judged against the category as the API has it
+  // now, never on the form's word: a new slug, type or parent, a new offer
+  // price, the unlimited-package switch going on, or a status move each need
+  // their own proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A save of
+  // the name, description, pictures or order needs none.
+  const stored = await readStoredCategory(id);
+  const required = stored ? categoryProofKeys(categoryChanges(stored, payload)) : everyEditProof(payload);
+  if (required.length > 0 && !(await hasConfirmationProofs(formData, required))) {
+    redirect(`${stored ? `/categories/${stored.slug}` : '/categories'}?error=${CONFIRMATION_REQUIRED}`);
+  }
 
   await apiFetch<Category>(`/categories/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify(categoryPayload(formData)),
+    body: JSON.stringify(payload),
   });
 
   revalidatePath('/categories');
@@ -48,6 +81,16 @@ export async function updateCategoryStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const slug = readFormString(formData, 'slug');
   const status = readFormString(formData, 'status') as CategoryStatus;
+
+  // Moving the status asks first, into ACTIVE or out of it; which way is
+  // judged against the stored status. A press that leaves it where it is
+  // writes the same status back and asks nothing.
+  const stored = await readStoredCategory(id);
+  if (!stored || stored.status !== status) {
+    if (!(await hasConfirmationProof(formData, categoryStatusProofKey(status)))) {
+      redirect(`/categories/${stored?.slug ?? slug}?error=${CONFIRMATION_REQUIRED}`);
+    }
+  }
 
   await apiFetch<Category>(`/categories/${id}/status`, {
     method: 'PATCH',
@@ -123,18 +166,24 @@ export async function replaceQuestionConditionsAction(formData: FormData) {
 export async function replaceRouterRulesAction(formData: FormData) {
   const id = readFormString(formData, 'id');
   const categorySlug = readFormString(formData, 'categorySlug');
-  const optionKeys = formData.getAll('routerOptionKey');
-  const targets = formData.getAll('routerTargetSlug');
+  const posted = readRouterRules(formData);
 
-  const rules = optionKeys.flatMap((optionKey, index) => {
-    const target = targets[index];
-
-    if (typeof optionKey !== 'string' || typeof target !== 'string' || target.trim() === '') {
-      return [];
+  // A save that sends any customer somewhere else is confirmed in a dialog;
+  // what changes is judged against the router's stored map, read from the API
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A question that cannot be
+  // read is treated as changed. Saving the same map asks nothing.
+  const stored = await readStoredRouterRules(categorySlug, id);
+  if (stored === null || routerRuleChanges(stored, posted).length > 0) {
+    if (!(await hasConfirmationProof(formData, 'category.router-rules-update'))) {
+      redirect(`/categories/${categorySlug}?tab=sorular&error=${CONFIRMATION_REQUIRED}`);
     }
+  }
 
-    return [{ optionKey, targetCategorySlug: target.trim(), sortOrder: index * 10 }];
-  });
+  const rules = posted.flatMap((entry, index) =>
+    entry.targetSlug === null
+      ? []
+      : [{ optionKey: entry.optionKey, targetCategorySlug: entry.targetSlug, sortOrder: index * 10 }],
+  );
 
   await apiFetch<Question>(`/questions/${id}/router-rules`, {
     method: 'PUT',
@@ -175,6 +224,12 @@ export async function updateQuestionStatusAction(formData: FormData) {
   const categorySlug = readFormString(formData, 'categorySlug');
   const isActive = readFormString(formData, 'isActive') === 'true';
 
+  // Deactivating takes the question out of every new request form; asked in a
+  // dialog (Paket B). Activating goes straight through.
+  if (!isActive && !(await hasConfirmationProof(formData, 'question.deactivate'))) {
+    redirect(`/categories/${categorySlug}?tab=sorular&error=${CONFIRMATION_REQUIRED}`);
+  }
+
   await apiFetch(`/questions/${id}/status`, {
     method: 'PATCH',
     body: JSON.stringify({ isActive }),
@@ -207,6 +262,12 @@ export async function providerInviteAction(
   // Which button was pressed, read from the submitted form rather than from
   // which handler was bound — there is only one handler now.
   const revoking = readFormString(formData, 'intent') === 'revoke';
+
+  // Withdrawing a link kills it for good; asked in a dialog (Paket B).
+  // Issuing a new one goes straight through.
+  if (revoking && !(await hasConfirmationProof(formData, 'provider-invite.revoke'))) {
+    return { kind: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE };
+  }
 
   try {
     if (revoking) {
@@ -260,52 +321,58 @@ function inviteFailureMessage(error: unknown): string {
   return 'İşlem tamamlanamadı. Lütfen tekrar deneyin.';
 }
 
-function categoryPayload(formData: FormData) {
-  const kind = readFormString(formData, 'kind') as CategoryKind;
-  const status = readFormString(formData, 'status') as CategoryStatus;
+/** The refusal code a submission without its confirmation proof comes back with. */
+const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
 
-  return {
-    name: readFormString(formData, 'name'),
-    slug: readFormString(formData, 'slug'),
-    description: readOptionalFormString(formData, 'description'),
-    imageUrl: readOptionalFormString(formData, 'imageUrl'),
-    coverImageUrl: readOptionalFormString(formData, 'coverImageUrl'),
-    iconKey: readOptionalFormString(formData, 'iconKey'),
-    // Empty means "top level"; the API refuses a parent that is not a GROUP.
-    parentId: readOptionalFormString(formData, 'parentId'),
-    kind,
-    // Not sent when the form had no status control (no CATEGORIES_STATUS):
-    // the status is then left as stored rather than echoed back.
-    ...(readFormString(formData, 'statusLocked') === '1' ? {} : { status }),
-    sortOrder: readFormNumber(formData, 'sortOrder'),
-    // Mandatory for a service, and only for a service. A group is a folder and
-    // a router is a question — neither can ever be offered on, so neither has a
-    // price, and sending one would be a number nothing reads. Sent as a number
-    // so the API DTO's @IsInt/@Min(1) rejects empty, zero, negative and
-    // non-numeric input rather than the value silently becoming null.
-    ...(kind === 'LEAF' ? { offerCreditCost: readFormNumber(formData, 'offerCreditCost') } : {}),
-    // Only sent where the API will take it. A live service is always open to
-    // applications and refuses the field, so sending it there would turn every
-    // unrelated edit of a released category into a 400. `kind` and `status` come
-    // off this same form, so the condition is asked of the category the save
-    // produces — which is the row the API judges too.
-    //
-    // An unticked checkbox never reaches FormData at all, so the comparison
-    // below is how closing the switch is expressed.
-    ...(kind === 'LEAF' && status === 'DRAFT'
-      ? { providerEnrollmentOpen: readFormString(formData, 'providerEnrollmentOpen') === 'on' }
-      : {}),
-    // Sent whenever the form could carry it. A closed category renders the box
-    // disabled, and a disabled input never reaches FormData — so sending the
-    // field there would read as "untick it" and silently clear a flag nobody
-    // touched.
-    ...(status === 'INACTIVE'
-      ? {}
-      : {
-          unlimitedPackageEligible:
-            readFormString(formData, 'unlimitedPackageEligible') === 'on',
-        }),
-  };
+/**
+ * The category as the API has it now, found by id in the operator listing
+ * (the detail route takes a slug, and the form's slug is the one being typed).
+ * Null when it cannot be read.
+ */
+async function readStoredCategory(id: string): Promise<CategoryStored | null> {
+  try {
+    const categories = await apiFetch<Category[]>('/admin/categories');
+    return categories.find((category) => category.id === id) ?? null;
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
+}
+
+/**
+ * The router question's stored option → service map, from the category the
+ * form names — or null when it cannot be read or the question is not one of
+ * that category's (a form naming another category's question is judged as a
+ * change).
+ */
+async function readStoredRouterRules(
+  categorySlug: string,
+  questionId: string,
+): Promise<Array<{ optionKey: string; targetCategorySlug: string }> | null> {
+  try {
+    const category = await apiFetch<Category & { questions?: Question[] }>(
+      `/admin/categories/${encodeURIComponent(categorySlug)}`,
+    );
+    const question = category.questions?.find((candidate) => candidate.id === questionId);
+    return question ? (question.routerRules ?? []) : null;
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
+}
+
+/**
+ * A category that cannot be read is treated as changing everything the save
+ * could: refused unless every one of those is confirmed — which the screen,
+ * judging against the category it rendered, never mints together.
+ */
+function everyEditProof(payload: CategoryPayload): ConfirmationProofKey[] {
+  return [
+    'category.structure-update',
+    ...(payload.offerCreditCost !== undefined ? (['category.offer-credit-update'] as const) : []),
+    ...(payload.unlimitedPackageEligible ? (['category.unlimited-enable'] as const) : []),
+    ...(payload.status !== undefined ? [categoryStatusProofKey(payload.status)] : []),
+  ];
 }
 
 function questionPayload(formData: FormData) {

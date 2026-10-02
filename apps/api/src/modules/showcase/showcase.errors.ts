@@ -266,6 +266,7 @@ export const SHOWCASE_PLACEMENT_NOT_SUSPENDABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_S
 export const SHOWCASE_PLACEMENT_NOT_RESUMABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_RESUMABLE';
 export const SHOWCASE_PLACEMENT_NOT_CANCELLABLE_CODE = 'SHOWCASE_PLACEMENT_NOT_CANCELLABLE';
 export const SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED_CODE = 'SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED';
+export const SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED_CODE = 'SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED';
 export const SHOWCASE_LEAD_AREA_NOT_SERVED_CODE = 'SHOWCASE_LEAD_AREA_NOT_SERVED';
 export const SHOWCASE_LEAD_NOT_FOUND_CODE = 'SHOWCASE_LEAD_NOT_FOUND';
 export const SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED_CODE =
@@ -434,6 +435,22 @@ export function showcasePlacementCancelNoteRequired(minLength: number) {
     error: 'Bad Request',
     code: SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED_CODE,
     message: `İptal gerekçesi zorunludur (en az ${minLength} karakter).`,
+  });
+}
+
+/**
+ * A suspension with no reason, or one too short to be a reason.
+ *
+ * Suspending takes a paid card off the air without telling the provider by
+ * mail, so the note is the record of why (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+ * Paket B). Judged after trimming, as the cancellation's note is.
+ */
+export function showcasePlacementSuspendNoteRequired(minLength: number) {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED_CODE,
+    message: `Durdurma gerekçesi zorunludur (en az ${minLength} karakter).`,
   });
 }
 
