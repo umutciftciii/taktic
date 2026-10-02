@@ -331,6 +331,11 @@ describe('Lemon Squeezy credentials', () => {
     process.env.LEMON_SQUEEZY_VARIANT_MAP = 'baslangic:111,profesyonel:111';
     expect(() => readLemonSqueezyConfig()).toThrow(/more than one credit package/);
 
+    // One map serves both catalogues: a variant may not stand for an offer
+    // package and a vitrin package at the same time either.
+    process.env.LEMON_SQUEEZY_VARIANT_MAP = 'baslangic:111,vitrin-mini-30:111';
+    expect(() => readLemonSqueezyConfig()).toThrow(/more than one credit package/);
+
     process.env.LEMON_SQUEEZY_VARIANT_MAP = 'Baslangic:111';
     expect(() => readLemonSqueezyConfig()).toThrow(/credit-package-slug:numericVariantId/);
 
