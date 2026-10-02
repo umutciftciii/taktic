@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
@@ -65,7 +66,13 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
 
       // ── 10,50 ──────────────────────────────────────────────────────────
       await price.fill('10,50');
-      await createForm.getByRole('button', { name: 'Paketi oluştur' }).click();
+      // A new package is on sale at once and its slug is permanent: it asks
+      // first, with the figures typed (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+      await confirmThrough(createForm.getByRole('button', { name: 'Paketi oluştur' }), 'Evet, oluştur ve satışa aç', async (createDialog) => {
+        await expect(createDialog).toContainText('₺10,50');
+        await expect(createDialog).toContainText(slug);
+        await expect(createDialog).toContainText('kalıcıdır');
+      });
       await expect(admin.page).toHaveURL(/created=1/);
       await assertNoErrorScreen(admin.page);
 
@@ -89,7 +96,9 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
 
       // ── 1.250,75 through the edit form ─────────────────────────────────
       await editForm.getByTestId('showcase-package-price').fill('1.250,75');
-      await editForm.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (repriceDialog) => {
+        await expect(repriceDialog.getByTestId('showcase-package-commercial-changes')).toContainText('₺10,50 → ₺1.250,75');
+      });
       await expect(admin.page).toHaveURL(/saved=1/);
       await assertNoErrorScreen(admin.page);
 
@@ -107,7 +116,7 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       // is a new URL this time and the wait for it is a real wait.
       await admin.gotoAdmin(screen);
       await editForm.getByTestId('showcase-package-price').fill('10');
-      await editForm.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet');
       await expect(admin.page).toHaveURL(/saved=1/);
       await assertNoErrorScreen(admin.page);
       expect(
@@ -122,7 +131,7 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       await admin.gotoAdmin(screen);
       // "0" passes the browser's pattern (it is digits) and fails the rule.
       await editForm.getByTestId('showcase-package-price').fill('0');
-      await editForm.getByRole('button', { name: 'Kaydet' }).click();
+      await editForm.getByRole('button', { name: 'Kaydet', exact: true }).click();
       await expect(admin.page).toHaveURL(/error=SHOWCASE_PACKAGE_PRICE_INVALID/);
       // The refusal comes back to the package's screen, not to the list.
       await expect(admin.page).toHaveURL(new RegExp(`${screen}\\?error=`));

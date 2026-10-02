@@ -8,7 +8,9 @@ import {
   MarketplacePublishSettings,
   OperationsSettings,
   ProviderReviewSettings,
+  SCHEDULER_JOB_COPY,
   SCHEDULER_JOB_KEYS,
+  type SchedulerJobKey,
   SchedulerSettings,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
@@ -77,9 +79,17 @@ export async function toggleSchedulerAction(formData: FormData) {
     redirect(schedulerUrl({ error: 'Zamanlanmış iş durumu yalnızca açık veya kapalı olabilir.' }));
   }
 
-  // Switching a job on is confirmed in a dialog; switching it off is not
-  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+  // Switching a job on is confirmed in a dialog; switching it off is too for
+  // the jobs whose silence delays money or credit, and one tap for the rest
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001, Paket A).
   if (enabled === 'true' && !(await hasConfirmationProof(formData, 'scheduler.toggle'))) {
+    redirect(schedulerUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
+  }
+  if (
+    enabled === 'false' &&
+    SCHEDULER_JOB_COPY[job as SchedulerJobKey].disableConfirmation &&
+    !(await hasConfirmationProof(formData, 'scheduler.disable'))
+  ) {
     redirect(schedulerUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
@@ -124,6 +134,11 @@ export async function toggleAutoPublishAction(formData: FormData) {
 
   if (enabled !== 'true' && enabled !== 'false') {
     redirect(autoPublishUrl({ error: 'Otomatik yayın durumu yalnızca açık veya kapalı olabilir.' }));
+  }
+  // Switching it on is confirmed in a dialog; off is one tap
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+  if (enabled === 'true' && !(await hasConfirmationProof(formData, 'operations.auto-publish-enable'))) {
+    redirect(autoPublishUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
   }
 
   let errorMessage: string | null = null;
@@ -171,6 +186,16 @@ export async function toggleProviderReviewsAction(formData: FormData) {
       providerReviewsUrl({ error: 'Değerlendirme durumu yalnızca açık veya kapalı olabilir.' }),
     );
   }
+  // Both directions are confirmed in a dialog, each with its own proof
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+  if (
+    !(await hasConfirmationProof(
+      formData,
+      enabled === 'true' ? 'operations.reviews-enable' : 'operations.reviews-disable',
+    ))
+  ) {
+    redirect(providerReviewsUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
+  }
 
   let errorMessage: string | null = null;
   try {
@@ -200,13 +225,13 @@ function providerReviewsUrl(params: Record<string, string>): string {
 /**
  * Switches the campaign engine on or off (CMP-004 S4).
  *
- * The one toggle on this screen that demands an explicit confirmation: the
- * form carries a `confirm` checkbox, and a submission without it is refused
- * here before any request is made — the browser's `required` is a
- * convenience, this check is the rule. Everything else is the shape of the
- * other toggles: the state asked for comes from the form, the operator from
- * the session on the API side, and the API records one change per real
- * change.
+ * Both directions are confirmed in the switch's dialog, and a submission
+ * without the dialog's single-use proof (`campaign-engine.toggle`) is refused
+ * here before any request is made — a fixed form value, like the old
+ * `confirm` checkbox, proves nothing (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
+ * Everything else is the shape of the other toggles: the state asked for
+ * comes from the form, the operator from the session on the API side, and the
+ * API records one change per real change.
  *
  * Only new entitlement is affected. Switching on raises no event for
  * anything that happened while the engine was off; switching off stops new

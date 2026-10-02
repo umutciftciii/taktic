@@ -5,6 +5,7 @@ import type { Campaign, CampaignChannelReadiness, CampaignVersionSummary } from 
 import { channelLabel, ruleErrorMessage } from '../../lib/campaign-rules';
 import { ConfirmDialog } from '../../components/confirm-dialog';
 import { campaignLifecycleAction } from './actions';
+import { versionChanges, versionFacts } from './lifecycle-proof';
 import { IDLE_CAMPAIGN_LIFECYCLE_STATE } from './lifecycle-state';
 
 type CampaignLifecyclePanelProps = {
@@ -43,10 +44,16 @@ type CampaignLifecyclePanelProps = {
  *
  * ADMIN-DESIGN-001 Faz 3E: the two moves that cannot be undone — "Sonlandır"
  * and "Taslağı kapat" — ask first (ConfirmDialog), with what the API will do
- * written in the dialog. They stay in the same forms, post the same `intent`
- * and `reason`, and need the same CAMPAIGNS_LIFECYCLE; activation, pause and
- * resume are reversible and stay one click. The forms carry `campaignId`,
- * never a field named "id", so the dialog's `intent` cannot be shadowed away.
+ * written in the dialog. The forms carry `campaignId`, never a field named
+ * "id", so the dialog's `intent` cannot be shadowed away.
+ *
+ * ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A: every other move asks too,
+ * each with its own proof. Activating a version says which version and its
+ * rule (trigger, credit, limits, budget, channel, window) from the stored
+ * version — or, for a switch or a resumption with a new version, what changes
+ * — and that granted lots are never taken back automatically. Resuming with a
+ * new version takes a reason like a plain resume. Pause and resume are a
+ * lighter question, with the reason the form already required.
  */
 export function CampaignLifecyclePanel({
   campaign,
@@ -113,25 +120,60 @@ export function CampaignLifecyclePanel({
       ) : null}
 
       {canActivate && activateVersion ? (
-        <form action={submit} className="campaign-lifecycle-form">
+        <form action={submit} className="campaign-lifecycle-form" data-testid="campaign-activate-form">
           <input type="hidden" name="intent" value="activate" />
           <input type="hidden" name="campaignId" value={campaign.id} />
           <input type="hidden" name="versionNumber" value={activateVersion.versionNumber} />
-          <button
-            className="btn btn-primary btn-sm"
-            type="submit"
-            disabled={pending || needsEngine || channelBlocked}
-            data-testid="campaign-activate"
-            title={
-              needsEngine
-                ? 'Kampanya motoru kapalı — etkinleştirme yapılamaz'
-                : channelBlocked
-                  ? 'Bu kanal için kayıtlı kaynak yok — etkinleştirme yapılamaz'
-                  : undefined
-            }
-          >
-            {status === 'DRAFT' ? `Sürüm ${activateVersion.versionNumber}’i etkinleştir` : status === 'PAUSED' ? `Sürüm ${activateVersion.versionNumber} ile devam ettir` : `Sürüm ${activateVersion.versionNumber}’e geç`}
-          </button>
+          {status === 'PAUSED' ? (
+            <label className="field">
+              <span>Devam ettirme gerekçesi</span>
+              <textarea
+                name="reason"
+                minLength={3}
+                maxLength={500}
+                required
+                placeholder="Kampanya neden yeni sürümle devam ediyor?"
+                data-testid="campaign-activate-reason"
+              />
+            </label>
+          ) : null}
+          {status === 'DRAFT' ? (
+            <ConfirmDialog
+              proof="campaign.version-activate"
+              triggerLabel={`Sürüm ${activateVersion.versionNumber}’i etkinleştir`}
+              triggerClassName="btn btn-primary btn-sm"
+              tone="primary"
+              title={`Sürüm ${activateVersion.versionNumber} etkinleştirilsin mi?`}
+              consequence={<VersionActivateConsequence campaign={campaign} version={activateVersion} />}
+              confirmLabel="Evet, etkinleştir"
+              disabled={pending || needsEngine || channelBlocked}
+              testId="campaign-activate"
+            />
+          ) : status === 'ACTIVE' ? (
+            <ConfirmDialog
+              proof="campaign.version-switch"
+              triggerLabel={`Sürüm ${activateVersion.versionNumber}’e geç`}
+              triggerClassName="btn btn-primary btn-sm"
+              tone="primary"
+              title={`Sürüm ${activeVersion?.versionNumber ?? '?'} → ${activateVersion.versionNumber} geçişi yapılsın mı?`}
+              consequence={<VersionSwitchConsequence campaign={campaign} from={activeVersion} to={activateVersion} />}
+              confirmLabel="Evet, sürüme geç"
+              disabled={pending || needsEngine || channelBlocked}
+              testId="campaign-activate"
+            />
+          ) : (
+            <ConfirmDialog
+              proof="campaign.version-resume"
+              triggerLabel={`Sürüm ${activateVersion.versionNumber} ile devam ettir`}
+              triggerClassName="btn btn-primary btn-sm"
+              tone="primary"
+              title={`Kampanya sürüm ${activateVersion.versionNumber} ile devam ettirilsin mi?`}
+              consequence={<VersionResumeConsequence campaign={campaign} from={activeVersion} to={activateVersion} />}
+              confirmLabel="Evet, yeni sürümle devam ettir"
+              disabled={pending || needsEngine || channelBlocked}
+              testId="campaign-activate"
+            />
+          )}
         </form>
       ) : null}
 
@@ -180,21 +222,54 @@ export function CampaignLifecyclePanel({
           </label>
           <div className="panel-row">
             {status === 'ACTIVE' ? (
-              <button className="btn btn-secondary btn-sm" type="submit" name="intent" value="pause" disabled={pending} data-testid="campaign-pause">
-                Duraklat
-              </button>
+              <ConfirmDialog
+                proof="campaign.pause"
+                triggerLabel="Duraklat"
+                triggerClassName="btn btn-secondary btn-sm"
+                tone="primary"
+                title="Kampanya duraklatılsın mı?"
+                consequence={
+                  <>
+                    <p>
+                      <strong>{campaign.name}</strong> <strong>Duraklatıldı</strong> olur: bundan sonraki olaylarda
+                      promosyon kredisi verilmez. Duraklatılmışken olan olaylar için devam ettirildiğinde de geriye dönük
+                      hak ediş üretilmez.
+                    </p>
+                    <p>
+                      Verilmiş promosyon lotları geri alınmaz, çalışmaya devam eder. Gerekçe adınızla “Neler oldu” kaydına
+                      yazılır; kampanya gerekçeyle yeniden devam ettirilebilir.
+                    </p>
+                  </>
+                }
+                confirmLabel="Evet, duraklat"
+                name="intent"
+                value="pause"
+                disabled={pending}
+                testId="campaign-pause"
+              />
             ) : (
-              <button
-                className="btn btn-primary btn-sm"
-                type="submit"
+              <ConfirmDialog
+                proof="campaign.resume"
+                triggerLabel="Devam ettir"
+                triggerClassName="btn btn-primary btn-sm"
+                tone="primary"
+                title="Kampanya devam ettirilsin mi?"
+                consequence={
+                  <>
+                    <p>
+                      <strong>{campaign.name}</strong> <strong>Duraklatıldı → Etkin</strong> olur ve sürüm{' '}
+                      {activeVersion?.versionNumber ?? '?'} kuralıyla bundan sonraki gerçek olaylarda promosyon kredisi
+                      dağıtmaya yeniden başlar. Duraklatılmışken olan olaylar için geriye dönük hak ediş üretilmez.
+                    </p>
+                    <p>Etkinleştirme koşulları şimdi yeniden denetlenir; tutmuyorsa API reddeder ve hiçbir şey yazılmaz. Gerekçe adınızla kayda geçer.</p>
+                  </>
+                }
+                confirmLabel="Evet, devam ettir"
                 name="intent"
                 value="resume"
                 disabled={pending || needsEngine}
-                data-testid="campaign-resume"
-                title={needsEngine ? 'Kampanya motoru kapalı — devam ettirme yapılamaz' : undefined}
-              >
-                Devam ettir
-              </button>
+                testId="campaign-resume"
+              />
             )}
             <ConfirmDialog
               proof="campaign.end"
@@ -223,5 +298,110 @@ export function CampaignLifecyclePanel({
         </form>
       ) : null}
     </section>
+  );
+}
+
+/** The version's rule, line by line, from the stored version. */
+function VersionFactList({ version }: { version: CampaignVersionSummary }) {
+  return (
+    <dl className="confirm-dialog-facts" data-testid="campaign-version-facts">
+      {versionFacts(version).map((fact) => (
+        <div key={fact.key}>
+          <dt>{fact.label}</dt>
+          <dd>{fact.value}</dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+/** What changes from the running version to the next one; every line when there is no running one. */
+function VersionChangeList({ from, to }: { from: CampaignVersionSummary | null; to: CampaignVersionSummary }) {
+  if (!from) return <VersionFactList version={to} />;
+  const changes = versionChanges(from, to);
+  if (changes.length === 0) {
+    return <p data-testid="campaign-version-changes">Kritik alanlarda (kredi, limit, bütçe, kanal, süre, tetikleyici) fark yok.</p>;
+  }
+  return (
+    <dl className="confirm-dialog-facts" data-testid="campaign-version-changes">
+      {changes.map((change) => (
+        <div key={change.key}>
+          <dt>{change.label}</dt>
+          <dd>
+            {change.from} → <strong>{change.to}</strong>
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+}
+
+const LOTS_STAY =
+  'Verilen promosyon lotları kampanya duraklatılsa, sonlandırılsa ya da sürüm değişse de otomatik geri alınmaz; yalnız ödeme iadesi ya da tek tek geri alma ile geri alınır.';
+
+function VersionActivateConsequence({ campaign, version }: { campaign: Campaign; version: CampaignVersionSummary }) {
+  return (
+    <>
+      <p>
+        <strong>{campaign.name}</strong> taslaktan <strong>Etkin</strong> olur; motor sürüm {version.versionNumber}{' '}
+        kuralını değerlendirmeye başlar:
+      </p>
+      <VersionFactList version={version} />
+      <p>
+        Etkinleşince bundan sonraki gerçek olaylarda (onay, kanıt, ödeme) koşulları sağlayan hizmet verenlere{' '}
+        <strong>promosyon kredisi dağıtımı başlar</strong>. Geçmiş olaylar için hak ediş üretilmez.
+      </p>
+      <p>{LOTS_STAY} Etkinleştirme adınızla “Neler oldu” kaydına yazılır.</p>
+    </>
+  );
+}
+
+function VersionSwitchConsequence({
+  campaign,
+  from,
+  to,
+}: {
+  campaign: Campaign;
+  from: CampaignVersionSummary | null;
+  to: CampaignVersionSummary;
+}) {
+  return (
+    <>
+      <p>
+        <strong>{campaign.name}</strong> etkin kalır; çalışan kural sürüm {from?.versionNumber ?? '?'} yerine{' '}
+        <strong>sürüm {to.versionNumber}</strong> olur. Değişen kritik alanlar:
+      </p>
+      <VersionChangeList from={from} to={to} />
+      <p>
+        Yeni kural <strong>onaydan hemen sonra</strong>, bir sonraki olaydan itibaren uygulanır. Kullanılmış hak ediş ve
+        bütçe sayaçları sıfırlanmaz.
+      </p>
+      <p>{LOTS_STAY}</p>
+    </>
+  );
+}
+
+function VersionResumeConsequence({
+  campaign,
+  from,
+  to,
+}: {
+  campaign: Campaign;
+  from: CampaignVersionSummary | null;
+  to: CampaignVersionSummary;
+}) {
+  return (
+    <>
+      <p>
+        <strong>{campaign.name}</strong> <strong>Duraklatıldı → Etkin</strong> olur ve sürüm {from?.versionNumber ?? '?'}{' '}
+        yerine <strong>sürüm {to.versionNumber}</strong> kuralıyla devam eder. Değişen kritik alanlar:
+      </p>
+      <VersionChangeList from={from} to={to} />
+      <p>
+        Onaydan sonraki gerçek olaylarda <strong>promosyon kredisi dağıtımı yeniden başlar</strong>. Duraklatılmışken
+        olan olaylar için geriye dönük hak ediş üretilmez. Gerekçe adınızla kayda geçer.
+      </p>
+      <p>{LOTS_STAY}</p>
+    </>
   );
 }

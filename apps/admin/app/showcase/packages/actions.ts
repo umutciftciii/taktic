@@ -3,8 +3,11 @@
 import { parseTurkishLiraToMinor } from '@taktic/shared';
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
-import { ApiError, apiFetch } from '../../../lib/api';
+import { ApiError, apiFetch, type ShowcasePackage } from '../../../lib/api';
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
+import type { ConfirmationProofKey } from '../../../lib/confirmation-proof-keys';
+import { hasConfirmationProof, hasConfirmationProofs } from '../../../lib/confirmation-proof-server';
+import { readShowcaseTerms, showcasePackageTermsChanges } from './package-changes';
 
 /**
  * Maintaining the vitrin catalogue.
@@ -34,6 +37,12 @@ export async function createShowcasePackageAction(formData: FormData) {
   const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
   if (priceAmount === null) {
     redirect(failureHref(NEW_PACKAGE_KEY, 'SHOWCASE_PACKAGE_PRICE_INVALID'));
+  }
+  // A new package is on sale the moment it exists (the API creates it
+  // active), and its slug can never change: asked in a dialog, whose proof is
+  // checked before anything is sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+  if (!(await hasConfirmationProof(formData, 'showcase-package.create-active'))) {
+    redirect(failureHref(NEW_PACKAGE_KEY, CONFIRMATION_REQUIRED));
   }
 
   try {
@@ -65,6 +74,14 @@ export async function updateShowcasePackageAction(formData: FormData) {
   const priceAmount = parseTurkishLiraToMinor(readString(formData, 'priceAmount'));
   if (priceAmount === null) {
     redirect(failureHref(packageId, 'SHOWCASE_PACKAGE_PRICE_INVALID'));
+  }
+  // What this save changes is judged against the package as the API has it
+  // now, never on the form's word: a change to what a purchase buys needs
+  // `showcase-package.update-commercial`, "Durum" moved needs the header
+  // button's proof. A save of the name, description or order needs none.
+  const required = await requiredEditProofs(packageId, formData);
+  if (required.length > 0 && !(await hasConfirmationProofs(formData, required))) {
+    redirect(failureHref(packageId, CONFIRMATION_REQUIRED));
   }
 
   try {
@@ -101,6 +118,11 @@ export async function updateShowcasePackageAction(formData: FormData) {
 export async function updateShowcasePackageStatusAction(formData: FormData) {
   const packageId = readString(formData, 'packageId');
   const isActive = readString(formData, 'isActive') === 'true';
+  // Both directions are asked in a dialog; the proof is the one for the
+  // direction asked for.
+  if (!(await hasConfirmationProof(formData, isActive ? 'showcase-package.activate' : 'showcase-package.deactivate'))) {
+    redirect(failureHref(packageId, CONFIRMATION_REQUIRED));
+  }
 
   try {
     await apiFetch(`/admin/showcase/packages/${packageId}`, {
@@ -115,6 +137,31 @@ export async function updateShowcasePackageStatusAction(formData: FormData) {
   revalidatePath('/showcase/packages');
   revalidatePath(detailHref(packageId));
   redirect(`${detailHref(packageId)}?${isActive ? 'activated' : 'deactivated'}=1`);
+}
+
+/** The refusal code a submission without its confirmation proof comes back with. */
+const CONFIRMATION_REQUIRED = 'CONFIRMATION_REQUIRED';
+
+/**
+ * The proofs an edit needs, from the stored package. One that cannot be read
+ * is treated as changing everything the save could: refused unless confirmed.
+ */
+async function requiredEditProofs(packageId: string, formData: FormData): Promise<ConfirmationProofKey[]> {
+  const nextActive = formData.get('isActive') === 'on';
+  const statusKey: ConfirmationProofKey = nextActive ? 'showcase-package.activate' : 'showcase-package.deactivate';
+  let stored: ShowcasePackage;
+  try {
+    stored = await apiFetch<ShowcasePackage>(`/admin/showcase/packages/${encodeURIComponent(packageId)}`);
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return ['showcase-package.update-commercial', statusKey];
+  }
+  const keys: ConfirmationProofKey[] = [];
+  if (showcasePackageTermsChanges(stored, readShowcaseTerms(formData, stored.currency)).length > 0) {
+    keys.push('showcase-package.update-commercial');
+  }
+  if (nextActive !== stored.isActive) keys.push(statusKey);
+  return keys;
 }
 
 /** The `?paket=` value that opens the new-package window. */

@@ -23,6 +23,7 @@ import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof
 
 export async function takePackageRefundAction(formData: FormData) {
   const id = readString(formData, 'id');
+  await refuseWithoutProof(formData, id, 'package-refund.take');
   await submit(id, `/admin/package-refund-requests/${encodeURIComponent(id)}/take`, {}, 'taken');
 }
 
@@ -102,7 +103,7 @@ export async function openPackageRefundRequestAction(formData: FormData) {
 }
 
 /**
- * Approve, reject and settlement-failed are confirmed in a dialog; a
+ * Take, approve, reject and settlement-failed are confirmed in a dialog; a
  * submission without its proof goes back to the request with the reason and
  * nothing sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
  */

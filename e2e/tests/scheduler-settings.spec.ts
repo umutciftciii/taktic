@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough, waitForHydration } from '../src/confirm-dialog';
 import { createAdmin, createCustomer, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
@@ -154,6 +155,41 @@ test.describe('scheduled jobs', () => {
       await expect(
         admin.page.getByTestId('scheduler-audit').locator('tbody tr'),
       ).toHaveCount(2);
+    } finally {
+      await admin.close();
+    }
+  });
+
+  test('switching off a money job asks first; the others stay one tap (Paket A)', async ({ browser }) => {
+    const adminAccount = await createAdmin();
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    try {
+      await prisma().operationsSettings.updateMany({
+        where: { id: 'singleton' },
+        data: { entitlementRenewalSchedulerEnabled: true, unviewedOfferRefundSchedulerEnabled: true },
+      });
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin('/operations-settings');
+
+      const renewal = admin.page.getByTestId('scheduler-toggle-entitlement-renewal');
+      await expect(renewal).toHaveAttribute('aria-checked', 'true');
+      await waitForHydration(renewal);
+      await renewal.click();
+      const renewalDialog = admin.page.getByTestId('scheduler-toggle-entitlement-renewal-dialog');
+      await expect(renewalDialog).toContainText('yenileme tahsilatı, dönem yenileme ve süre sonu işleri durur');
+      await renewalDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      expect(await storedFlag('entitlement-renewal')).toBe(true);
+      await confirmThrough(renewal, 'Evet, işi kapat');
+      await expect(admin.page.getByTestId('scheduler-toggle-entitlement-renewal')).toHaveAttribute('aria-checked', 'false');
+      expect(await storedFlag('entitlement-renewal')).toBe(false);
+
+      const refund = admin.page.getByTestId('scheduler-toggle-unviewed-offer-refund');
+      await confirmThrough(refund, 'Evet, işi kapat', async (refundDialog) => {
+        await expect(refundDialog).toContainText('gecikir');
+      });
+      await expect(admin.page.getByTestId('scheduler-toggle-unviewed-offer-refund')).toHaveAttribute('aria-checked', 'false');
+      expect(await storedFlag('unviewed-offer-refund')).toBe(false);
+      await assertNoErrorScreen(admin.page);
     } finally {
       await admin.close();
     }
@@ -336,8 +372,17 @@ test.describe('provider reviews switch', () => {
         path: resolve(__dirname, '..', 'test-results', 'provider-review-screens', 'admin-switch-off-1280.png'),
       });
 
-      // ---- on ---------------------------------------------------------------
-      await admin.page.getByTestId('provider-reviews-toggle').click();
+      // ---- on: asks first (Paket A); "Vazgeç" writes nothing --------------------
+      const reviewsToggle = admin.page.getByTestId('provider-reviews-toggle');
+      await waitForHydration(reviewsToggle);
+      await reviewsToggle.click();
+      const onDialog = admin.page.getByTestId('provider-reviews-toggle-dialog');
+      await expect(onDialog).toContainText('yeniden görünür hâle gelebilir');
+      await expect(onDialog).toContainText('davet');
+      await onDialog.getByRole('button', { name: 'Vazgeç' }).click();
+      await expect(onDialog).toBeHidden();
+      expect(await storedReviewFlag()).toBe(false);
+      await confirmThrough(reviewsToggle, 'Evet, değerlendirmeleri aç');
       await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
         'aria-checked',
         'true',
@@ -360,8 +405,10 @@ test.describe('provider reviews switch', () => {
       // (other specs in this run write the settings row).
       await expect(audit.locator('tbody tr').first()).toContainText('Açık');
 
-      // ---- off again --------------------------------------------------------
-      await admin.page.getByTestId('provider-reviews-toggle').click();
+      // ---- off again: asks too, and says nothing is deleted ---------------------
+      await confirmThrough(admin.page.getByTestId('provider-reviews-toggle'), 'Evet, değerlendirmeleri kapat', async (offDialog) => {
+        await expect(offDialog).toContainText('silinmez');
+      });
       await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
         'aria-checked',
         'false',

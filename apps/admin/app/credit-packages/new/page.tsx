@@ -3,6 +3,7 @@ import { apiFetch, requireAdmin, type UnlimitedEligibleCategory } from '../../..
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
 import { createCreditPackageAction } from '../actions';
+import { CreditPackageCreateSubmit } from '../credit-package-gates';
 
 type NewCreditPackagePageProps = {
   searchParams: Promise<{
@@ -280,7 +281,7 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
                 )}
                 <span className="help-text" data-testid="credit-package-new-status-help">
                   {canChooseStatus
-                    ? 'Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.'
+                    ? 'Aktif paket oluşturulduğu anda satışa çıkar; oluştururken onay istenir. Pasif paketler yeni satın alıma kapanır, mevcut satın almaları etkilemez.'
                     : 'Paket pasif oluşturulur. Satışa açmak paket durumu yetkisi gerektirir; bu yetkiye sahip biri paketi detay ekranından aktifleştirebilir.'}
                 </span>
               </label>
@@ -297,9 +298,8 @@ export default async function NewCreditPackagePage({ searchParams }: NewCreditPa
             </div>
 
             <div className="compact-actions">
-              <button className="btn btn-primary btn-sm" type="submit">
-                Paketi oluştur
-              </button>
+              {/* An active package asks first: it is on sale the moment it exists. */}
+              <CreditPackageCreateSubmit />
               <Link className="btn btn-secondary btn-sm" href="/credit-packages">
                 Vazgeç
               </Link>

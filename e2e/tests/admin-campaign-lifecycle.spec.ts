@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { clickBeforeHydration, confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
 
@@ -102,13 +103,14 @@ test.describe('admin campaign lifecycle', () => {
       await expect(page.getByTestId('campaign-close-draft')).toBeEnabled();
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'DRAFT');
 
-      // Forcing the form past the disabled button reaches the API, which
-      // refuses with the same reason and writes nothing.
+      // Forcing the form past the disabled button carries no confirmation
+      // proof, so the action refuses it before the API is asked (Paket A);
+      // the API's own CAMPAIGN_ENGINE_DISABLED is pinned in the API suite.
       await page.evaluate(() => {
         const button = document.querySelector<HTMLButtonElement>('[data-testid="campaign-activate"]');
         button?.closest('form')?.requestSubmit();
       });
-      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('motoru kapalı');
+      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('onay penceresinden onay alınamadı');
       expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe('DRAFT');
       expect(await prisma().campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(2);
 
@@ -119,7 +121,16 @@ test.describe('admin campaign lifecycle', () => {
       await expect(engineState).toHaveAttribute('data-engine', 'on');
       await expect(page.getByTestId('campaign-lifecycle-engine-off')).toHaveCount(0);
       await expect(page.getByTestId('campaign-activate')).toBeEnabled();
-      await page.getByTestId('campaign-activate').click();
+      // A click before hydration reaches the action with no proof: refused,
+      // nothing written (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+      await clickBeforeHydration(page, page.url(), page.getByTestId('campaign-activate'));
+      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('onay penceresinden onay alınamadı');
+      expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe('DRAFT');
+      // The dialog names the version and its rule, and what activation starts.
+      await confirmThrough(page.getByTestId('campaign-activate'), 'Evet, etkinleştir', async (activateDialog) => {
+        await expect(activateDialog).toContainText('promosyon kredisi dağıtımı başlar');
+        await expect(activateDialog).toContainText('otomatik geri alınmaz');
+      });
       await expect(page).toHaveURL(/ok=activate/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ACTIVE');
@@ -138,7 +149,7 @@ test.describe('admin campaign lifecycle', () => {
 
       // ---- pause, with a reason ----
       await page.getByTestId('campaign-lifecycle-reason').fill('E2E: bütçe kontrolü');
-      await page.getByTestId('campaign-pause').click();
+      await confirmThrough(page.getByTestId('campaign-pause'), 'Evet, duraklat');
       await expect(page).toHaveURL(/ok=pause/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'PAUSED');
@@ -147,7 +158,7 @@ test.describe('admin campaign lifecycle', () => {
 
       // ---- resume ----
       await page.getByTestId('campaign-lifecycle-reason').fill('E2E: kontrol bitti');
-      await page.getByTestId('campaign-resume').click();
+      await confirmThrough(page.getByTestId('campaign-resume'), 'Evet, devam ettir');
       await expect(page).toHaveURL(/ok=resume/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ACTIVE');
@@ -164,7 +175,12 @@ test.describe('admin campaign lifecycle', () => {
       await expect(page.locator('[data-testid="campaign-version-row"][data-version="2"]')).toHaveAttribute('data-active', 'false');
       expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).activeVersionId).toBe(version.id);
       await expect(page.getByTestId('campaign-activate')).toContainText('Sürüm 2');
-      await page.getByTestId('campaign-activate').click();
+      // The switch names old → new and only what changed.
+      await confirmThrough(page.getByTestId('campaign-activate'), 'Evet, sürüme geç', async (switchDialog) => {
+        await expect(switchDialog).toContainText('Sürüm 1 → 2');
+        await expect(switchDialog.getByTestId('campaign-version-changes')).toContainText('10 promosyon kredisi');
+        await expect(switchDialog.getByTestId('campaign-version-changes')).toContainText('15 promosyon kredisi');
+      });
       await expect(page).toHaveURL(/ok=activate/);
       await assertNoErrorScreen(page);
       await expect(page.locator('[data-testid="campaign-version-row"][data-version="2"]')).toHaveAttribute('data-active', 'true');
@@ -218,6 +234,62 @@ test.describe('admin campaign lifecycle', () => {
       ]);
     } finally {
       await setEngine(false);
+      await admin.close();
+    }
+  });
+
+  test('a paused campaign resumed with a newer version asks for a reason and says PAUSED → ACTIVE (Paket A)', async ({ browser }) => {
+    const adminAccount = await createAdmin();
+    const key = `e2e-yeni-surumle-${Date.now().toString(36)}`;
+    const { campaign, version } = await seedDraft(adminAccount.id, key);
+    // Running v1, paused, with a stored v2 that pays more — the state the
+    // panel offers "Sürüm 2 ile devam ettir" in.
+    const v2 = await prisma().campaignVersion.create({
+      data: {
+        ...(({ id: _id, createdAt: _at, ...rest }) => rest)(version),
+        definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 20, expiresInDays: 30 } },
+        versionNumber: 2,
+        benefitCredits: 20,
+      },
+    });
+    await prisma().campaign.update({
+      where: { id: campaign.id },
+      data: { status: 'PAUSED', activeVersionId: version.id, currentVersionId: v2.id },
+    });
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    const page = admin.page;
+
+    try {
+      await setEngine(true);
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await admin.gotoAdmin(`/campaigns/${campaign.id}`);
+      await assertNoErrorScreen(page);
+      const trigger = page.getByTestId('campaign-activate');
+      await expect(trigger).toHaveText('Sürüm 2 ile devam ettir');
+
+      // No reason: the browser refuses the form and no dialog opens.
+      await trigger.click();
+      await expect(page.getByTestId('campaign-activate-dialog')).toBeHidden();
+      expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe('PAUSED');
+
+      await page.getByTestId('campaign-activate-reason').fill('E2E: yeni kuralla açılıyor');
+      await confirmThrough(trigger, 'Evet, yeni sürümle devam ettir', async (dialog) => {
+        await expect(dialog).toContainText('Duraklatıldı → Etkin');
+        await expect(dialog).toContainText('20 promosyon kredisi');
+        await expect(dialog).toContainText('promosyon kredisi dağıtımı yeniden başlar');
+      });
+      await expect(page).toHaveURL(/ok=activate/);
+      await assertNoErrorScreen(page);
+      expect(await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).toMatchObject({
+        status: 'ACTIVE',
+        activeVersionId: v2.id,
+      });
+      const resumed = await prisma().campaignAuditLog.findFirstOrThrow({ where: { campaignId: campaign.id, action: 'RESUMED' } });
+      expect(resumed.summary).toMatchObject({ versionNumber: 2, reason: 'E2E: yeni kuralla açılıyor', fromStatus: 'PAUSED' });
+      await expect(page.getByTestId('campaign-audit')).toContainText('gerekçe: E2E: yeni kuralla açılıyor');
+    } finally {
+      await setEngine(false);
+      await prisma().campaign.update({ where: { id: campaign.id }, data: { status: 'ENDED' } });
       await admin.close();
     }
   });

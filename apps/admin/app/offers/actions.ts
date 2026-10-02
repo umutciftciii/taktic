@@ -51,6 +51,12 @@ export async function refundOfferCreditAction(formData: FormData) {
   const reasonCode = readFormString(formData, 'reasonCode');
   const note = readOptionalFormString(formData, 'note');
 
+  // A reason chosen on purpose: the form no longer preselects one, and an
+  // empty value never reaches the API (Paket A). Which codes exist stays the
+  // API's to judge.
+  if (reasonCode.trim() === '') {
+    redirect(`/offers/${id}?tab=kredi&refundError=reasonRequired`);
+  }
   if (!(await hasConfirmationProof(formData, 'offer.refund'))) {
     redirect(`/offers/${id}?tab=kredi&refundError=confirmationRequired`);
   }

@@ -261,6 +261,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
           {CONFIRMATION_PROOF_REFUSAL_MESSAGE}
         </div>
       ) : null}
+      {search.refundError === 'reasonRequired' ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="offer-refund-reason-error">
+          İade yapılmadı: bir operasyon gerekçesi seçin.
+        </div>
+      ) : null}
       {refundBlockedByLimit ? (
         <div className="notice-warning detail-notice" role="alert" data-testid="offer-refund-limit-error">
           İade yapılmadı: kredi hizmet verenin bakiyesini üst sınırın üzerine çıkaracaktı. Kredi ve kayıtlar
@@ -648,7 +653,16 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
                       </p>
                       <label className="detail-form-field">
                         <span>Operasyon gerekçesi *</span>
-                        <select name="reasonCode" defaultValue="INVALID_REQUEST">
+                        {/*
+                          No reason is preselected (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+                          Paket A): the select starts on a disabled placeholder and is
+                          required, so the confirmation does not open until a reason
+                          was chosen on purpose. The codes and the API are unchanged.
+                        */}
+                        <select name="reasonCode" defaultValue="" required data-testid="offer-refund-reason">
+                          <option value="" disabled>
+                            Gerekçe seçin…
+                          </option>
                           {manualRefundReasons.map((reason) => (
                             <option key={reason.code} value={reason.code}>
                               {reason.label}

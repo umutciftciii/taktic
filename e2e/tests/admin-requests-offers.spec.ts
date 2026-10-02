@@ -349,6 +349,13 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await page.getByLabel('Yönetici notu').fill('E2E: müşteriye ulaşılamadı');
       const refund = page.getByTestId('offer-refund');
       const refundDialog = page.getByRole('dialog', { name: 'Kredi iade edilsin mi?' });
+      // No reason is preselected (Paket A): without one the dialog does not open.
+      const reason = page.getByTestId('offer-refund-reason');
+      await expect(reason).toHaveValue('');
+      await refund.click();
+      await expect(page.getByTestId('offer-refund-dialog')).toBeHidden();
+      expect(await reason.evaluate((element) => (element as HTMLSelectElement).validity.valueMissing)).toBe(true);
+      await reason.selectOption('CUSTOMER_UNREACHABLE');
       await refund.click();
       await expect(refundDialog).toContainText(`3 kredi ${provider.businessName} bakiyesine geri yüklenir`);
       await expect(refundDialog).toContainText('kredi iadesi e-postası gider');

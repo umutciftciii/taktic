@@ -6,6 +6,7 @@ import {
   ApiError,
   apiFetch,
   type CampaignDetailResponse,
+  type CampaignStatus,
   type CampaignRuleError,
   type CampaignValidationResponse,
 } from '../../lib/api';
@@ -13,7 +14,8 @@ import { rethrowNextControlFlow } from '../../lib/next-control-flow';
 import type { CampaignFormState } from './form-state';
 import type { CampaignLifecycleState } from './lifecycle-state';
 import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
-import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../lib/confirmation-proof-keys';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE, type ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
+import { campaignVersionProofKey } from './lifecycle-proof';
 
 /**
  * The builder's two verbs: check, and save.
@@ -155,6 +157,25 @@ function failureState(error: unknown): CampaignFormState {
 
 const LIFECYCLE_INTENTS = new Set(['activate', 'pause', 'resume', 'end', 'close']);
 
+/** The proof each non-activation move needs; an activation's depends on the status (`campaignVersionProofKey`). */
+const LIFECYCLE_PROOF: Record<string, ConfirmationProofKey> = {
+  pause: 'campaign.pause',
+  resume: 'campaign.resume',
+  end: 'campaign.end',
+  close: 'campaign.close-draft',
+};
+
+/** The campaign's status as the API has it now, or null when it cannot be read. */
+async function readCampaignStatus(campaignId: string): Promise<CampaignStatus | null> {
+  try {
+    const detail = await apiFetch<CampaignDetailResponse>(`/admin/campaigns/${encodeURIComponent(campaignId)}`);
+    return detail?.campaign?.status ?? null;
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
+}
+
 /**
  * Activate a version, pause, resume or end — each one POST to the matching
  * SUPER_ADMIN route, nothing decided here. `close` is the draft's own name
@@ -181,23 +202,44 @@ export async function campaignLifecycleAction(
   if (intent !== 'activate' && reason.length < 3) {
     return { status: 'error', message: 'Gerekçe en az 3 karakter olmalı.', errors: [] };
   }
-  // Closing a draft and ending a campaign are asked in a dialog; the dialog's
-  // proof is checked before anything is sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001).
-  if (intent === 'close' || intent === 'end') {
-    if (!(await hasConfirmationProof(formData, intent === 'close' ? 'campaign.close-draft' : 'campaign.end'))) {
+  // Every move here is asked in a dialog; the dialog's proof is checked before
+  // anything is sent (ADMIN-DESTRUCTIVE-CONFIRMATION-001). An activation's key
+  // depends on what the campaign is now — read from the API, never from the
+  // form — and the API is told that status, so a move confirmed as "switch"
+  // cannot land as a resumption.
+  let activation: { versionNumber: number; expectedStatus: CampaignStatus } | null = null;
+  if (intent === 'activate') {
+    const versionNumber = Number.parseInt(readString(formData, 'versionNumber'), 10);
+    if (!Number.isInteger(versionNumber) || versionNumber < 1) {
+      return { status: 'error', message: 'Sürüm numarası okunamadı.', errors: [] };
+    }
+    const current = await readCampaignStatus(campaignId);
+    if (current === null) {
+      return { status: 'error', message: 'Kampanyanın güncel durumu okunamadı; hiçbir şey gönderilmedi. Sayfayı yenileyin.', errors: [] };
+    }
+    const key = campaignVersionProofKey(current);
+    if (key === null) {
+      return { status: 'error', message: 'Sona ermiş bir kampanyada sürüm etkinleştirilemez.', errors: [] };
+    }
+    if (current === 'PAUSED' && reason.length < 3) {
+      return { status: 'error', message: 'Duraklatılmış kampanyayı devam ettirmek için gerekçe en az 3 karakter olmalı.', errors: [] };
+    }
+    if (!(await hasConfirmationProof(formData, key))) {
       return { status: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, errors: [] };
     }
+    activation = { versionNumber, expectedStatus: current };
+  } else if (!(await hasConfirmationProof(formData, LIFECYCLE_PROOF[intent]!))) {
+    return { status: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, errors: [] };
   }
 
   let failure: CampaignLifecycleState | null = null;
   try {
     const base = `/admin/campaigns/${encodeURIComponent(campaignId)}`;
-    if (intent === 'activate') {
-      const versionNumber = Number.parseInt(readString(formData, 'versionNumber'), 10);
-      if (!Number.isInteger(versionNumber) || versionNumber < 1) {
-        return { status: 'error', message: 'Sürüm numarası okunamadı.', errors: [] };
-      }
-      await apiFetch(`${base}/versions/${versionNumber}/activate`, { method: 'POST', body: JSON.stringify({}) });
+    if (activation) {
+      await apiFetch(`${base}/versions/${activation.versionNumber}/activate`, {
+        method: 'POST',
+        body: JSON.stringify({ expectedStatus: activation.expectedStatus, ...(reason ? { reason } : {}) }),
+      });
     } else {
       const verb = intent === 'close' ? 'end' : intent;
       await apiFetch(`${base}/${verb}`, { method: 'POST', body: JSON.stringify({ reason }) });

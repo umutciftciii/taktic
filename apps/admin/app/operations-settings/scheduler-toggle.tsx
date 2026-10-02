@@ -23,27 +23,53 @@ import { toggleSchedulerAction } from './actions';
  * ADMIN-DESIGN-001 Faz 3E: switching a job *on* asks first (ConfirmDialog, the
  * same switch as its trigger): the dialog says what the job will start doing
  * at its next cron run, and — for the two money jobs — the money or credit it
- * moves. Switching a job off stays one tap: it only stops the next run. The
- * form, its two fields and SCHEDULERS_WRITE are unchanged.
+ * moves. The form, its two fields and SCHEDULERS_WRITE are unchanged.
+ *
+ * ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A: switching *off* asks too, but
+ * only for the two jobs whose silence costs somebody — package renewal (no
+ * renewal charge, no period end) and the unviewed-offer refund (earned
+ * refunds wait) — with proof `scheduler.disable`. The other jobs only stop
+ * their next run and stay one tap.
  */
 export function SchedulerToggle({
   job,
   jobName,
   enabled,
   consequence,
+  disableConsequence,
 }: {
   job: string;
   jobName: string;
   enabled: boolean;
   /** What switching the job on starts doing; shown in the dialog. */
   consequence: ReactNode;
+  /**
+   * What switching the job off holds back — given only for the two jobs whose
+   * stopping delays money or credit (`SCHEDULER_DISABLE_CONFIRMATION`). The
+   * others switch off in one tap.
+   */
+  disableConsequence?: ReactNode;
 }) {
   return (
     <form action={toggleSchedulerAction} className="setting-toggle-form">
       <input type="hidden" name="job" value={job} />
       <input type="hidden" name="enabled" value={enabled ? 'false' : 'true'} />
       {enabled ? (
-        <OffSwitch job={job} jobName={jobName} />
+        disableConsequence ? (
+          <ConfirmDialog
+            proof="scheduler.disable"
+            triggerLabel={jobName}
+            triggerClassName="toggle"
+            switchChecked
+            tone="primary"
+            title={`“${jobName}” kapatılsın mı?`}
+            consequence={disableConsequence}
+            confirmLabel="Evet, işi kapat"
+            testId={`scheduler-toggle-${job}`}
+          />
+        ) : (
+          <OffSwitch job={job} jobName={jobName} />
+        )
       ) : (
         <ConfirmDialog
           proof="scheduler.toggle"

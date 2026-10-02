@@ -108,9 +108,11 @@ async function paidThroughWebhook(createdOverrides: Record<string, unknown> = {}
 async function approvedRequest(fixture: Awaited<ReturnType<typeof paidThroughWebhook>>) {
   const opened = await openRefundTicket(ctx, fixture.cookie, fixture.purchaseId).expect(201);
   const refund = await requestOfTicket(ctx.prisma, opened.body.id);
+  const maker = await operator(ctx);
+  await adminCall(ctx, maker.cookie).take(refund.id).expect(200);
+  // Maker ≠ checker for a normal approval too (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
   const { cookie } = await operator(ctx);
   const admin = adminCall(ctx, cookie);
-  await admin.take(refund.id).expect(200);
   await admin.approve(refund.id, { kind: 'NORMAL' }).expect(200);
   return { ticketId: opened.body.id as string, requestId: refund.id, admin };
 }

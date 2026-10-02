@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough } from '../src/confirm-dialog';
 import {
   createAdmin,
   createCategory,
@@ -369,7 +370,9 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       page = switcher.page;
       await switcher.gotoAdmin('/credit-packages');
       await expect(page.getByTestId('package-move-up')).toHaveCount(0);
-      await row(page, oneTime.id).getByTestId('package-status-toggle').click();
+      await confirmThrough(row(page, oneTime.id).getByTestId('package-status-toggle'), 'Evet, pasifleştir', async (deactivateDialog) => {
+        await expect(deactivateDialog).toContainText('yeni satışa kapanır');
+      });
       await expect(page).toHaveURL(/ok=deactivated/);
       expect((await prisma().offerCreditPackage.findUniqueOrThrow({ where: { id: oneTime.id } })).isActive).toBe(false);
       await expect(row(page, oneTime.id)).toContainText('Pasif');

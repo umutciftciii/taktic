@@ -90,22 +90,82 @@ describe('campaign lifecycle: what asks first', () => {
     expect(close).toContain('value="close"');
     expect(markup).toContain('Taslak kapatılsın mı?');
     expect(button(markup, 'campaign-end')).toBeNull();
-    // Activation is reversible (pause, a newer version) and stays one click.
-    expect(button(markup, 'campaign-activate')).not.toContain('aria-haspopup');
   });
 
-  it('asks before ending; pause and resume stay one click', () => {
+  it('asks before ending, and before pausing and resuming (Paket A)', () => {
     const active = panel('ACTIVE', true);
     const end = button(active, 'campaign-end');
     expect(end).toContain('aria-haspopup="dialog"');
     expect(end).toContain('value="end"');
     expect(active).toContain('Kampanya sonlandırılsın mı?');
     expect(active).toContain('bir daha açılamaz');
-    expect(button(active, 'campaign-pause')).not.toContain('aria-haspopup');
+    const pause = button(active, 'campaign-pause');
+    expect(pause).toContain('aria-haspopup="dialog"');
+    expect(pause).toContain('value="pause"');
+    expect(active).toContain('Kampanya duraklatılsın mı?');
+    expect(active).toContain('Verilmiş promosyon lotları geri alınmaz');
 
     const paused = panel('PAUSED', true);
     expect(button(paused, 'campaign-end')).toContain('aria-haspopup="dialog"');
-    expect(button(paused, 'campaign-resume')).not.toContain('aria-haspopup');
+    const resume = button(paused, 'campaign-resume');
+    expect(resume).toContain('aria-haspopup="dialog"');
+    expect(resume).toContain('value="resume"');
+    expect(paused).toContain('Duraklatıldı → Etkin');
+    // The reason the form already required stays required.
+    expect(paused).toMatch(/<textarea name="reason" minLength="3" maxLength="500" required=""[^>]*data-testid="campaign-lifecycle-reason"/);
+  });
+
+  it('a first activation asks, naming the version and its rule from the stored version', () => {
+    const markup = panel('DRAFT', true);
+    expect(button(markup, 'campaign-activate')).toContain('aria-haspopup="dialog"');
+    expect(markup).toContain('Sürüm 1 etkinleştirilsin mi?');
+    expect(markup).toContain('Paket ödemesi tamamlandı');
+    expect(markup).toContain('10 promosyon kredisi, 30 gün içinde kullanılmalı');
+    expect(markup).toContain('hizmet veren başına 1 · toplam sınırsız · günlük sınırsız');
+    expect(markup).toContain('Web');
+    expect(markup).toContain('süresiz (başlangıç ve bitiş yok)');
+    expect(markup).toContain('promosyon kredisi dağıtımı başlar');
+    expect(markup).toContain('otomatik geri alınmaz');
+  });
+
+  it('a switch on a running campaign names old → new and only what changes', () => {
+    const v2: CampaignVersionSummary = { ...VERSION, id: 'v2', versionNumber: 2, benefitCredits: 25, budgetCredits: 500 };
+    const markup = html(
+      <CampaignLifecyclePanel
+        campaign={campaign('ACTIVE', VERSION.id)}
+        engineEnabled
+        activeVersion={VERSION}
+        currentVersion={v2}
+        currentVersionChannel={{ channel: 'WEB', available: true, missingSources: [] }}
+        canLifecycle
+      />,
+    );
+    expect(button(markup, 'campaign-activate')).toContain('aria-haspopup="dialog"');
+    expect(markup).toContain('Sürüm 1 → 2 geçişi yapılsın mı?');
+    expect(markup).toContain('10 promosyon kredisi, 30 gün içinde kullanılmalı → <strong>25 promosyon kredisi, 30 gün içinde kullanılmalı</strong>');
+    expect(markup).toContain('sınırsız → <strong>500 kredi</strong>');
+    expect(markup).not.toContain('<dt>Kanal</dt>');
+    expect(markup).toContain('onaydan hemen sonra');
+  });
+
+  it('resuming a paused campaign with a new version asks for a reason and says PAUSED → ACTIVE', () => {
+    const v2: CampaignVersionSummary = { ...VERSION, id: 'v2', versionNumber: 2, maxRedemptionsPerProvider: 3 };
+    const markup = html(
+      <CampaignLifecyclePanel
+        campaign={campaign('PAUSED', VERSION.id)}
+        engineEnabled
+        activeVersion={VERSION}
+        currentVersion={v2}
+        currentVersionChannel={{ channel: 'WEB', available: true, missingSources: [] }}
+        canLifecycle
+      />,
+    );
+    expect(button(markup, 'campaign-activate')).toContain('aria-haspopup="dialog"');
+    expect(markup).toMatch(/<textarea name="reason" minLength="3" maxLength="500" required=""[^>]*data-testid="campaign-activate-reason"/);
+    expect(markup).toContain('Kampanya sürüm 2 ile devam ettirilsin mi?');
+    expect(markup).toContain('Duraklatıldı → Etkin');
+    expect(markup).toContain('hizmet veren başına 1 · toplam sınırsız · günlük sınırsız → <strong>hizmet veren başına 3 · toplam sınırsız · günlük sınırsız</strong>');
+    expect(markup).toContain('promosyon kredisi dağıtımı yeniden başlar');
   });
 
   it('draws no move at all without CAMPAIGNS_LIFECYCLE, in any state', () => {

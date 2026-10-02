@@ -1,5 +1,6 @@
 import { formatMinorAsTurkishLiraInput } from '@taktic/shared';
 import type { ShowcasePackage } from '../../../lib/api';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
  * The pieces the vitrin catalogue's two screens share (ADMIN-DESIGN-001 Faz
@@ -16,6 +17,7 @@ export const SHOWCASE_PACKAGE_ERRORS: Record<string, string> = {
   SHOWCASE_PACKAGE_PRICE_INVALID:
     'Yayın bedeli Türk lirası olarak girilmeli: örn. 10, 10,50 veya 1.250,75. Sıfır, eksi ve ikiden fazla ondalık kabul edilmez.',
   SHOWCASE_PACKAGE_SAVE_FAILED: 'Paket kaydedilemedi. Alanları kontrol edip tekrar deneyin.',
+  CONFIRMATION_REQUIRED: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
 };
 
 export function showcasePackageErrorText(code: string | undefined): string | null {

@@ -18,16 +18,26 @@ export async function waitForHydration(locator: Locator): Promise<void> {
 /**
  * Opens a `ConfirmDialog` from its trigger and presses the confirm button.
  * The dialog is the trigger's sibling with `data-testid="<trigger>-dialog"`.
+ *
+ * `before` runs against the open dialog before the confirm button is pressed:
+ * confirming closes the dialog, so what it says must be asserted there, not on
+ * the returned locator afterwards.
  */
-export async function confirmThrough(trigger: Locator, confirmLabel: string): Promise<Locator> {
+export async function confirmThrough(
+  trigger: Locator,
+  confirmLabel: string,
+  before?: (dialog: Locator) => Promise<void>,
+): Promise<Locator> {
   await waitForHydration(trigger);
   await trigger.click();
   const testId = await trigger.getAttribute('data-testid');
+  // The open one: a list draws one dialog per row under the same test id.
   const dialog = testId
-    ? trigger.page().getByTestId(`${testId}-dialog`)
+    ? trigger.page().locator(`dialog[data-testid="${testId}-dialog"][open]`)
     : trigger.page().locator('dialog.confirm-dialog[open]');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'Vazgeç' })).toBeFocused();
+  if (before) await before(dialog);
   await dialog.getByRole('button', { name: confirmLabel, exact: true }).click();
   return dialog;
 }

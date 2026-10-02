@@ -320,12 +320,30 @@ describe('operator: the state machine', () => {
     const taken = await admin.take(refund.id).expect(200);
     expect(taken.body).toMatchObject({ status: 'UNDER_REVIEW', reviewStartedBy: { id: staff.id } });
 
-    const approved = await admin.approve(refund.id, { kind: 'NORMAL' }).expect(200);
+    // Maker ≠ checker for a normal approval too (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+    // Paket A): whoever took it into review cannot approve it, and their
+    // screen says why the button is missing.
+    const makerView = await admin.detail(refund.id).expect(200);
+    expect(makerView.body.allowedActions.approveNormal).toBe(false);
+    expect(makerView.body.approvalBlockedByMakerChecker).toBe(true);
+    expect(makerView.body.exceptionBlockedByMakerChecker).toBe(false);
+    const selfApproval = await admin.approve(refund.id, { kind: 'NORMAL' }).expect(409);
+    expect(selfApproval.body).toMatchObject({
+      code: 'PACKAGE_REFUND_MAKER_CHECKER',
+      message: 'İade onayını, talebi açan veya işleme alan yönetici veremez. İkinci bir yetkili onaylamalı.',
+    });
+    expect((await ctx.prisma.packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe('UNDER_REVIEW');
+
+    const checker = await operator(ctx);
+    const checkerView = await adminCall(ctx, checker.cookie).detail(refund.id).expect(200);
+    expect(checkerView.body.allowedActions.approveNormal).toBe(true);
+    expect(checkerView.body.approvalBlockedByMakerChecker).toBe(false);
+    const approved = await adminCall(ctx, checker.cookie).approve(refund.id, { kind: 'NORMAL' }).expect(200);
     expect(approved.body).toMatchObject({
       status: 'APPROVED_PENDING_SETTLEMENT',
       approvalKind: 'NORMAL',
       exceptionGround: null,
-      approvedBy: { id: staff.id },
+      approvedBy: { id: checker.admin.id },
     });
     expect(approved.body.approvalEligibility.recommendation).toBe('REFUNDABLE');
     // Nothing on the admin side can settle it.
@@ -355,7 +373,8 @@ describe('operator: the state machine', () => {
     expect(adminTicket.body.packageRefund.request).toEqual({ id: refund.id, status: 'APPROVED_PENDING_SETTLEMENT' });
     const refundEntries = adminTicket.body.timeline.filter((entry: { kind: string }) => entry.kind === 'PACKAGE_REFUND_EVENT');
     expect(refundEntries).toHaveLength(3);
-    expect(refundEntries[2].actor).toEqual({ id: staff.id, name: staff.name });
+    expect(refundEntries[1].actor).toEqual({ id: staff.id, name: staff.name });
+    expect(refundEntries[2].actor).toEqual({ id: checker.admin.id, name: checker.admin.name });
   });
 
   it('approval recomputes: a spend after submission turns a normal approval into a 409', async () => {
@@ -418,6 +437,41 @@ describe('operator: the state machine', () => {
       where: { requestId: refund.id, action: 'APPROVED' },
     });
     expect(audit.note).toBe('Teklif ekranı hatası nedeniyle harcandı.');
+  });
+
+  it('a rejection is not held to maker-checker: the reviewer may reject what they took', async () => {
+    const { refund } = await submitted();
+    const { cookie } = await operator(ctx);
+    const admin = adminCall(ctx, cookie);
+    await admin.take(refund.id).expect(200);
+    const view = await admin.detail(refund.id).expect(200);
+    expect(view.body.allowedActions).toMatchObject({ approveNormal: false, reject: true });
+    await admin.reject(refund.id, 'Hizmet verildi, iade koşulları yok.').expect(200);
+  });
+
+  it('an operator-opened normal request: neither the opener nor the reviewer may approve it', async () => {
+    const account = await providerAccount(ctx);
+    const purchase = await paidPurchase(ctx.prisma, { providerId: account.provider.id, userId: account.owner.id });
+    const ticket = await request(ctx.server)
+      .post('/support/tickets')
+      .set('Cookie', account.cookie)
+      .send({ subject: 'İade', message: 'Paketi kullanmadım, iade istiyorum.' })
+      .expect(201);
+    const opener = await operator(ctx);
+    const reviewer = await operator(ctx);
+    const approver = await operator(ctx);
+    const created = await adminCall(ctx, opener.cookie)
+      .create({ supportTicketId: ticket.body.id, purchaseId: purchase.id })
+      .expect(201);
+    expect(created.body.submittedRecommendation).toBe('REFUNDABLE');
+    await adminCall(ctx, reviewer.cookie).take(created.body.id).expect(200);
+    for (const who of [opener, reviewer]) {
+      expect((await adminCall(ctx, who.cookie).approve(created.body.id, { kind: 'NORMAL' }).expect(409)).body.code).toBe(
+        'PACKAGE_REFUND_MAKER_CHECKER',
+      );
+      expect((await adminCall(ctx, who.cookie).detail(created.body.id).expect(200)).body.allowedActions.approveNormal).toBe(false);
+    }
+    await adminCall(ctx, approver.cookie).approve(created.body.id, { kind: 'NORMAL' }).expect(200);
   });
 
   it('an operator-opened exception: neither the opener nor the reviewer may approve it', async () => {
@@ -526,7 +580,7 @@ describe('operator: the state machine', () => {
 
     const late = await submitted();
     await adminCall(ctx, cookie).take(late.refund.id).expect(200);
-    await adminCall(ctx, cookie).approve(late.refund.id, { kind: 'NORMAL' }).expect(200);
+    await adminCall(ctx, (await operator(ctx)).cookie).approve(late.refund.id, { kind: 'NORMAL' }).expect(200);
     const refused = await request(ctx.server)
       .post(`/support/package-refund/tickets/${late.ticketId}/withdraw`)
       .set('Cookie', late.cookie)

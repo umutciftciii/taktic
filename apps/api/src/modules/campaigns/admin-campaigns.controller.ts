@@ -19,7 +19,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { CampaignsService } from './campaigns.service';
 import { CampaignDefinitionDto } from './dto/campaign-definition.dto';
-import { CampaignTransitionDto } from './dto/campaign-transition.dto';
+import { CampaignActivateDto, CampaignTransitionDto } from './dto/campaign-transition.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
 import { ListCampaignsDto } from './dto/list-campaigns.dto';
 
@@ -90,15 +90,23 @@ export class AdminCampaignsController {
     return this.campaigns.addVersion(id, dto.definition, requireActor(user));
   }
 
-  /** DRAFT → ACTIVE on first use; afterwards swaps the running version. Refused while the engine is off. */
+  /**
+   * DRAFT → ACTIVE on first use; afterwards swaps the running version, and on
+   * a PAUSED campaign resumes it with that version — then with a reason, as a
+   * plain resume. Refused while the engine is off.
+   */
   @Post(':id/versions/:versionNumber/activate')
   @RequiresPermission(AdminPermission.CAMPAIGNS_LIFECYCLE)
   activateVersion(
     @Param('id') id: string,
     @Param('versionNumber', ParseIntPipe) versionNumber: number,
+    @Body() dto: CampaignActivateDto,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.campaigns.activateVersion(id, versionNumber, requireActor(user));
+    return this.campaigns.activateVersion(id, versionNumber, requireActor(user), {
+      reason: dto.reason,
+      expectedStatus: dto.expectedStatus,
+    });
   }
 
   @Post(':id/pause')

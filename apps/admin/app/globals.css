@@ -6114,6 +6114,31 @@ button:disabled {
   margin-bottom: 0;
 }
 
+/* A record's figures inside a dialog: label above value, one block per line. */
+.confirm-dialog-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--color-neutral-100);
+}
+
+.confirm-dialog-facts > div {
+  display: grid;
+  grid-template-columns: minmax(96px, max-content) 1fr;
+  gap: 8px;
+}
+
+.confirm-dialog-facts dt {
+  font-weight: 600;
+}
+
+.confirm-dialog-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .confirm-dialog-actions {
   display: flex;
   flex-wrap: wrap;

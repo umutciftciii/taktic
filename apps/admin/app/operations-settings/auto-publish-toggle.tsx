@@ -1,6 +1,7 @@
 'use client';
 
 import { useFormStatus } from 'react-dom';
+import { ConfirmDialog } from '../../components/confirm-dialog';
 import { Toggle } from '../../components/toggle';
 import { toggleAutoPublishAction } from './actions';
 
@@ -18,24 +19,52 @@ import { toggleAutoPublishAction } from './actions';
  * API records one change. `useFormStatus` disables the switch for the life of
  * the submission.
  *
- * ADMIN-DESIGN-001 Faz 3E: drawn with the design's `Toggle`; still one tap —
- * it changes only what happens to the *next* request, in both directions.
+ * ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A: switching it *on* asks first
+ * (ConfirmDialog drawn as the same switch, proof
+ * `operations.auto-publish-enable`): from then on a new request reaches
+ * providers without a moderator having read it. Switching it off stays one
+ * tap — it only sends the next request back to the queue.
  */
 export function AutoPublishToggle({ enabled }: { enabled: boolean }) {
   return (
     <form action={toggleAutoPublishAction} className="setting-toggle-form">
       <input type="hidden" name="enabled" value={enabled ? 'false' : 'true'} />
-      <ToggleSubmit enabled={enabled} />
+      {enabled ? (
+        <OffSwitch />
+      ) : (
+        <ConfirmDialog
+          proof="operations.auto-publish-enable"
+          triggerLabel="Pazar talepleri otomatik yayınlansın"
+          triggerClassName="toggle"
+          switchChecked={false}
+          tone="primary"
+          title="Otomatik yayın açılsın mı?"
+          consequence={
+            <>
+              <p>
+                Bundan sonra gönderilen pazar talepleri <strong>moderasyon beklemeden</strong> yayınlanabilir ve eşleşen
+                hizmet verenlere iletilir; bir moderatör talebi yayından önce okumaz.
+              </p>
+              <p>
+                Onay kuyruğunda bekleyen talepler kendiliğinden yayınlanmaz. Kapatmak onay istemez ve yalnız bundan sonraki
+                talepleri kuyruğa geri gönderir. Değişiklik adınızla kayda geçer.
+              </p>
+            </>
+          }
+          confirmLabel="Evet, otomatik yayını aç"
+          testId="auto-publish-toggle"
+        />
+      )}
     </form>
   );
 }
 
-function ToggleSubmit({ enabled }: { enabled: boolean }) {
+function OffSwitch() {
   const { pending } = useFormStatus();
   return (
     <Toggle
       type="submit"
-      checked={enabled}
+      checked
       label="Pazar talepleri otomatik yayınlansın"
       stateText={pending ? { on: 'Kaydediliyor…', off: 'Kaydediliyor…' } : undefined}
       disabled={pending}

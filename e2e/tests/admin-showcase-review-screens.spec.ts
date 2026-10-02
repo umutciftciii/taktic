@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough } from '../src/confirm-dialog';
 import {
   createAdmin,
   createCategory,
@@ -631,23 +632,32 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       // Saving writes every field it shows, keeps the slug, and stays here.
       await form.locator('input[name="name"]').fill('E2E Faz3C Paket (yeni ad)');
       await form.locator('input[name="durationDays"]').fill('14');
-      await form.getByRole('button', { name: 'Kaydet' }).click();
+      // The run length is a sales term: the save asks, old → new (Paket A).
+      await confirmThrough(form.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (durationDialog) => {
+        await expect(durationDialog.getByTestId('showcase-package-commercial-changes')).toContainText('→ 14 gün');
+      });
       await expect(page).toHaveURL(new RegExp(`/showcase/packages/${pkg.id}\\?saved=1$`));
       const saved = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
       expect(saved).toMatchObject({ name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14, slug, isActive: true });
 
       // The form's Durum select is the window's checkbox: "Kapalı" sends false.
       await form.getByTestId('showcase-package-active').selectOption('off');
-      await form.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(form.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (offDialog) => {
+        await expect(offDialog.getByTestId('showcase-package-status-change')).toContainText('Satışta → Kapalı');
+      });
       await expect(page).toHaveURL(/saved=1/);
       await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
 
       // The header's switch is the same PATCH with isActive alone.
-      await page.getByTestId('showcase-package-status-toggle').click();
+      await confirmThrough(page.getByTestId('showcase-package-status-toggle'), 'Evet, satışa aç', async (openDialog) => {
+        await expect(openDialog).toContainText('14 gün');
+      });
       await expect(page).toHaveURL(/activated=1/);
       const reopened = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
       expect(reopened).toMatchObject({ isActive: true, name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14 });
-      await page.getByTestId('showcase-package-status-toggle').click();
+      await confirmThrough(page.getByTestId('showcase-package-status-toggle'), 'Evet, satıştan kaldır', async (closeDialog) => {
+        await expect(closeDialog).toContainText('değişmez');
+      });
       await expect(page).toHaveURL(/deactivated=1/);
       await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
 

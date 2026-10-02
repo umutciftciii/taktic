@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
+import { confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
 
@@ -123,9 +124,10 @@ test.describe('admin campaign channel', () => {
         const button = document.querySelector<HTMLButtonElement>('[data-testid="campaign-activate"]');
         button?.closest('form')?.requestSubmit();
       });
+      // No dialog was confirmed, so the action refuses before the API is
+      // asked (Paket A); CHANNEL_SOURCE_UNAVAILABLE itself is the API suite's.
       const refusal = page.getByTestId('campaign-lifecycle-error');
-      await expect(refusal).toContainText('CHANNEL_SOURCE_UNAVAILABLE');
-      await expect(refusal).toContainText('channel');
+      await expect(refusal).toContainText('onay penceresinden onay alınamadı');
       expect(await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).toMatchObject({ status: 'DRAFT', activeVersionId: null });
       expect(await prisma().campaignAuditLog.count({ where: { campaignId: campaign.id } })).toBe(auditBefore);
 
@@ -145,7 +147,9 @@ test.describe('admin campaign channel', () => {
       expect(versions.map((v) => [v.versionNumber, v.channel])).toEqual([[1, 'MOBILE'], [2, 'WEB']]);
 
       await expect(page.getByTestId('campaign-activate')).toBeEnabled();
-      await page.getByTestId('campaign-activate').click();
+      await confirmThrough(page.getByTestId('campaign-activate'), 'Evet, etkinleştir', async (activateDialog) => {
+        await expect(activateDialog).toContainText('Web');
+      });
       await expect(page).toHaveURL(/ok=activate/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ACTIVE');
@@ -211,7 +215,7 @@ test.describe('admin campaign channel', () => {
         const button = document.querySelector<HTMLButtonElement>('[data-testid="campaign-activate"]');
         button?.closest('form')?.requestSubmit();
       });
-      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('CHANNEL_SOURCE_UNAVAILABLE');
+      await expect(page.getByTestId('campaign-lifecycle-error')).toContainText('onay penceresinden onay alınamadı');
       expect(await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).toMatchObject({ status: 'DRAFT', activeVersionId: null });
 
       // ---- the panel offers closing the draft, not ending a running campaign ----

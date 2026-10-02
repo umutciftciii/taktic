@@ -483,7 +483,8 @@ export async function enableAutoPublish(admin: Actor): Promise<void> {
   await expect(toggle).toBeVisible();
 
   if ((await toggle.getAttribute('aria-checked')) !== 'true') {
-    await toggle.click();
+    // Switching it on asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+    await confirmThrough(toggle, 'Evet, otomatik yayını aç');
     await expect(admin.page.getByTestId('auto-publish-toggle')).toHaveAttribute(
       'aria-checked',
       'true',
@@ -734,7 +735,8 @@ export async function enableProviderReviews(admin: Actor): Promise<void> {
   await expect(toggle).toBeVisible();
 
   if ((await toggle.getAttribute('aria-checked')) !== 'true') {
-    await toggle.click();
+    // Both directions ask first (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
+    await confirmThrough(toggle, 'Evet, değerlendirmeleri aç');
     await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
       'aria-checked',
       'true',

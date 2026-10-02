@@ -75,3 +75,34 @@ export async function hasConfirmationProof(
 ): Promise<boolean> {
   return (await verifyConfirmationProof(source, key)).ok;
 }
+
+/**
+ * Whether this submission carries a good, unspent proof for **each** of
+ * `keys` — and if it does, spends them. For a form whose one save can make
+ * several guarded changes at once (a package edit that changes the price and
+ * takes the package off sale): the dialog mints one proof per change it
+ * names, and the action demands one per change *it* finds against the stored
+ * record. A proof stands for one key only; an empty list asks for nothing.
+ *
+ * A refused key leaves the proofs already matched spent — the submission is
+ * refused as a whole and the operator confirms again, which is the safe
+ * direction to fail in.
+ */
+export async function hasConfirmationProofs(formData: FormData, keys: readonly ConfirmationProofKey[]): Promise<boolean> {
+  const tokens = formData.getAll(CONFIRMATION_PROOF_FIELD).filter((value): value is string => typeof value === 'string');
+  const unused = [...tokens];
+  for (const key of new Set(keys)) {
+    // A token minted for another key is refused on scope before anything is
+    // spent, so trying each one in turn uses up only the one that matches.
+    let matched = -1;
+    for (let index = 0; index < unused.length; index += 1) {
+      if ((await verifyConfirmationProof(unused[index], key)).ok) {
+        matched = index;
+        break;
+      }
+    }
+    if (matched < 0) return false;
+    unused.splice(matched, 1);
+  }
+  return true;
+}
