@@ -12,8 +12,10 @@ import {
   SHOWCASE_CARD_STATUS_LABELS,
   SHOWCASE_VERSION_REVIEW_LABELS,
   type ShowcaseCardVersion,
+  type ShowcasePlacement,
   type ShowcaseVersionDetail,
 } from '../../../../lib/api';
+import { rethrowNextControlFlow } from '../../../../lib/next-control-flow';
 import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { DetailHeader } from '../../../../components/detail-header';
 import { KeyValueList } from '../../../../components/key-value-list';
@@ -21,6 +23,11 @@ import { SectionCard } from '../../../../components/section-card';
 import type { SummaryItem } from '../../../../components/summary-strip';
 import { approveShowcaseVersionAction, rejectShowcaseVersionAction } from './actions';
 import { FirstApprovalConsequence } from './first-approval-consequence';
+import {
+  REPINNED_PLACEMENT_STATUSES,
+  RevisionApprovalConsequence,
+  type RevisionPlacementImpact,
+} from './revision-approval-consequence';
 
 type ShowcaseReviewPageProps = {
   params: Promise<{ versionId: string }>;
@@ -43,7 +50,8 @@ type ShowcaseReviewPageProps = {
  *
  * ADMIN-DESIGN-001 Faz 3C: no screen of its own in the design (`soon`), so it
  * sits on the shared detail template. Approving a first version asks first
- * (ADMIN-DESTRUCTIVE-CONFIRMATION-001; a revision approval still does not).
+ * (ADMIN-DESTRUCTIVE-CONFIRMATION-001), and so does a revision approval, with
+ * the number of runs it moves (Paket B).
  * Refusing asks first, in a dialog whose
  * text follows `rejectVersion` exactly — including the part that is easy to
  * get wrong: no mail goes out for a refusal, and for a card that is already
@@ -73,6 +81,13 @@ export default async function ShowcaseReviewPage({
   const live = card.liveVersion;
   const isPending = version.reviewStatus === 'PENDING';
   const replaces = live && live.id !== version.id ? live : null;
+
+  // What a revision approval would re-pin, counted from the real placements —
+  // only for a pending revision, and only for a session that may read them.
+  const revisionImpact: RevisionPlacementImpact =
+    isPending && canDecide && live && can('SHOWCASE_PLACEMENTS_READ')
+      ? await readRevisionImpact(version.provider.id, card.id)
+      : null;
 
   const facts: SummaryItem[] = [
     { label: 'Kart türü', value: SHOWCASE_CARD_KIND_LABELS[version.kind] },
@@ -255,7 +270,7 @@ export default async function ShowcaseReviewPage({
         {isPending && !canDecide ? null : isPending ? (
           <SectionCard
             title="Karar"
-            subtitle="Onay bu sürümü kartın yayına hazır sürümü yapar ve hizmet verene e-posta gönderir. Ret, gerekçe ister ve onaydan önce ne olacağını sorar."
+            subtitle="Onay bu sürümü kartın yayına hazır sürümü yapar ve hizmet verene e-posta gönderir. Onay da ret de uygulanmadan önce ne olacağını sorar; ret ayrıca gerekçe ister."
           >
             <form action={approveShowcaseVersionAction} className="inline-actions">
               <input type="hidden" name="versionId" value={version.id} />
@@ -280,9 +295,26 @@ export default async function ShowcaseReviewPage({
                   testId="showcase-approve"
                 />
               ) : (
-                <button className="btn btn-primary btn-sm" type="submit" disabled={!isPending}>
-                  Onayla
-                </button>
+                // A revision replaces what is live on every run of the card,
+                // and nothing puts the previous version back — so it asks too
+                // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+                <ConfirmDialog
+                  proof="showcase.revision-approve"
+                  triggerLabel="Onayla"
+                  triggerClassName="btn btn-primary btn-sm"
+                  tone="primary"
+                  title="Revizyon onaylanıp yayındaki sürümün yerine geçsin mi?"
+                  consequence={
+                    <RevisionApprovalConsequence
+                      liveVersionNumber={card.liveVersion.versionNumber}
+                      nextVersionNumber={version.versionNumber}
+                      impact={revisionImpact}
+                    />
+                  }
+                  confirmLabel="Evet, onayla ve yayındakini değiştir"
+                  disabled={!isPending}
+                  testId="showcase-revision-approve"
+                />
               )}
               {card.liveVersion === null && !version.entitlement?.valid ? (
                 <span className="cell-muted">Geçerli bir yayın hakkı yok.</span>
@@ -365,6 +397,28 @@ export default async function ShowcaseReviewPage({
       </div>
     </main>
   );
+}
+
+/**
+ * The card's runs a revision approval would move, from the placement list the
+ * API keeps (filtered by the business, then by the card). Null when the read
+ * fails: the dialog then says it cannot count rather than printing a number.
+ */
+async function readRevisionImpact(providerId: string, cardId: string): Promise<RevisionPlacementImpact> {
+  try {
+    const { placements } = await apiFetch<{ placements: ShowcasePlacement[] }>(
+      `/admin/showcase/placements?${new URLSearchParams({ providerId }).toString()}`,
+    );
+    const live = placements.filter(
+      (placement) =>
+        placement.cardId === cardId &&
+        (REPINNED_PLACEMENT_STATUSES as readonly string[]).includes(placement.status),
+    );
+    return { live: live.length, onAir: live.filter((placement) => placement.status === 'ACTIVE').length };
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
 }
 
 /** One version's content, in the order an operator reads it. */

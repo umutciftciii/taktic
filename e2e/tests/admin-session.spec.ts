@@ -122,7 +122,8 @@ test.describe('company e-mail settings', () => {
       // ---- a value that cannot receive mail is refused ------------------
       await admin.page.locator('input[name="legalName"]').fill('E2E Örnek Teknoloji A.Ş.');
       await admin.page.locator('input[name="supportEmail"]').fill('destek@example.test');
-      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      // A real change asks first (Paket B); the action then refuses the value.
+      await confirmThrough(admin.page.getByTestId('company-settings-save'), 'Evet, kaydet');
       // The page's own banner, not Next's route announcer — which also carries
       // role="alert" and would make a bare role query ambiguous.
       await expect(admin.page.getByTestId('company-settings-error')).toContainText('placeholder');
@@ -132,7 +133,7 @@ test.describe('company e-mail settings', () => {
       // ---- and so is a legal name that is only the product name ---------
       await admin.page.locator('input[name="legalName"]').fill('TakTick');
       await admin.page.locator('input[name="supportEmail"]').fill('destek@e2e-ornek.com.tr');
-      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(admin.page.getByTestId('company-settings-save'), 'Evet, kaydet');
       await expect(admin.page.getByTestId('company-settings-error')).toContainText('ürün adı olamaz');
       expect(await prisma().companySettings.count()).toBe(0);
 
@@ -140,7 +141,11 @@ test.describe('company e-mail settings', () => {
       await admin.page.locator('input[name="legalName"]').fill('E2E Örnek Teknoloji A.Ş.');
       await admin.page.locator('input[name="supportEmail"]').fill('destek@e2e-ornek.com.tr');
       await admin.page.locator('textarea[name="postalAddress"]').fill('Bir Cadde No:1, Çankaya');
-      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(admin.page.getByTestId('company-settings-save'), 'Evet, kaydet', async (dialog) => {
+        // Each changed line old → new, and what it affects from now on.
+        await expect(dialog.getByTestId('company-settings-changes')).toContainText('destek@e2e-ornek.com.tr');
+        await expect(dialog).toContainText('bundan sonra gönderilecek her e-postanın');
+      });
 
       await expect(admin.page.getByTestId('company-settings-complete')).toBeVisible();
       await expect(admin.page.getByTestId('company-settings-issues')).toHaveCount(0);

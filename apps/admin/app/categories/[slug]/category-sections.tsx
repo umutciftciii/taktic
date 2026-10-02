@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { CategoryImageUploader } from '../category-image-uploader';
+import type { CategoryPlacementImpact } from '../category-changes';
+import { CategoryEditSubmit, CategoryStatusSubmit, RouterRulesSubmit } from '../category-gates';
 import {
   CATEGORY_ICON_KEYS,
   formatDateTime,
@@ -9,6 +11,7 @@ import {
   type QuestionSystemField,
   type QuestionType,
 } from '../../../lib/api';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { DetailFormFooter } from '../../../components/detail-form-footer';
 import { EmptyState } from '../../../components/empty-state';
 import { InfoPopover } from '../../../components/info-popover';
@@ -84,6 +87,7 @@ export function CategoryInfoSection({
   canChangeStatus,
   canUpload,
   updateAction,
+  placementImpact = null,
 }: {
   category: Category;
   /** The categories that may be its parent: groups other than itself. */
@@ -92,6 +96,8 @@ export function CategoryInfoSection({
   canChangeStatus: boolean;
   canUpload: boolean;
   updateAction: FormAction;
+  /** The vitrin runs a status move would touch, for the save's dialog; null when not countable. */
+  placementImpact?: CategoryPlacementImpact;
 }) {
   return (
     <SectionCard
@@ -280,9 +286,17 @@ export function CategoryInfoSection({
             </label>
           </div>
           <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde geçerlidir. Kısa ad değişirse mevcut bağlantılar kırılır.">
-            <button className="btn btn-primary" type="submit">
-              Kategoriyi kaydet
-            </button>
+            {/*
+              Asks first when the save moves the slug, type or parent, the
+              offer price, switches unlimited eligibility on or moves the
+              status (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B); the action
+              judges the same against the stored category.
+            */}
+            <CategoryEditSubmit
+              stored={category}
+              parentNames={Object.fromEntries(groups.map((group) => [group.id, group.name]))}
+              impact={placementImpact}
+            />
           </DetailFormFooter>
         </form>
       ) : (
@@ -399,9 +413,12 @@ export function RouterTargetsSection({
             })}
           </div>
           <DetailFormFooter note="Hedef yayında bir hizmet değilse müşteri talebi tamamlayamaz.">
-            <button className="btn btn-primary" type="submit">
-              Yönlendirmeyi kaydet
-            </button>
+            {/* Asks first when any option is sent somewhere else (Paket B). */}
+            <RouterRulesSubmit
+              stored={routerQuestion.routerRules ?? []}
+              optionLabels={Object.fromEntries((routerQuestion.options ?? []).map((option) => [option.key, option.label]))}
+              targetNames={Object.fromEntries(targets.map((target) => [target.slug, target.name]))}
+            />
           </DetailFormFooter>
         </form>
       ) : (
@@ -572,12 +589,23 @@ export function QuestionSetSection({
                           ? 'Pasifleştir: müşteri akışında görünmez.'
                           : 'Aktifleştir: müşteri akışında listelenir.'}
                       </span>
-                      <button
-                        className={question.isActive ? 'btn btn-danger btn-sm' : 'btn btn-secondary btn-sm'}
-                        type="submit"
-                      >
-                        {question.isActive ? 'Pasifleştir' : 'Aktifleştir'}
-                      </button>
+                      {question.isActive ? (
+                        // Asks first: the question leaves every new request
+                        // form (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+                        <ConfirmDialog
+                          proof="question.deactivate"
+                          triggerLabel="Pasifleştir"
+                          triggerClassName="btn btn-danger btn-sm"
+                          title="Soru pasifleştirilsin mi?"
+                          consequence={<QuestionDeactivateConsequence question={question} />}
+                          confirmLabel="Evet, pasifleştir"
+                          testId={`question-deactivate-${question.id}`}
+                        />
+                      ) : (
+                        <button className="btn btn-secondary btn-sm" type="submit">
+                          Aktifleştir
+                        </button>
+                      )}
                     </form>
                   </div>
                 ) : (
@@ -613,6 +641,30 @@ export function QuestionSetSection({
         ) : null}
       </div>
     </SectionCard>
+  );
+}
+
+/**
+ * What "Pasifleştir" does (`PATCH /questions/:id/status`, `isActive: false`):
+ * a soft switch, not a delete — the row, its answers and its rules stay, and
+ * "Aktifleştir" puts it back.
+ */
+function QuestionDeactivateConsequence({ question }: { question: Question }) {
+  return (
+    <ul data-testid="question-disable-impact">
+      <li>
+        <strong>Soru silinmez, pasif olur.</strong> Kaydı, geçmiş taleplerdeki cevapları ve kuralları korunur; “Aktifleştir”
+        ile geri açılabilir.
+      </li>
+      <li>
+        <strong>Yeni akışlarda kullanılmaz:</strong> bundan sonra açılan taleplerin formunda sorulmaz.
+      </li>
+      {question.isRouter ? (
+        <li>
+          <strong>Bu yönlendirme sorusudur:</strong> pasifken yönlendirici kategorinin akışı durur; müşteriler bu sorudan bir hizmete taşınamaz.
+        </li>
+      ) : null}
+    </ul>
   );
 }
 
@@ -928,7 +980,16 @@ function formatOptions(options: QuestionOption[] | null | undefined) {
  * The status switch, with CATEGORIES_STATUS only: the current status and what
  * it means, then the select and its button in the card's footer band.
  */
-export function CategoryStatusSection({ category, action }: { category: Category; action: FormAction }) {
+export function CategoryStatusSection({
+  category,
+  action,
+  placementImpact = null,
+}: {
+  category: Category;
+  action: FormAction;
+  /** The vitrin runs the move would touch, for its dialog; null when not countable. */
+  placementImpact?: CategoryPlacementImpact;
+}) {
   return (
     <SectionCard
       title="Kategori durumu"
@@ -956,9 +1017,8 @@ export function CategoryStatusSection({ category, action }: { category: Category
               ))}
             </select>
           </label>
-          <button className="btn btn-secondary" type="submit">
-            Durumu güncelle
-          </button>
+          {/* Any move asks first, into ACTIVE or out of it (Paket B). */}
+          <CategoryStatusSubmit stored={category} impact={placementImpact} />
         </form>
       </div>
     </SectionCard>

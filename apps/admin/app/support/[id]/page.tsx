@@ -53,6 +53,24 @@ const CLOSE_CONSEQUENCE = (
 );
 
 /**
+ * What resolving does (support-ticket.rules.ts, admin-support-tickets.service.ts):
+ * the requester may write only on OPEN and IN_PROGRESS, there is no
+ * RESOLVED → OPEN (only → CLOSED), and every status change mails the requester.
+ */
+const RESOLVE_CONSEQUENCE = (
+  <ul data-testid="support-resolve-impact">
+    <li>
+      <strong>Talep sahibi artık bu talebe mesaj yazamaz.</strong> Siz yazmaya devam edebilirsiniz; talep sahibi konu
+      sürüyorsa yeni bir destek talebi açar.
+    </li>
+    <li>
+      <strong>Geri dönüş yok:</strong> çözülmüş bir talep yeniden “Açık” ya da “İşlemde” yapılamaz; yalnız kapatılabilir.
+    </li>
+    <li>Talep sahibine durum değişikliği e-postası gider.</li>
+  </ul>
+);
+
+/**
  * One ticket, its whole history, and the two things an operator can do to it
  * (ADMIN-DESIGN-001 Faz 3B, the detail template; the design has no screen of
  * its own for this route).
@@ -225,7 +243,21 @@ export default async function AdminSupportTicketPage({
                     <form key={next} action={changeSupportTicketStatusAction}>
                       <input type="hidden" name="id" value={ticket.id} />
                       <input type="hidden" name="status" value={next} />
-                      {next === 'CLOSED' ? (
+                      {next === 'RESOLVED' ? (
+                        // Resolving is the last step the requester can write
+                        // in; asked first (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+                        // Paket B). Closing keeps its own dialog below.
+                        <ConfirmDialog
+                          proof="support.resolve"
+                          triggerLabel={supportTicketTransitionLabel(next)}
+                          triggerClassName="btn btn-secondary btn-sm"
+                          tone="primary"
+                          title="Destek talebi çözüldü olarak işaretlensin mi?"
+                          consequence={RESOLVE_CONSEQUENCE}
+                          confirmLabel="Evet, çözüldü olarak işaretle"
+                          testId={`support-transition-${next}`}
+                        />
+                      ) : next === 'CLOSED' ? (
                         <ConfirmDialog
                           proof="support.status"
                           triggerLabel={supportTicketTransitionLabel(next)}
@@ -318,9 +350,33 @@ export default async function AdminSupportTicketPage({
                     ekranında ayrı adımlardır.
                   </p>
                   <div className="detail-form-actions">
-                    <button className="btn btn-secondary btn-sm" type="submit" data-testid="support-refund-open">
-                      İade isteği aç
-                    </button>
+                    {/*
+                      Asks first: the provider is mailed that a request was
+                      opened (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B,
+                      inventory PK#13). The dialog opens only once a purchase
+                      is chosen.
+                    */}
+                    <ConfirmDialog
+                      proof="package-refund.open"
+                      triggerLabel="İade isteği aç"
+                      triggerClassName="btn btn-secondary btn-sm"
+                      tone="primary"
+                      title="İade isteği açılsın mı?"
+                      consequence={
+                        <ul data-testid="support-refund-open-impact">
+                          <li>
+                            Seçtiğiniz satın alma için bu talebe bağlı bir paket iade isteği açılır ve inceleme
+                            kuyruğuna düşer. Aynı satın alma için ikinci bir açık istek açılamaz.
+                          </li>
+                          <li>
+                            <strong>Hizmet verene e-posta gider:</strong> iade isteğinin alındığı bildirilir.
+                          </li>
+                          <li>Para hareketi olmaz; işleme alma, onay ve ödeme iade isteği ekranında ayrı adımlardır.</li>
+                        </ul>
+                      }
+                      confirmLabel="Evet, iade isteği aç"
+                      testId="support-refund-open"
+                    />
                   </div>
                 </form>
               ) : (

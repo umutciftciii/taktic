@@ -19,6 +19,7 @@ import { CampaignEngineToggle } from './campaign-engine-toggle';
 import { ProviderReviewsToggle } from './provider-reviews-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
 import { AuditTable, SettingRow, SettingsGroup, switchStateLabel } from './setting-row';
+import { RefundWindowSubmit } from './refund-window-submit';
 
 /**
  * The commercial terms an operator maintains, starting with the one this
@@ -248,9 +249,7 @@ export default async function OperationsSettingsPage({
                       saat
                     </span>
                   </label>
-                  <button className="btn btn-primary btn-sm" type="submit">
-                    Kaydet
-                  </button>
+                  <RefundWindowSubmit storedHours={settings.unviewedOfferRefundWindowHours} />
                 </form>
               ) : null
             }

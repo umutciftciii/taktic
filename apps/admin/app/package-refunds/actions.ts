@@ -74,6 +74,10 @@ export async function openPackageRefundRequestAction(formData: FormData) {
   if (!purchaseId) {
     redirect(`/support/${ticketId}?error=${encodeURIComponent('Bir satın alma seçin.')}`);
   }
+  // Confirmed in a dialog: opening one mails the provider (Paket B).
+  if (!(await hasConfirmationProof(formData, 'package-refund.open'))) {
+    redirect(`/support/${ticketId}?error=${encodeURIComponent(CONFIRMATION_PROOF_REFUSAL_MESSAGE)}`);
+  }
 
   let createdId: string | null = null;
   let failure: string | null = null;

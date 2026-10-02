@@ -68,6 +68,12 @@ export async function dismissReviewReportAction(formData: FormData) {
   const reviewId = readFormString(formData, 'reviewId');
   const target = `/provider-reviews/${reviewId}`;
 
+  // Confirmed in a dialog: every open report closes and none can be reopened
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+  if (!(await hasConfirmationProof(formData, 'provider-review.report-dismiss'))) {
+    redirect(`${target}?error=confirmation`);
+  }
+
   let detail: AdminReviewDetail;
   try {
     detail = await apiFetch<AdminReviewDetail>(`/provider-reviews/${reviewId}/reports/dismiss`, {

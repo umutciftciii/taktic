@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen, expectNotFoundScreen } from '../src/actors';
 import { createAdmin, createCustomer, prisma } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * Customer support tickets, end to end.
@@ -176,7 +177,10 @@ test.describe('customer support tickets', () => {
 
       // ---- the operator resolves, then closes -----------------------------
       await admin.gotoAdmin(`/support/${ticketId}`);
-      await admin.page.getByTestId('support-transition-RESOLVED').click();
+      // Resolving asks first: the requester can no longer write (Paket B).
+      await confirmThrough(admin.page.getByTestId('support-transition-RESOLVED'), 'Evet, çözüldü olarak işaretle', async (dialog) => {
+        await expect(dialog.getByTestId('support-resolve-impact')).toContainText('artık bu talebe mesaj yazamaz');
+      });
       await expect(admin.page.getByTestId('support-detail-status')).toHaveText('Çözüldü');
 
       // A resolved ticket may only be closed — the other moves have no button.

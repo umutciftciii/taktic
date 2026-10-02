@@ -15,7 +15,11 @@ import {
   ProviderInviteList,
   Question,
   requireAdmin,
+  type ShowcasePlacement,
 } from '../../../lib/api';
+import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
+import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
+import type { CategoryPlacementImpact } from '../category-changes';
 import { formatCount } from '../../../lib/pagination';
 import { resolveTab } from '../../../lib/list-query';
 import { ActivityLog, NO_CHANGE_HISTORY_NOTE } from '../../../components/activity-log';
@@ -83,7 +87,7 @@ import {
 
 type CategoryDetailPageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; error?: string }>;
 };
 
 type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
@@ -91,7 +95,7 @@ type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
 export default async function CategoryDetailPage({ params, searchParams }: CategoryDetailPageProps) {
   const { can } = await requireAdmin('CATALOG_READ');
   const { slug } = await params;
-  const { tab } = await searchParams;
+  const { tab, error } = await searchParams;
   // Each control below is offered only to a session the API would let through;
   // the API still checks every one of them.
   const canWriteCategory = can('CATEGORIES_WRITE');
@@ -129,6 +133,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
     if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
     return a.label.localeCompare(b.label, 'tr-TR');
   });
+
+  // The vitrin runs a status move would touch, counted from the real
+  // placements, for the confirmation dialogs (ADMIN-DESTRUCTIVE-CONFIRMATION-001
+  // Paket B). Only for a session that may move the status and read placements.
+  const placementImpact: CategoryPlacementImpact =
+    canChangeStatus && can('SHOWCASE_PLACEMENTS_READ') ? await readPlacementImpact(category.id) : null;
 
   const groups = allCategories.filter((candidate) => candidate.kind === 'GROUP' && candidate.id !== category.id);
   // A router may send the customer on to a service or to another router, never
@@ -236,6 +246,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
         testId="category-header"
       />
 
+      {error === 'CONFIRMATION_REQUIRED' ? (
+        <div className="notice notice-error detail-notice" role="alert" data-testid="category-error">
+          {CONFIRMATION_PROOF_REFUSAL_MESSAGE}
+        </div>
+      ) : null}
+
       <Tabs label="Kategori sekmeleri" items={tabs} active={activeTab} path={path} testId="category-tabs" />
 
       {activeTab === '' ? (
@@ -247,6 +263,7 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
             canChangeStatus={canChangeStatus}
             canUpload={canUpload}
             updateAction={updateCategoryAction}
+            placementImpact={placementImpact}
           />
 
           {category.status === 'DRAFT' || canChangeStatus || isRouter ? (
@@ -260,7 +277,11 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
               ) : null}
 
               {canChangeStatus ? (
-                <CategoryStatusSection category={category} action={updateCategoryStatusAction} />
+                <CategoryStatusSection
+                  category={category}
+                  action={updateCategoryStatusAction}
+                  placementImpact={placementImpact}
+                />
               ) : null}
 
               {isRouter ? <RouterExplainerSection /> : null}
@@ -335,4 +356,27 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
       ) : null}
     </main>
   );
+}
+
+/**
+ * This category's vitrin runs a status move touches, from the placement list
+ * the API keeps: ACTIVE ones (what closing suspends) and the ones suspended
+ * with CATEGORY_CLOSED (what opening resumes). Null when the read fails — the
+ * dialog then says it cannot count, it never prints a guess.
+ */
+async function readPlacementImpact(categoryId: string): Promise<CategoryPlacementImpact> {
+  try {
+    const { placements } = await apiFetch<{ placements: ShowcasePlacement[] }>(
+      `/admin/showcase/placements?${new URLSearchParams({ categoryId }).toString()}`,
+    );
+    return {
+      onAir: placements.filter((placement) => placement.status === 'ACTIVE').length,
+      heldByClosure: placements.filter(
+        (placement) => placement.status === 'SUSPENDED' && placement.suspendReason === 'CATEGORY_CLOSED',
+      ).length,
+    };
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    return null;
+  }
 }

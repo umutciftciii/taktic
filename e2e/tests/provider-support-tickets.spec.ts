@@ -9,6 +9,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * The support desk from the hizmet veren panel, end to end.
@@ -319,7 +320,10 @@ test.describe('a hizmet veren and the support desk', () => {
 
       // ---- resolved, then closed, with the same terminal behaviour ---------
       await admin.gotoAdmin(`/support/${ticketId}`);
-      await admin.page.getByTestId('support-transition-RESOLVED').click();
+      // Resolving asks first: the requester can no longer write (Paket B).
+      await confirmThrough(admin.page.getByTestId('support-transition-RESOLVED'), 'Evet, çözüldü olarak işaretle', async (dialog) => {
+        await expect(dialog.getByTestId('support-resolve-impact')).toContainText('artık bu talebe mesaj yazamaz');
+      });
       await expect(admin.page.getByTestId('support-detail-status')).toHaveText('Çözüldü');
 
       await provider.gotoWeb(`/destek/${ticketId}`);

@@ -1,19 +1,27 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsString, MaxLength } from 'class-validator';
 
 /**
  * The operator's note on a suspension.
  *
- * Optional, and it is the only field. There is deliberately no `reason` — an
- * operator's action is `ADMIN_ACTION` by definition, and a body that could name
- * a different reason could name one that does not stop the clock, which would
- * be an operator quietly billing a provider for days the platform took away.
+ * Required (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B): a suspension takes a
+ * paid card off the air, and the provider is not told by mail — the note is
+ * the only record of why. The minimum length is judged on the trimmed value by
+ * the service ({@link SHOWCASE_PLACEMENT_SUSPEND_NOTE_MIN_LENGTH}), as the
+ * cancellation's is, so whitespace is not a reason either.
+ *
+ * It is the only field. There is deliberately no `reason` — an operator's
+ * action is `ADMIN_ACTION` by definition, and a body that could name a
+ * different reason could name one that does not stop the clock, which would be
+ * an operator quietly billing a provider for days the platform took away.
  */
 export class ShowcasePlacementSuspendDto {
-  @IsOptional()
   @IsString()
   @MaxLength(500)
-  note?: string;
+  note!: string;
 }
+
+/** The shortest suspension note, after trimming — the cancellation's rule. */
+export const SHOWCASE_PLACEMENT_SUSPEND_NOTE_MIN_LENGTH = 10;
 
 /**
  * The reason a cancellation is filed under.

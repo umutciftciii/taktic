@@ -358,3 +358,70 @@ describe('POST /admin/showcase/placements/:id/cancel requires a reason', () => {
     expect(purchase.adminNote).toBe('Müşteri şikâyeti üzerine');
   });
 });
+
+describe('POST /admin/showcase/placements/:id/suspend requires a reason (Paket B)', () => {
+  async function livePlacement() {
+    const category = await createCategory(ctx.prisma, 'Klima');
+    const providerUser = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const profile = await createDiscoverableProvider(ctx.prisma, {
+      userId: providerUser.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: null }],
+    });
+    const { card, version } = await createApprovedShowcaseCard(ctx.prisma, {
+      providerId: profile.id,
+      categoryId: category.id,
+    });
+    const pkg = await createShowcasePackage(ctx.prisma, { durationDays: 30 });
+    const { placement } = await createLiveShowcasePlacement(ctx, {
+      providerId: profile.id,
+      cardId: card.id,
+      versionId: version.id,
+      packageId: pkg.id,
+    });
+    return placement;
+  }
+
+  function suspend(placementId: string, cookie: string, payload: Record<string, unknown>) {
+    return request(ctx.server)
+      .post(`/admin/showcase/placements/${placementId}/suspend`)
+      .set('Cookie', cookie)
+      .send(payload);
+  }
+
+  it('refuses a missing, blank or too-short note and leaves the run on the air', async () => {
+    const placement = await livePlacement();
+    const { cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENTS_MODERATE]);
+
+    for (const payload of [{}, { note: null }, { note: '' }, { note: '          ' }, { note: '  kısa  ' }]) {
+      const response = await suspend(placement.id, cookie, payload);
+      expect(response.status).toBe(400);
+    }
+    const coded = await suspend(placement.id, cookie, { note: '   kısa   ' });
+    expect(coded.body.code).toBe('SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED');
+
+    const after = await ctx.prisma.showcasePlacement.findUniqueOrThrow({ where: { id: placement.id } });
+    expect(after.status).toBe('ACTIVE');
+    expect(after.endAt.getTime()).toBe(placement.endAt.getTime());
+    expect(await ctx.prisma.showcasePlacementSuspension.count()).toBe(0);
+  });
+
+  it('suspends with a reason, keeping the actor, the trimmed note and the stopped clock', async () => {
+    const placement = await livePlacement();
+    const { admin, cookie } = await staff([AdminPermission.SHOWCASE_PLACEMENTS_MODERATE]);
+
+    const response = await suspend(placement.id, cookie, { note: '  Şikâyet incelemesi için  ' });
+
+    expect(response.status).toBe(200);
+    const row = await ctx.prisma.showcasePlacementSuspension.findFirstOrThrow({ where: { placementId: placement.id } });
+    expect(row).toMatchObject({
+      actorUserId: admin.id,
+      note: 'Şikâyet incelemesi için',
+      reason: 'ADMIN_ACTION',
+      extendsClock: true,
+      endedAt: null,
+    });
+    const after = await ctx.prisma.showcasePlacement.findUniqueOrThrow({ where: { id: placement.id } });
+    expect(after.status).toBe('SUSPENDED');
+  });
+});

@@ -3,6 +3,7 @@
 import { formatDateTime } from '@taktic/shared';
 import { useActionState, useRef, useState } from 'react';
 import type { ProviderInvite } from '../../lib/api';
+import { ConfirmDialog } from '../../components/confirm-dialog';
 import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import { InfoPopover } from '../../components/info-popover';
@@ -165,14 +166,21 @@ export function ProviderInvitePanel({
                     <input type="hidden" name="categoryId" value={categoryId} />
                     <input type="hidden" name="categorySlug" value={categorySlug} />
                     <input type="hidden" name="inviteId" value={invite.id} />
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      type="submit"
+                    {/*
+                      Asks first: the link dies for good
+                      (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). Issuing a
+                      new one stays one press.
+                    */}
+                    <ConfirmDialog
+                      proof="provider-invite.revoke"
+                      triggerLabel="İptal et"
+                      triggerClassName="btn btn-secondary btn-sm"
+                      title="Davet bağlantısı iptal edilsin mi?"
+                      consequence={REVOKE_CONSEQUENCE}
+                      confirmLabel="Evet, bağlantıyı iptal et"
                       disabled={pending}
-                      data-testid={`provider-invite-revoke-${invite.id}`}
-                    >
-                      İptal et
-                    </button>
+                      testId={`provider-invite-revoke-${invite.id}`}
+                    />
                   </form>
                 ) : (
                   <span className="cell-muted" aria-hidden="true">
@@ -187,6 +195,18 @@ export function ProviderInvitePanel({
     </SectionCard>
   );
 }
+
+/** What withdrawing a link does (`POST …/provider-invites/:id/revoke`). */
+const REVOKE_CONSEQUENCE = (
+  <ul data-testid="invite-revoke-impact">
+    <li>
+      <strong>Bağlantı kalıcı olarak geçersiz olur:</strong> işletmeye iletilmişse artık başvuru için kullanılamaz ve
+      yeniden açılamaz.
+    </li>
+    <li>Gerekirse “Yeni davet bağlantısı oluştur” ile ayrıca yeni bir bağlantı üretip işletmeye iletebilirsiniz.</li>
+    <li>Bağlantı kullanılarak yapılmış bir başvuru varsa o başvuru değişmez.</li>
+  </ul>
+);
 
 /**
  * The design's invitation table, less its "Davet edilen" column: a link is not

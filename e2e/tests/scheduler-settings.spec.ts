@@ -281,7 +281,10 @@ test.describe('scheduled jobs', () => {
         .getByTestId('operations-settings-form')
         .locator('input[name="unviewedOfferRefundWindowHours"]')
         .fill('72');
-      await admin.page.getByRole('button', { name: 'Kaydet' }).click();
+      await confirmThrough(admin.page.getByTestId('refund-window-save'), 'Evet, kaydet', async (dialog) => {
+        await expect(dialog.getByTestId('refund-window-change')).toContainText('→ 72 saat');
+        await expect(dialog).toContainText('yalnız bundan sonra verilecek tekliflere');
+      });
       await assertNoErrorScreen(admin.page);
 
       await expect(admin.page.getByTestId('operations-settings-notice')).toContainText('72 saat');

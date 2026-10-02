@@ -45,6 +45,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
       await page.locator('input[name="name"]').fill(`${pkg.name} yeni`);
       await save.click();
       await expect(page).toHaveURL(/ok=saved/);
+      // WebKit can follow the action's redirect with a second navigation to
+      // the same URL; let it settle before the next goto, or that goto is
+      // interrupted by it.
+      await page.waitForLoadState('networkidle');
       await expect(page.getByTestId('credit-package-save-dialog')).toBeHidden();
       expect((await creditPackage(pkg.id)).name).toBe(`${pkg.name} yeni`);
 
@@ -61,6 +65,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
       expect((await creditPackage(pkg.id)).priceAmount).toBe(149_900);
       await confirmThrough(page.getByTestId('credit-package-save'), 'Evet, kaydet');
       await expect(page).toHaveURL(/ok=saved/);
+      // WebKit can follow the action's redirect with a second navigation to
+      // the same URL; let it settle before the next goto, or that goto is
+      // interrupted by it.
+      await page.waitForLoadState('networkidle');
       expect((await creditPackage(pkg.id)).priceAmount).toBe(159_900);
 
       // ---- credits and the form's status together: one dialog, both lines ------
@@ -72,6 +80,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
         await expect(both.getByTestId('credit-package-status-change')).toContainText('Aktif → Pasif');
       });
       await expect(page).toHaveURL(/ok=saved/);
+      // WebKit can follow the action's redirect with a second navigation to
+      // the same URL; let it settle before the next goto, or that goto is
+      // interrupted by it.
+      await page.waitForLoadState('networkidle');
       expect(await creditPackage(pkg.id)).toMatchObject({ creditAmount: 12, isActive: false });
 
       // ---- the header switch: before hydration it writes nothing; then it asks --

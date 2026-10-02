@@ -3,7 +3,10 @@ import { ShowcasePlacementStatus, ShowcasePlacementSuspendReason } from '@prisma
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH } from './dto/showcase-placement-admin.dto';
+import {
+  SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH,
+  SHOWCASE_PLACEMENT_SUSPEND_NOTE_MIN_LENGTH,
+} from './dto/showcase-placement-admin.dto';
 import { ShowcasePlacementReadService } from './showcase-placement-read.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
 import {
@@ -12,6 +15,7 @@ import {
   showcasePlacementNotFound,
   showcasePlacementNotResumable,
   showcasePlacementNotSuspendable,
+  showcasePlacementSuspendNoteRequired,
 } from './showcase.errors';
 
 /**
@@ -34,7 +38,14 @@ export class AdminShowcasePlacementsService {
     private readonly read: ShowcasePlacementReadService,
   ) {}
 
-  async suspend(placementId: string, user: AuthUser, note: string | null) {
+  async suspend(placementId: string, user: AuthUser, rawNote: string) {
+    // Required, and judged trimmed: the DTO only proves it is a string
+    // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+    const note = rawNote.trim();
+    if (note.length < SHOWCASE_PLACEMENT_SUSPEND_NOTE_MIN_LENGTH) {
+      throw showcasePlacementSuspendNoteRequired(SHOWCASE_PLACEMENT_SUSPEND_NOTE_MIN_LENGTH);
+    }
+
     await runSerializable(
       this.prisma,
       async (tx) => {

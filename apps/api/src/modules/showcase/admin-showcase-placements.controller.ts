@@ -113,7 +113,9 @@ export class AdminShowcasePlacementsController {
   }
 
   /**
-   * Takes a run off the air. The clock stops while it is down.
+   * Takes a run off the air. The clock stops while it is down. A note of at
+   * least ten characters is required: the provider is not mailed, and the note
+   * is the record of why.
    *
    * This is the platform pulling the card, so the days the provider cannot use
    * are not billed to them — see `showcase-placement-suspension.ts` for why
@@ -128,7 +130,7 @@ export class AdminShowcasePlacementsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: ShowcasePlacementSuspendDto,
   ) {
-    return this.admin.suspend(placementId, user, dto.note ?? null);
+    return this.admin.suspend(placementId, user, dto.note);
   }
 
   /**

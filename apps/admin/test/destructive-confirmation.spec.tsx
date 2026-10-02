@@ -7,6 +7,7 @@ import { CreditGrantConsequence } from '../app/providers/[id]/credits/credit-gra
 import { CreditOperationForm } from '../app/providers/[id]/credits/credit-operation-form';
 import { RoleActivateConsequence, RoleStatusForm } from '../app/roles/role-forms';
 import { FirstApprovalConsequence } from '../app/showcase/reviews/[versionId]/first-approval-consequence';
+import { RevisionApprovalConsequence } from '../app/showcase/reviews/[versionId]/revision-approval-consequence';
 import {
   isPlacementCancelNoteValid,
   PLACEMENT_CANCEL_NOTE_MIN_LENGTH,
@@ -221,7 +222,7 @@ describe('D) Rolü aktifleştir asks first', () => {
   });
 });
 
-describe('E) the first vitrin approval asks first; a revision does not (Faz 4)', () => {
+describe('E) both vitrin approvals ask first: the first one, and a revision (Paket B)', () => {
   it('says the right is spent, the card goes live, the provider is told and nothing undoes it', () => {
     const said = html(
       <FirstApprovalConsequence
@@ -237,12 +238,37 @@ describe('E) the first vitrin approval asks first; a revision does not (Faz 4)',
     expect(said).toContain('tüketilen hak iade edilmez');
   });
 
-  it('the page wraps only the first approval, and the rejection keeps its dialog', () => {
+  it('the page wraps both approvals in their own dialogs, and the rejection keeps its dialog', () => {
     const source = read('app/showcase/reviews/[versionId]/page.tsx');
     expect(source).toMatch(/\{card\.liveVersion === null \? \([\s\S]*?<ConfirmDialog\s+proof="showcase.approve-first"\s+triggerLabel="Onayla"/);
     expect(source).toContain('testId="showcase-approve"');
-    expect(source).toMatch(/<button className="btn btn-primary btn-sm" type="submit" disabled=\{!isPending\}>\s*Onayla/);
+    expect(source).toMatch(/<ConfirmDialog\s+proof="showcase.revision-approve"\s+triggerLabel="Onayla"/);
+    expect(source).toContain('testId="showcase-revision-approve"');
+    expect(source).not.toMatch(/<button className="btn btn-primary btn-sm" type="submit" disabled=\{!isPending\}>\s*Onayla/);
     expect(source).toContain('testId="showcase-reject"');
+  });
+
+  it('a revision says it replaces the live version on every run, with the real count, no way back, and the mail', () => {
+    const said = html(
+      <RevisionApprovalConsequence
+        liveVersionNumber={3}
+        nextVersionNumber={4}
+        impact={{ live: 2, onAir: 1 }}
+      />,
+    );
+    expect(said).toContain('4. sürüm, yayındaki 3. sürümün yerini alır');
+    expect(said).toContain('bitmemiş 2 yerleşimi var (1 tanesi şu anda yayında)');
+    expect(said).toContain('Eski sürüme dönüş yok');
+    expect(said).toContain('e-posta gider');
+    expect(said).toContain('Yayın hakkı harcanmaz');
+  });
+
+  it('a revision whose runs cannot be counted says so instead of printing a number', () => {
+    const said = html(
+      <RevisionApprovalConsequence liveVersionNumber={1} nextVersionNumber={2} impact={null} />,
+    );
+    expect(said).toContain('yerleşim sayısı bu ekranda gösterilemiyor');
+    expect(said).not.toMatch(/bitmemiş \d+ yerleşimi/);
   });
 });
 

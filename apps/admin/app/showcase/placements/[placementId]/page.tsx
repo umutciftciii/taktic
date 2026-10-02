@@ -22,7 +22,7 @@ import {
   resumeShowcasePlacementAction,
   suspendShowcasePlacementAction,
 } from '../actions';
-import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH } from '../placement-cancel';
+import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH, PLACEMENT_SUSPEND_NOTE_MIN_LENGTH } from '../placement-cancel';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 
 type PlacementPageProps = {
@@ -42,6 +42,7 @@ const ERRORS: Record<string, string> = {
     'Bu yerleşim operatör kararıyla durdurulmuş bir yerleşim değil. Diğer durdurma sebepleri, sebep ortadan kalktığında kendiliğinden kalkar.',
   SHOWCASE_PLACEMENT_NOT_CANCELLABLE: 'Yalnız süresi devam eden bir yerleşim iptal edilebilir.',
   SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED: `İptal gerekçesi zorunludur (en az ${PLACEMENT_CANCEL_NOTE_MIN_LENGTH} karakter). Yerleşim iptal edilmedi.`,
+  SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED: `Durdurma gerekçesi zorunludur (en az ${PLACEMENT_SUSPEND_NOTE_MIN_LENGTH} karakter). Yerleşim durdurulmadı.`,
   CONFIRMATION_REQUIRED: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
   SHOWCASE_PLACEMENT_ACTION_FAILED: 'İşlem tamamlanamadı.',
 };
@@ -92,6 +93,16 @@ export default async function ShowcasePlacementPage({
     placement.status === 'ACTIVE' ||
     placement.status === 'PENDING_ACTIVATION' ||
     placement.status === 'SUSPENDED';
+
+  // What resuming an operator's hold would make the end date, the way
+  // `ShowcasePlacementService.resume` computes it: the held time is added back.
+  // An estimate as of this render; the API fixes the real one when it runs.
+  const resumedEndAt =
+    placement.status === 'SUSPENDED' && isAdminHold && placement.suspendedAt
+      ? new Date(
+          new Date(placement.endAt).getTime() + Math.max(0, Date.now() - new Date(placement.suspendedAt).getTime()),
+        ).toISOString()
+      : null;
 
   const facts: SummaryItem[] = [
     { label: 'Paket', value: placement.packageName, note: `${placement.durationDays} gün` },
@@ -321,16 +332,36 @@ export default async function ShowcasePlacementPage({
             title="Yayından kaldır"
             subtitle="Operatör kararıyla durdurmak süreyi durdurur: durdurma boyunca geçen süre, sürdürüldüğünde bitiş tarihine eklenir."
           >
-            <form action={suspendShowcasePlacementAction} className="form-grid">
+            <form action={suspendShowcasePlacementAction} className="form-grid" data-testid="placement-suspend-form">
               <input type="hidden" name="placementId" value={placementId} />
               <label className="form-grid-wide">
-                <span>Not</span>
-                <textarea name="note" maxLength={500} placeholder="Kayda geçecek gerekçe" />
+                <span>Durdurma gerekçesi *</span>
+                {/*
+                  Required (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B): the
+                  provider is not mailed, so this note is the only record of
+                  why a paid card went off the air. The dialog does not open
+                  until the browser accepts it; the action and the API refuse
+                  it short or blank as well.
+                */}
+                <textarea
+                  name="note"
+                  required
+                  minLength={PLACEMENT_SUSPEND_NOTE_MIN_LENGTH}
+                  maxLength={500}
+                  placeholder={`Kayda geçecek gerekçe (en az ${PLACEMENT_SUSPEND_NOTE_MIN_LENGTH} karakter).`}
+                  data-testid="placement-suspend-note"
+                />
               </label>
               <div className="form-actions form-grid-wide">
-                <button className="btn btn-danger" type="submit">
-                  Yerleşimi durdur
-                </button>
+                <ConfirmDialog
+                  proof="showcase.placement-suspend"
+                  triggerLabel="Yerleşimi durdur"
+                  triggerClassName="btn btn-danger"
+                  title="Yerleşim durdurulsun mu?"
+                  consequence={SUSPEND_CONSEQUENCE}
+                  confirmLabel="Evet, yayından kaldır"
+                  testId="placement-suspend"
+                />
               </div>
             </form>
           </SectionCard>
@@ -348,6 +379,13 @@ export default async function ShowcasePlacementPage({
             {isAdminHold ? (
               <form action={resumeShowcasePlacementAction}>
                 <input type="hidden" name="placementId" value={placementId} />
+                {resumedEndAt ? (
+                  <p className="muted" data-testid="placement-resume-end">
+                    Şimdi sürdürülürse yeni bitiş tarihi yaklaşık <strong>{formatDateTime(resumedEndAt)}</strong> olur
+                    (şu anki bitiş {formatDateTime(placement.endAt)} + durdurma süresi). Kesin tarih, sürdürdüğünüz
+                    an hesaplanır.
+                  </p>
+                ) : null}
                 <button className="btn btn-primary" type="submit">
                   Yerleşimi sürdür
                 </button>
@@ -418,6 +456,32 @@ const VERSION_CHANGE_COLUMNS: DataColumn[] = [
   { key: 'trigger', label: 'Sebep' },
   { key: 'version', label: 'Sürüm' },
 ];
+
+/**
+ * What `AdminShowcasePlacementsService.suspend` does (ADMIN-DESTRUCTIVE-
+ * CONFIRMATION-001 Paket B): an `ADMIN_ACTION` suspension, which stops the
+ * clock; no mail is sent by this path; resume is the operator's own button.
+ */
+const SUSPEND_CONSEQUENCE = (
+  <ul data-testid="placement-suspend-impact">
+    <li>
+      <strong>Ücretli kart yayından iner:</strong> yerleşim hemen “Durduruldu” olur ve bütün vitrin raflarından kalkar;
+      karttan yeni talep gelmez.
+    </li>
+    <li>
+      <strong>Yayın süresi durur:</strong> durdurma boyunca geçen süre işlemez; yerleşimi sürdürdüğünüzde bu süre bitiş
+      tarihine eklenir.
+    </li>
+    <li>
+      <strong>Hizmet verene e-posta gitmez.</strong> Mevcut davranışta bu işlem için bildirim yoktur; gerekiyorsa hizmet
+      vereni ayrıca bilgilendirin.
+    </li>
+    <li>
+      Gerekçeniz, durdurma zamanı ve sizin adınız yerleşimin durdurma geçmişine yazılır. Kart, onaylı sürümü ve
+      gelmiş talepler değişmez.
+    </li>
+  </ul>
+);
 
 /**
  * What `AdminShowcasePlacementsService.cancel` does, in the order it does it.

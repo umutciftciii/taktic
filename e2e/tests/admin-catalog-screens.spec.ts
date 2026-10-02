@@ -254,7 +254,10 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       await switcher.gotoAdmin(`${servicePath}?tab=davetler`);
       await expect(page.getByTestId('provider-invite-create')).toHaveCount(0);
       const invite = await prisma().providerInviteToken.findFirstOrThrow({ where: { categoryId: service.id } });
-      await page.getByTestId(`provider-invite-revoke-${invite.id}`).click();
+      // Withdrawing asks first: the link dies for good (Paket B).
+      await confirmThrough(page.getByTestId(`provider-invite-revoke-${invite.id}`), 'Evet, bağlantıyı iptal et', async (dialog) => {
+        await expect(dialog.getByTestId('invite-revoke-impact')).toContainText('kalıcı olarak geçersiz olur');
+      });
       await expect(page.getByTestId('provider-invite-revoked')).toBeVisible();
       await expect
         .poll(async () => (await prisma().providerInviteToken.findUniqueOrThrow({ where: { id: invite.id } })).revokedAt)

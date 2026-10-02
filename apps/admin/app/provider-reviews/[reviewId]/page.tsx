@@ -15,6 +15,7 @@ import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
 import { SectionCard } from '../../../components/section-card';
 import type { SummaryItem } from '../../../components/summary-strip';
+import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { dismissReviewReportAction } from './actions';
 import { ReviewModerationForm } from './moderation-form';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
@@ -82,6 +83,9 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
   const okMessage = ok ? (OK_MESSAGES[ok] ?? null) : null;
   const errorMessage = error ? (ERROR_MESSAGES[error] ?? null) : null;
   const openReport = review.reports.find((report) => report.resolvedAt === null) ?? null;
+  // "Uygun bulundu" closes every open report at once (`dismissReport` is one
+  // updateMany over the review's open rows), so the dialog counts them all.
+  const openReportCount = review.reports.filter((report) => report.resolvedAt === null).length;
   const requestRef = review.request.requestNumber ?? `#${review.request.id.slice(-8)}`;
 
   const facts: SummaryItem[] = [
@@ -293,9 +297,38 @@ export default async function ReviewDetailPage({ params, searchParams }: ReviewD
                   <span>Not (opsiyonel, yalnız yönetici görür)</span>
                   <textarea name="resolutionNote" placeholder="Neden uygun bulundu?" />
                 </label>
-                <button className="btn btn-secondary btn-sm" type="submit" data-testid="review-dismiss">
-                  Uygun bulundu
-                </button>
+                {/*
+                  Asks first: every open report closes and none can be
+                  reopened (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B).
+                */}
+                <ConfirmDialog
+                  proof="provider-review.report-dismiss"
+                  triggerLabel="Uygun bulundu"
+                  triggerClassName="btn btn-secondary btn-sm"
+                  tone="primary"
+                  title="Bildirim uygun bulundu olarak kapatılsın mı?"
+                  consequence={
+                    <ul data-testid="review-dismiss-impact">
+                      <li>
+                        <strong>
+                          {openReportCount === 1
+                            ? 'Açık bildirim kapanır'
+                            : `Açık ${openReportCount} bildirimin tamamı kapanır`}
+                        </strong>{' '}
+                        ve “Uygun bulundu” olarak kaydedilir; notunuz varsa bildirime eklenir.
+                      </li>
+                      <li>
+                        <strong>Değerlendirme yayında kalır:</strong> yorum, puan ve ortalama değişmez.
+                      </li>
+                      <li>
+                        <strong>Geri açılamaz:</strong> kapatılan bir bildirimi yeniden açan bir işlem yoktur. Gerekirse
+                        değerlendirmeyi daha sonra moderasyon formundan kaldırabilirsiniz.
+                      </li>
+                    </ul>
+                  }
+                  confirmLabel="Evet, uygun bulundu"
+                  testId="review-dismiss"
+                />
               </form>
             </div>
           ) : null}

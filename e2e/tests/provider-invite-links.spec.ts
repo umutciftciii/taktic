@@ -9,6 +9,7 @@ import {
   uniqueSuffix,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { confirmThrough } from '../src/confirm-dialog';
 
 /**
  * Recruiting one business for a service the marketplace has not released.
@@ -234,7 +235,8 @@ test.describe('provider application invitations', () => {
 
       const inviteRow = admin.page.getByTestId('provider-invite-list').locator('tbody tr').first();
       await expect(inviteRow).toContainText('Geçerli');
-      await inviteRow.getByRole('button', { name: 'İptal et' }).click();
+      // Withdrawing asks first (Paket B).
+      await confirmThrough(inviteRow.getByRole('button', { name: 'İptal et' }), 'Evet, bağlantıyı iptal et');
 
       await expect(admin.page.getByTestId('provider-invite-revoked')).toBeVisible();
       await expect(admin.page.getByTestId('provider-invite-list')).toContainText('İptal edildi');

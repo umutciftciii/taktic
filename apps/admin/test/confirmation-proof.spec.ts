@@ -239,6 +239,42 @@ const STORED_SHOWCASE_PACKAGE = {
   sortOrder: 0,
 };
 
+/** A live service as the category form posts it, unchanged from STORED_CATEGORY. */
+const CATEGORY_FIELDS = {
+  id: 'cat-1',
+  name: 'Klima',
+  slug: 'klima',
+  kind: 'LEAF',
+  status: 'ACTIVE',
+  parentId: '',
+  sortOrder: '0',
+  offerCreditCost: '3',
+  description: '',
+};
+const STORED_CATEGORY = {
+  id: 'cat-1',
+  name: 'Klima',
+  slug: 'klima',
+  kind: 'LEAF',
+  status: 'ACTIVE',
+  parentId: null,
+  offerCreditCost: 3,
+  unlimitedPackageEligible: false,
+  providerEnrollmentOpen: false,
+  sortOrder: 0,
+};
+
+const COMPANY_SETTINGS_FIELDS = {
+  legalName: 'Örnek Teknoloji A.Ş.',
+  supportEmail: 'destek@ornek.com.tr',
+  postalAddress: '',
+};
+const STORED_COMPANY_SETTINGS = {
+  legalName: 'Örnek Teknoloji A.Ş.',
+  supportEmail: 'destek@ornek.com.tr',
+  postalAddress: null,
+};
+
 type Case = {
   name: string;
   key: (typeof CONFIRMATION_PROOF_KEYS)[number];
@@ -246,6 +282,8 @@ type Case = {
   refused: (result: { redirect?: string; value?: unknown }) => void;
   /** What the API answers a read the action makes before deciding (GET), if any. */
   read?: unknown;
+  /** What the API answers the write, when the action reads its answer. */
+  write?: unknown;
 };
 
 const refusedRedirect = (fragment: string) => (result: { redirect?: string }) => {
@@ -711,6 +749,168 @@ const CASES: Case[] = [
     },
     refused: refusedRedirect('/showcase/packages/sp-1?error=CONFIRMATION_REQUIRED'),
   },
+  // ── Paket B: vitrin, category, terminal R2, settings ──
+  {
+    name: 'showcase: revizyon onayı',
+    key: 'showcase.revision-approve',
+    read: { card: { liveVersion: { id: 'live' } } },
+    run: async (proof) => {
+      const { approveShowcaseVersionAction } = await import('../app/showcase/reviews/[versionId]/actions');
+      return approveShowcaseVersionAction(form({ versionId: 'v-2' }, proof));
+    },
+    refused: refusedRedirect('/showcase/reviews/v-2?error='),
+  },
+  {
+    name: 'showcase: yerleşimi durdur',
+    key: 'showcase.placement-suspend',
+    run: async (proof) => {
+      const { suspendShowcasePlacementAction } = await import('../app/showcase/placements/actions');
+      return suspendShowcasePlacementAction(form({ placementId: 'pl-1', note: 'Şikâyet incelemesi için' }, proof));
+    },
+    refused: refusedRedirect('/showcase/placements/pl-1?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: yayında oluştur',
+    key: 'category.create-published',
+    run: async (proof) => {
+      const { createCategoryAction } = await import('../app/categories/actions');
+      return createCategoryAction(form({ ...CATEGORY_FIELDS, status: 'ACTIVE' }, proof));
+    },
+    refused: refusedRedirect('/categories/new?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: kısa ad değişimi',
+    key: 'category.structure-update',
+    read: [STORED_CATEGORY],
+    run: async (proof) => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, slug: 'klima-servisi' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: teklif kredisi değişimi',
+    key: 'category.offer-credit-update',
+    read: [STORED_CATEGORY],
+    run: async (proof) => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, offerCreditCost: '5' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: limitsiz paket uygunluğunu açma',
+    key: 'category.unlimited-enable',
+    read: [STORED_CATEGORY],
+    run: async (proof) => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, unlimitedPackageEligible: 'on' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: formdan yayına alma',
+    key: 'category.activate',
+    read: [{ ...STORED_CATEGORY, status: 'DRAFT' }],
+    run: async (proof) => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, status: 'ACTIVE' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: durum kartından kapatma',
+    key: 'category.deactivate',
+    read: [STORED_CATEGORY],
+    run: async (proof) => {
+      const { updateCategoryStatusAction } = await import('../app/categories/actions');
+      return updateCategoryStatusAction(form({ id: 'cat-1', slug: 'klima', status: 'INACTIVE' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'categories: yönlendirme kuralları',
+    key: 'category.router-rules-update',
+    read: { ...STORED_CATEGORY, questions: [{ id: 'q-1', routerRules: [{ optionKey: 'a', targetCategorySlug: 'klima' }] }] },
+    run: async (proof) => {
+      const { replaceRouterRulesAction } = await import('../app/categories/actions');
+      return replaceRouterRulesAction(
+        form({ id: 'q-1', categorySlug: 'klima', routerOptionKey: 'a', routerTargetSlug: 'kombi' }, proof),
+      );
+    },
+    refused: refusedRedirect('/categories/klima?tab=sorular&error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'questions: pasifleştir',
+    key: 'question.deactivate',
+    run: async (proof) => {
+      const { updateQuestionStatusAction } = await import('../app/categories/actions');
+      return updateQuestionStatusAction(form({ id: 'q-1', categorySlug: 'klima', isActive: 'false' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?tab=sorular&error=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'provider invites: iptal et',
+    key: 'provider-invite.revoke',
+    write: { revoked: true },
+    run: async (proof) => {
+      const { providerInviteAction } = await import('../app/categories/actions');
+      return providerInviteAction(
+        { kind: 'idle' },
+        form({ intent: 'revoke', categoryId: 'cat-1', categorySlug: 'klima', inviteId: 'inv-1' }, proof),
+      );
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'support: çözüldü',
+    key: 'support.resolve',
+    run: async (proof) => {
+      const { changeSupportTicketStatusAction } = await import('../app/support/actions');
+      return changeSupportTicketStatusAction(form({ id: 't-1', status: 'RESOLVED' }, proof));
+    },
+    refused: refusedRedirect('/support/t-1?error='),
+  },
+  {
+    name: 'provider reviews: bildirim uygun bulundu',
+    key: 'provider-review.report-dismiss',
+    write: { id: 'r-1', provider: { id: 'p-1' }, request: { id: 'rq-1' } },
+    run: async (proof) => {
+      const { dismissReviewReportAction } = await import('../app/provider-reviews/[reviewId]/actions');
+      return dismissReviewReportAction(form({ reviewId: 'r-1' }, proof));
+    },
+    refused: refusedRedirect('/provider-reviews/r-1?error=confirmation'),
+  },
+  {
+    name: 'support: iade isteği aç',
+    key: 'package-refund.open',
+    write: { id: 'pr-9' },
+    run: async (proof) => {
+      const { openPackageRefundRequestAction } = await import('../app/package-refunds/actions');
+      return openPackageRefundRequestAction(form({ supportTicketId: 't-1', purchaseId: 'pu-1' }, proof));
+    },
+    refused: refusedRedirect('/support/t-1?error='),
+  },
+  {
+    name: 'company settings: değer değişimi',
+    key: 'company-settings.update',
+    read: STORED_COMPANY_SETTINGS,
+    run: async (proof) => {
+      const { saveCompanySettingsAction } = await import('../app/company-settings/actions');
+      return saveCompanySettingsAction(form({ ...COMPANY_SETTINGS_FIELDS, legalName: 'Yeni Unvan A.Ş.' }, proof));
+    },
+    refused: refusedRedirect('/company-settings?error='),
+  },
+  {
+    name: 'operations: teklif iade süresi',
+    key: 'operations.refund-window-update',
+    read: { unviewedOfferRefundWindowHours: 24 },
+    run: async (proof) => {
+      const { saveOperationsSettingsAction } = await import('../app/operations-settings/actions');
+      return saveOperationsSettingsAction(form({ unviewedOfferRefundWindowHours: '48' }, proof));
+    },
+    refused: refusedRedirect('/operations-settings?error='),
+  },
   // ── Paket A: package refunds ──
   {
     name: 'package refunds: işleme al',
@@ -729,22 +929,22 @@ describe('guarded server actions refuse a submission without a good proof, and w
     cookieValue = 'staff-session';
   });
 
-  function primeReads(read: unknown) {
+  function primeReads(read: unknown, write: unknown = { id: 'x', amount: 10, balanceAfter: 50 }) {
     apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) =>
-      !init?.method || init.method === 'GET' ? read : { id: 'x', amount: 10, balanceAfter: 50 },
+      !init?.method || init.method === 'GET' ? read : write,
     );
   }
 
   for (const testCase of CASES) {
     describe(testCase.name, () => {
       it('no proof — a click before hydration or a post with JavaScript off — is refused', async () => {
-        primeReads(testCase.read);
+        primeReads(testCase.read, testCase.write);
         testCase.refused(await outcome(() => testCase.run(null)));
         expect(writes()).toEqual([]);
       });
 
       it('a made-up proof, or a static "confirm" value, is refused', async () => {
-        primeReads(testCase.read);
+        primeReads(testCase.read, testCase.write);
         for (const forged of ['yes', 'on', 'eyJrIjoieCJ9.Zm9yZ2Vk']) {
           testCase.refused(await outcome(() => testCase.run(forged)));
         }
@@ -752,7 +952,7 @@ describe('guarded server actions refuse a submission without a good proof, and w
       });
 
       it('a proof minted for another confirmation, or in another session, is refused', async () => {
-        primeReads(testCase.read);
+        primeReads(testCase.read, testCase.write);
         const otherKey = testCase.key === 'credits.grant' ? 'credits.deduct' : 'credits.grant';
         const wrongScope = await issueConfirmationProof(otherKey);
         testCase.refused(await outcome(() => testCase.run(wrongScope)));
@@ -763,7 +963,7 @@ describe('guarded server actions refuse a submission without a good proof, and w
       });
 
       it('a real proof goes through exactly as before — once; a replay of it is refused', async () => {
-        primeReads(testCase.read);
+        primeReads(testCase.read, testCase.write);
         const proof = await issueConfirmationProof(testCase.key);
         const first = await outcome(() => testCase.run(proof));
         expect(JSON.stringify(first)).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
@@ -777,15 +977,163 @@ describe('guarded server actions refuse a submission without a good proof, and w
     });
   }
 
-  it('the actions\' direct branches are left alone: shortlisting, a revision approval, switching a job off', async () => {
+  it('the actions\' direct branches are left alone: shortlisting, switching a job off', async () => {
     primeReads({ card: { liveVersion: { id: 'live' } } });
     const { updateOfferStatusAction } = await import('../app/offers/actions');
     await outcome(() => updateOfferStatusAction(form({ id: 'o-1', status: 'SHORTLISTED' })));
-    const { approveShowcaseVersionAction } = await import('../app/showcase/reviews/[versionId]/actions');
-    await outcome(() => approveShowcaseVersionAction(form({ versionId: 'v-2' })));
     const { toggleSchedulerAction } = await import('../app/operations-settings/actions');
     await outcome(() => toggleSchedulerAction(form({ job: 'request-expiry', enabled: 'false' })));
-    expect(writes()).toHaveLength(3);
+    expect(writes()).toHaveLength(2);
+  });
+
+  it('Paket B: a revision approval is no longer direct — it needs its own proof, not the first approval\'s', async () => {
+    primeReads({ card: { liveVersion: { id: 'live' } } });
+    const { approveShowcaseVersionAction } = await import('../app/showcase/reviews/[versionId]/actions');
+    const first = await issueConfirmationProof('showcase.approve-first');
+    expect((await outcome(() => approveShowcaseVersionAction(form({ versionId: 'v-2' }, first)))).redirect).toContain(
+      'error=',
+    );
+    expect(writes()).toEqual([]);
+  });
+
+  describe('Paket B: the low-risk branches stay direct — no proof asked, one write each', () => {
+    it('a category save of the name, description or order; a status card pressed on the current status', async () => {
+      const { updateCategoryAction, updateCategoryStatusAction } = await import('../app/categories/actions');
+      primeReads([STORED_CATEGORY]);
+      const saved = await outcome(() =>
+        updateCategoryAction(form({ ...CATEGORY_FIELDS, name: 'Klima bakımı', description: 'Yeni metin', sortOrder: '4' })),
+      );
+      expect(saved.redirect).toBe('/categories/klima');
+      await outcome(() => updateCategoryStatusAction(form({ id: 'cat-1', slug: 'klima', status: 'ACTIVE' })));
+      expect(writes()).toHaveLength(2);
+    });
+
+    it('switching unlimited eligibility off, and a save without the status permission', async () => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      primeReads([{ ...STORED_CATEGORY, unlimitedPackageEligible: true }]);
+      await outcome(() => updateCategoryAction(form({ ...CATEGORY_FIELDS })));
+      // statusLocked: the status is not sent, so a stale echo cannot ask or move it.
+      await outcome(() => updateCategoryAction(form({ ...CATEGORY_FIELDS, status: 'DRAFT', statusLocked: '1', unlimitedPackageEligible: 'on' })));
+      expect(writes()).toHaveLength(2);
+    });
+
+    it('a DRAFT create, an invite issue, activating a question, IN_PROGRESS, resuming a hold, an unchanged map', async () => {
+      const categories = await import('../app/categories/actions');
+      primeReads({ ...STORED_CATEGORY, questions: [{ id: 'q-1', routerRules: [{ optionKey: 'a', targetCategorySlug: 'klima' }] }] }, {
+        id: 'x',
+        slug: 'yeni',
+        url: 'https://example.test/davet',
+        expiresAt: '2026-10-20T00:00:00.000Z',
+      });
+      await outcome(() => categories.createCategoryAction(form({ ...CATEGORY_FIELDS, status: 'DRAFT' })));
+      await outcome(() =>
+        categories.providerInviteAction({ kind: 'idle' }, form({ intent: 'issue', categoryId: 'cat-1', categorySlug: 'klima' })),
+      );
+      await outcome(() => categories.updateQuestionStatusAction(form({ id: 'q-1', categorySlug: 'klima', isActive: 'true' })));
+      await outcome(() =>
+        categories.replaceRouterRulesAction(
+          form({ id: 'q-1', categorySlug: 'klima', routerOptionKey: 'a', routerTargetSlug: 'klima' }),
+        ),
+      );
+      const { changeSupportTicketStatusAction } = await import('../app/support/actions');
+      await outcome(() => changeSupportTicketStatusAction(form({ id: 't-1', status: 'IN_PROGRESS' })));
+      const { resumeShowcasePlacementAction } = await import('../app/showcase/placements/actions');
+      await outcome(() => resumeShowcasePlacementAction(form({ placementId: 'pl-1' })));
+      expect(writes()).toHaveLength(6);
+    });
+
+    it('a settings save that changes nothing (company: case and spaces only; refund window: same hours)', async () => {
+      const { saveCompanySettingsAction } = await import('../app/company-settings/actions');
+      primeReads(STORED_COMPANY_SETTINGS);
+      const company = await outcome(() =>
+        saveCompanySettingsAction(form({ ...COMPANY_SETTINGS_FIELDS, supportEmail: ' DESTEK@ornek.com.tr ', postalAddress: '   ' })),
+      );
+      expect(company.redirect).toBe('/company-settings?ok=saved');
+      const { saveOperationsSettingsAction } = await import('../app/operations-settings/actions');
+      primeReads({ unviewedOfferRefundWindowHours: 24 });
+      const hours = await outcome(() => saveOperationsSettingsAction(form({ unviewedOfferRefundWindowHours: '24' })));
+      expect(hours.redirect).toBe('/operations-settings?ok=saved');
+      expect(writes()).toHaveLength(2);
+    });
+  });
+
+  describe('Paket B: the delta is the server\'s, never the form\'s', () => {
+    it('a category save that moves the slug and the status needs both proofs; either alone is refused', async () => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      primeReads([STORED_CATEGORY]);
+      const fields = { ...CATEGORY_FIELDS, slug: 'klima-servisi', status: 'INACTIVE' };
+      const structure = await issueConfirmationProof('category.structure-update');
+      expect((await outcome(() => updateCategoryAction(form(fields, structure)))).redirect).toContain('CONFIRMATION_REQUIRED');
+      const status = await issueConfirmationProof('category.deactivate');
+      expect((await outcome(() => updateCategoryAction(form(fields, status)))).redirect).toContain('CONFIRMATION_REQUIRED');
+      expect(writes()).toEqual([]);
+
+      const both = form(fields);
+      both.append(CONFIRMATION_PROOF_FIELD, (await issueConfirmationProof('category.structure-update'))!);
+      both.append(CONFIRMATION_PROOF_FIELD, (await issueConfirmationProof('category.deactivate'))!);
+      await outcome(() => updateCategoryAction(both));
+      expect(writes()).toHaveLength(1);
+    });
+
+    it('the direction of a status move comes from the stored status: an activate proof does not close', async () => {
+      const { updateCategoryStatusAction } = await import('../app/categories/actions');
+      primeReads([STORED_CATEGORY]);
+      const activate = await issueConfirmationProof('category.activate');
+      const result = await outcome(() =>
+        updateCategoryStatusAction(form({ id: 'cat-1', slug: 'klima', status: 'DRAFT' }, activate)),
+      );
+      expect(result.redirect).toContain('CONFIRMATION_REQUIRED');
+      expect(writes()).toEqual([]);
+    });
+
+    it('a category, router or setting that cannot be read is treated as changed, and refused without a proof', async () => {
+      apiFetch.mockImplementation(async (_path: string, init?: { method?: string }) => {
+        if (!init?.method || init.method === 'GET') throw new Error('unreadable');
+        return { id: 'x' };
+      });
+      const categories = await import('../app/categories/actions');
+      expect((await outcome(() => categories.updateCategoryAction(form({ ...CATEGORY_FIELDS })))).redirect).toContain(
+        'CONFIRMATION_REQUIRED',
+      );
+      expect((await outcome(() => categories.updateCategoryStatusAction(form({ id: 'cat-1', slug: 'klima', status: 'ACTIVE' })))).redirect).toContain(
+        'CONFIRMATION_REQUIRED',
+      );
+      expect(
+        (
+          await outcome(() =>
+            categories.replaceRouterRulesAction(form({ id: 'q-1', categorySlug: 'klima', routerOptionKey: 'a', routerTargetSlug: 'klima' })),
+          )
+        ).redirect,
+      ).toContain('CONFIRMATION_REQUIRED');
+      const { saveCompanySettingsAction } = await import('../app/company-settings/actions');
+      expect((await outcome(() => saveCompanySettingsAction(form(COMPANY_SETTINGS_FIELDS)))).redirect).toContain('error=');
+      const { saveOperationsSettingsAction } = await import('../app/operations-settings/actions');
+      expect((await outcome(() => saveOperationsSettingsAction(form({ unviewedOfferRefundWindowHours: '24' })))).redirect).toContain(
+        'error=',
+      );
+      expect(writes()).toEqual([]);
+    });
+
+    it('a router question named under another category is judged as a change', async () => {
+      const { replaceRouterRulesAction } = await import('../app/categories/actions');
+      primeReads({ ...STORED_CATEGORY, questions: [] });
+      const result = await outcome(() =>
+        replaceRouterRulesAction(form({ id: 'q-1', categorySlug: 'klima', routerOptionKey: 'a', routerTargetSlug: 'klima' })),
+      );
+      expect(result.redirect).toContain('CONFIRMATION_REQUIRED');
+      expect(writes()).toEqual([]);
+    });
+
+    it('a suspension without a reason is refused before the proof is even looked at', async () => {
+      const { suspendShowcasePlacementAction } = await import('../app/showcase/placements/actions');
+      const proof = await issueConfirmationProof('showcase.placement-suspend');
+      const result = await outcome(() => suspendShowcasePlacementAction(form({ placementId: 'pl-1', note: '  kısa  ' }, proof)));
+      expect(result.redirect).toBe('/showcase/placements/pl-1?error=SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED');
+      expect(writes()).toEqual([]);
+      // Not spent by the refusal: it still opens the real suspension once.
+      await outcome(() => suspendShowcasePlacementAction(form({ placementId: 'pl-1', note: 'Şikâyet incelemesi için' }, proof)));
+      expect(writes()).toHaveLength(1);
+    });
   });
 
   it('Faz 2: the low-risk branches of the same actions stay direct — no proof asked, one write each', async () => {
@@ -1157,6 +1505,20 @@ describe('guarded server actions refuse a submission without a good proof, and w
 
 // ─────────────────────────── coverage ───────────────────────────
 
+/** The app-local `.ts` modules a file imports with a relative path (one level, no packages). */
+function localImports(path: string): string[] {
+  const root = resolve(__dirname, '..');
+  const dir = join(path, '..');
+  return [...read(path).matchAll(/from '(\.{1,2}\/[^']+)'/g)].flatMap((match) => {
+    const candidate = join(dir, `${match[1]}.ts`);
+    try {
+      return statSync(resolve(root, candidate)).isFile() ? [candidate] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
 describe('every ConfirmDialog is guarded on the server', () => {
   const tsx = walk('app').filter((path) => path.endsWith('.tsx'));
   const actions = walk('app')
@@ -1175,16 +1537,17 @@ describe('every ConfirmDialog is guarded on the server', () => {
         expect(CONFIRMATION_PROOF_KEYS as readonly string[], `${path}: ${key}`).toContain(key);
       }
     }
-    expect(dialogs).toBeGreaterThanOrEqual(37);
+    expect(dialogs).toBeGreaterThanOrEqual(44);
   });
 
   it('every key is used by a dialog and checked by an action before it writes', () => {
     const dialogs = tsx.map((path) => read(path)).join('\n');
     // A ConfirmGate (Paket A) names its proofs in its `evaluate` decision, in a
-    // client file that renders <ConfirmGate.
-    const gates = tsx
-      .map((path) => read(path))
-      .filter((source) => source.includes('<ConfirmGate'))
+    // client file that renders <ConfirmGate — or (Paket B) in a local module
+    // that file imports to work the decision out (`category-changes.ts`).
+    const gateFiles = tsx.filter((path) => read(path).includes('<ConfirmGate'));
+    const gates = gateFiles
+      .flatMap((path) => [read(path), ...localImports(path).map((imported) => read(imported))])
       .join('\n');
     for (const key of CONFIRMATION_PROOF_KEYS) {
       const asked = dialogs.includes(`proof="${key}"`) || gates.includes(`'${key}'`);

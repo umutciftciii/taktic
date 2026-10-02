@@ -315,7 +315,10 @@ test.describe('package refund request', () => {
       await signInStaff(makerActor, maker);
       await makerActor.gotoAdmin(`/support/${ticketId}`);
       await makerActor.page.locator('#support-refund-purchase').selectOption(purchase.id);
-      await makerActor.page.getByTestId('support-refund-open').click();
+      // Opening one mails the provider, so it asks first (Paket B, PK#13).
+      await confirmThrough(makerActor.page.getByTestId('support-refund-open'), 'Evet, iade isteği aç', async (dialog) => {
+        await expect(dialog.getByTestId('support-refund-open-impact')).toContainText('Hizmet verene e-posta gider');
+      });
       await expect(makerActor.page).toHaveURL(/\/package-refunds\/[^/?]+\?done=created$/);
       await confirmThrough(makerActor.page.getByTestId('package-refund-take'), 'Evet, işleme al');
       await expect(makerActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'UNDER_REVIEW');
