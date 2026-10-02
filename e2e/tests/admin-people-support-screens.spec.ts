@@ -273,7 +273,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       // No OFFERS_READ / PACKAGE_PURCHASES_READ either: the API carries no
       // offers or purchases, so there is no tab for them and no figure
       // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001).
-      await expect(tabs.getByRole('link')).toHaveText(['İşletme bilgileri']);
+      await expect(tabs.getByRole('link')).toHaveText(['İşletme bilgileri', 'Neler oldu']);
       await expect(page.getByTestId('provider-fact-credit')).toHaveCount(0);
       await expect(page.getByTestId('provider-fact-open-offers')).toHaveCount(0);
       await expect(page.getByTestId('provider-fact-purchases')).toHaveCount(0);
@@ -312,7 +312,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       // The request and offer history are REQUESTS_READ's and OFFERS_READ's
       // (API-ADMIN-CROSS-DOMAIN-PROJECTION-RBAC-001): CUSTOMERS_READ alone
       // opens the account and nothing it is joined to.
-      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim']);
+      await expect(tabs.getByRole('link')).toHaveText(['Profil ve iletişim', 'Neler oldu']);
       await expect(page.getByTestId('customer-fact-requests')).toHaveCount(0);
       await expect(page.getByTestId('customer-email-verification')).toBeVisible();
       for (const name of ['Hesabı pasife al', 'Şifre belirleme bağlantısı oluştur']) {

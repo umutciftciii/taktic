@@ -8,6 +8,8 @@ import {
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
 import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
+import { AuditPageQueryDto } from '../../common/admin-audit';
+import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isSuperAdmin, STAFF_ROLES } from '../auth/admin-permissions';
 import { AuthUser } from '../auth/auth.types';
@@ -379,13 +381,47 @@ export class UsersService {
       }
     }
 
-    const updated = await this.prisma.user.update({
-      where: { id: target.id },
-      data: { isActive: dto.isActive },
-      select: { id: true, isActive: true },
+    // ADMIN-ACTION-AUDIT-001: the change and its audit row commit together.
+    // Conditional on the value this request read, so two concurrent saves of
+    // the same switch produce one change and one row rather than two rows that
+    // both claim to have flipped it.
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.user.updateMany({
+        where: { id: target.id, isActive: target.isActive },
+        data: { isActive: dto.isActive },
+      });
+      if (changed.count === 1) {
+        await tx.accountStatusChange.create({
+          data: {
+            userId: target.id,
+            userRole: target.role,
+            fromActive: target.isActive,
+            toActive: dto.isActive,
+            reason: null,
+            actorId: actor.id,
+          },
+          select: { id: true },
+        });
+      }
+      return tx.user.findUniqueOrThrow({ where: { id: target.id }, select: { id: true, isActive: true } });
     });
+  }
 
-    return updated;
+  /**
+   * A staff account's status history, newest first (ADMIN-ACTION-AUDIT-001):
+   * every admin activate/deactivate recorded since the audit existed. The
+   * actor's e-mail follows `staffActorSelect` — this route's own permission
+   * is ADMIN_USERS_READ, so it is present.
+   */
+  async statusHistory(id: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    const user = await this.prisma.user.findFirst({
+      where: { id, role: { in: [...STAFF_ROLES] } },
+      select: { id: true },
+    });
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+    return readAccountStatusHistory(this.prisma, id, 'STAFF_ACCOUNT', query, viewer);
   }
 }
 

@@ -287,9 +287,12 @@ describe('no other route leaks an unreleased category', () => {
       (entry) => entry.permission === AdminPermission.CATALOG_READ,
     );
 
+    // ADMIN-ACTION-AUDIT-001 adds the category's own change log behind the
+    // same permission: it carries values the detail route already serves.
     expect(catalogueRoutes.map((entry) => `${entry.method} ${entry.path}`).sort()).toEqual([
       'GET /admin/categories',
       'GET /admin/categories/:slug',
+      'GET /admin/categories/:slug/history',
     ]);
   });
 });

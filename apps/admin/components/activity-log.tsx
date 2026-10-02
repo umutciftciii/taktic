@@ -24,14 +24,13 @@ const COLUMNS: DataColumn[] = [
 ];
 
 /**
- * A detail screen's "Neler oldu" tab (ADMIN-DESIGN-001 Faz 3F.1): the design's
- * Zaman · Yapılan iş · Yapan table.
+ * A detail screen's Zaman · Yapılan iş · Yapan table (ADMIN-DESIGN-001 Faz
+ * 3F.1), for events a screen assembles from the instants records store (an
+ * invitation issued, used or withdrawn).
  *
- * It draws only what the screen hands it, newest first, and the screen hands it
- * only instants the records themselves store (created, last changed, an
- * invitation issued, used or withdrawn). Where no change history is kept — the
- * catalogue tables have none — the footnote says so, so an operator never
- * reads "Son değişiklik" as the only change there ever was.
+ * It draws only what the screen hands it, newest first. A record with an audit
+ * trail is drawn by `AuditTimeline` instead (ADMIN-ACTION-AUDIT-001), which
+ * shows what changed and who changed it rather than when a row was last saved.
  */
 export function ActivityLog({
   entries,
@@ -85,32 +84,3 @@ export function ActivityLog({
     </SectionCard>
   );
 }
-
-/**
- * "Oluşturuldu" and, when it differs, "Son değişiklik" — the two instants every
- * catalogue row carries. A save that changed nothing still moves `updatedAt`,
- * so the second entry says *that* the record was saved, not *what* changed.
- */
-export function recordLifecycleEntries({
-  createdAt,
-  updatedAt,
-  created,
-  updated,
-}: {
-  createdAt: string;
-  updatedAt: string;
-  created: ReactNode;
-  updated: ReactNode;
-}): ActivityEntry[] {
-  const entries: ActivityEntry[] = [{ key: 'created', at: createdAt, title: created, actor: null }];
-  // Prisma stamps both columns with the same instant on create, so any later
-  // `updatedAt` is a save — however soon after the create it came.
-  if (Date.parse(updatedAt) > Date.parse(createdAt)) {
-    entries.push({ key: 'updated', at: updatedAt, title: updated, actor: null });
-  }
-  return entries;
-}
-
-/** The sentence under every catalogue "Neler oldu": what is and is not recorded. */
-export const NO_CHANGE_HISTORY_NOTE =
-  'Bu kayıt için alan değişikliklerinin geçmişi tutulmuyor; burada yalnız kayıtların kendi tuttuğu zamanlar görünür. "Son güncellendi" satırı kaydın en son ne zaman değiştiğini söyler, neyin değiştiğini ve kimin değiştirdiğini söylemez.';

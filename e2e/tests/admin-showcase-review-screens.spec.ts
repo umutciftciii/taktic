@@ -537,7 +537,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(page.getByTestId('showcase-package-panel-bilgiler')).toBeVisible();
       await expect(page.getByTestId('showcase-package-sales')).toHaveCount(0);
       await reader.gotoAdmin(`/showcase/packages/${pkg.id}?tab=gecmis`);
-      await expect(page.getByTestId('showcase-package-activity')).toContainText('Paket oluşturuldu');
+      await expect(page.getByTestId('showcase-package-activity')).toContainText('değişiklik yapılmadı');
       // The new-package window is not a way in either.
       await reader.gotoAdmin('/showcase/packages?paket=yeni');
       await expect(page.getByTestId('showcase-package-dialog')).toHaveCount(0);
@@ -661,10 +661,15 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(page).toHaveURL(/deactivated=1/);
       await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
 
-      // "Neler oldu" is the row's own instants, and says no history is kept.
+      // "Neler oldu" is the package's audit (ADMIN-ACTION-AUDIT-001): each
+      // save above with its field diff, newest first.
       await staff.gotoAdmin(`/showcase/packages/${pkg.id}?tab=gecmis`);
-      await expect(page.getByTestId('showcase-package-activity')).toContainText('Paket son güncellendi');
-      await expect(page.getByTestId('showcase-package-activity-footnote')).toContainText('geçmişi tutulmuyor');
+      const activity = page.getByTestId('showcase-package-activity');
+      await expect(activity.getByTestId('audit-row')).toHaveCount(4);
+      await expect(activity.getByTestId('audit-row').first()).toContainText('Durumu değişti');
+      await expect(activity.getByTestId('audit-row').first()).toContainText('Aktif → Pasif');
+      await expect(activity).toContainText('E2E Faz3C Paket (yeni ad)');
+      await expect(page.getByTestId('showcase-package-activity-footnote')).toContainText('kaydedilmediği için');
 
       // An old window link lands on the screen; one to a package that does
       // not exist says so on the list.

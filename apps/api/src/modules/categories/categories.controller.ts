@@ -147,14 +147,14 @@ export class CategoriesController {
   @Patch(':id/status')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CATEGORIES_STATUS)
-  updateCategoryStatus(@Param('id') id: string, @Body() dto: UpdateCategoryStatusDto) {
+  updateCategoryStatus(@Param('id') id: string, @Body() dto: UpdateCategoryStatusDto, @CurrentUser() user: AuthUser) {
     const status = resolveRequestedStatus(dto);
 
     if (status === undefined) {
       throw new BadRequestException('status veya isActive alanlarından biri gereklidir');
     }
 
-    return this.categoriesService.updateCategoryStatus(id, status);
+    return this.categoriesService.updateCategoryStatus(id, status, user);
   }
 
   @Delete(':id')

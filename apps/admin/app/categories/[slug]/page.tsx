@@ -12,6 +12,8 @@ import {
   apiFetch,
   fetchOrNotFound,
   Category,
+  formatDateTime,
+  getCategoryHistory,
   ProviderInviteList,
   Question,
   requireAdmin,
@@ -21,12 +23,13 @@ import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-pr
 import { rethrowNextControlFlow } from '../../../lib/next-control-flow';
 import type { CategoryPlacementImpact } from '../category-changes';
 import { formatCount } from '../../../lib/pagination';
-import { resolveTab } from '../../../lib/list-query';
-import { ActivityLog, NO_CHANGE_HISTORY_NOTE } from '../../../components/activity-log';
+import { parsePage, resolveTab } from '../../../lib/list-query';
+import { ActivityLog } from '../../../components/activity-log';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { DetailHeader } from '../../../components/detail-header';
 import type { SummaryItem } from '../../../components/summary-strip';
 import { Tabs, type TabItem } from '../../../components/tabs';
-import { categoryActivity } from './category-activity';
+import { inviteActivity } from './category-activity';
 import {
   KIND_HINTS,
   KIND_LABELS,
@@ -57,8 +60,10 @@ import {
  *   on a router, what a router is.
  * - Sorular (QUESTIONS_READ): the routing map on a router and the question set.
  * - Hizmet veren davetleri (a service + PROVIDER_INVITES_READ): the desk.
- * - Neler oldu: the instants the category, its questions and its invitations
- *   carry. No change log exists for them, and the tab says so.
+ * - Neler oldu: the category's change log (ADMIN-ACTION-AUDIT-001) — each
+ *   create, edit and status move with its field diff and its operator — and,
+ *   for a service, its invitations with who issued and who withdrew them.
+ *   Question edits are not audited, and the tab says so.
  *
  * A tab the session may not read is not drawn, and asking for it by URL shows
  * the first tab. The question actions revalidate the page without a redirect,
@@ -87,7 +92,7 @@ import {
 
 type CategoryDetailPageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string; error?: string }>;
+  searchParams: Promise<{ tab?: string; error?: string; gecmisSayfa?: string }>;
 };
 
 type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
@@ -95,7 +100,7 @@ type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
 export default async function CategoryDetailPage({ params, searchParams }: CategoryDetailPageProps) {
   const { can } = await requireAdmin('CATALOG_READ');
   const { slug } = await params;
-  const { tab, error } = await searchParams;
+  const { tab, error, gecmisSayfa } = await searchParams;
   // Each control below is offered only to a session the API would let through;
   // the API still checks every one of them.
   const canWriteCategory = can('CATEGORIES_WRITE');
@@ -208,6 +213,9 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
     tabs.map((item) => item.key as TabKey),
     '',
   );
+  // ADMIN-ACTION-AUDIT-001: the category's change log, read on its own tab.
+  const history =
+    activeTab === 'gecmis' ? await getCategoryHistory(category.slug, parsePage(gecmisSayfa)) : null;
 
   return (
     <main className="catalog-page catalog-detail-page">
@@ -332,26 +340,23 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
         </div>
       ) : null}
 
-      {activeTab === 'gecmis' ? (
+      {activeTab === 'gecmis' && history ? (
         <div className="detail-tab-panel" data-testid="category-panel-gecmis">
-          <ActivityLog
-            entries={categoryActivity({
-              category,
-              questions: questions ? sortedQuestions : null,
-              invites: invites ? invites.invites : null,
-            })}
-            meta={
-              questions && invites
-                ? 'Kategori, soruları ve davetleri'
-                : questions
-                  ? 'Kategori ve soruları'
-                  : invites
-                    ? 'Kategori ve davetleri'
-                    : 'Kategori kaydı'
-            }
-            footnote={NO_CHANGE_HISTORY_NOTE}
+          <AuditTimeline
+            page={history}
+            meta={category.createdAt ? `Kategori ${formatDateTime(category.createdAt)} tarihinde oluşturuldu` : undefined}
+            empty="Kayıt tutulmaya başladığından beri bu kategoride değişiklik yapılmadı."
+            footnote={`${AUDIT_SINCE_NOTE} Soru değişiklikleri bu geçmişte yer almaz.`}
             testId="category-activity"
+            pager={{ path, params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
           />
+          {invites ? (
+            <ActivityLog
+              entries={inviteActivity(invites.invites)}
+              meta="Davet bağlantılarının kayıtlı zamanları"
+              testId="category-invite-activity"
+            />
+          ) : null}
         </div>
       ) : null}
     </main>

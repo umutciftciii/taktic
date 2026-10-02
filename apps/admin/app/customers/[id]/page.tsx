@@ -18,7 +18,9 @@ import {
   requireAdmin,
   statusBadgeClass,
   statusLabel,
+  getCustomerStatusHistory,
 } from '../../../lib/api';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
@@ -29,7 +31,7 @@ import { SectionCard } from '../../../components/section-card';
 import type { SummaryItem } from '../../../components/summary-strip';
 import { Tabs, type TabItem } from '../../../components/tabs';
 import { customerVerificationBadges, verificationBadgeClass } from '../../../lib/customer-verification';
-import { resolveTab } from '../../../lib/list-query';
+import { parsePage, resolveTab } from '../../../lib/list-query';
 import { createCustomerNoteAction, updateCustomerStatusAction } from '../actions';
 import { ActivationLinkForm } from './activation-link-form';
 import { CustomerActivateConsequence } from './customer-activate-consequence';
@@ -56,11 +58,11 @@ import { CustomerActivateConsequence } from './customer-activate-consequence';
 
 type CustomerDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; statusError?: string }>;
+  searchParams: Promise<{ tab?: string; statusError?: string; gecmisSayfa?: string }>;
 };
 
-type TabKey = '' | 'talepler' | 'teklifler' | 'notlar';
-const TAB_KEYS: readonly TabKey[] = ['', 'talepler', 'teklifler', 'notlar'];
+type TabKey = '' | 'talepler' | 'teklifler' | 'notlar' | 'gecmis';
+const TAB_KEYS: readonly TabKey[] = ['', 'talepler', 'teklifler', 'notlar', 'gecmis'];
 
 /** Which linked screens this session may open; a link it cannot follow is plain text. */
 type RowLinks = { requests: boolean; offers: boolean; providers: boolean };
@@ -154,6 +156,10 @@ export default async function AdminCustomerDetailPage({
         : Promise.resolve<CustomerNotesResponse | null>(null),
     ]),
   );
+  // ADMIN-ACTION-AUDIT-001: the status history, read only when its tab is open.
+  const historyPage = parsePage(search.gecmisSayfa);
+  const statusHistory =
+    activeTab === 'gecmis' ? await getCustomerStatusHistory(id, historyPage) : null;
   const { customer, metrics } = response;
   // Absent, not empty, without the permission; the tabs above are gone then.
   const recentRequests = response.recentRequests ?? [];
@@ -185,6 +191,7 @@ export default async function AdminCustomerDetailPage({
     ...(canReadNotes
       ? [{ key: 'notlar', label: 'Notlar', count: notes.length, testId: 'customer-tab-notlar' }]
       : []),
+    { key: 'gecmis', label: 'Neler oldu', testId: 'customer-tab-gecmis' },
   ];
 
   const facts: SummaryItem[] = [
@@ -501,6 +508,18 @@ export default async function AdminCustomerDetailPage({
               </ul>
             )}
           </SectionCard>
+        </div>
+      ) : null}
+      {activeTab === 'gecmis' && statusHistory ? (
+        <div className="detail-panel" data-testid="customer-panel-gecmis">
+          <AuditTimeline
+            page={statusHistory}
+            meta="Hesabın aktif / pasif değişiklikleri"
+            empty="Bu hesabın durumu kayıt tutulmaya başladığından beri değiştirilmedi."
+            footnote={AUDIT_SINCE_NOTE}
+            testId="customer-status-history"
+            pager={{ path, params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
+          />
         </div>
       ) : null}
     </main>

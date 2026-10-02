@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailFormFooter, LockedField } from '../../../components/detail-form-footer';
 import { DetailHeader } from '../../../components/detail-header';
@@ -9,11 +10,13 @@ import {
   fetchOrNotFound,
   formatDateTime,
   getAdminRole,
+  getAdminRoleAudit,
   listAdminPermissionCatalogue,
   requireSuperAdmin,
   userRoleBadgeClass,
   userRoleLabel,
 } from '../../../lib/api';
+import { parsePage } from '../../../lib/list-query';
 import { groupPermissions } from '../../../lib/permission-groups';
 import { criticalPermissionsIn, permissionLines, roleReach } from '../../../lib/permission-model';
 import {
@@ -25,7 +28,7 @@ import { RolePermissionsForm, RoleStatusForm } from '../role-forms';
 
 type RoleDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; ok?: string }>;
+  searchParams: Promise<{ error?: string; ok?: string; gecmisSayfa?: string }>;
 };
 
 const OK_MESSAGES: Record<string, string> = {
@@ -65,10 +68,13 @@ const HOLDER_COLUMNS: DataColumn[] = [
  */
 export default async function AdminRoleDetailPage({ params, searchParams }: RoleDetailPageProps) {
   await requireSuperAdmin();
-  const [{ id }, { error, ok }] = await Promise.all([params, searchParams]);
-  const [role, catalogue] = await Promise.all([
+  const [{ id }, { error, ok, gecmisSayfa }] = await Promise.all([params, searchParams]);
+  const historyPage = parsePage(gecmisSayfa);
+  const [role, catalogue, history] = await Promise.all([
     fetchOrNotFound(() => getAdminRole(id)),
     listAdminPermissionCatalogue(),
+    // ADMIN-ACTION-AUDIT-001: the role's own audit rows, root-only like the page.
+    fetchOrNotFound(() => getAdminRoleAudit(id, historyPage)),
   ]);
   const groups = groupPermissions(catalogue.permissions);
   const reach = roleReach(role.assignments);
@@ -223,6 +229,15 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
             )}
           </SectionCard>
         </div>
+
+        <AuditTimeline
+          page={history}
+          meta="Rolde ve atamalarında yapılan değişiklikler"
+          footnote={`${AUDIT_SINCE_NOTE} Ad ve açıklama değişikliklerinde yalnız değişen alanın adı kaydedilir; eski değer kaydedilmez.`}
+          testId="role-history"
+          perspective="role"
+          pager={{ path: `/roles/${role.id}`, params: {}, pageParam: 'gecmisSayfa' }}
+        />
       </div>
     </main>
   );

@@ -53,6 +53,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/campaigns', permission: AdminPermission.CAMPAIGNS_READ },
   { method: 'GET', path: '/admin/categories', permission: AdminPermission.CATALOG_READ },
   { method: 'GET', path: '/admin/categories/:slug', permission: AdminPermission.CATALOG_READ },
+  { method: 'GET', path: '/admin/categories/:slug/history', permission: AdminPermission.CATALOG_READ },
   { method: 'POST', path: '/admin/campaigns', permission: AdminPermission.CAMPAIGNS_WRITE },
   { method: 'GET', path: '/admin/campaigns/:id', permission: AdminPermission.CAMPAIGNS_READ },
   { method: 'POST', path: '/admin/campaigns/:id/end', permission: AdminPermission.CAMPAIGNS_LIFECYCLE },
@@ -95,6 +96,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   // CMP-006 PR-C.1: the operator's read of one provider's reviews (the provider panel's route stays ownership-guarded).
   { method: 'GET', path: '/provider-reviews/by-provider/:providerId', permission: AdminPermission.PROVIDER_REVIEWS_READ },
   { method: 'GET', path: '/admin/offer-packages/:id', permission: AdminPermission.CREDIT_PACKAGES_READ },
+  { method: 'GET', path: '/admin/offer-packages/:id/history', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/offer-packages/unlimited-eligible-categories', permission: AdminPermission.CREDIT_PACKAGES_READ },
   { method: 'GET', path: '/admin/showcase/cards', permission: AdminPermission.SHOWCASE_CARDS_READ },
   { method: 'GET', path: '/admin/showcase/cards/:cardId', permission: AdminPermission.SHOWCASE_CARDS_READ },
@@ -105,6 +107,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/showcase/packages', permission: AdminPermission.SHOWCASE_PACKAGES_READ },
   { method: 'POST', path: '/admin/showcase/packages', permission: AdminPermission.SHOWCASE_PACKAGES_WRITE },
   { method: 'GET', path: '/admin/showcase/packages/:packageId', permission: AdminPermission.SHOWCASE_PACKAGES_READ },
+  { method: 'GET', path: '/admin/showcase/packages/:packageId/history', permission: AdminPermission.SHOWCASE_PACKAGES_READ },
   { method: 'PATCH', path: '/admin/showcase/packages/:packageId', permission: AdminPermission.SHOWCASE_PACKAGES_WRITE },
   { method: 'GET', path: '/admin/showcase/placements', permission: AdminPermission.SHOWCASE_PLACEMENTS_READ },
   { method: 'GET', path: '/admin/showcase/placements/:placementId', permission: AdminPermission.SHOWCASE_PLACEMENTS_READ },
@@ -133,6 +136,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PATCH', path: '/categories/:id', permission: AdminPermission.CATEGORIES_WRITE, orInstead: [AdminPermission.CATEGORIES_STATUS] },
   { method: 'PATCH', path: '/categories/:id/status', permission: AdminPermission.CATEGORIES_STATUS },
   { method: 'GET', path: '/company-settings', permission: AdminPermission.COMPANY_SETTINGS_READ },
+  { method: 'GET', path: '/company-settings/history', permission: AdminPermission.COMPANY_SETTINGS_READ },
   { method: 'PUT', path: '/company-settings', permission: AdminPermission.COMPANY_SETTINGS_WRITE },
   { method: 'POST', path: '/credit-packages', permission: AdminPermission.CREDIT_PACKAGES_WRITE },
   // BUG-RBAC-STATUS-001: as `PATCH /categories/:id`, with `isActive` as the status.
@@ -144,6 +148,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/customers/:id/notes', permission: AdminPermission.CUSTOMER_NOTES_READ },
   { method: 'POST', path: '/customers/:id/notes', permission: AdminPermission.CUSTOMER_NOTES_WRITE },
   { method: 'PATCH', path: '/customers/:id/status', permission: AdminPermission.CUSTOMERS_STATUS },
+  { method: 'GET', path: '/customers/:id/status-history', permission: AdminPermission.CUSTOMERS_READ },
   { method: 'GET', path: '/dashboard/admin-summary', permission: AdminPermission.DASHBOARD_READ },
   { method: 'GET', path: '/finance/analytics', permission: AdminPermission.FINANCE_READ },
   { method: 'GET', path: '/finance/credit-ledger', permission: AdminPermission.FINANCE_LEDGER_READ },
@@ -180,6 +185,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PATCH', path: '/providers/:id', permission: AdminPermission.PROVIDERS_WRITE },
   { method: 'PATCH', path: '/providers/:id/status', permission: AdminPermission.PROVIDERS_MODERATE },
   { method: 'GET', path: '/providers/:providerId/admin-detail', permission: AdminPermission.PROVIDERS_READ_DETAIL },
+  { method: 'GET', path: '/providers/:providerId/status-history', permission: AdminPermission.PROVIDERS_READ_DETAIL },
   { method: 'POST', path: '/providers/:providerId/claim-invitations', permission: AdminPermission.PROVIDER_CLAIM_INVITE_ISSUE },
   { method: 'POST', path: '/providers/:providerId/credits/deduct', permission: AdminPermission.CREDITS_DEDUCT },
   { method: 'POST', path: '/providers/:providerId/credits/grant', permission: AdminPermission.CREDITS_GRANT },
@@ -213,6 +219,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/service-requests/reports', permission: AdminPermission.REQUEST_REPORTS_READ },
   { method: 'GET', path: '/users', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id', permission: AdminPermission.ADMIN_USERS_READ },
+  { method: 'GET', path: '/users/:id/status-history', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'PATCH', path: '/users/:id/status', permission: AdminPermission.ADMIN_USERS_STATUS },
 ];
 
@@ -232,6 +239,9 @@ export const ROOT_ONLY_ROUTES: readonly { method: AdminRoutePermission['method']
   { method: 'GET', path: '/admin/roles' },
   { method: 'POST', path: '/admin/roles' },
   { method: 'GET', path: '/admin/roles/:id' },
+  // ADMIN-ACTION-AUDIT-001: the audit of root-only data is root-only too.
+  { method: 'GET', path: '/admin/roles/:id/audit' },
+  { method: 'GET', path: '/admin/users/:userId/role-audit' },
   { method: 'PATCH', path: '/admin/roles/:id' },
   { method: 'PUT', path: '/admin/roles/:id/permissions' },
   { method: 'GET', path: '/admin/permissions' },

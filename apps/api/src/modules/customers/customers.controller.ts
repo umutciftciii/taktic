@@ -8,6 +8,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { CustomerActivationService } from '../customer-activation/customer-activation.service';
 import { CreateCustomerActivationLinkDto } from '../customer-activation/dto/create-customer-activation-link.dto';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { CustomersService } from './customers.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import { ListCustomersDto } from './dto/list-customers.dto';
@@ -56,8 +57,16 @@ export class CustomersController {
   @Patch(':id/status')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CUSTOMERS_STATUS)
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateCustomerStatusDto) {
-    return this.customersService.updateStatus(id, dto);
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateCustomerStatusDto, @CurrentUser() user: AuthUser) {
+    return this.customersService.updateStatus(id, dto, user);
+  }
+
+  /** ADMIN-ACTION-AUDIT-001: who switched this customer on or off, and when. */
+  @Get(':id/status-history')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CUSTOMERS_READ)
+  statusHistory(@Param('id') id: string, @Query() query: AuditPageQueryDto, @CurrentUser() user: AuthUser) {
+    return this.customersService.statusHistory(id, query, user);
   }
 
   @Post(':id/activation-link')

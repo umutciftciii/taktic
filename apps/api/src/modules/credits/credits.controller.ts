@@ -11,6 +11,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminPermission, UserRole } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -74,6 +75,14 @@ export class CreditsController {
     return this.creditsService.getPackageForAdmin(id);
   }
 
+  /** ADMIN-ACTION-AUDIT-001: the package's recorded creates, edits and status switches. */
+  @Get('admin/offer-packages/:id/history')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.CREDIT_PACKAGES_READ)
+  getAdminPackageHistory(@Param('id') id: string, @Query() query: AuditPageQueryDto, @CurrentUser() user: AuthUser) {
+    return this.creditsService.getCreditPackageHistory(id, query, user);
+  }
+
   @Post('credit-packages')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CREDIT_PACKAGES_WRITE)
@@ -99,8 +108,12 @@ export class CreditsController {
   @Patch('credit-packages/:id/status')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.CREDIT_PACKAGES_STATUS)
-  updateCreditPackageStatus(@Param('id') id: string, @Body() dto: UpdateCreditPackageStatusDto) {
-    return this.creditsService.updateCreditPackageStatus(id, dto.isActive);
+  updateCreditPackageStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateCreditPackageStatusDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.creditsService.updateCreditPackageStatus(id, dto.isActive, user);
   }
 
   /**

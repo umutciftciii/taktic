@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminPermission, UserRole } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { WEB_SURFACE_CHANNEL } from '../../common/web-surface-channel';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
@@ -146,6 +147,22 @@ export class ProvidersController {
     return this.providersService.withdrawProviderOffer(providerId, offerId);
   }
 
+  /**
+   * ADMIN-ACTION-AUDIT-001: the provider's admin status transitions. Same
+   * permission as the detail, which already shows the current note and
+   * rejection reason these rows carry.
+   */
+  @Get(':providerId/status-history')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.PROVIDERS_READ_DETAIL)
+  getProviderStatusHistory(
+    @Param('providerId') providerId: string,
+    @Query() query: AuditPageQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.providersService.getProviderStatusHistory(providerId, query, user);
+  }
+
   @Get(':providerId/admin-detail')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.PROVIDERS_READ_DETAIL)
@@ -250,7 +267,7 @@ export class ProvidersController {
   @Patch(':id/status')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.PROVIDERS_MODERATE)
-  updateProviderStatus(@Param('id') id: string, @Body() dto: UpdateProviderStatusDto) {
-    return this.providersService.updateProviderStatus(id, dto);
+  updateProviderStatus(@Param('id') id: string, @Body() dto: UpdateProviderStatusDto, @CurrentUser() user: AuthUser) {
+    return this.providersService.updateProviderStatus(id, dto, user);
   }
 }

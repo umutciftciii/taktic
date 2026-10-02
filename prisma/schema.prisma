@@ -516,6 +516,15 @@ model User {
   packageRefundRequestsRejected   PackageRefundRequest[]               @relation("PackageRefundRequestRejectedBy")
   packageRefundRequestsFailed     PackageRefundRequest[]               @relation("PackageRefundRequestSettlementFailedBy")
   packageRefundRequestEvents      PackageRefundRequestEvent[]          @relation("PackageRefundRequestEventActor")
+  /// ADMIN-ACTION-AUDIT-001. Append-only audit rows this account is the
+  /// subject or the author of. Restrict on the other side, as for every audit
+  /// table: who changed what outlives the account that did it.
+  accountStatusChanges            AccountStatusChange[]                @relation("AccountStatusChangeTarget")
+  accountStatusChangesMade        AccountStatusChange[]                @relation("AccountStatusChangeActor")
+  providerStatusChangesMade       ProviderStatusChange[]               @relation("ProviderStatusChangeActor")
+  companySettingsChanges          CompanySettingsChange[]              @relation("CompanySettingsChangeActor")
+  catalogAuditEntries             CatalogAuditLog[]                    @relation("CatalogAuditActor")
+  revokedProviderInvites          ProviderInviteToken[]                @relation("ProviderInviteTokenRevokedBy")
 
   @@index([role])
   @@index([isActive])
@@ -1369,6 +1378,8 @@ model ProviderProfile {
   promotionEligibilityHolds       PromotionEligibilityHold[]
   promotionEligibilityReviews     PromotionEligibilityReview[]
 
+  /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
+  statusChanges            ProviderStatusChange[]
   @@index([status])
   @@index([city])
   @@index([district])
@@ -2710,14 +2721,25 @@ model ProviderInviteToken {
   revokedAt   DateTime?
   /// The SUPER_ADMIN who issued it. NULL only if that account is later deleted.
   createdById String?
+  /// The operator who withdrew it (ADMIN-ACTION-AUDIT-001), written in the
+  /// same statement as `revokedAt`.
+  ///
+  /// NULL on every link withdrawn before this column existed, deliberately:
+  /// nobody recorded who did it, and backfilling a name would invent one. The
+  /// admin screen says "Bilinmiyor" for those. A CHECK keeps it from ever being
+  /// set on a link that is not withdrawn. Restrict, like every other "who did
+  /// this" column on an audit-bearing row.
+  revokedById String?
   createdAt   DateTime  @default(now())
 
   category  ServiceCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   createdBy User?           @relation("ProviderInviteTokenCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  revokedBy User?           @relation("ProviderInviteTokenRevokedBy", fields: [revokedById], references: [id], onDelete: Restrict)
 
   /// The admin list: "this category's invitations, newest first".
   @@index([categoryId, createdAt])
   @@index([createdById])
+  @@index([revokedById])
   @@index([expiresAt])
 }
 
@@ -5369,4 +5391,124 @@ model PromotionEligibilityReview {
 
   @@index([providerId, decidedAt])
   @@index([decidedById])
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN-ACTION-AUDIT-001 — admin action audit.
+//
+// Domain tables rather than one generic log: each records exactly the facts of
+// its own domain (a status pair, a field diff), and the read side projects all
+// of them into one shape (`AdminAuditEntry`, apps/api/src/common/admin-audit.ts)
+// that the admin screens draw with one timeline. Nothing here copies an event
+// another table already records — role changes stay in AdminRoleAuditLog.
+//
+// Every table is append-only: a trigger refuses UPDATE and DELETE (TRUNCATE,
+// which only test harnesses issue, does not fire row triggers). Rows are
+// written in the same transaction as the change they describe, never for a
+// save that changed nothing, and never backfilled — history before this
+// migration was not recorded and is not invented.
+// ---------------------------------------------------------------------------
+
+/// One admin change to an account's `isActive` — a staff account
+/// (`PATCH /users/:id/status`) or a customer (`PATCH /customers/:id/status`).
+///
+/// One table for both because the fact is one column on one table (User); the
+/// role at the moment of the change is kept so each screen reads only its own
+/// kind. A CHECK refuses a row whose two values are equal: a no-op is not a
+/// change. `reason` is NULL because neither route accepts one today — the
+/// column exists so a reason, once collected, has a place that is not invented.
+model AccountStatusChange {
+  id         String   @id @default(cuid())
+  userId     String
+  /// The account's role when the change was made.
+  userRole   UserRole
+  fromActive Boolean
+  toActive   Boolean
+  reason     String?
+  actorId    String
+  createdAt  DateTime @default(now())
+
+  user  User @relation("AccountStatusChangeTarget", fields: [userId], references: [id], onDelete: Restrict)
+  actor User @relation("AccountStatusChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt, id])
+  @@index([actorId])
+}
+
+/// One admin transition of a provider's status (`PATCH /providers/:id/status`).
+///
+/// Only real transitions: re-saving the same status (to change a note) writes
+/// none, and a CHECK refuses equal values. The note and the rejection reason
+/// are the values that request wrote — never later edits.
+model ProviderStatusChange {
+  id              String         @id @default(cuid())
+  providerId      String
+  fromStatus      ProviderStatus
+  toStatus        ProviderStatus
+  moderationNote  String?
+  rejectionReason String?
+  actorId         String
+  createdAt       DateTime       @default(now())
+
+  provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  actor    User            @relation("ProviderStatusChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, createdAt, id])
+  @@index([actorId])
+}
+
+/// One save of CompanySettings that changed something: only the fields that
+/// changed, each as `{ field, from, to }` (`from` NULL on the first save).
+///
+/// Business facts only — the legal name, the support address, the postal
+/// address. No transport, key or sender setting is reachable from here, and
+/// none may be added: those are deployment configuration, not company details.
+model CompanySettingsChange {
+  id        String   @id @default(cuid())
+  changes   Json
+  actorId   String
+  createdAt DateTime @default(now())
+
+  actor User @relation("CompanySettingsChangeActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt, id])
+  @@index([actorId])
+}
+
+/// Which catalogue record a CatalogAuditLog row describes.
+enum CatalogAuditEntity {
+  CATEGORY
+  CREDIT_PACKAGE
+  SHOWCASE_PACKAGE
+}
+
+/// What happened to it. STATUS_CHANGED is a save whose only changes are the
+/// record's status (category status, a package's isActive); UPDATED is any
+/// other save that changed something.
+enum CatalogAuditAction {
+  CREATED
+  UPDATED
+  STATUS_CHANGED
+}
+
+/// One admin create or change of a category, credit package or showcase
+/// package, as a readable structured diff: `changes` is an array of
+/// `{ field, from, to }`, from the database values before and after.
+///
+/// `entityId` deliberately has no foreign key. A category can be hard-deleted
+/// when nothing references it, and its history must neither block that nor be
+/// deleted with it; the history of a deleted record stays readable by id.
+model CatalogAuditLog {
+  id         String             @id @default(cuid())
+  entityType CatalogAuditEntity
+  entityId   String
+  action     CatalogAuditAction
+  changes    Json
+  actorId    String
+  createdAt  DateTime           @default(now())
+
+  actor User @relation("CatalogAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId, createdAt, id])
+  @@index([actorId])
 }

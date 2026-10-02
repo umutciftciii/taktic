@@ -12,6 +12,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -83,8 +84,8 @@ export class AdminShowcasePlacementsController {
   @Post('packages')
   @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_WRITE)
   @HttpCode(HttpStatus.CREATED)
-  createPackage(@Body() dto: CreateShowcasePackageDto) {
-    return this.packages.create(dto);
+  createPackage(@Body() dto: CreateShowcasePackageDto, @CurrentUser() user: AuthUser) {
+    return this.packages.create(dto, user);
   }
 
   @Patch('packages/:packageId')
@@ -92,8 +93,20 @@ export class AdminShowcasePlacementsController {
   updatePackage(
     @Param('packageId') packageId: string,
     @Body() dto: UpdateShowcasePackageDto,
+    @CurrentUser() user: AuthUser,
   ) {
-    return this.packages.update(packageId, dto);
+    return this.packages.update(packageId, dto, user);
+  }
+
+  /** ADMIN-ACTION-AUDIT-001: the package's recorded creates and edits. */
+  @Get('packages/:packageId/history')
+  @RequiresPermission(AdminPermission.SHOWCASE_PACKAGES_READ)
+  getPackageHistory(
+    @Param('packageId') packageId: string,
+    @Query() query: AuditPageQueryDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.packages.history(packageId, query, user);
   }
 
   @Get('placements')

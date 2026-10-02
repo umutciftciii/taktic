@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import {
   AdminPermission,
+  CatalogAuditEntity,
   Prisma,
   ProviderStatus,
   ServiceCategory,
@@ -16,6 +17,8 @@ import {
   ServiceCategoryStatus,
   ShowcasePlacementSuspendReason,
 } from '@prisma/client';
+import { AuditPageQueryDto } from '../../common/admin-audit';
+import { categoryAuditSnapshot, readCatalogAudit, recordCatalogAudit } from '../../common/catalog-audit';
 import { runSerializable } from '../../common/serializable-transaction';
 import type { AuthUser } from '../auth/auth.types';
 import { assertDeltaPermissions } from '../auth/delta-permissions';
@@ -679,7 +682,7 @@ export class CategoriesService {
    * ACTIVE, as it always has, and therefore needs both: the default can no
    * longer be used to publish without the permission.
    */
-  async createCategory(dto: CreateCategoryDto, actor: Pick<AuthUser, 'role' | 'permissions'>) {
+  async createCategory(dto: CreateCategoryDto, actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>) {
     // `isActive` is the pre-taxonomy spelling of the same switch; ACTIVE is
     // what a payload that mentions neither has always meant.
     const status = resolveRequestedStatus(dto) ?? ServiceCategoryStatus.ACTIVE;
@@ -702,30 +705,41 @@ export class CategoriesService {
     assertEnrollmentFieldIsWritable(dto.providerEnrollmentOpen, { kind, status });
 
     try {
-      return await this.prisma.serviceCategory.create({
-        data: {
-          name: normalizeRequiredString(dto.name, 'Category name'),
-          slug: normalizeSlug(dto.slug),
-          description: normalizeNullableString(dto.description),
-          offerCreditCost: dto.offerCreditCost,
-          parentId,
-          kind,
-          status,
-          // Absent means closed, which is the column default and the safe one:
-          // a category nobody has opened recruits nobody.
-          providerEnrollmentOpen: dto.providerEnrollmentOpen ?? false,
-          // Opt-in, always. A newly created or newly imported category is never
-          // sellable as part of an unlimited package until somebody says so.
-          unlimitedPackageEligible: dto.unlimitedPackageEligible ?? false,
-          // Written together, never one without the other: see
-          // ServiceCategoryStatus in the schema.
-          isActive: isActiveFor(status),
-          imageUrl: normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl') ?? null,
-          coverImageUrl:
-            normalizeCategoryImageUrl(dto.coverImageUrl, 'coverImageUrl') ?? null,
-          iconKey: normalizeCategoryIconKey(dto.iconKey) ?? null,
-          sortOrder: dto.sortOrder ?? 0,
-        },
+      // ADMIN-ACTION-AUDIT-001: the row and its CREATED audit entry commit together.
+      return await this.prisma.$transaction(async (tx) => {
+        const created = await tx.serviceCategory.create({
+          data: {
+            name: normalizeRequiredString(dto.name, 'Category name'),
+            slug: normalizeSlug(dto.slug),
+            description: normalizeNullableString(dto.description),
+            offerCreditCost: dto.offerCreditCost,
+            parentId,
+            kind,
+            status,
+            // Absent means closed, which is the column default and the safe one:
+            // a category nobody has opened recruits nobody.
+            providerEnrollmentOpen: dto.providerEnrollmentOpen ?? false,
+            // Opt-in, always. A newly created or newly imported category is never
+            // sellable as part of an unlimited package until somebody says so.
+            unlimitedPackageEligible: dto.unlimitedPackageEligible ?? false,
+            // Written together, never one without the other: see
+            // ServiceCategoryStatus in the schema.
+            isActive: isActiveFor(status),
+            imageUrl: normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl') ?? null,
+            coverImageUrl:
+              normalizeCategoryImageUrl(dto.coverImageUrl, 'coverImageUrl') ?? null,
+            iconKey: normalizeCategoryIconKey(dto.iconKey) ?? null,
+            sortOrder: dto.sortOrder ?? 0,
+          },
+        });
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.CATEGORY,
+          entityId: created.id,
+          before: null,
+          after: await categoryAuditSnapshot(tx, created),
+          actorId: actor.id,
+        });
+        return created;
       });
     } catch (error) {
       handleCategoryWriteError(error);
@@ -755,7 +769,7 @@ export class CategoriesService {
   async updateCategory(
     id: string,
     dto: UpdateCategoryDto,
-    actor: Pick<AuthUser, 'role' | 'permissions'>,
+    actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>,
   ) {
     const existing = await this.ensureCategoryExists(id);
 
@@ -855,6 +869,16 @@ export class CategoriesService {
             await this.applyStatusChange(tx, id, current.status, resultingStatus, now);
           }
 
+          // ADMIN-ACTION-AUDIT-001: the stored row before and after this
+          // write; an echo of unchanged values records nothing.
+          await recordCatalogAudit(tx, {
+            entityType: CatalogAuditEntity.CATEGORY,
+            entityId: id,
+            before: await categoryAuditSnapshot(tx, current),
+            after: await categoryAuditSnapshot(tx, updated),
+            actorId: actor.id,
+          });
+
           return updated;
         },
         { label: 'categories.update' },
@@ -885,13 +909,16 @@ export class CategoriesService {
    * card. A run an operator has separately held down with `ADMIN_ACTION` stays
    * down.
    */
-  async updateCategoryStatus(id: string, status: ServiceCategoryStatus) {
+  async updateCategoryStatus(id: string, status: ServiceCategoryStatus, actor: Pick<AuthUser, 'id'>) {
     const existing = await this.ensureCategoryExists(id);
     const now = new Date();
 
     return runSerializable(
       this.prisma,
       async (tx) => {
+        // ADMIN-ACTION-AUDIT-001: the row this transaction replaces, for the
+        // audit's "from" — read inside it, so it is what was overwritten.
+        const before = await tx.serviceCategory.findUniqueOrThrow({ where: { id } });
         const updated = await tx.serviceCategory.update({
           where: { id },
           data: { status, isActive: isActiveFor(status) },
@@ -899,10 +926,27 @@ export class CategoriesService {
 
         await this.applyStatusChange(tx, id, existing.status, status, now);
 
+        await recordCatalogAudit(tx, {
+          entityType: CatalogAuditEntity.CATEGORY,
+          entityId: id,
+          before: await categoryAuditSnapshot(tx, before),
+          after: await categoryAuditSnapshot(tx, updated),
+          actorId: actor.id,
+        });
+
         return updated;
       },
       { label: 'categories.updateStatus' },
     );
+  }
+
+  /** A category's catalogue history by slug, newest first (ADMIN-ACTION-AUDIT-001). */
+  async getCategoryHistory(slug: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    const category = await this.prisma.serviceCategory.findUnique({ where: { slug }, select: { id: true } });
+    if (!category) {
+      throw new NotFoundException('Category not found');
+    }
+    return readCatalogAudit(this.prisma, CatalogAuditEntity.CATEGORY, category.id, query, viewer);
   }
 
   /**

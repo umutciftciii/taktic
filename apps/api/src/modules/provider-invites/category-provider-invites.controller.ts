@@ -66,7 +66,11 @@ export class CategoryProviderInvitesController {
   @Post(':inviteId/revoke')
   @RequiresPermission(AdminPermission.PROVIDER_INVITES_REVOKE)
   @HttpCode(HttpStatus.OK)
-  revoke(@Param('categoryId') categoryId: string, @Param('inviteId') inviteId: string) {
-    return this.invites.revoke(categoryId, inviteId);
+  revoke(
+    @Param('categoryId') categoryId: string,
+    @Param('inviteId') inviteId: string,
+    @CurrentUser() actor: AuthUser,
+  ) {
+    return this.invites.revoke(categoryId, inviteId, actor);
   }
 }

@@ -9,6 +9,8 @@ import { AdminPermission, CustomerOrigin, OfferStatus, Prisma, UserRole } from '
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
+import { AuditPageQueryDto } from '../../common/admin-audit';
+import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import {
@@ -476,16 +478,39 @@ export class CustomersService {
     return note;
   }
 
-  async updateStatus(customerId: string, dto: UpdateCustomerStatusDto) {
+  async updateStatus(customerId: string, dto: UpdateCustomerStatusDto, actor: AuthUser) {
     await this.assertCustomerExists(customerId);
 
-    const updated = await this.prisma.user.update({
-      where: { id: customerId },
-      data: { isActive: dto.isActive },
-      select: { id: true, isActive: true },
+    // ADMIN-ACTION-AUDIT-001: the flip and its audit row commit together. The
+    // write is conditional on the value being the other one, so its count is
+    // the answer to "did this request change anything": a repeated save still
+    // answers 200 with the current value, as it always has, and records no row.
+    return this.prisma.$transaction(async (tx) => {
+      const changed = await tx.user.updateMany({
+        where: { id: customerId, role: UserRole.CUSTOMER, isActive: !dto.isActive },
+        data: { isActive: dto.isActive },
+      });
+      if (changed.count === 1) {
+        await tx.accountStatusChange.create({
+          data: {
+            userId: customerId,
+            userRole: UserRole.CUSTOMER,
+            fromActive: !dto.isActive,
+            toActive: dto.isActive,
+            reason: null,
+            actorId: actor.id,
+          },
+          select: { id: true },
+        });
+      }
+      return tx.user.findUniqueOrThrow({ where: { id: customerId }, select: { id: true, isActive: true } });
     });
+  }
 
-    return updated;
+  /** The customer's status history, newest first (ADMIN-ACTION-AUDIT-001). */
+  async statusHistory(customerId: string, query: AuditPageQueryDto | undefined, viewer: AuthUser) {
+    await this.assertCustomerExists(customerId);
+    return readAccountStatusHistory(this.prisma, customerId, 'CUSTOMER', query, viewer);
   }
 
   private async assertCustomerExists(customerId: string) {

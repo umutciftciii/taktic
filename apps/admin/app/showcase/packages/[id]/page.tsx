@@ -4,6 +4,7 @@ import {
   apiFetch,
   fetchOrNotFound,
   formatDateTime,
+  getShowcasePackageHistory,
   requireAdmin,
   SHOWCASE_CARD_KIND_LABELS,
   SHOWCASE_PLACEMENT_STATUS_LABELS,
@@ -14,8 +15,8 @@ import {
   type ShowcasePackage,
 } from '../../../../lib/api';
 import { formatCount } from '../../../../lib/pagination';
-import { resolveTab } from '../../../../lib/list-query';
-import { ActivityLog, NO_CHANGE_HISTORY_NOTE, recordLifecycleEntries } from '../../../../components/activity-log';
+import { parsePage, resolveTab } from '../../../../lib/list-query';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../../components/audit-timeline';
 import { DataTable, type DataColumn } from '../../../../components/data-table';
 import { ConfirmDialog } from '../../../../components/confirm-dialog';
 import { DetailFormFooter, LockedField } from '../../../../components/detail-form-footer';
@@ -54,7 +55,8 @@ import { showcasePackageSales } from '../showcase-package-sales';
  *   the tab is open, which is also why its count is drawn only there. A
  *   purchase that is paid but has no run says so; whether its right is still
  *   usable is an entitlement fact no admin read carries, and is not guessed.
- * - Neler oldu: the package's own instants. No change log exists for it.
+ * - Neler oldu: the package's change log (ADMIN-ACTION-AUDIT-001) — each
+ *   create, edit and on-sale switch with its field diff and its operator.
  *
  * Satıştan kaldır / Satışa aç is the same PATCH as the form, `isActive` alone,
  * behind the same SHOWCASE_PACKAGES_WRITE. Metin onayları is the consent ledger
@@ -65,6 +67,7 @@ type PageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{
     tab?: string;
+    gecmisSayfa?: string;
     error?: string;
     saved?: string;
     activated?: string;
@@ -96,7 +99,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
   const canReadTerms = can('SHOWCASE_TERMS_ACCEPTANCES_READ');
 
   const { id } = await params;
-  const { tab, error, saved, activated, deactivated } = await searchParams;
+  const { tab, gecmisSayfa, error, saved, activated, deactivated } = await searchParams;
   const pkg = await fetchOrNotFound(() =>
     apiFetch<ShowcasePackage>(`/admin/showcase/packages/${encodeURIComponent(id)}`),
   );
@@ -104,6 +107,8 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
   const path = `/showcase/packages/${pkg.id}`;
   const tabKeys: TabKey[] = ['', ...(canReadPurchases ? (['satislar'] as const) : []), 'gecmis'];
   const activeTab = resolveTab<TabKey>(tab, tabKeys, '');
+  const history =
+    activeTab === 'gecmis' ? await getShowcasePackageHistory(pkg.id, parsePage(gecmisSayfa)) : null;
 
   // Read only on the tab that shows it: see the header comment.
   const sales =
@@ -595,18 +600,15 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
         </div>
       ) : null}
 
-      {activeTab === 'gecmis' ? (
+      {activeTab === 'gecmis' && history ? (
         <div className="detail-tab-panel" data-testid="showcase-package-panel-gecmis">
-          <ActivityLog
-            entries={recordLifecycleEntries({
-              createdAt: pkg.createdAt,
-              updatedAt: pkg.updatedAt,
-              created: 'Paket oluşturuldu',
-              updated: 'Paket son güncellendi',
-            })}
-            meta="Paket kaydının zamanları"
-            footnote={NO_CHANGE_HISTORY_NOTE}
+          <AuditTimeline
+            page={history}
+            meta={`Paket ${formatDateTime(pkg.createdAt)} tarihinde oluşturuldu`}
+            empty="Kayıt tutulmaya başladığından beri bu pakette değişiklik yapılmadı."
+            footnote={AUDIT_SINCE_NOTE}
             testId="showcase-package-activity"
+            pager={{ path, params: { tab: 'gecmis' }, pageParam: 'gecmisSayfa' }}
           />
         </div>
       ) : null}

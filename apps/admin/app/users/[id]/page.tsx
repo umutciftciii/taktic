@@ -4,6 +4,8 @@ import {
   fetchOrNotFound,
   formatDate,
   formatDateTime,
+  getAdminUserRoleAudit,
+  getStaffStatusHistory,
   listAdminRoles,
   listAdminUserRoles,
   requireAdmin,
@@ -11,7 +13,9 @@ import {
   userRoleLabel,
 } from '../../../lib/api';
 import { criticalPermissionsIn, effectivePermissions } from '../../../lib/permission-model';
+import { AUDIT_SINCE_NOTE, AuditTimeline } from '../../../components/audit-timeline';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
+import { parsePage } from '../../../lib/list-query';
 import { DetailHeader } from '../../../components/detail-header';
 import { KeyValueList } from '../../../components/key-value-list';
 import { SectionCard } from '../../../components/section-card';
@@ -26,6 +30,9 @@ type SearchParams = {
   /** Written by the role assign/revoke actions (app/roles/actions.ts). */
   ok?: string;
   error?: string;
+  /** ADMIN-ACTION-AUDIT-001: each history card pages on its own parameter. */
+  durumSayfa?: string;
+  rolSayfa?: string;
 };
 
 const ROLE_OK_MESSAGES: Record<string, string> = {
@@ -83,6 +90,17 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
         catalogue,
       }))
     : null;
+
+  // ADMIN-ACTION-AUDIT-001: two histories from two sources, never merged.
+  // The status history is this page's own permission; the role history is the
+  // role audit, which is root-only like the roles themselves.
+  const statusPage = parsePage(search.durumSayfa);
+  const rolePage = parsePage(search.rolSayfa);
+  const [statusHistory, roleHistory] = await Promise.all([
+    getStaffStatusHistory(user.id, statusPage),
+    isSuperAdminViewer ? getAdminUserRoleAudit(user.id, rolePage) : Promise.resolve(null),
+  ]);
+  const historyParams = { durumSayfa: statusPage > 1 ? statusPage : undefined, rolSayfa: rolePage > 1 ? rolePage : undefined };
 
   const displayName = user.name ?? user.email ?? user.phone ?? '—';
 
@@ -287,6 +305,27 @@ export default async function AdminUserDetailPage({ params, searchParams }: Admi
             accountName={displayName}
           />
         </div>
+
+        <AuditTimeline
+          page={statusHistory}
+          meta="Hesabın aktif / pasif değişiklikleri"
+          empty="Bu hesabın durumu kayıt tutulmaya başladığından beri değiştirilmedi."
+          footnote={AUDIT_SINCE_NOTE}
+          testId="user-status-history"
+          pager={{ path: `/users/${user.id}`, params: historyParams, pageParam: 'durumSayfa' }}
+        />
+
+        {roleHistory ? (
+          <AuditTimeline
+            page={roleHistory}
+            title="Rol geçmişi"
+            meta="Bu hesaba yapılan rol atamaları ve geri almalar"
+            empty="Bu hesaba hiç rol atanmamış."
+            testId="user-role-history"
+            perspective="user"
+            pager={{ path: `/users/${user.id}`, params: historyParams, pageParam: 'rolSayfa' }}
+          />
+        ) : null}
       </div>
     </main>
   );

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Inject, Put, Query, UseGuards } from '@nestjs/common';
 import { AdminPermission } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
@@ -6,6 +6,7 @@ import { AuthUser } from '../auth/auth.types';
 import { CurrentUser } from '../auth/auth.decorators';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { CompanySettingsService } from './company-settings.service';
 import { SaveCompanySettingsDto } from './dto/save-company-settings.dto';
 
@@ -39,6 +40,18 @@ export class CompanySettingsController {
   @Put()
   @RequiresPermission(AdminPermission.COMPANY_SETTINGS_WRITE)
   saveCompanySettings(@Body() dto: SaveCompanySettingsDto, @CurrentUser() user: AuthUser) {
-    return this.companySettings.save(dto, user?.id ?? null);
+    // The guards make an anonymous save unreachable; restated here because
+    // every audit row has a NOT NULL actor (ADMIN-ACTION-AUDIT-001).
+    if (!user?.id) {
+      throw new ForbiddenException('Authenticated operator required');
+    }
+    return this.companySettings.save(dto, user.id);
+  }
+
+  /** ADMIN-ACTION-AUDIT-001: who changed which field, from what to what. */
+  @Get('history')
+  @RequiresPermission(AdminPermission.COMPANY_SETTINGS_READ)
+  getCompanySettingsHistory(@Query() query: AuditPageQueryDto, @CurrentUser() user: AuthUser) {
+    return this.companySettings.listChanges(query, user);
   }
 }

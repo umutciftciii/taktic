@@ -17,6 +17,7 @@ import { CurrentUser, Roles } from '../auth/auth.decorators';
 import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
+import { AuditPageQueryDto } from '../../common/admin-audit';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ListUsersDto } from './dto/list-users.dto';
 import { UpdateUserStatusDto } from './dto/update-user-status.dto';
@@ -45,6 +46,14 @@ export class UsersController {
   @RequiresPermission(AdminPermission.ADMIN_USERS_READ)
   detail(@Param('id') id: string) {
     return this.usersService.detail(id);
+  }
+
+  /** ADMIN-ACTION-AUDIT-001: who switched this staff account on or off, and when. */
+  @Get(':id/status-history')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.ADMIN_USERS_READ)
+  statusHistory(@Param('id') id: string, @Query() query: AuditPageQueryDto, @CurrentUser() viewer: AuthUser) {
+    return this.usersService.statusHistory(id, query, viewer);
   }
 
   @Patch(':id/status')

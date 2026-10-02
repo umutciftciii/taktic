@@ -6,6 +6,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AdminPermission, AdminRoleAuditAction, Prisma, UserRole } from '@prisma/client';
+import {
+  AdminAuditEntry,
+  AdminAuditPage,
+  AUDIT_ORDER,
+  AuditPageQueryDto,
+  auditPage,
+  auditPaging,
+  toAuditActor,
+} from '../../common/admin-audit';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ALL_ADMIN_PERMISSIONS, STAFF_ROLES } from '../auth/admin-permissions';
 import type { AuthUser } from '../auth/auth.types';
@@ -343,6 +352,70 @@ export class AdminRolesService {
     };
   }
 
+  /**
+   * A role's audit trail, newest first (ADMIN-ACTION-AUDIT-001). Read-only:
+   * the rows are the ones `audit()` below has always written, projected as
+   * recorded — `summary` travels as `payload`, and no before/after value the
+   * row does not hold is reconstructed.
+   */
+  async listAudit(roleId: string, query?: AuditPageQueryDto): Promise<AdminAuditPage> {
+    const role = await this.prisma.adminRole.findUnique({ where: { id: roleId }, select: { id: true } });
+    if (!role) {
+      throw new NotFoundException('Role not found');
+    }
+    return this.readAudit({ roleId }, query);
+  }
+
+  /** The role rows about one staff account (assignments granted and revoked). */
+  async listAuditForUser(userId: string, query?: AuditPageQueryDto): Promise<AdminAuditPage> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true } });
+    if (!user || !STAFF_ROLES.includes(user.role)) {
+      throw new NotFoundException('User not found');
+    }
+    return this.readAudit({ targetUserId: userId }, query);
+  }
+
+  private async readAudit(where: Prisma.AdminRoleAuditLogWhereInput, query?: AuditPageQueryDto) {
+    const { page, pageSize, skip } = auditPaging(query);
+    // Root-only routes: the viewer is a super admin, who holds ADMIN_USERS_READ,
+    // so the staff e-mail travels as `staffActorSelect` would allow it.
+    const person = { select: { id: true, name: true, email: true } } as const;
+    const [total, rows] = await Promise.all([
+      this.prisma.adminRoleAuditLog.count({ where }),
+      this.prisma.adminRoleAuditLog.findMany({
+        where,
+        orderBy: [...AUDIT_ORDER],
+        skip,
+        take: pageSize,
+        select: {
+          id: true,
+          action: true,
+          summary: true,
+          createdAt: true,
+          role: { select: { id: true, key: true, name: true } },
+          targetUser: person,
+          actor: person,
+        },
+      }),
+    ]);
+
+    const items = rows.map(
+      (row): AdminAuditEntry => ({
+        id: row.id,
+        domain: 'ADMIN_ROLE',
+        action: row.action,
+        actor: toAuditActor(row.actor),
+        target: row.role ? { type: 'ADMIN_ROLE', id: row.role.id, label: row.role.name } : null,
+        targetUser: row.targetUser ? toAuditActor(row.targetUser) : null,
+        changes: [],
+        reason: null,
+        createdAt: row.createdAt,
+        payload: isJsonObject(row.summary) ? row.summary : {},
+      }),
+    );
+    return auditPage(items, total, page, pageSize);
+  }
+
   private audit(
     tx: Prisma.TransactionClient,
     action: AdminRoleAuditAction,
@@ -364,6 +437,10 @@ export class AdminRolesService {
 
 function dedupe(permissions: readonly AdminPermission[]): AdminPermission[] {
   return [...new Set(permissions)].sort();
+}
+
+function isJsonObject(value: Prisma.JsonValue): value is Prisma.JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isUniqueViolation(error: unknown): boolean {

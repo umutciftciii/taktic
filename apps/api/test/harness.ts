@@ -203,6 +203,13 @@ export function resetAuthThrottle(app: INestApplication): void {
 }
 
 const TRUNCATED_TABLES = [
+  // ADMIN-ACTION-AUDIT-001: append-only audit rows, children of User,
+  // ProviderProfile and (by id only) the catalogue. TRUNCATE does not fire the
+  // append-only triggers.
+  'CatalogAuditLog',
+  'CompanySettingsChange',
+  'ProviderStatusChange',
+  'AccountStatusChange',
   'CompanySettings',
   // PR-0 admin RBAC, children first: an audit row points at a role and at two
   // accounts, an assignment at a role and an account, a permission at a role.

@@ -41,6 +41,12 @@ export type ProviderInviteSummary = {
   usedAt: Date | null;
   revokedAt: Date | null;
   createdBy: { id: string; name: string | null } | null;
+  /**
+   * Who withdrew it (ADMIN-ACTION-AUDIT-001). `null` on a live or used link,
+   * and on every link withdrawn before the actor was recorded — the screen
+   * says "Bilinmiyor" for those rather than guessing.
+   */
+  revokedBy: { id: string; name: string | null } | null;
 };
 
 /**
@@ -64,6 +70,7 @@ const inviteSummarySelect = {
   usedAt: true,
   revokedAt: true,
   createdBy: { select: { id: true, name: true } },
+  revokedBy: { select: { id: true, name: true } },
 } satisfies Prisma.ProviderInviteTokenSelect;
 
 @Injectable()
@@ -164,6 +171,7 @@ export class ProviderInvitesService {
   async revoke(
     categoryId: string,
     inviteId: string,
+    actor: AuthUser,
   ): Promise<{ revoked: boolean; invite: ProviderInviteSummary }> {
     await this.ensureCategoryExists(categoryId);
 
@@ -181,7 +189,9 @@ export class ProviderInvitesService {
 
     const { count } = await this.prisma.providerInviteToken.updateMany({
       where: { id: inviteId, categoryId, usedAt: null, revokedAt: null },
-      data: { revokedAt: new Date() },
+      // The withdrawing operator in the same statement as the instant, so a
+      // withdrawal recorded from now on always names who did it.
+      data: { revokedAt: new Date(), revokedById: actor.id },
     });
 
     const invite = await this.prisma.providerInviteToken.findUniqueOrThrow({
