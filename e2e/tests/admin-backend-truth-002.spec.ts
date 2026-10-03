@@ -94,9 +94,10 @@ test.describe('ADMIN-BACKEND-TRUTH-002 — server pagination and run records', (
   });
 
   test('the eligibility queue reaches past 100 holds, with both views counted', async ({ browser }) => {
-    const category = await createCategory(2, { namePrefix: 'E2E BT2 uygunluk' });
+    const category = await createCategory(2, { namePrefix: 'E2E BT2 kuyruk' });
     const provider = await createProvider({ categoryId: category.id, location: uniqueLocation(), credits: 0 });
     const base = Date.now() - 3_600_000;
+    const seeded: Array<{ eventId: string; holdId: string }> = [];
     for (let i = 0; i < 105; i += 1) {
       const event = await prisma().campaignTriggerEvent.create({
         data: {
@@ -106,7 +107,7 @@ test.describe('ADMIN-BACKEND-TRUTH-002 — server pagination and run records', (
           status: 'HELD_FOR_REVIEW',
         },
       });
-      await prisma().promotionEligibilityHold.create({
+      const hold = await prisma().promotionEligibilityHold.create({
         data: {
           triggerEventId: event.id,
           providerId: provider.id,
@@ -115,6 +116,7 @@ test.describe('ADMIN-BACKEND-TRUTH-002 — server pagination and run records', (
           heldAt: new Date(base + i * 1000),
         },
       });
+      seeded.push({ eventId: event.id, holdId: hold.id });
     }
     const openTotal = await prisma().promotionEligibilityHold.count({ where: { review: { is: null } } });
     const decidedTotal = await prisma().promotionEligibilityHold.count({ where: { review: { isNot: null } } });
@@ -149,6 +151,22 @@ test.describe('ADMIN-BACKEND-TRUTH-002 — server pagination and run records', (
       expect(page.url()).not.toMatch(/page=/);
     } finally {
       await reviewer.actor.close();
+      // Holds are append-only, so they are decided rather than removed: 105
+      // old open holds would push a later spec's hold off the queue's page 1.
+      const decider = await createAdmin();
+      for (const { eventId, holdId } of seeded) {
+        await prisma().campaignTriggerEvent.update({ where: { id: eventId }, data: { status: 'EVALUATED' } });
+        await prisma().promotionEligibilityReview.create({
+          data: {
+            triggerEventId: eventId,
+            holdId,
+            providerId: provider.id,
+            decision: 'INELIGIBLE',
+            reason: 'E2E sayfalama fikstürü, kapatıldı.',
+            decidedById: decider.id,
+          },
+        });
+      }
     }
   });
 
