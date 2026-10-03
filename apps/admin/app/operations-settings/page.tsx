@@ -12,7 +12,7 @@ import {
   SchedulerSettings,
 } from '../../lib/api';
 import { InfoPopover } from '../../components/info-popover';
-import { describeSchedulerRun } from '../../lib/scheduler-run';
+import { describeManualRun, describeSchedulerRun } from '../../lib/scheduler-run';
 import { PageHeader } from '../../components/page-header';
 import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
@@ -379,6 +379,11 @@ export default async function OperationsSettingsPage({
                       <span data-testid={`scheduler-last-run-${job.key}`}>
                         {describeSchedulerRun(job.lastRun, formatDateTime, { withSummary: true })}
                       </span>
+                      {job.lastManualRun !== undefined ? (
+                        <span data-testid={`scheduler-last-manual-run-${job.key}`}>
+                          {describeManualRun(job.lastManualRun, formatDateTime)}
+                        </span>
+                      ) : null}
                     </>
                   }
                   // Shown before the switch is used, not after: an operator

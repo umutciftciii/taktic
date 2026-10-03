@@ -4,7 +4,7 @@ import { warnIfLegacySchedulerFlagSet } from '../../common/legacy-scheduler-flag
 import { readSchedulerCron } from '../../common/scheduler-cron';
 import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
 import { SchedulerSettingsService } from '../operations-settings/scheduler-settings.service';
-import { UnviewedOfferRefundService } from '../offers/unviewed-offer-refund.service';
+import { refundRunSummary, UnviewedOfferRefundService } from '../offers/unviewed-offer-refund.service';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
@@ -67,10 +67,7 @@ export class UnviewedOfferRefundSchedulerService implements OnModuleInit {
 
     try {
       const result = await this.unviewedOfferRefund.execute({ limit });
-      const failed = result.results.filter((item) => item.status === 'FAILED').length;
-      const summary =
-        `processed=${result.processed} refunded=${result.refunded} ` +
-        `skipped=${result.skipped} failed=${failed}`;
+      const summary = refundRunSummary(result);
 
       this.logger.log(`Unviewed-offer refund summary ${summary}`);
       await run.succeed(summary);

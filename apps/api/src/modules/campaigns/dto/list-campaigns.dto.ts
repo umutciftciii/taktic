@@ -24,3 +24,16 @@ export class ListCampaignsDto {
   @MaxLength(64)
   cursor?: string;
 }
+
+/**
+ * The campaign list's own query (ADMIN-BACKEND-TRUTH-002): the shared cursor
+ * pair plus `before`, the way back. `cursor` asks for the page after a row,
+ * `before` for the page before one; asking for both is a 400.
+ */
+export class ListCampaignsPageDto extends ListCampaignsDto {
+  /** The `id` of the first row of the page after the one wanted (`previousCursor`). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  before?: string;
+}

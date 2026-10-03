@@ -321,9 +321,32 @@ const TRUNCATED_TABLES = [
   'User',
 ];
 
+/**
+ * Empties every table between cases.
+ *
+ * The TRUNCATE takes an exclusive lock on each table in turn, so a query the
+ * app's own background work issues at that moment (a cron tick, an outbox
+ * pass) can close a lock cycle with it, and PostgreSQL aborts one side with a
+ * deadlock (40P01). The abort rolls the whole TRUNCATE back, so trying again is
+ * safe; a few attempts with a short pause is enough for the other side to
+ * finish. Anything else is still thrown at once.
+ */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
   const list = TRUNCATED_TABLES.map((table) => `"public"."${table}"`).join(', ');
-  await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+      return;
+    } catch (error) {
+      if (attempt >= 4 || !isDeadlock(error)) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+    }
+  }
+}
+
+function isDeadlock(error: unknown): boolean {
+  const meta = (error as { meta?: { code?: unknown } } | null)?.meta;
+  return meta?.code === '40P01' || (error instanceof Error && error.message.includes('40P01'));
 }
 
 let sequence = 0;

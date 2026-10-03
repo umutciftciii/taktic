@@ -5,20 +5,22 @@ import {
   formatDateTime,
   formatPrice,
   PackagePurchase,
+  PackagePurchasePage,
   PackagePurchaseStatus,
+  PackagePurchaseSummary,
   PURCHASE_CREDIT_HOLD_LABELS,
   requireAdmin,
   statusBadgeClass,
   statusLabel,
 } from '../../lib/api';
-import { buildHref, type QueryParams } from '../../lib/list-query';
+import { buildHref, parsePage, type QueryParams } from '../../lib/list-query';
 import { formatCount } from '../../lib/pagination';
 import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import { FilterBar, FilterField } from '../../components/filter-bar';
 import { KeyValueList } from '../../components/key-value-list';
 import { PageHeader } from '../../components/page-header';
-import { WholeListFooter } from '../../components/pagination';
+import { Pagination } from '../../components/pagination';
 import { SectionCard } from '../../components/section-card';
 
 /**
@@ -36,11 +38,17 @@ import { SectionCard } from '../../components/section-card';
  *   credit is never hidden by the view — its "Yalnız bunları göster" link,
  *   and the hold badge on the row.
  * - The manual review notice and a badge on the row it counts.
- * - The `status`, `providerId`, `packageId` and `creditHold` query filters; the
- *   first and the last now have fields, the two ids stay as a pin.
+ * - The `status`, `providerId`, `packageId`, `showcasePackageId` and
+ *   `creditHold` query filters; the first and the last have fields, the ids
+ *   stay as a pin.
  *
- * The API returns this list whole (no page, no cursor), so the footer says how
- * many rows there are and draws no pager.
+ * ADMIN-BACKEND-TRUTH-002: the list is paged on the server — one page of 25
+ * and the filtered set's `total`, from the same predicate — so the screen no
+ * longer reads every purchase. The figures that used to be counted over the
+ * whole fetched list (paid, manual review, open credit holds) are the
+ * database's counts over the same filters (`/package-purchases/summary`, and a
+ * one-row page of `creditHold=OPEN` for its `total`). A filter change starts
+ * again from page 1: the filter form does not carry `page`.
  *
  * Not rendered: the design's Ara and Tarih filters (the API takes neither),
  * "Bu ay 96 satış · 184.300 ₺" (that total is the finance summary's, behind
@@ -48,6 +56,8 @@ import { SectionCard } from '../../components/section-card';
  */
 
 const PATH = '/package-purchases';
+
+const PAGE_SIZE = 25;
 
 const PURCHASE_STATUSES: PackagePurchaseStatus[] = ['PENDING', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED', 'REFUNDED'];
 
@@ -71,7 +81,9 @@ type AdminPackagePurchasesPageProps = {
     status?: PackagePurchaseStatus;
     providerId?: string;
     packageId?: string;
+    showcasePackageId?: string;
     creditHold?: string;
+    page?: string;
   }>;
 };
 
@@ -86,40 +98,57 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
   const status = params.status && PURCHASE_STATUSES.includes(params.status) ? params.status : '';
   const providerId = (params.providerId ?? '').trim();
   const packageId = (params.packageId ?? '').trim();
+  const showcasePackageId = (params.showcasePackageId ?? '').trim();
   const holdFilter = params.creditHold === 'OPEN' || params.creditHold === 'ANY' ? params.creditHold : null;
+  const page = parsePage(params.page);
 
-  const query = new URLSearchParams();
-  if (status) query.set('status', status);
-  if (providerId) query.set('providerId', providerId);
-  if (packageId) query.set('packageId', packageId);
-  if (holdFilter) query.set('creditHold', holdFilter);
-  const [purchases, paymentConfig, openHolds] = await Promise.all([
-    apiFetch<PackagePurchase[]>(`/package-purchases${query.toString() ? `?${query.toString()}` : ''}`),
+  const filterQuery = new URLSearchParams();
+  if (status) filterQuery.set('status', status);
+  if (providerId) filterQuery.set('providerId', providerId);
+  if (packageId) filterQuery.set('packageId', packageId);
+  if (showcasePackageId) filterQuery.set('showcasePackageId', showcasePackageId);
+  if (holdFilter) filterQuery.set('creditHold', holdFilter);
+  const pageQuery = new URLSearchParams(filterQuery);
+  pageQuery.set('page', String(page));
+  pageQuery.set('pageSize', String(PAGE_SIZE));
+  const summaryQuery = filterQuery.toString();
+
+  const [response, totals, paymentConfig, openHolds] = await Promise.all([
+    apiFetch<PackagePurchasePage>(`/package-purchases?${pageQuery.toString()}`),
+    apiFetch<PackagePurchaseSummary>(`/package-purchases/summary${summaryQuery ? `?${summaryQuery}` : ''}`),
     canReadPaymentConfig ? apiFetch<AdminPaymentConfig>('/payments/config') : Promise.resolve(null),
     // API-HARDENING-001: counted over every purchase, whatever the filter, so
-    // captured-but-undelivered money is never hidden by the view.
-    apiFetch<PackagePurchase[]>('/package-purchases?creditHold=OPEN'),
+    // captured-but-undelivered money is never hidden by the view. One row is
+    // enough: only its `total` is read.
+    apiFetch<PackagePurchasePage>('/package-purchases?creditHold=OPEN&page=1&pageSize=1'),
   ]);
+  const purchases = response.items;
 
-  const manualReviewCount = purchases.filter((purchase) => purchase.manualReviewAt).length;
-  const hasFilters = Boolean(status || providerId || packageId || holdFilter);
-  const filterParams: QueryParams = { status, providerId, packageId, creditHold: holdFilter ?? '' };
-  const paidCount = purchases.filter((purchase) => purchase.status === 'PAID').length;
+  const manualReviewCount = totals.manualReview;
+  const hasFilters = Boolean(status || providerId || packageId || showcasePackageId || holdFilter);
+  const filterParams: QueryParams = {
+    status,
+    providerId,
+    packageId,
+    showcasePackageId,
+    creditHold: holdFilter ?? '',
+  };
+  const paidCount = totals.byStatus.PAID ?? 0;
 
   const summary =
-    purchases.length === 0
+    response.total === 0
       ? hasFilters
         ? 'Bu filtreyle satın alma yok'
         : 'Henüz paket satın alınmadı'
-      : `${formatCount(purchases.length)} satın alma · ${formatCount(paidCount)} tanesi ödendi · en yeni başta`;
+      : `${formatCount(response.total)} satın alma · ${formatCount(paidCount)} tanesi ödendi · en yeni başta`;
 
   return (
     <main className="finance-list-page">
       <PageHeader title="Paket satışları" subtitle={summary} info={SCREEN_INFO} />
 
-      {openHolds.length > 0 ? (
+      {openHolds.total > 0 ? (
         <div className="notice notice-warning detail-notice" data-testid="credit-hold-notice">
-          <strong>{formatCount(openHolds.length)}</strong> satın almada ödeme sağlayıcıda tahsil edildi ama kredi,
+          <strong>{formatCount(openHolds.total)}</strong> satın almada ödeme sağlayıcıda tahsil edildi ama kredi,
           hizmet verenin bakiyesi üst sınırı aşacağı için teslim edilmedi. Otomatik iade yapılmaz; her birini
           detayında inceleyin.{' '}
           {holdFilter === 'OPEN' ? null : (
@@ -137,7 +166,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
         </div>
       ) : null}
 
-      {providerId || packageId ? (
+      {providerId || packageId || showcasePackageId ? (
         <div className="notice detail-notice" data-testid="purchase-pin">
           {providerId ? (
             <>
@@ -149,7 +178,18 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
               Yalnız bir paketin satın almaları (<code className="cell-break">{packageId}</code>).{' '}
             </>
           ) : null}
-          <Link href={buildHref(PATH, filterParams, { providerId: undefined, packageId: undefined })}>
+          {showcasePackageId ? (
+            <>
+              Yalnız bir vitrin paketinin satın almaları (<code className="cell-break">{showcasePackageId}</code>).{' '}
+            </>
+          ) : null}
+          <Link
+            href={buildHref(PATH, filterParams, {
+              providerId: undefined,
+              packageId: undefined,
+              showcasePackageId: undefined,
+            })}
+          >
             Bu sabitlemeyi kaldır
           </Link>
         </div>
@@ -159,7 +199,7 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
         key={buildHref(PATH, filterParams)}
         action={PATH}
         clearHref={hasFilters ? PATH : null}
-        preserve={{ providerId, packageId }}
+        preserve={{ providerId, packageId, showcasePackageId }}
         label="Paket satışı filtreleri"
         testId="purchase-filters"
       >
@@ -184,21 +224,34 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
 
       <div className="data-list-card">
         {purchases.length === 0 ? (
-          <EmptyState
-            title={hasFilters ? 'Bu filtreyle satın alma bulunamadı.' : 'Henüz paket talebi yok.'}
-            description={
-              hasFilters
-                ? 'Filtreleri temizleyerek tüm satın almaları görebilirsiniz.'
-                : 'Hizmet verenler paket aldıkça burada görünür.'
-            }
-            action={
-              hasFilters ? (
-                <Link className="btn btn-secondary btn-sm" href={PATH}>
-                  Filtreyi temizle
+          response.total > 0 ? (
+            // A page past the last row, reached by editing the URL.
+            <EmptyState
+              title="Bu sayfada satın alma yok."
+              description="Liste bu sayfaya kadar uzanmıyor."
+              action={
+                <Link className="btn btn-secondary btn-sm" href={buildHref(PATH, filterParams)}>
+                  İlk sayfaya dön
                 </Link>
-              ) : null
-            }
-          />
+              }
+            />
+          ) : (
+            <EmptyState
+              title={hasFilters ? 'Bu filtreyle satın alma bulunamadı.' : 'Henüz paket talebi yok.'}
+              description={
+                hasFilters
+                  ? 'Filtreleri temizleyerek tüm satın almaları görebilirsiniz.'
+                  : 'Hizmet verenler paket aldıkça burada görünür.'
+              }
+              action={
+                hasFilters ? (
+                  <Link className="btn btn-secondary btn-sm" href={PATH}>
+                    Filtreyi temizle
+                  </Link>
+                ) : null
+              }
+            />
+          )
         ) : (
           <DataTable caption="Paket satışları" columns={COLUMNS} minWidth={1120} testId="purchase-table">
             {purchases.map((purchase) => (
@@ -206,8 +259,17 @@ export default async function AdminPackagePurchasesPage({ searchParams }: AdminP
             ))}
           </DataTable>
         )}
-        {purchases.length > 0 ? (
-          <WholeListFooter count={purchases.length} noun="satın alma" summaryTestId="purchase-count" />
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="satın alma"
+            summaryTestId="purchase-count"
+          />
         ) : null}
       </div>
 

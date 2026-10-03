@@ -9,6 +9,7 @@ import {
 } from '../../lib/api';
 import { TRIGGER_LABELS, channelLabel, type CampaignTrigger } from '../../lib/campaign-rules';
 import { formatCount } from '../../lib/pagination';
+import { CursorPagination } from '../../components/pagination';
 import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
@@ -27,14 +28,18 @@ import { CampaignQuestions } from './campaign-questions';
  * "three questions" card and the design's table — who it covers, what it
  * gives, how many times it paid out — with every column the old table had
  * (status, trigger, channel, credit, days, running and latest version,
- * redemptions, last change). The list is cursor-paged by the API, so the
- * footer says how many rows are on this page, not a total it does not have.
+ * redemptions, last change). The list is cursor-paged by the API.
+ *
+ * ADMIN-BACKEND-TRUTH-002: the API now also sends the exact `total` and a
+ * `previousCursor`, so the footer says "N kampanyanın bu sayfadaki M'si" and
+ * offers Önceki as well as Sonraki — `?before=` reads the page before, the
+ * cursor stays the canonical page key, and there is no offset.
  */
 
 export const dynamic = 'force-dynamic';
 
 type CampaignsPageProps = {
-  searchParams: Promise<{ cursor?: string }>;
+  searchParams: Promise<{ cursor?: string; before?: string }>;
 };
 
 const SCREEN_INFO =
@@ -56,14 +61,17 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
   const canWrite = can('CAMPAIGNS_WRITE');
   const params = await searchParams;
   const query = new URLSearchParams({ limit: '25' });
+  // One direction at a time; a hand-made URL carrying both reads forward.
   if (params.cursor) query.set('cursor', params.cursor);
+  else if (params.before) query.set('before', params.before);
+  const paged = Boolean(params.cursor || params.before);
 
   const data = await apiFetch<CampaignListResponse>(`/admin/campaigns?${query.toString()}`);
   const running = data.items.filter((item) => item.status === 'ACTIVE').length;
   const subtitle =
-    data.items.length === 0
+    data.total === 0
       ? 'Henüz kampanya yok'
-      : `Bu sayfada ${formatCount(data.items.length)} kampanya · ${running === 0 ? 'hiçbiri etkin değil' : `${formatCount(running)} etkin`}`;
+      : `${formatCount(data.total)} kampanya · bu sayfada ${running === 0 ? 'etkin olan yok' : `${formatCount(running)} etkin`}`;
 
   return (
     <main className="campaigns-page">
@@ -98,10 +106,10 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
           {data.items.length === 0 ? (
             <EmptyState
               className="campaigns-empty"
-              title={params.cursor ? 'Bu sayfada kampanya yok' : 'Henüz kampanya yok'}
+              title={paged || data.total > 0 ? 'Bu sayfada kampanya yok' : 'Henüz kampanya yok'}
               description="İlk taslağı yazın. Bir kampanya ancak motor açıkken etkinleştirilebilir."
               action={
-                params.cursor ? (
+                paged ? (
                   <Link className="btn btn-secondary btn-sm" href="/campaigns">
                     İlk sayfaya dön
                   </Link>
@@ -167,31 +175,24 @@ export default async function CampaignsPage({ searchParams }: CampaignsPageProps
             </DataTable>
           )}
 
-          {data.items.length > 0 || params.cursor ? (
-            <nav className="pagination" aria-label="Sayfalama">
-              <p className="pagination-summary" data-testid="campaign-page-summary">
-                {data.items.length === 0
-                  ? 'Bu sayfada kampanya yok'
-                  : `Bu sayfada ${formatCount(data.items.length)} kampanya`}
-              </p>
-              <div className="pagination-links">
-                {params.cursor ? (
-                  <Link className="btn btn-secondary btn-sm" href="/campaigns" data-testid="campaign-page-first">
+          {data.items.length > 0 || paged ? (
+            <>
+              <CursorPagination
+                count={data.items.length}
+                total={data.total}
+                previousHref={data.previousCursor ? `/campaigns?before=${encodeURIComponent(data.previousCursor)}` : null}
+                nextHref={data.nextCursor ? `/campaigns?cursor=${encodeURIComponent(data.nextCursor)}` : null}
+                noun="kampanya"
+                summaryTestId="campaign-page-summary"
+              />
+              {paged ? (
+                <p className="pagination-first">
+                  <Link className="btn btn-ghost btn-sm" href="/campaigns" data-testid="campaign-page-first">
                     İlk sayfa
                   </Link>
-                ) : null}
-                {data.nextCursor ? (
-                  <Link
-                    className="btn btn-secondary btn-sm is-next"
-                    rel="next"
-                    href={`/campaigns?cursor=${encodeURIComponent(data.nextCursor)}`}
-                    data-testid="campaign-page-next"
-                  >
-                    Sonraki sayfa
-                  </Link>
-                ) : null}
-              </div>
-            </nav>
+                </p>
+              ) : null}
+            </>
           ) : null}
         </section>
       </div>

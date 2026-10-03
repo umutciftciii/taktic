@@ -5859,6 +5859,12 @@ button:disabled {
   border-color: var(--text);
 }
 
+/* A cursor list's way back to its start, under the pager (ADMIN-BACKEND-TRUTH-002). */
+.pagination-first {
+  margin: 0;
+  padding: 0 16px 12px;
+}
+
 /* ---- SummaryStrip ---- */
 
 .summary-strip {

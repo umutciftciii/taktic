@@ -521,6 +521,7 @@ model User {
   /// table: who changed what outlives the account that did it.
   accountStatusChanges            AccountStatusChange[]                @relation("AccountStatusChangeTarget")
   accountStatusChangesMade        AccountStatusChange[]                @relation("AccountStatusChangeActor")
+  schedulerRunsStarted            SchedulerRun[]                       @relation("SchedulerRunActor")
   providerStatusChangesMade       ProviderStatusChange[]               @relation("ProviderStatusChangeActor")
   companySettingsChanges          CompanySettingsChange[]              @relation("CompanySettingsChangeActor")
   catalogAuditEntries             CatalogAuditLog[]                    @relation("CatalogAuditActor")
@@ -695,18 +696,21 @@ model OperationsSettingsChange {
   @@index([changedById])
 }
 
-/// Where a scheduler run's start came from. Only `SCHEDULER` has a writer
-/// today: every background job starts from its own cron tick. `MANUAL` is the
-/// name a run started by a person would carry; no such trigger exists yet, so
-/// no row carries it (OPS-SCHEDULER-RUN-PERSISTENCE-001).
+/// Where a scheduler run's start came from. `SCHEDULER`: a job's own cron
+/// tick. `MANUAL`: an operator ran the job by hand — today the refund scan's
+/// execute (`POST /offers/refund-scan/execute`), which records its run under
+/// the same job key with this trigger and the operator as `actorId`
+/// (ADMIN-BACKEND-TRUTH-002).
 enum SchedulerRunTrigger {
   SCHEDULER
   MANUAL
 }
 
 /// RUNNING from the moment a run starts until it ends, then SUCCESS or FAILED
-/// — once. A run whose process died mid-way stays RUNNING: its end was never
-/// recorded, and nothing guesses one for it.
+/// — once. A run whose process died mid-way stops renewing its lease
+/// (`heartbeatAt`); once the lease has run out the recovery closes it FAILED
+/// with `errorCode = PROCESS_INTERRUPTED` and `finishedAt` = the moment it was
+/// declared over — never a guessed end and never SUCCESS (ADMIN-BACKEND-TRUTH-002).
 enum SchedulerRunStatus {
   RUNNING
   SUCCESS
@@ -730,23 +734,35 @@ enum SchedulerRunStatus {
 /// No error text, stack or identifier is stored: `summary` is the counts line
 /// the job already logs, and `errorCode` is the error's class name.
 model SchedulerRun {
-  id         String              @id @default(cuid())
+  id          String              @id @default(cuid())
   /// One of SCHEDULER_JOB_KEYS (scheduler-jobs.ts). Text rather than an enum,
   /// like OperationsSettingsChange.setting: a new job is added in code.
-  jobKey     String
-  trigger    SchedulerRunTrigger @default(SCHEDULER)
-  status     SchedulerRunStatus  @default(RUNNING)
-  startedAt  DateTime
+  jobKey      String
+  trigger     SchedulerRunTrigger @default(SCHEDULER)
+  status      SchedulerRunStatus  @default(RUNNING)
+  startedAt   DateTime
   /// NULL exactly while RUNNING (a CHECK says so).
-  finishedAt DateTime?
+  finishedAt  DateTime?
   /// Counts only, e.g. "processed=3 refunded=2 skipped=1 failed=0".
-  summary    String?
+  summary     String?
   /// The error's class name on a FAILED run; NULL otherwise (a CHECK says so).
-  errorCode  String?
-  createdAt  DateTime            @default(now())
+  /// `PROCESS_INTERRUPTED` is the recovery's own code: the run's lease ran out
+  /// (no heartbeat) and it was closed as interrupted, not as finished.
+  errorCode   String?
+  createdAt   DateTime            @default(now())
+  /// ADMIN-BACKEND-TRUTH-002: the run's lease. The process running it renews
+  /// this while it works (database clock); a RUNNING row whose lease has run
+  /// out belongs to a process that stopped, and is closed FAILED with
+  /// `PROCESS_INTERRUPTED`. NULL on rows written before heartbeats existed.
+  heartbeatAt DateTime?
+  /// The operator who ran a MANUAL run (a hand-run refund scan); NULL on a
+  /// SCHEDULER run, which a CHECK enforces. Restrict, like every audit actor.
+  actorId     String?
+  actor       User?               @relation("SchedulerRunActor", fields: [actorId], references: [id], onDelete: Restrict)
 
   /// "The last run of this job" is one index probe.
   @@index([jobKey, startedAt(sort: Desc)])
+  @@index([actorId])
 }
 
 /// One signed-in session, and the two independent clocks that end it.
@@ -1433,7 +1449,8 @@ model ProviderProfile {
   promotionEligibilityReviews     PromotionEligibilityReview[]
 
   /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
-  statusChanges            ProviderStatusChange[]
+  statusChanges ProviderStatusChange[]
+
   @@index([status])
   @@index([city])
   @@index([district])
@@ -1502,46 +1519,46 @@ model ProviderServiceArea {
 }
 
 model Offer {
-  id                          String                  @id @default(cuid())
-  offerNumber                 String?                 @unique
-  requestId                   String
-  providerId                  String
-  status                      OfferStatus             @default(SUBMITTED)
-  priceAmount                 Int
-  currency                    String                  @default("TRY")
-  estimatedStartDate          DateTime?
-  estimatedCompletionDate     DateTime?
-  message                     String
-  warrantyNote                String?
-  internalNote                String?
-  creditCost                  Int                     @default(1)
+  id                                  String                  @id @default(cuid())
+  offerNumber                         String?                 @unique
+  requestId                           String
+  providerId                          String
+  status                              OfferStatus             @default(SUBMITTED)
+  priceAmount                         Int
+  currency                            String                  @default("TRY")
+  estimatedStartDate                  DateTime?
+  estimatedCompletionDate             DateTime?
+  message                             String
+  warrantyNote                        String?
+  internalNote                        String?
+  creditCost                          Int                     @default(1)
   /// Which right paid for this offer.
   ///
   /// Written by the entitlement resolver in the same transaction that charged
   /// it, so "no credit moved" and "an unlimited period covered it" are never
   /// the same reading. Backfilled to ONE_TIME_CREDIT for every offer that
   /// predates entitlements, which is what they all spent.
-  entitlementSource           OfferEntitlementSource?
+  entitlementSource                   OfferEntitlementSource?
   /// The period entitlement that covered this offer, when one did. NULL for a
   /// ONE_TIME_CREDIT offer.
-  entitlementId               String?
-  creditSpentTransactionId    String?
-  creditRefundedTransactionId String?
-  creditRefundedAt            DateTime?
-  creditRefundReason          String?
+  entitlementId                       String?
+  creditSpentTransactionId            String?
+  creditRefundedTransactionId         String?
+  creditRefundedAt                    DateTime?
+  creditRefundReason                  String?
   /// BUG-OFFER-REFUND-ACCEPT-001. The OFFER_SPEND an acceptance wrote because
   /// this offer's credit had already been refunded, and when. Written by the
   /// accept transaction only, at most once (conditional UPDATE on NULL, plus
   /// the ledger's "ProviderCreditTransaction_one_recharge_per_offer" partial
   /// index). The first spend and its refund stay in the columns above: this
   /// pair records a second, later charge, never a rewrite of the first.
-  creditRechargeTransactionId         String?   @unique
+  creditRechargeTransactionId         String?                 @unique
   creditRechargedAt                   DateTime?
   /// The OFFER_REFUND that gave the acceptance charge back (a cancel of the
   /// matched request with REFUND), and when. At most once per offer; the
   /// ledger's "ProviderCreditTransaction_one_recharge_refund_per_offer"
   /// partial index is the database-level backstop.
-  creditRechargeRefundedTransactionId String?   @unique
+  creditRechargeRefundedTransactionId String?                 @unique
   creditRechargeRefundedAt            DateTime?
   /// Whether this offer is governed by the 48-hour unviewed-offer refund rule.
   ///
@@ -1555,7 +1572,7 @@ model Offer {
   /// A `false` here is not "not refundable yet"; it is "this offer was sold
   /// under the old terms", which is why the provider panel renders no policy
   /// state at all for those rows rather than inventing one.
-  unviewedRefundPolicy        Boolean                 @default(false)
+  unviewedRefundPolicy                Boolean                 @default(false)
   /// The refund window this offer was sold under, in whole hours, and the exact
   /// moment its credit becomes refundable — both snapshotted when the offer is
   /// created and never recomputed.
@@ -1572,31 +1589,31 @@ model Offer {
   /// columns existed, which is exactly the rule they were already governed by.
   /// A NULL here on an in-policy offer would be a missing schedule rather than
   /// an eligible one: `lte` never matches NULL, so such a row is never paid.
-  unviewedRefundWindowHours   Int?
-  unviewedRefundEligibleAt    DateTime?
+  unviewedRefundWindowHours           Int?
+  unviewedRefundEligibleAt            DateTime?
   /// When something other than a customer view closed this offer's refund
   /// eligibility for good, and why.
   ///
   /// The worker excludes a non-NULL `refundBlockedAt` exactly as it excludes a
   /// non-NULL `viewedAt`, so eligibility never rests on `viewedAt` alone. The
   /// pair is written atomically with the status change that caused it.
-  refundBlockedAt             DateTime?
-  refundBlockedReason         OfferRefundBlockReason?
-  submittedAt                 DateTime                @default(now())
-  viewedAt                    DateTime?
-  acceptedAt                  DateTime?
-  rejectedAt                  DateTime?
-  rejectionReason             OfferRejectionReason?
-  withdrawnAt                 DateTime?
+  refundBlockedAt                     DateTime?
+  refundBlockedReason                 OfferRefundBlockReason?
+  submittedAt                         DateTime                @default(now())
+  viewedAt                            DateTime?
+  acceptedAt                          DateTime?
+  rejectedAt                          DateTime?
+  rejectionReason                     OfferRejectionReason?
+  withdrawnAt                         DateTime?
   /// When the platform closed this offer because its request ended without it:
   /// taken off the market (ServiceRequestsService.rejectRequestInTransaction)
   /// or cancelled (ServiceRequestsService.cancelServiceRequest). Written
   /// together with `status: CANCELLED`; those two are the only writers. An
   /// accepted offer closed by a cancel keeps its `acceptedAt` as the record of
   /// the acceptance. NULL on every offer never closed that way.
-  cancelledAt                 DateTime?
-  createdAt                   DateTime                @default(now())
-  updatedAt                   DateTime                @updatedAt
+  cancelledAt                         DateTime?
+  createdAt                           DateTime                @default(now())
+  updatedAt                           DateTime                @updatedAt
 
   request            ServiceRequest              @relation(fields: [requestId], references: [id])
   provider           ProviderProfile             @relation(fields: [providerId], references: [id])

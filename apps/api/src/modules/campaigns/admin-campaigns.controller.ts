@@ -21,7 +21,7 @@ import { CampaignsService } from './campaigns.service';
 import { CampaignDefinitionDto } from './dto/campaign-definition.dto';
 import { CampaignActivateDto, CampaignTransitionDto } from './dto/campaign-transition.dto';
 import { CreateCampaignDto } from './dto/create-campaign.dto';
-import { ListCampaignsDto } from './dto/list-campaigns.dto';
+import { ListCampaignsDto, ListCampaignsPageDto } from './dto/list-campaigns.dto';
 
 /**
  * Campaigns, for staff holding the campaign permissions (CMP-002 S1 + S2B2,
@@ -57,7 +57,7 @@ export class AdminCampaignsController {
 
   @Get()
   @RequiresPermission(AdminPermission.CAMPAIGNS_READ)
-  list(@Query() query: ListCampaignsDto) {
+  list(@Query() query: ListCampaignsPageDto) {
     return this.campaigns.list(query);
   }
 

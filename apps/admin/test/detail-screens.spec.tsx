@@ -348,6 +348,7 @@ describe('vitrin package sales', () => {
     total: 4,
     byStatus: { PENDING: 1, PAID: 3, FAILED: 0, CANCELLED: 0, EXPIRED: 0, REFUNDED: 0 },
     paidRevenue: [{ currency: 'TRY', amount: 720000 }],
+    manualReview: 0,
     activeRuns: 1,
     entitlements: { AVAILABLE: 1, RESERVED: 0, CONSUMED: 1, EXPIRED: 1 },
     asOf: '2026-10-02T00:00:00.000Z',

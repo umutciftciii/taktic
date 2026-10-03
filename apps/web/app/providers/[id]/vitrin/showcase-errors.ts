@@ -30,6 +30,8 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   SHOWCASE_ENTITLEMENT_REQUIRED: 'Kart oluşturmak için kullanılabilir bir vitrin hakkınız olmalı. Önce vitrin paketi alın.',
   SHOWCASE_ENTITLEMENT_UNAVAILABLE: 'Bu vitrin hakkı artık kullanılabilir değil. Sayfayı yenileyip tekrar deneyin.',
   SHOWCASE_ENTITLEMENT_KIND_MISMATCH: 'Seçtiğiniz vitrin hakkı bu kart türü için kullanılamaz.',
+  SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW:
+    'Bu satın alma iade incelemesinde olduğu için vitrin hakkı şu anda kullanılamaz.',
   SHOWCASE_REVISION_NEEDS_PUBLICATION: 'Bu kartı düzenlemeden önce bir vitrin hakkıyla yayına almanız gerekir.',
   SHOWCASE_PRICE_TERMS_REACCEPT_REQUIRED: 'Devam etmek için sorumluluk metnini kabul edin.',
   // A package the catalogue lists but the payment provider cannot sell yet —
