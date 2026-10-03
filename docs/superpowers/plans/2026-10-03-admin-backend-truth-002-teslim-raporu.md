@@ -97,9 +97,23 @@ yayına girebilir. Öneri: (1) karar verilene kadar manuel incelemedeki satın a
 
 ## 9. Testler
 
-_(final sonuçlar aşağıda doldurulur)_
+**Ara hedefli:** yeni `admin-backend-truth-002.spec.ts` 25/25; etkilenen 17 API dosyası 364 test; admin 10 dosya
+343 test (+ yeni `scheduler-run.spec.ts`); dar E2E 16/16 (yeni spec + scheduler + kampanya/ayar ekranları).
+
+**FINAL (1 kez):**
+
+| Adım | Sonuç |
+| --- | --- |
+| API full | 191 dosya / 4233 test; 1 hata: `request-reports-admin` `resetDatabase` TRUNCATE deadlock (40P01, bilinen flake; bekleyen kilit AccessShare okuma) → dosya tek başına 7/7 |
+| Admin full unit | 35 dosya / 984 test |
+| Typecheck | api / admin / web / e2e temiz |
+| Build | api / admin / web |
+| Chromium full E2E | 1. koşu 486 ✓ / 2 ✘ — **bu PR'ın fikstürü**: 105 eski açık inceleme `provider-business-registration`'ın kaydını kuyruğun 1. sayfasından itiyordu; kategori adındaki "uygunluk" `category-wave-2-drafts` sızıntı testine takılıyordu → fikstür kendi incelemelerini kapatır, ad değişti (3 spec 10/10). 2. koşu 487 ✓ / 1 ✘ `seo-indexing` — rastgele cuid'de `0535` telefon desenine uydu (PR'dan bağımsız flake) → spec tekrar 10/10 |
+| WebKit seçili | 79 ✓: paket satışları/finans, kampanya ekranları (uygunluk + operasyon ayarları dahil), talep-teklif (refund-scan), RBAC, uygunluk kuyruğu, yeni spec |
 
 ## 10. Scope dışı kalan borçlar
+
+- `seo-indexing` E2E telefon deseni cuid flake'i (ayrı iş önerildi).
 
 - F: vitrin hakkı iade/chargeback ürün kararı (yukarıdaki öneri), dispute webhook'u.
 - Dashboard timeseries, global audit feed, Excel export, manual request create, support reopen, category hard delete,
