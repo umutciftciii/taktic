@@ -128,6 +128,10 @@ Silme yok, geçmiş/audit yazısı yok, yeni izin yok, migration yok. Web yalnı
 - Dar E2E: `showcase-package-first-flow` (+ yeni senaryo), `admin-showcase-review-screens`, `showcase-placement*` —
   Chromium 19/19, WebKit 19/19. Full regresyon talimat gereği tekrar koşulmadı.
 
+- CI `37139230162` (head `3f11514d`): chromium ✓, test job'ında tek hata yine `resetDatabase` TRUNCATE deadlock'u
+  (40P01, `status-transition-guards`). Test harness'ı deadlock'ta (yalnız 40P01) en çok 4 kez kısa beklemeyle yeniden
+  dener; TRUNCATE geri alındığı için güvenli. Etkilenen dosyalar yerelde 87/87.
+
 ## 10. Scope dışı kalan borçlar
 
 - `seo-indexing` E2E telefon deseni cuid flake'i (ayrı iş önerildi).
