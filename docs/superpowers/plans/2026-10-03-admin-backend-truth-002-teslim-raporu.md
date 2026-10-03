@@ -70,21 +70,30 @@ eşiği ise uzun ama canlı bir koşuyu yanlışlıkla kapatır. Bu yüzden DB'd
 koşusu yeni instance tarafından kapatılabilir (eski koşular saniyeler mertebesinde). Event loop'u 5 dk bloklayan
 senkron iş de aynı şekilde kapanır; gerçek sonuç loglanır, geçmiş yeniden yazılmaz.
 
-## 7. F — Vitrin hakkı iade/ters ibraz: **implement edilmedi**
+## 7. F — Vitrin hakkı iade/ters ibraz
 
-Bugünkü akış (kod incelemesi): Lemon `order_refunded` / `subscription_payment_refunded` satın almayı yalnız manuel
-incelemeye işaretler (+ kanıtlı tam iadede promo geri alma ve iade isteği varsa SETTLED); dispute/chargeback olayı
-yok sayılır (`UNHANDLED_EVENT`). Vitrin satın alması paket iade isteği akışına giremez (DB tetikleyici). Hiçbir yol
-`ShowcaseEntitlement`/`ShowcasePlacement`'a dokunmaz; domain'de CANCELLED/REVOKED hak yok.
+İlk teslimde ürün kuralları belirsiz olduğu için implement edilmedi. Sonra gelen **ürün kararı** ile dar bir guard eklendi:
+iade bildirimi alan (`manualReviewAt` dolu) ya da artık `PAID` olmayan satın alma **yeni değer teslim edemez**.
 
-Kod ve dokümanda cevabı olmayan sorular: AVAILABLE hak iadede iptal mi; RESERVED (inceleme bekleyen kart) ne olur;
-CONSUMED + yayındaki placement geri alınır mı; teslim edilmiş yayın için sağlayıcı borcu; chargeback = iade mi;
-iade kaynaklı iptalin audit biçimi. Bu yüzden davranış eklenmedi.
+| Durum | Davranış |
+| --- | --- |
+| AVAILABLE | kart oluşturma / `use-entitlement` ile rezerve **edilemez**; adıyla seçilse de, aranırken de 409 (`SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW`, "Bu satın alma iade incelemesinde olduğu için vitrin hakkı şu anda kullanılamaz."). Adsız aramada temiz bir hak varsa o seçilir |
+| RESERVED (canlı değil) | admin onayı / `use-entitlement` ile tüketime **ilerleyemez**; onay işlemi bütünüyle geri alınır (sürüm PENDING, inceleme satırı yok, placement yok) |
+| CONSUMED + aktif placement | **dokunulmaz** (otomatik iptal/askı yok) |
+| Chargeback / dispute | eklenmedi (ayrı ürün kararı) |
 
-**Önemli bulgu (ürün kararı bekliyor):** rezerv/tüketim yalnız hak durumu ve süreye bakıyor, satın almanın
-`REFUNDED`/manuel inceleme durumuna bakmıyor → iadesi bildirilmiş satın almanın AVAILABLE hakkı hâlâ karta bağlanıp
-yayına girebilir. Öneri: (1) karar verilene kadar manuel incelemedeki satın almanın hakkının rezervini engelleyen
-"bekletme" kuralı, (2) ayrı bir ürün kararıyla `REVOKED` durumu + audit satırı + placement için mevcut manuel iptal.
+**Write noktaları:** `ShowcaseEntitlementService.reserveForCard` (kart oluşturma ve `use-entitlement`) ve
+`ShowcaseEntitlementService.consumeForCard` (admin ilk onay ve `use-entitlement` ile anında yayın). Tüm reserve/consume
+yazıları bu iki metottan geçer.
+
+**Transaction / yarış:** `assertPurchaseDeliverable` yazıdan hemen önce, aynı transaction içinde
+`SELECT … FROM "ShowcaseEntitlement" JOIN "PackagePurchase" … FOR SHARE OF p` ile satın almayı kilitleyip yeniden okur.
+Webhook'un bayrak UPDATE'i bu kilitle sıraya girer: önce commit eden kazanır, ikinci gelen diğerini görür
+(serializable yeniden deneme). Test: bayrak commit edilmeden tutulurken rezervasyon kilitte bekler, commit sonrası 409
+verir ve hak AVAILABLE kalır. `FOR SHARE` kaldırılınca bu test düşüyor (mutasyonla doğrulandı).
+
+Silme yok, geçmiş/audit yazısı yok, yeni izin yok, migration yok. Web yalnız destekleyici: hata kodu → Türkçe mesaj
+(`showcase-errors.ts`) ve hub yönlendirmesi.
 
 ## 8. Migration güvenliği
 
@@ -111,10 +120,18 @@ yayına girebilir. Öneri: (1) karar verilene kadar manuel incelemedeki satın a
 | Chromium full E2E | 1. koşu 486 ✓ / 2 ✘ — **bu PR'ın fikstürü**: 105 eski açık inceleme `provider-business-registration`'ın kaydını kuyruğun 1. sayfasından itiyordu; kategori adındaki "uygunluk" `category-wave-2-drafts` sızıntı testine takılıyordu → fikstür kendi incelemelerini kapatır, ad değişti (3 spec 10/10). 2. koşu 487 ✓ / 1 ✘ `seo-indexing` — rastgele cuid'de `0535` telefon desenine uydu (PR'dan bağımsız flake) → spec tekrar 10/10 |
 | WebKit seçili | 79 ✓: paket satışları/finans, kampanya ekranları (uygunluk + operasyon ayarları dahil), talep-teklif (refund-scan), RBAC, uygunluk kuyruğu, yeni spec |
 
+### Ek düzeltme (iade guard'ı) — hedefli testler
+
+- API: yeni `showcase-entitlement-refund-guard.spec.ts` 8/8; vitrin + Lemon + backend-truth + paket satın alma setleri
+  34 dosya / 460 test.
+- Web unit 383/383; typecheck api/web/e2e; build api/web.
+- Dar E2E: `showcase-package-first-flow` (+ yeni senaryo), `admin-showcase-review-screens`, `showcase-placement*` —
+  Chromium 19/19, WebKit 19/19. Full regresyon talimat gereği tekrar koşulmadı.
+
 ## 10. Scope dışı kalan borçlar
 
 - `seo-indexing` E2E telefon deseni cuid flake'i (ayrı iş önerildi).
 
-- F: vitrin hakkı iade/chargeback ürün kararı (yukarıdaki öneri), dispute webhook'u.
+- Chargeback/dispute davranışı ve webhook'u (ayrı ürün kararı); iade incelemesi sonuçlanınca hakkın akıbeti.
 - Dashboard timeseries, global audit feed, Excel export, manual request create, support reopen, category hard delete,
   genel audit reason politikası (talimat gereği dokunulmadı).

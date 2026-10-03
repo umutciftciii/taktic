@@ -663,6 +663,7 @@ export const SHOWCASE_ENTITLEMENT_REQUIRED_CODE = 'SHOWCASE_ENTITLEMENT_REQUIRED
 export const SHOWCASE_ENTITLEMENT_UNAVAILABLE_CODE = 'SHOWCASE_ENTITLEMENT_UNAVAILABLE';
 export const SHOWCASE_ENTITLEMENT_MISSING_CODE = 'SHOWCASE_ENTITLEMENT_MISSING';
 export const SHOWCASE_ENTITLEMENT_KIND_MISMATCH_CODE = 'SHOWCASE_ENTITLEMENT_KIND_MISMATCH';
+export const SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW_CODE = 'SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW';
 export const SHOWCASE_REVISION_NEEDS_PUBLICATION_CODE = 'SHOWCASE_REVISION_NEEDS_PUBLICATION';
 
 /** The provider has no usable right: a card cannot be opened or submitted without one. */
@@ -693,6 +694,22 @@ export function showcaseEntitlementMissing() {
     code: SHOWCASE_ENTITLEMENT_MISSING_CODE,
     message:
       'Bu kartın geçerli bir yayın hakkı yok. Sağlayıcı vitrin paketi almadan kart onaylanıp yayına alınamaz.',
+  });
+}
+
+/**
+ * The right's purchase can no longer deliver anything new: a refund was
+ * reported for it (`manualReviewAt` set) or it is no longer PAID. Its unused
+ * right can be neither bound to a card nor spent on a run until a person
+ * settles the purchase (ADMIN-BACKEND-TRUTH-002). A run already on the air and
+ * a right already consumed are not touched by this.
+ */
+export function showcaseEntitlementPurchaseUnderReview() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW_CODE,
+    message: 'Bu satın alma iade incelemesinde olduğu için vitrin hakkı şu anda kullanılamaz.',
   });
 }
 

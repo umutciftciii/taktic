@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  PackagePurchaseStatus,
   Prisma,
   ShowcaseCardKind,
   ShowcaseEntitlementPauseEnd,
@@ -10,6 +11,7 @@ import { ShowcasePlacementService } from './showcase-placement.service';
 import {
   showcaseEntitlementKindMismatch,
   showcaseEntitlementMissing,
+  showcaseEntitlementPurchaseUnderReview,
   showcaseEntitlementRequired,
   showcaseEntitlementUnavailable,
 } from './showcase.errors';
@@ -36,6 +38,16 @@ export function reservedEntitlementWhere(
     OR: [{ reviewPausedAt: { not: null } }, { expiresAt: { gt: now } }],
   };
 }
+
+/**
+ * A right whose purchase can still deliver: PAID, and no refund reported
+ * against it (`manualReviewAt` unset). The filter half of the purchase guard;
+ * the locked re-read in {@link ShowcaseEntitlementService.assertPurchaseDeliverable}
+ * is the other half.
+ */
+export const deliverablePurchaseWhere: Prisma.ShowcaseEntitlementWhereInput = {
+  purchase: { status: PackagePurchaseStatus.PAID, manualReviewAt: null },
+};
 
 /** The columns a settlement hands over. Narrowed by the caller, never asserted. */
 export type SettledEntitlementPurchase = {
@@ -130,24 +142,33 @@ export class ShowcaseEntitlementService {
       now: Date;
     },
   ) {
+    const searchWhere: Prisma.ShowcaseEntitlementWhereInput = {
+      providerId: input.providerId,
+      ...usableEntitlementWhere(input.now),
+      ...(input.entitlementId
+        ? { id: input.entitlementId }
+        : // Unnamed search: only a right that could actually cover this card
+          // kind is a candidate. A kind-restricted right the caller did not
+          // name is simply not in the running — it is not what makes a later,
+          // usable right unreachable.
+          { OR: [{ allowedCardKindSnapshot: null }, { allowedCardKindSnapshot: input.kind }] }),
+    };
     const candidate = await tx.showcaseEntitlement.findFirst({
-      where: {
-        providerId: input.providerId,
-        ...usableEntitlementWhere(input.now),
-        ...(input.entitlementId
-          ? { id: input.entitlementId }
-          : // Unnamed search: only a right that could actually cover this card
-            // kind is a candidate. A kind-restricted right the caller did not
-            // name is simply not in the running — it is not what makes a later,
-            // usable right unreachable.
-            { OR: [{ allowedCardKindSnapshot: null }, { allowedCardKindSnapshot: input.kind }] }),
-      },
+      // An unnamed search passes over a right whose purchase is under refund
+      // review and takes a clean one if the provider has it; a named right is
+      // read as it is, so its refusal can say why.
+      where: input.entitlementId ? searchWhere : { AND: [searchWhere, deliverablePurchaseWhere] },
       orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
       select: { id: true, allowedCardKindSnapshot: true },
     });
 
     if (!candidate) {
-      throw showcaseEntitlementRequired();
+      // Nothing clean to take. If what is left is only rights whose purchase
+      // is under review, say that rather than "buy a package".
+      const heldBack = input.entitlementId
+        ? null
+        : await tx.showcaseEntitlement.findFirst({ where: searchWhere, select: { id: true } });
+      throw heldBack ? showcaseEntitlementPurchaseUnderReview() : showcaseEntitlementRequired();
     }
 
     if (candidate.allowedCardKindSnapshot !== null && candidate.allowedCardKindSnapshot !== input.kind) {
@@ -155,6 +176,8 @@ export class ShowcaseEntitlementService {
       // has no usable right of this kind.
       throw input.entitlementId ? showcaseEntitlementKindMismatch() : showcaseEntitlementRequired();
     }
+
+    await this.assertPurchaseDeliverable(tx, candidate.id);
 
     const moved = await tx.showcaseEntitlement.updateMany({
       where: { id: candidate.id, ...usableEntitlementWhere(input.now) },
@@ -309,6 +332,10 @@ export class ShowcaseEntitlementService {
       throw showcaseEntitlementMissing();
     }
 
+    // Before anything is written: no run is born from a right whose purchase
+    // was reported refunded after the card reserved it.
+    await this.assertPurchaseDeliverable(tx, reserved.id);
+
     if (reserved.reviewPausedAt) {
       await this.closePause(tx, reserved.id, ShowcaseEntitlementPauseEnd.CONSUMED, input.now);
     }
@@ -337,6 +364,30 @@ export class ShowcaseEntitlementService {
     }
 
     return { placementId, entitlementId: reserved.id };
+  }
+
+  /**
+   * The purchase guard (ADMIN-BACKEND-TRUTH-002): a right may be reserved or
+   * spent only while its purchase is PAID with no refund reported against it.
+   *
+   * Read inside the caller's transaction with `FOR SHARE` on the purchase row,
+   * so the answer cannot go stale before the write that depends on it: the
+   * webhook that flags a reversal updates that row, and its UPDATE waits for
+   * this lock (or, if it committed first, this read sees it; under the
+   * serializable retry the loser replays). Whichever commits second sees the
+   * other. Nothing is written here and nothing is deleted.
+   */
+  async assertPurchaseDeliverable(tx: Prisma.TransactionClient, entitlementId: string): Promise<void> {
+    const rows = await tx.$queryRaw<Array<{ status: PackagePurchaseStatus; manualReviewAt: Date | null }>>`
+      SELECT p."status", p."manualReviewAt"
+      FROM "ShowcaseEntitlement" e
+      JOIN "PackagePurchase" p ON p."id" = e."purchaseId"
+      WHERE e."id" = ${entitlementId}
+      FOR SHARE OF p`;
+    const purchase = rows[0];
+    if (!purchase || purchase.status !== PackagePurchaseStatus.PAID || purchase.manualReviewAt !== null) {
+      throw showcaseEntitlementPurchaseUnderReview();
+    }
   }
 
   findReservedForCard(db: Prisma.TransactionClient | PrismaService, cardId: string, now: Date) {
