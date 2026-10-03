@@ -1,5 +1,5 @@
 import { ConflictException, HttpStatus, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { CampaignTriggerEventStatus, type Prisma, PromotionEligibilityDecision } from '@prisma/client';
+import { CampaignTriggerEventStatus, Prisma, PromotionEligibilityDecision } from '@prisma/client';
 import { runSerializable } from '../../../common/serializable-transaction';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { AuthUser } from '../../auth/auth.types';
@@ -8,6 +8,9 @@ import { isUniqueViolation } from '../engine/campaign-engine.repository';
 
 export const ELIGIBILITY_HOLD_NOT_FOUND = 'ELIGIBILITY_HOLD_NOT_FOUND';
 export const ELIGIBILITY_DECISION_ALREADY_RECORDED = 'ELIGIBILITY_DECISION_ALREADY_RECORDED';
+
+/** The queue's page size when none is asked for, and the most one page holds (ADMIN-BACKEND-TRUTH-002). */
+export const ELIGIBILITY_HOLD_PAGE_MAX_SIZE = 100;
 
 /**
  * The hold as the queue reads it. `decidedBy` names the operator by id and
@@ -61,18 +64,42 @@ export class PromotionEligibilityReviewsService {
   /**
    * The queue, or — with `providerId` — one provider's holds, which is the
    * eligibility context the operator's provider page shows (PR-C.1).
+   *
+   * ADMIN-BACKEND-TRUTH-002: paged, with the view's `total`. The list used to
+   * stop at 100 rows with nothing past them reachable; now every hold is one
+   * `?page=` away. Without `page`/`pageSize` the answer is page 1 of 100 —
+   * the rows an old caller always got — plus the paging fields. Count and page
+   * are read in one REPEATABLE READ snapshot, and the order ends on `id`, so
+   * walking the pages of an unchanged queue meets every hold exactly once. A
+   * decision taken while someone pages moves that hold to the other view, and
+   * the next read's `total` says so.
    */
-  async list(filter: 'open' | 'decided' | 'all', providerId: string | null = null, viewer: AuthUser | null = null) {
-    const rows = await this.prisma.promotionEligibilityHold.findMany({
-      where: {
-        ...(filter === 'open' ? { review: { is: null } } : filter === 'decided' ? { review: { isNot: null } } : {}),
-        ...(providerId ? { providerId } : {}),
-      },
-      orderBy: [{ heldAt: filter === 'open' ? 'asc' : 'desc' }, { id: 'asc' }],
-      take: 100,
-      select: holdSelectFor(viewer),
-    });
-    return { items: rows.map(holdView) };
+  async list(
+    filter: 'open' | 'decided' | 'all',
+    providerId: string | null = null,
+    viewer: AuthUser | null = null,
+    paging: { page?: number; pageSize?: number } = {},
+  ) {
+    const where: Prisma.PromotionEligibilityHoldWhereInput = {
+      ...(filter === 'open' ? { review: { is: null } } : filter === 'decided' ? { review: { isNot: null } } : {}),
+      ...(providerId ? { providerId } : {}),
+    };
+    const page = paging.page ?? 1;
+    const pageSize = paging.pageSize ?? ELIGIBILITY_HOLD_PAGE_MAX_SIZE;
+    const [total, rows] = await this.prisma.$transaction(
+      [
+        this.prisma.promotionEligibilityHold.count({ where }),
+        this.prisma.promotionEligibilityHold.findMany({
+          where,
+          orderBy: [{ heldAt: filter === 'open' ? 'asc' : 'desc' }, { id: 'asc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: holdSelectFor(viewer),
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    return { items: rows.map(holdView), total, page, pageSize, hasNextPage: page * pageSize < total };
   }
 
   async get(triggerEventId: string, viewer: AuthUser | null = null) {

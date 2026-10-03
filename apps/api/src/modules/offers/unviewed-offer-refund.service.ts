@@ -25,6 +25,20 @@ type RefundScanPageOptions = {
   pageSize?: number | string;
 };
 
+/**
+ * The counts line a run of the refund leaves in `SchedulerRun.summary` — the
+ * same words whether the scheduler or an operator ran it.
+ */
+export function refundRunSummary(result: {
+  processed: number;
+  refunded: number;
+  skipped: number;
+  results: Array<{ status: string }>;
+}): string {
+  const failed = result.results.filter((item) => item.status === 'FAILED').length;
+  return `processed=${result.processed} refunded=${result.refunded} skipped=${result.skipped} failed=${failed}`;
+}
+
 /** The preview's page size when none is asked for, and the most one page holds. */
 export const REFUND_SCAN_DEFAULT_PAGE_SIZE = 50;
 export const REFUND_SCAN_MAX_PAGE_SIZE = 100;

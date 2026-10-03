@@ -577,6 +577,10 @@ export class PackagePurchasesService implements OnModuleInit {
    * - `paidRevenue` — the purchase-time price of every PAID purchase, per
    *   currency. The same snapshot the list shows on each row.
    * - `activeRuns` — purchases whose run is ACTIVE and inside its window now.
+   * - `manualReview` — purchases a provider refund/chargeback notice marked
+   *   for manual review (`manualReviewAt` set). The list screen's notice used
+   *   to count these in the browser over the whole list it fetched
+   *   (ADMIN-BACKEND-TRUTH-002).
    * - `entitlements` — vitrin rights granted by these purchases, by their
    *   effective status ({@link effectiveShowcaseEntitlementStatus}); a legacy
    *   card-bound purchase settled straight into a run and has none.
@@ -589,7 +593,7 @@ export class PackagePurchasesService implements OnModuleInit {
     const entitlementWhere = (status: ShowcaseEntitlementEffectiveStatus): Prisma.ShowcaseEntitlementWhereInput => ({
       AND: [{ purchase: where }, showcaseEntitlementEffectiveWhere(status, now)],
     });
-    const [total, byStatus, revenue, activeRuns, ...entitlementCounts] = await this.prisma.$transaction(
+    const [total, byStatus, revenue, activeRuns, manualReview, ...entitlementCounts] = await this.prisma.$transaction(
       [
         this.prisma.packagePurchase.count({ where }),
         this.prisma.packagePurchase.groupBy({ by: ['status'], where, _count: { _all: true }, orderBy: { status: 'asc' } }),
@@ -611,6 +615,7 @@ export class PackagePurchasesService implements OnModuleInit {
             ],
           },
         }),
+        this.prisma.packagePurchase.count({ where: { AND: [where, { manualReviewAt: { not: null } }] } }),
         ...SHOWCASE_ENTITLEMENT_EFFECTIVE_STATUSES.map((status) =>
           this.prisma.showcaseEntitlement.count({ where: entitlementWhere(status) }),
         ),
@@ -632,6 +637,7 @@ export class PackagePurchasesService implements OnModuleInit {
         (row) => ({ currency: row.currencySnapshot, amount: row._sum.priceAmountSnapshot ?? 0 }),
       ),
       activeRuns,
+      manualReview,
       entitlements: Object.fromEntries(
         SHOWCASE_ENTITLEMENT_EFFECTIVE_STATUSES.map((status, index) => [status, entitlementCounts[index] as number]),
       ) as Record<ShowcaseEntitlementEffectiveStatus, number>,

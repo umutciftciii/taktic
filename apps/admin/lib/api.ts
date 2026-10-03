@@ -1413,6 +1413,8 @@ export type PackagePurchaseSummary = {
   paidRevenue: Array<{ currency: string; amount: number }>;
   /** Purchases whose run is ACTIVE and inside its window now. */
   activeRuns: number;
+  /** Purchases a refund/chargeback notice marked for manual review (ADMIN-BACKEND-TRUTH-002). */
+  manualReview: number;
   entitlements: Record<ShowcaseEntitlementStatus, number>;
   asOf: string;
 };
@@ -2494,8 +2496,15 @@ export type SchedulerRunRecord = {
   finishedAt: string | null;
   /** Counts only — never an id, an address or a provider's error text. */
   summary: string | null;
-  /** The error's class name on a FAILED run. */
+  /**
+   * The error's class name on a FAILED run; `PROCESS_INTERRUPTED` when the
+   * run's lease ran out and the recovery closed it (ADMIN-BACKEND-TRUTH-002).
+   */
   errorCode: string | null;
+  /** The run's last sign of life; null on rows from before heartbeats. */
+  heartbeatAt?: string | null;
+  /** Who ran a MANUAL run. */
+  actor?: { id: string; name: string | null } | null;
 };
 
 export type SchedulerJob = {
@@ -2505,8 +2514,10 @@ export type SchedulerJob = {
   cron: string;
   /** True for the two jobs whose passes move credits. */
   movesMoney: boolean;
-  /** The job's most recent recorded run, or null when none has been recorded. */
+  /** The job's most recent recorded scheduled run, or null when none has been recorded. */
   lastRun: SchedulerRunRecord | null;
+  /** Only on a job that can be run by hand (the refund scan): its last hand-run, or null. */
+  lastManualRun?: SchedulerRunRecord | null;
 };
 
 export type SchedulerSettings = {
@@ -3884,6 +3895,10 @@ export type CampaignListResponse = {
   engineEnabled: boolean;
   evaluationQueue: CampaignEvaluationQueue;
   items: Array<Campaign & { currentVersion: CampaignVersionSummary | null; activeVersion: CampaignVersionSummary | null }>;
+  /** Every campaign, counted exactly (ADMIN-BACKEND-TRUTH-002). */
+  total: number;
+  /** `?before=` this id reads the page before; null on the first page. */
+  previousCursor: string | null;
   nextCursor: string | null;
 };
 

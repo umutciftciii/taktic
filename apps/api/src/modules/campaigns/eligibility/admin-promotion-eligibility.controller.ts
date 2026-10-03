@@ -7,7 +7,8 @@ import type { AuthUser } from '../../auth/auth.types';
 import { PermissionsGuard } from '../../auth/permissions.guard';
 import { RequiresPermission } from '../../auth/permissions.decorator';
 import { EligibilityDecisionDto } from './eligibility-decision.dto';
-import { PromotionEligibilityReviewsService } from './promotion-eligibility-reviews.service';
+import { ELIGIBILITY_HOLD_PAGE_MAX_SIZE, PromotionEligibilityReviewsService } from './promotion-eligibility-reviews.service';
+import { readPageParam } from '../../../common/page-param';
 
 /**
  * The promotion eligibility queue (CMP-006 PR-C). Its own prefix rather than
@@ -26,11 +27,17 @@ export class AdminPromotionEligibilityController {
     @CurrentUser() user: AuthUser,
     @Query('filter') filter?: string,
     @Query('providerId') providerId?: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
   ) {
     return this.reviews.list(
       filter === 'decided' ? 'decided' : filter === 'all' ? 'all' : 'open',
       providerId?.trim() || null,
       user,
+      {
+        page: readPageParam(page, 'page', Number.MAX_SAFE_INTEGER),
+        pageSize: readPageParam(pageSize, 'pageSize', ELIGIBILITY_HOLD_PAGE_MAX_SIZE),
+      },
     );
   }
 

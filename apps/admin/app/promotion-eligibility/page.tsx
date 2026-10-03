@@ -6,21 +6,28 @@ import {
   eligibilitySignalLabel,
   type PromotionEligibilityHoldView,
 } from '../../lib/business-registration';
+import { parsePage, type QueryParams } from '../../lib/list-query';
 import { formatCount } from '../../lib/pagination';
 import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import { PageHeader } from '../../components/page-header';
+import { Pagination } from '../../components/pagination';
 import { SavedViewTabs, type TabItem } from '../../components/tabs';
 
-type PageProps = { searchParams: Promise<{ filter?: string }> };
+type PageProps = { searchParams: Promise<{ filter?: string; page?: string }> };
 
 const PATH = '/promotion-eligibility';
 
-/**
- * The API returns at most this many holds per view, oldest first while open,
- * and has no page or cursor (promotion-eligibility-reviews.service.ts).
- */
-const ELIGIBILITY_LIST_LIMIT = 100;
+/** Holds per page; the API pages the queue and counts the whole view (ADMIN-BACKEND-TRUTH-002). */
+const PAGE_SIZE = 50;
+
+type HoldPage = {
+  items: PromotionEligibilityHoldView[];
+  total: number;
+  page: number;
+  pageSize: number;
+  hasNextPage: boolean;
+};
 
 const SCREEN_INFO =
   'Giriş promosyonu için incelemeye alınan hizmet verenler. Kampanya motoru, kapının incelemeye aldığı olayı kendiliğinden yeniden denemez; olay burada gerekçeyle, bir kez ve kesin olarak karara bağlanır. Aynı IP tek başına hiçbir zaman ret gerekçesi değildir.';
@@ -40,32 +47,43 @@ const COLUMNS: DataColumn[] = [
  * worker; it waits here until someone decides it, once, with a reason.
  *
  * ADMIN-DESIGN-001 Faz 3E: the shared list template. "Bekleyen / Karar
- * verilen" became saved views on the same `?filter=decided` parameter; only
- * the open view's count is shown, because it is the only one this request
- * holds. Nothing on this screen decides — the decision is on the detail.
+ * verilen" became saved views on the same `?filter=decided` parameter.
+ * Nothing on this screen decides — the decision is on the detail.
+ *
+ * ADMIN-BACKEND-TRUTH-002: the queue is paged on the server with each view's
+ * real `total`, so no hold sits unreachable past a fixed cut-off. Both tabs
+ * carry their count (the other view's is a one-row read of its `total`), and
+ * switching view goes back to page 1.
  */
 export default async function PromotionEligibilityPage({ searchParams }: PageProps) {
   const { can } = await requireAdmin('PROMOTION_ELIGIBILITY_REVIEW');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
-  const filter = (await searchParams).filter === 'decided' ? 'decided' : 'open';
-  const { items } = await apiFetch<{ items: PromotionEligibilityHoldView[] }>(
-    `/admin/promotion-eligibility/holds?filter=${filter}`,
-  );
-  const truncated = items.length >= ELIGIBILITY_LIST_LIMIT;
+  const params = await searchParams;
+  const filter = params.filter === 'decided' ? 'decided' : 'open';
+  const otherFilter = filter === 'open' ? 'decided' : 'open';
+  const page = parsePage(params.page);
+  const [response, other] = await Promise.all([
+    apiFetch<HoldPage>(`/admin/promotion-eligibility/holds?filter=${filter}&page=${page}&pageSize=${PAGE_SIZE}`),
+    apiFetch<HoldPage>(`/admin/promotion-eligibility/holds?filter=${otherFilter}&page=1&pageSize=1`),
+  ]);
+  const { items } = response;
+  const openTotal = filter === 'open' ? response.total : other.total;
+  const decidedTotal = filter === 'decided' ? response.total : other.total;
+  const filterParams: QueryParams = { filter: filter === 'decided' ? 'decided' : '' };
 
   const views: TabItem[] = [
-    { key: '', label: 'Bekleyen', count: filter === 'open' && !truncated ? items.length : null, testId: 'eligibility-view-open' },
-    { key: 'decided', label: 'Karar verilen', testId: 'eligibility-view-decided' },
+    { key: '', label: 'Bekleyen', count: openTotal, testId: 'eligibility-view-open' },
+    { key: 'decided', label: 'Karar verilen', count: decidedTotal, testId: 'eligibility-view-decided' },
   ];
 
   const subtitle =
     filter === 'open'
-      ? items.length === 0
+      ? openTotal === 0
         ? 'Karar bekleyen inceleme yok'
-        : `${truncated ? `En eski ${formatCount(items.length)}` : formatCount(items.length)} inceleme karar bekliyor`
-      : items.length === 0
+        : `${formatCount(openTotal)} inceleme karar bekliyor · en eski başta`
+      : decidedTotal === 0
         ? 'Henüz karar verilmedi'
-        : `Son ${formatCount(items.length)} karar`;
+        : `${formatCount(decidedTotal)} karar · en yeni başta`;
 
   return (
     <main className="eligibility-list-page">
@@ -82,10 +100,22 @@ export default async function PromotionEligibilityPage({ searchParams }: PagePro
 
       <div className="data-list-card">
         {items.length === 0 ? (
-          <EmptyState
-            title={filter === 'open' ? 'Bekleyen inceleme yok' : 'Henüz karar verilmedi'}
-            description="Kampanya motoru bir giriş promosyonunu incelemeye aldığında burada görünür."
-          />
+          response.total > 0 ? (
+            <EmptyState
+              title="Bu sayfada inceleme yok"
+              description="Liste bu sayfaya kadar uzanmıyor; kararlar verildikçe sayfa sayısı azalır."
+              action={
+                <Link className="btn btn-secondary btn-sm" href={filter === 'decided' ? `${PATH}?filter=decided` : PATH}>
+                  İlk sayfaya dön
+                </Link>
+              }
+            />
+          ) : (
+            <EmptyState
+              title={filter === 'open' ? 'Bekleyen inceleme yok' : 'Henüz karar verilmedi'}
+              description="Kampanya motoru bir giriş promosyonunu incelemeye aldığında burada görünür."
+            />
+          )
         ) : (
           <DataTable caption={filter === 'open' ? 'Bekleyen incelemeler' : 'Karar verilen incelemeler'} columns={COLUMNS} minWidth={900} testId="eligibility-table">
             {items.map((item) => (
@@ -130,14 +160,17 @@ export default async function PromotionEligibilityPage({ searchParams }: PagePro
             ))}
           </DataTable>
         )}
-        {items.length > 0 ? (
-          <nav className="pagination" aria-label="Liste sonu">
-            <p className="pagination-summary" data-testid="eligibility-list-summary">
-              {truncated
-                ? `İlk ${formatCount(items.length)} inceleme gösteriliyor; liste bu sayıda kesilir ve sayfalanmaz.`
-                : `${formatCount(items.length)} inceleme, tamamı gösteriliyor`}
-            </p>
-          </nav>
+        {response.total > 0 ? (
+          <Pagination
+            path={PATH}
+            params={filterParams}
+            page={response.page}
+            pageSize={response.pageSize}
+            total={response.total}
+            hasNextPage={response.hasNextPage}
+            noun="inceleme"
+            summaryTestId="eligibility-list-summary"
+          />
         ) : null}
       </div>
     </main>

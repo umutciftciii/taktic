@@ -50,6 +50,13 @@ export type SchedulerJobView = {
    * been recorded since runs were persisted (OPS-SCHEDULER-RUN-PERSISTENCE-001).
    */
   lastRun: SchedulerRunView | null;
+  /**
+   * The job's most recent hand-run, with its operator — present only on a job
+   * that can be run by hand (the refund scan, ADMIN-BACKEND-TRUTH-002), null
+   * there when none has been recorded. A hand-run is not the scheduler
+   * running, so it never stands in for `lastRun`.
+   */
+  lastManualRun?: SchedulerRunView | null;
 };
 
 export type SchedulerSettingsView = {
@@ -151,7 +158,7 @@ export class SchedulerSettingsService {
   }
 
   async listForAdmin(): Promise<SchedulerSettingsView> {
-    const [row, changes, lastRuns] = await Promise.all([
+    const [row, changes, lastRuns, lastManualRefundRun] = await Promise.all([
       this.prisma.operationsSettings.findUnique({
         where: { id: OPERATIONS_SETTINGS_ID },
         select: flagsSelect,
@@ -170,6 +177,7 @@ export class SchedulerSettingsService {
         },
       }),
       this.runs.lastRuns(),
+      this.runs.lastManualRun('unviewed-offer-refund'),
     ]);
 
     return {
@@ -181,6 +189,7 @@ export class SchedulerSettingsService {
         cron: readSchedulerCron(job),
         movesMoney: SCHEDULER_JOB_MOVES_MONEY[job],
         lastRun: lastRuns[job],
+        ...(job === 'unviewed-offer-refund' ? { lastManualRun: lastManualRefundRun } : {}),
       })),
       recentChanges: changes,
     };

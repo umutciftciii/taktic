@@ -299,7 +299,7 @@ export default async function ProviderDetailPage({
       : Promise.resolve(null),
     // This provider's promotion eligibility holds, open and decided.
     canReadEligibility && activeTab === ''
-      ? apiFetch<{ items: PromotionEligibilityHoldView[] }>(
+      ? apiFetch<{ items: PromotionEligibilityHoldView[]; total: number }>(
           `/admin/promotion-eligibility/holds?filter=all&providerId=${encodeURIComponent(id)}`,
         )
       : Promise.resolve(null),
@@ -881,6 +881,12 @@ export default async function ProviderDetailPage({
                     ))}
                   </ul>
                 )}
+                {eligibility.total > eligibility.items.length ? (
+                  // ADMIN-BACKEND-TRUTH-002: the API's first page is 100 holds; say so rather than imply it is all.
+                  <p className="detail-muted-note" data-testid="provider-eligibility-more">
+                    {eligibility.total} incelemenin en yeni {eligibility.items.length} tanesi gösteriliyor.
+                  </p>
+                ) : null}
               </SectionCard>
             ) : null}
 
