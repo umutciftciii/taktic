@@ -132,9 +132,19 @@ Silme yok, geçmiş/audit yazısı yok, yeni izin yok, migration yok. Web yalnı
   (40P01, `status-transition-guards`). Test harness'ı deadlock'ta (yalnız 40P01) en çok 4 kez kısa beklemeyle yeniden
   dener; TRUNCATE geri alındığı için güvenli. Etkilenen dosyalar yerelde 87/87.
 
+### Ek düzeltme — cuid/telefon deseni flake'i
+
+- `e2e/tests/seo-indexing.spec.ts`: işletme JSON-LD'sinde `example.test` kontrolü tüm blokta aynen; telefon kontrolü
+  (`\+90|05\d{2}`) canonical URL (işletme id'si) çıkarıldıktan sonra — kart kontrolünün mevcut yaklaşımıyla ve PR #140
+  sitemap düzeltmesiyle aynı. Uygulama davranışı değişmedi.
+- Tarama (`e2e/tests`, `apps/api/test`): cuid içeren JSON'a 4 haneli literal uygulayan 3 küçük assertion aynı sınıfta
+  bulundu ve aynı şekilde düzeltildi — `provider-review-notifications` (davet verisi, `reviewUrl` içinde talep id'si),
+  `provider-reviews-aggregate` ve `showcase-feed` (id alanları boşaltılır). Kimlik taşımayan `review-removed` verisi
+  ve `"0555 123"` (boşluklu) kontrolleri değiştirilmedi.
+- Testler: `pnpm e2e seo-indexing` 10/10; 3 API dosyası 35/35; api/e2e typecheck temiz.
+
 ## 10. Scope dışı kalan borçlar
 
-- `seo-indexing` E2E telefon deseni cuid flake'i (ayrı iş önerildi).
 
 - Chargeback/dispute davranışı ve webhook'u (ayrı ürün kararı); iade incelemesi sonuçlanınca hakkın akıbeti.
 - Dashboard timeseries, global audit feed, Excel export, manual request create, support reopen, category hard delete,

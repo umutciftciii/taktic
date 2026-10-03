@@ -406,7 +406,8 @@ describe('provider review aggregate', () => {
       resolution: null,
     });
 
-    const text = JSON.stringify(body);
+    // Ids are blanked first: a random cuid may spell "0555" by chance.
+    const text = JSON.stringify(body).replace(/"(id|[a-zA-Z]+Id)":"[^"]*"/g, '"$1":""');
     expect(text).not.toMatch(/Müşteri |0555|@example\.test|User |Gizli not|customer/i);
 
     // The owner alone (or a SUPER_ADMIN) may look at the panel.

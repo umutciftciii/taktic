@@ -270,7 +270,9 @@ describe('provider review notifications', () => {
     expect(invitation?.data?.fullName).toBe(job.request.customerName);
     expect(invitation?.data?.windowEndsAt).toMatch(/^\d{1,2} \S+ \d{4}$/);
     expect(invitation?.data?.accountUrl).toContain('/account');
-    expect(JSON.stringify(invitation?.data)).not.toMatch(/0555|example\.test/);
+    // The review link carries the request id, a random string that may spell
+    // "0555" by chance; it is taken out before the phone check.
+    expect(JSON.stringify(invitation?.data).split(job.request.id).join('')).not.toMatch(/0555|example\.test/);
 
     await setReviewsEnabled(false);
     expect(await mail.composeRetryMessage('review-invitation', invitationKey)).toBeNull();

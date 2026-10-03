@@ -500,6 +500,9 @@ describe('index eligibility on the feed and the card (SEO-003)', () => {
     expect(card.body.seoIndexable).toBe(false);
     expect(Object.keys(card.body).filter((key) => /seo|index|eligib|score|reason|threshold/i.test(key))).toEqual(['seoIndexable']);
     // Nothing the rule read on the business travels with the card.
-    expect(JSON.stringify(card.body)).not.toMatch(/Test işletmesi|"description"|moderasyon|0555/);
+    // Ids are blanked first: a random cuid may spell "0555" by chance.
+    expect(JSON.stringify(card.body).replace(/"(id|[a-zA-Z]+Id)":"[^"]*"/g, '"$1":""')).not.toMatch(
+      /Test işletmesi|"description"|moderasyon|0555/,
+    );
   });
 });

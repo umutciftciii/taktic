@@ -322,8 +322,13 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
         address: { '@type': 'PostalAddress', addressCountry: 'TR' },
       });
       expectCleanJsonLd(business.jsonLd);
-      // Nothing that reaches a person, in any block.
-      expect(JSON.stringify(business.jsonLd)).not.toMatch(/example\.test|\+90|05\d{2}/);
+      // Nothing that reaches a person, in any block. The e-mail check reads
+      // the whole block; the phone check runs with the URL taken out first, as
+      // the card check below does: a business id is a random string and may
+      // spell "05" and two digits by chance.
+      const businessJsonLd = JSON.stringify(business.jsonLd);
+      expect(businessJsonLd).not.toMatch(/example\.test/);
+      expect(businessJsonLd.split(business.canonical!).join('')).not.toMatch(/\+90|05\d{2}/);
 
       const shelf = await headOf(visitor, '/vitrin');
       expect(shelf.robots).toBe('index, follow');
