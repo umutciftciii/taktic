@@ -530,20 +530,53 @@ export class CampaignsService {
 
   // ─────────────────────────────── reads ────────────────────────────────
 
-  async list(query: { limit?: number; cursor?: string }) {
+  /**
+   * The campaign list, newest change first, cursor-paged on `(updatedAt, id)`.
+   *
+   * ADMIN-BACKEND-TRUTH-002 keeps the cursor canonical and adds what the screen
+   * lacked, without changing what an old client reads:
+   *
+   * - `total` — every campaign, counted exactly (`count(*)`; the list has no
+   *   filter, so the total is the table's).
+   * - `previousCursor` — the first row's id when rows come before this page;
+   *   `?before=<previousCursor>` returns that page. Null on the first page.
+   * - `nextCursor` — unchanged: the last row's id when rows come after.
+   *
+   * `before` reads backwards from the row (Prisma's negative `take`), so the
+   * page it returns ends right before that row in the list's own order.
+   * `cursor` and `before` together are a 400.
+   */
+  async list(query: { limit?: number; cursor?: string; before?: string }) {
+    if (query.cursor && query.before) {
+      throw new BadRequestException('cursor and before cannot be combined');
+    }
     const take = query.limit ?? CAMPAIGN_LIST_DEFAULT_LIMIT;
-    const [engineEnabled, evaluationQueue, rows] = await Promise.all([
+    const backwards = Boolean(query.before);
+    const anchor = query.cursor ?? query.before;
+    const [engineEnabled, evaluationQueue, [total, rows]] = await Promise.all([
       this.engineSettings.isEngineEnabled(),
       this.evaluationQueue(),
-      this.prisma.campaign.findMany({
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-        take: take + 1,
-        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-        select: campaignSelect,
-      }),
+      this.prisma.$transaction(
+        [
+          this.prisma.campaign.count(),
+          this.prisma.campaign.findMany({
+            orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+            take: backwards ? -(take + 1) : take + 1,
+            ...(anchor ? { cursor: { id: anchor }, skip: 1 } : {}),
+            select: campaignSelect,
+          }),
+        ],
+        { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      ),
     ]);
 
-    const page = rows.slice(0, take);
+    // One row past the page on the side being read says whether more lie that way.
+    const more = rows.length > take;
+    const page = backwards ? rows.slice(more ? 1 : 0) : rows.slice(0, take);
+    const first = page[0];
+    const last = page[page.length - 1];
+    const hasPrevious = backwards ? more : Boolean(anchor) && page.length > 0;
+    const hasNext = backwards ? page.length > 0 : more;
     return {
       engineEnabled,
       evaluationQueue,
@@ -552,7 +585,9 @@ export class CampaignsService {
         currentVersion: row.currentVersion ? versionSummaryView(row.currentVersion) : null,
         activeVersion: row.activeVersion ? versionSummaryView(row.activeVersion) : null,
       })),
-      nextCursor: rows.length > take ? page[page.length - 1]!.id : null,
+      total,
+      previousCursor: hasPrevious && first ? first.id : null,
+      nextCursor: hasNext && last ? last.id : null,
     };
   }
 

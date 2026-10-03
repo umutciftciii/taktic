@@ -10,7 +10,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { AdminPermission } from '@prisma/client';
+import { AdminPermission, SchedulerRunTrigger } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -21,7 +21,8 @@ import { ListOffersQueryDto } from './dto/list-offers-query.dto';
 import { RefundOfferCreditDto } from './dto/refund-offer-credit.dto';
 import { ExecuteRefundScanDto, RefundScanQueryDto } from './dto/refund-scan.dto';
 import { UpdateOfferStatusDto } from './dto/update-offer-status.dto';
-import { UnviewedOfferRefundService } from './unviewed-offer-refund.service';
+import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
+import { refundRunSummary, UnviewedOfferRefundService } from './unviewed-offer-refund.service';
 import { OffersService } from './offers.service';
 
 @Controller('offers')
@@ -30,6 +31,7 @@ export class OffersController {
     @Inject(OffersService) private readonly offersService: OffersService,
     @Inject(UnviewedOfferRefundService)
     private readonly unviewedOfferRefund: UnviewedOfferRefundService,
+    @Inject(SchedulerRunRegistry) private readonly runs: SchedulerRunRegistry,
   ) {}
 
   @Get()
@@ -59,10 +61,22 @@ export class OffersController {
   @Post('refund-scan/execute')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.OFFER_REFUND_EXECUTE)
-  executeRefundScan(@Body() dto: ExecuteRefundScanDto, @CurrentUser() user: AuthUser) {
-    // The operator is the session, never the body: each ledger row the run
-    // writes names who ran it, and the scheduler's rows stay actor-less.
-    return this.unviewedOfferRefund.execute({ limit: dto.limit, actorId: user.id });
+  async executeRefundScan(@Body() dto: ExecuteRefundScanDto, @CurrentUser() user: AuthUser) {
+    // ADMIN-BACKEND-TRUTH-002: a hand-run leaves a run record like a scheduled
+    // one — the same job key, trigger MANUAL, the operator as its actor — so
+    // the operations screen can say when the refund last ran by hand and
+    // whether it finished. Recording never decides the run (see the registry).
+    const run = await this.runs.start('unviewed-offer-refund', SchedulerRunTrigger.MANUAL, { actorId: user.id });
+    try {
+      // The operator is the session, never the body: each ledger row the run
+      // writes names who ran it, and the scheduler's rows stay actor-less.
+      const result = await this.unviewedOfferRefund.execute({ limit: dto.limit, actorId: user.id });
+      await run.succeed(refundRunSummary(result));
+      return result;
+    } catch (error) {
+      await run.fail(error);
+      throw error;
+    }
   }
 
   @Get(':id')

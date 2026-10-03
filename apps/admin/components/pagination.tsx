@@ -75,12 +75,19 @@ export function Pagination({
  */
 export function CursorPagination({
   count,
+  total,
   previousHref,
   nextHref,
   noun,
   summaryTestId,
 }: {
   count: number;
+  /**
+   * The list's exact size, when the API counts it (the campaign list does,
+   * ADMIN-BACKEND-TRUTH-002). Still no position: a cursor page does not know
+   * which rows it is, only how many it holds out of how many.
+   */
+  total?: number;
   previousHref: string | null;
   nextHref: string | null;
   noun?: string;
@@ -89,7 +96,7 @@ export function CursorPagination({
   return (
     <nav className="pagination" aria-label="Sayfalama">
       <p className="pagination-summary" data-testid={summaryTestId}>
-        {cursorSummary(count, noun)}
+        {cursorSummary(count, noun, total)}
       </p>
       <div className="pagination-links">
         <PagerLink rel="prev" label="Önceki" href={previousHref} testId="pagination-previous" />

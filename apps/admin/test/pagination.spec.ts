@@ -51,5 +51,9 @@ describe('pagination', () => {
     expect(cursorSummary(0)).toBe('Bu sayfada kayıt yok');
     expect(cursorSummary(25)).toBe('Bu sayfada 25 kayıt');
     expect(cursorSummary(3, 'hareket')).toBe('Bu sayfada 3 hareket');
+    // ADMIN-BACKEND-TRUTH-002: a counted cursor list says its real total too.
+    expect(cursorSummary(25, 'kampanya', 60)).toBe('Toplam 60 kampanya · bu sayfada 25');
+    expect(cursorSummary(0, 'kampanya', 60)).toBe('Bu sayfada kampanya yok · toplam 60 kampanya');
+    expect(cursorSummary(0, 'kampanya', 0)).toBe('0 kampanya');
   });
 });

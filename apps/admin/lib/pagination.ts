@@ -77,7 +77,16 @@ export function pageSummary(window: PageWindow, noun = 'kayıt'): string {
   return `${formatCount(window.total)} kaydın ${formatCount(window.start)}–${formatCount(window.end)} arası gösteriliyor`;
 }
 
-/** A cursor list knows how many rows it holds, not how many exist. */
-export function cursorSummary(count: number, noun = 'kayıt'): string {
-  return count === 0 ? `Bu sayfada ${noun} yok` : `Bu sayfada ${formatCount(count)} ${noun}`;
+/**
+ * A cursor list knows how many rows it holds; how many exist only when the API
+ * counted them and said so (`total`). Never a guessed total.
+ */
+export function cursorSummary(count: number, noun = 'kayıt', total?: number): string {
+  if (total === undefined) {
+    return count === 0 ? `Bu sayfada ${noun} yok` : `Bu sayfada ${formatCount(count)} ${noun}`;
+  }
+  if (total === 0) return `0 ${noun}`;
+  return count === 0
+    ? `Bu sayfada ${noun} yok · toplam ${formatCount(total)} ${noun}`
+    : `Toplam ${formatCount(total)} ${noun} · bu sayfada ${formatCount(count)}`;
 }

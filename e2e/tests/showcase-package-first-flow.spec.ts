@@ -948,6 +948,64 @@ test.describe('vitrin: paket-önce akış', () => {
     }
   });
 
+  test('iade incelemesindeki satın almanın hakkı kartı yayına almaz; yayındaki hiçbir şeye dokunulmaz', async ({
+    browser,
+  }) => {
+    // ADMIN-BACKEND-TRUTH-002: a refund reported against the purchase (what the
+    // reversal webhook writes) stops its unused right from delivering a run.
+    const location = uniqueLocation();
+    const category = await createCategory(3, { namePrefix: 'E2E Vitrin Iade' });
+    const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const { card, version } = await seedApprovedCard({
+      providerId: owner.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+      title: 'E2E İade İncelemesi Kartı',
+    });
+    const { placement } = await seedLivePlacement({
+      providerId: owner.id,
+      cardId: card.id,
+      versionId: version.id,
+      categoryId: category.id,
+      city: location.city,
+      district: location.district,
+    });
+    await expirePlacement(placement.id);
+    const { purchase, entitlement } = await seedEntitlement(owner.id, 'E2E İade Paketi');
+    await prisma().packagePurchase.update({
+      where: { id: purchase.id },
+      data: { manualReviewReason: 'PAYMENT_REVERSAL_REPORTED', manualReviewAt: new Date() },
+    });
+
+    const provider = await Actor.open(browser, 'web', primaryRuntime);
+    try {
+      await provider.loginToWeb(owner.email, owner.password);
+      await provider.gotoWeb(`/providers/${owner.id}/vitrin/${card.id}`);
+      await assertNoErrorScreen(provider.page);
+      const action = provider.page.getByTestId('showcase-stage-action');
+      await expect(action).toHaveText('Yeniden yayınla');
+      await action.click();
+      await assertNoErrorScreen(provider.page);
+
+      await expect(provider.page).toHaveURL(/error=SHOWCASE_ENTITLEMENT_PURCHASE_UNDER_REVIEW/);
+      await expect(provider.page.locator('.pdash-notice-error')).toHaveText(
+        'Bu satın alma iade incelemesinde olduğu için vitrin hakkı şu anda kullanılamaz.',
+      );
+
+      // Nothing was delivered and nothing was taken away.
+      expect(await prisma().showcaseEntitlement.findUniqueOrThrow({ where: { id: entitlement.id } })).toMatchObject({
+        status: 'AVAILABLE',
+        cardId: null,
+        placementId: null,
+      });
+      expect(await prisma().showcasePlacement.count({ where: { cardId: card.id } })).toBe(1);
+      expect(await prisma().showcasePlacement.count({ where: { cardId: card.id, status: 'ACTIVE' } })).toBe(0);
+    } finally {
+      await provider.close();
+    }
+  });
+
   test('paket tanımlı değilken ekran teknik terim içermez', async ({ browser }) => {
     const location = uniqueLocation();
     const category = await createCategory(3, { namePrefix: 'E2E Vitrin Paketsiz' });

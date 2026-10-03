@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   Body,
   Controller,
   Get,
@@ -25,6 +24,7 @@ import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
 import { PACKAGE_PURCHASE_PAGE_MAX_SIZE, PackagePurchasesService } from './package-purchases.service';
+import { readPageParam } from '../../common/page-param';
 
 @Controller()
 export class PackagePurchasesController {
@@ -140,16 +140,4 @@ export class PackagePurchasesController {
   ) {
     return this.packagePurchasesService.updateAdminPurchaseStatus(id, dto, user);
   }
-}
-
-/** A page parameter: absent means the default, anything but a whole number in range is a 400. */
-function readPageParam(value: string | undefined, name: string, max: number): number | undefined {
-  if (value === undefined || value === '') return undefined;
-  const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed < 1 || parsed > max) {
-    throw new BadRequestException(
-      max === Number.MAX_SAFE_INTEGER ? `${name} must be a positive integer` : `${name} must be an integer from 1 to ${max}`,
-    );
-  }
-  return parsed;
 }
