@@ -9,6 +9,8 @@ TakTic is a local services marketplace foundation. Phase 0 is intentionally limi
 - Admin: `http://localhost:3002`
 - PostgreSQL: `localhost:5433` by default
 
+Every port is published on `127.0.0.1` only, by `docker-compose.yml` itself — no override file is needed for that, and none can be relied on for it.
+
 ## Local Setup
 
 1. Install the Node version from `.nvmrc`.
@@ -34,7 +36,7 @@ docker compose up -d postgres
 pnpm stack:up
 ```
 
-`pnpm stack:up` is `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`. The second file is the local machine's own declaration (`APP_ENVIRONMENT=local` for the api and web services) and is loaded only when named: the base `docker-compose.yml` forwards `APP_ENVIRONMENT` exactly as the host set it, and a host that set nothing gets processes that treat themselves as production — Turnstile in its strict Cloudflare mode, the API refusing to boot without `TURNSTILE_SECRET_KEY`, the request forms closed. That is what a staging or production host running the base file alone should get; a developer's stack says it is local instead, needs no Turnstile value, and never contacts Cloudflare. Running the API on the host directly (`pnpm dev`) needs the same word exported: `APP_ENVIRONMENT=local`.
+`pnpm stack:up` is `docker compose -f docker-compose.yml -f docker-compose.local.yml up -d`. The second file is the local machine's own declaration (`APP_ENVIRONMENT=local` for the api and web services) and is loaded only when named: the base `docker-compose.yml` forwards `APP_ENVIRONMENT` exactly as the host set it, and a host that set nothing gets processes that treat themselves as production — Turnstile in its strict Cloudflare mode, the API refusing to boot without `TURNSTILE_SECRET_KEY`, the request forms closed. That is also how the base file fails closed if a deployed host ever runs it (deployed hosts run `docker-compose.prod.yml`; see Deployment); a developer's stack says it is local instead, needs no Turnstile value, and never contacts Cloudflare. Running the API on the host directly (`pnpm dev`) needs the same word exported: `APP_ENVIRONMENT=local`.
 
 5. Generate Prisma Client:
 
@@ -239,6 +241,17 @@ How it behaves:
 Contact details are never added to an offer list or detail. They are served only by three dedicated routes, each of which checks the match, the audit row and the caller: the customer sees the provider they chose, that provider sees the customer, and `SUPER_ADMIN` sees both plus the audit row. A losing provider, an unrelated party and an anonymous caller get nothing. Requests created before the disclosure columns existed carry no acceptance and are never opened.
 
 Nothing in the product can repeat, edit or undo a reveal; the accept transaction is the only writer.
+
+## Deployment
+
+Staging and production run immutable images, not this repository's development stack: `Dockerfile` builds `api` (compiled NestJS), `web` and `admin` (`next start`) and a `migrate` tool image, from `git archive <sha>` so no untracked file can enter them. `docker-compose.prod.yml` runs them standalone — no bind mount, api/web/admin on `127.0.0.1` only, PostgreSQL not published at all.
+
+```bash
+scripts/ops/deploy-staging.sh --sha <commit> --check   # read-only preflight
+scripts/ops/deploy-staging.sh --sha <commit>           # deploy
+```
+
+The deploy stops the API before the checkout moves, takes and verifies a backup, runs `prisma migrate deploy` (nothing else: the migrate image refuses `migrate dev`, `reset`, `db push` and shadow databases), requires a clean status and zero drift, and only then starts the new API. Backups (`scripts/ops/backup-db.sh`, `backup-uploads.sh`) are verified on write and never deleted; `scripts/ops/restore-rehearsal.sh` proves one restores, into a throwaway database. After a merge, `scripts/ops/local-sync.sh` brings the local stack up in the same order. The full runbook, the port matrix and the first-cutover steps are in [docs/ops/deploy-runtime.md](docs/ops/deploy-runtime.md).
 
 ## Local Ops
 

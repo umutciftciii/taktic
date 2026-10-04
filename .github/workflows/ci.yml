@@ -18,9 +18,9 @@ jobs:
   # when every link holds. Anything else — a direct push, a base that moved, a
   # different tree, a PR run that is missing, pending, failed or incomplete,
   # an API error, this job failing — leaves `reuse` unset or false, and the
-  # three jobs below run in full. When they are not run they show as skipped,
+  # jobs below run in full. When they are not run they show as skipped,
   # never as passed, and this job's summary links the PR run that tested the
-  # tree. Pull requests never run this job: all three jobs always run there.
+  # tree. Pull requests never run this job: all of them always run there.
   post-merge-gate:
     name: post-merge gate (reuse PR result only for an identical tree)
     if: github.event_name == 'push'
@@ -377,3 +377,94 @@ jobs:
             e2e/.artifacts/report
           retention-days: 7
           if-no-files-found: ignore
+
+  ops:
+    name: ops (compose · scripts · production images)
+    runs-on: ubuntu-latest
+    needs: post-merge-gate
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
+
+    # The deploy contract (OPS-004 / OPS-006 / OPS-002), proven on every pull
+    # request without touching any real host. Its own job, in parallel with
+    # the others: it needs Docker, not the browser or the integration
+    # database, and its few minutes of image builds sit well inside the e2e
+    # job's runtime, so it adds nothing to a PR's wall-clock time.
+    #
+    #   1. shell scripts: bash -n + shellcheck (warnings and above)
+    #   2. compose security: the audit's own tests, then the audit of the
+    #      real files — docker-compose.prod.yml alone must publish api, web and
+    #      admin on 127.0.0.1 only and PostgreSQL nowhere
+    #   3. the four production images, built from `git archive` of this commit
+    #   4. what is inside them: no .env / .git / dumps, non-root, no dev tools
+    #   5. boot: a throwaway prod stack on an empty database — migrate deploy
+    #      through the guard, api/web/admin healthy, then scripts/ops/smoke.sh
+    #   6. backup + isolated restore rehearsal of that database
+    #
+    # Placeholders only: the .env written below holds no secret (Cloudflare's
+    # published always-pass Turnstile test keys and throwaway values).
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shell scripts
+        run: |
+          for f in scripts/ops/*.sh; do bash -n "$f"; done
+          shellcheck --version | head -n 2
+          shellcheck -S warning -x -P scripts/ops scripts/ops/*.sh
+
+      - name: Compose security
+        run: |
+          node --test scripts/ops/
+          node scripts/ops/compose-security.mjs prod
+          node scripts/ops/compose-security.mjs dev
+
+      - name: Throwaway stack environment
+        run: |
+          cat > .env <<'EOF'
+          COMPOSE_PROJECT_NAME=taktic-ci
+          APP_ENVIRONMENT=staging
+          API_NODE_ENV=development
+          POSTGRES_PASSWORD=ci-placeholder
+          NEXT_PUBLIC_API_URL=http://127.0.0.1:3001
+          NEXT_PUBLIC_WEB_URL=http://127.0.0.1:3000
+          WEB_ORIGIN=http://127.0.0.1:3000
+          ADMIN_ORIGIN=http://127.0.0.1:3002
+          TURNSTILE_MODE=cloudflare
+          TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+          TURNSTILE_SITE_KEY=1x00000000000000000000AA
+          TURNSTILE_EXPECTED_HOSTNAMES=127.0.0.1
+          PROMOTION_FINGERPRINT_KEY=ci-placeholder-fingerprint-key-not-a-secret-0001
+          PROMOTION_FINGERPRINT_KEY_VERSION=1
+          EOF
+          echo "TAKTIC_IMAGE_TAG=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "TAKTIC_BACKUP_DIR=$RUNNER_TEMP/taktic-backups" >> "$GITHUB_ENV"
+
+      - name: Build production images
+        run: scripts/ops/build-images.sh "$TAKTIC_IMAGE_TAG"
+
+      - name: Image contents
+        run: scripts/ops/check-image-contents.sh "$TAKTIC_IMAGE_TAG"
+
+      - name: Boot the production stack and smoke it
+        run: |
+          set -euo pipefail
+          prod() { docker compose -f docker-compose.prod.yml "$@"; }
+          node scripts/ops/compose-security.mjs prod --use-env
+          prod up -d --wait postgres
+          prod --profile tools run --rm --no-deps -T migrate deploy
+          prod --profile tools run --rm --no-deps -T migrate status
+          prod --profile tools run --rm --no-deps -T migrate drift
+          prod up -d --no-deps --wait --wait-timeout 180 api
+          prod up -d --no-deps --wait --wait-timeout 180 web admin
+          scripts/ops/smoke.sh --sha "$TAKTIC_IMAGE_TAG"
+
+      - name: Backup and isolated restore rehearsal
+        run: |
+          set -euo pipefail
+          dump="$(scripts/ops/backup-db.sh --label ci | sed -n 's/^BACKUP_FILE=//p')"
+          archive="$(scripts/ops/backup-uploads.sh --label ci --allow-empty | sed -n 's/^UPLOADS_ARCHIVE=//p')"
+          scripts/ops/restore-rehearsal.sh --db-dump "$dump" --uploads-archive "$archive" \
+            --migrate-image "taktic-migrate:$TAKTIC_IMAGE_TAG"
+
+      - name: Stack logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.prod.yml logs --no-color --tail 200 || true
