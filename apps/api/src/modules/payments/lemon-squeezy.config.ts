@@ -232,8 +232,10 @@ function readVariantMap(): ReadonlyMap<string, string> {
  *
  * Overridable so the browser suite can point the adapter at a local stand-in
  * and never reach Lemon Squeezy at all. The override is https-only outside
- * loopback, and loopback is only accepted outside production — which is
- * belt-and-braces, since `lemon-squeezy-test` cannot run in production either.
+ * loopback, and the seam is refused outright under NODE_ENV=production. That
+ * includes staging, which runs the production build against the real sandbox
+ * (docker-compose.prod.yml does not forward this variable at all); the seam is
+ * for the browser suite's development-mode stack only.
  */
 function readApiBaseUrl(): string {
   const raw = process.env.LEMON_SQUEEZY_API_BASE_URL?.trim();

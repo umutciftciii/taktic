@@ -1,3 +1,4 @@
+import { parseAppEnvironment } from '../../common/app-environment';
 import { readLemonSqueezyConfig } from './lemon-squeezy.config';
 
 /**
@@ -15,9 +16,13 @@ import { readLemonSqueezyConfig } from './lemon-squeezy.config';
  *    falling back to a provider nobody chose. The value is never echoed — a
  *    misconfiguration that pastes an API key into the wrong variable must not
  *    turn the boot log into the place that key finally gets written down.
- * 2. `lemon-squeezy-test` is refused under NODE_ENV=production. The sandbox
+ * 2. `lemon-squeezy-test` is refused on a production deployment. The sandbox
  *    provider settles nothing; a production deployment wired to it would hand
- *    out credits against payments that never happened.
+ *    out credits against payments that never happened. "Production" is the
+ *    deployment's own statement, APP_ENVIRONMENT — not NODE_ENV, which only
+ *    says how the process was built and started: the staging stack runs the
+ *    same immutable production build as production (NODE_ENV=production) and
+ *    is exactly where the sandbox belongs. See {@link isSandboxPaymentProviderPermitted}.
  * 3. Any environment variable that could only mean "go live" fails the boot,
  *    whichever provider is selected. Lemon Squeezy's suitability for this
  *    marketplace has not been approved in writing, so live mode is not a switch
@@ -133,11 +138,14 @@ export function assertPaymentProviderConfig(): void {
 
   const kind = resolvePaymentProviderKind();
 
-  if (kind === 'lemon-squeezy-test' && process.env.NODE_ENV === 'production') {
+  if (kind === 'lemon-squeezy-test' && !isSandboxPaymentProviderPermitted()) {
     throw new Error(
-      'PAYMENT_PROVIDER=lemon-squeezy-test cannot run under NODE_ENV=production: it is a sandbox ' +
-        'integration that settles nothing, so a production process wired to it would load credits ' +
-        'against payments that never happened. Keep PAYMENT_PROVIDER=mock.',
+      'PAYMENT_PROVIDER=lemon-squeezy-test cannot run on this deployment ' +
+        `(APP_ENVIRONMENT is ${describeAppEnvironment()}, NODE_ENV is ` +
+        `"${process.env.NODE_ENV ?? ''}"): it is a sandbox integration that settles nothing, so a ` +
+        'production process wired to it would load credits against payments that never happened. ' +
+        'It runs on APP_ENVIRONMENT=staging, or on a local stack that is not NODE_ENV=production. ' +
+        'Keep PAYMENT_PROVIDER=mock everywhere else.',
     );
   }
 
@@ -146,6 +154,41 @@ export function assertPaymentProviderConfig(): void {
     // without echoing any of them.
     readLemonSqueezyConfig();
   }
+}
+
+/**
+ * Whether the sandbox provider (`lemon-squeezy-test`) may run in this process.
+ *
+ *   APP_ENVIRONMENT=production   never, whatever NODE_ENV says
+ *   APP_ENVIRONMENT=staging      always — including NODE_ENV=production, which
+ *                                is how the staging host runs the immutable
+ *                                production images (docker-compose.prod.yml)
+ *   APP_ENVIRONMENT=local, or    only outside NODE_ENV=production: the rule
+ *   not declared                 this file had before staging ran production
+ *                                builds, kept so a developer's stack and the
+ *                                test suite behave exactly as they did
+ *
+ * A value outside the three is refused by parseAppEnvironment rather than read
+ * as "not production". Live mode is a separate refusal
+ * ({@link assertNoLiveModeConfig}) and applies on every environment.
+ */
+export function isSandboxPaymentProviderPermitted(env: NodeJS.ProcessEnv = process.env): boolean {
+  const environment = parseAppEnvironment(env.APP_ENVIRONMENT);
+
+  if (environment === 'production') {
+    return false;
+  }
+
+  if (environment === 'staging') {
+    return true;
+  }
+
+  return env.NODE_ENV !== 'production';
+}
+
+function describeAppEnvironment(): string {
+  const environment = parseAppEnvironment(process.env.APP_ENVIRONMENT);
+  return environment ? `"${environment}"` : 'not set';
 }
 
 /**
