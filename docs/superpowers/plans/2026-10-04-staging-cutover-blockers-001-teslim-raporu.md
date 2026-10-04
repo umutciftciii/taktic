@@ -128,5 +128,22 @@ APP_ENVIRONMENT'a bağlı bir kural).
 
 ## 9. PR / CI
 
-- PR: _(açıldıktan sonra eklenecek)_
-- CI: _(sonuç eklenecek)_
+- PR: [umutciftciii/taktic#143](https://github.com/umutciftciii/taktic/pull/143)
+- CI (head `60ed436`, run 37206532430): **hepsi yeşil**
+
+| Job | Sonuç | Süre |
+|---|---|---|
+| ops (compose · scripts · production images) | pass | 5m3s |
+| typecheck · lint · test · build | pass | 17m23s |
+| e2e (chromium) | pass | 27m39s |
+| e2e (webkit · sign-in and mobile shells) | pass | 28m1s |
+| record tested merge commit | pass | 8s |
+| post-merge gate | skipped (PR'da beklenen) | — |
+
+`ops` kanıtı (log): node ops testleri 50/50; throwaway stack `NODE_ENV (api) = production`
+ile boot etti, `PASS test-payment contract` (lemon-squeezy-test, APP_ENVIRONMENT=staging,
+NODE_ENV=production), `boot-config: OK`; preflight 0 failure, `--check` "nothing was
+changed" ve yedek dizini oluşmadı; root sahipli gerçek volume bayraksız FAIL
+("4 entries not owned by 1000:1000"), bayrakla WARN, düzeltme sonrası sha256 aynı,
+tümü 1000:1000, sentinel volume 0:0 kaldı, API yazabildi, preflight yeniden temiz;
+yedek + izole restore provası geçti.
