@@ -10,6 +10,7 @@ import {
   REFUSED_LIVE_MODE_ENV_KEYS,
   assertNoLiveModeConfig,
   assertPaymentProviderConfig,
+  isSandboxPaymentProviderPermitted,
   resolvePaymentProviderKind,
 } from '../src/modules/payments/payment-provider.config';
 
@@ -30,6 +31,7 @@ const PLACEHOLDER_STORE_ID = '424242';
 
 const MANAGED_KEYS = [
   'NODE_ENV',
+  'APP_ENVIRONMENT',
   'PAYMENT_PROVIDER',
   'LEMON_SQUEEZY_API_KEY',
   'LEMON_SQUEEZY_STORE_ID',
@@ -162,18 +164,91 @@ describe('live mode is not a switch that exists yet', () => {
 });
 
 describe('production boot matrix', () => {
-  it('refuses the sandbox provider in production', () => {
+  it('runs the sandbox provider on staging under the production build', () => {
+    // The staging host runs docker-compose.prod.yml: NODE_ENV=production
+    // images, APP_ENVIRONMENT=staging, and Lemon Squeezy's sandbox.
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'staging';
+    process.env.NODE_ENV = 'production';
+
+    expect(isSandboxPaymentProviderPermitted()).toBe(true);
+    expect(() => assertPaymentProviderConfig()).not.toThrow();
+  });
+
+  it('runs the sandbox provider on staging under a development process too', () => {
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'staging';
+    process.env.NODE_ENV = 'development';
+
+    expect(() => assertPaymentProviderConfig()).not.toThrow();
+  });
+
+  it('refuses the sandbox provider on a production deployment, whatever NODE_ENV says', () => {
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'production';
+
+    for (const nodeEnv of ['production', 'development', 'test']) {
+      process.env.NODE_ENV = nodeEnv;
+      expect(isSandboxPaymentProviderPermitted()).toBe(false);
+      expect(() => assertPaymentProviderConfig()).toThrow(
+        /lemon-squeezy-test cannot run on this deployment \(APP_ENVIRONMENT is "production"/,
+      );
+    }
+  });
+
+  it('refuses the sandbox provider under NODE_ENV=production when no deployment is declared', () => {
     configureLemonSqueezy();
     process.env.NODE_ENV = 'production';
 
-    expect(() => assertPaymentProviderConfig()).toThrow(/cannot run under NODE_ENV=production/);
+    expect(() => assertPaymentProviderConfig()).toThrow(/APP_ENVIRONMENT is not set/);
   });
 
-  it('keeps the mock provider bootable in production', () => {
+  it('keeps a local stack exactly as it was: sandbox outside NODE_ENV=production only', () => {
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'local';
+
+    process.env.NODE_ENV = 'development';
+    expect(() => assertPaymentProviderConfig()).not.toThrow();
+
+    process.env.NODE_ENV = 'production';
+    expect(() => assertPaymentProviderConfig()).toThrow(/APP_ENVIRONMENT is "local"/);
+
+    delete process.env.APP_ENVIRONMENT;
+    process.env.NODE_ENV = 'development';
+    expect(() => assertPaymentProviderConfig()).not.toThrow();
+  });
+
+  it('refuses an APP_ENVIRONMENT outside the three rather than reading it as "not production"', () => {
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'prod';
+    process.env.NODE_ENV = 'development';
+
+    expect(() => assertPaymentProviderConfig()).toThrow(/APP_ENVIRONMENT must be one of/);
+  });
+
+  it('keeps the mock provider bootable on every deployment', () => {
     process.env.NODE_ENV = 'production';
     process.env.PAYMENT_PROVIDER = 'mock';
 
-    expect(() => assertPaymentProviderConfig()).not.toThrow();
+    for (const environment of ['production', 'staging', 'local']) {
+      process.env.APP_ENVIRONMENT = environment;
+      expect(() => assertPaymentProviderConfig()).not.toThrow();
+    }
+  });
+
+  it('refuses live mode on staging exactly as everywhere else', () => {
+    configureLemonSqueezy();
+    process.env.APP_ENVIRONMENT = 'staging';
+    process.env.NODE_ENV = 'production';
+
+    for (const key of REFUSED_LIVE_MODE_ENV_KEYS) {
+      process.env[key] = 'true';
+      expect(() => assertPaymentProviderConfig()).toThrow(/live payment collection is not part/);
+      delete process.env[key];
+    }
+
+    process.env.LEMON_SQUEEZY_MODE = 'live';
+    expect(() => assertPaymentProviderConfig()).toThrow(/LEMON_SQUEEZY_MODE may only be "test"/);
   });
 
   it('refuses the API base-url test seam in production', () => {
@@ -181,8 +256,8 @@ describe('production boot matrix', () => {
     process.env.PAYMENT_PROVIDER = 'mock';
     process.env.LEMON_SQUEEZY_API_BASE_URL = 'https://api.lemonsqueezy.com';
 
-    // The seam is only read when the sandbox provider is selected, which
-    // production already refuses — this asserts the second lock independently.
+    // The seam is a development-mode test double. Staging runs the sandbox
+    // provider under NODE_ENV=production and must still never accept it.
     configureLemonSqueezy();
     process.env.NODE_ENV = 'test';
     expect(() => readLemonSqueezyConfig()).not.toThrow();

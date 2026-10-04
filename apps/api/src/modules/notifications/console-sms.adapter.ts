@@ -1,15 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { maskPhone } from './mask';
 import { SmsMessage, SmsPort, SmsSendResult } from './sms.port';
+import { isConsoleSmsPermitted } from './sms-transport';
 
 /**
- * Development adapter: nothing leaves the process. The one-time code is printed
- * so a developer can finish the flow locally without an SMS provider.
+ * Stand-in adapter: nothing leaves the process. The one-time code is printed
+ * to this process's log so a developer — or, on staging, the host operator
+ * through `docker logs` — can finish the flow without an SMS provider. It is
+ * never returned to a caller or stored.
  *
- * In production it prints nothing and fails loudly instead. Two reasons, and
- * both matter: a code in a production log is a credential in a log, and a
- * silent no-op would let phone verification look like it works while no message
- * is ever delivered. Failing is what makes "no SMS provider configured" visible.
+ * On a production deployment (APP_ENVIRONMENT=production, or a local or
+ * undeclared stack under NODE_ENV=production; see sms-transport.ts) it prints
+ * nothing and fails loudly instead. Two reasons, and both matter: a code in a
+ * production log is a credential in a log, and a silent no-op would let phone
+ * verification look like it works while no message is ever delivered. Failing
+ * is what makes "no SMS provider configured" visible.
  */
 @Injectable()
 export class ConsoleSmsAdapter extends SmsPort {
@@ -18,7 +23,7 @@ export class ConsoleSmsAdapter extends SmsPort {
   async send(message: SmsMessage): Promise<SmsSendResult> {
     const recipient = maskPhone(message.to);
 
-    if (process.env.NODE_ENV === 'production') {
+    if (!isConsoleSmsPermitted()) {
       this.logger.error(
         `[${message.template}] not delivered to ${recipient}: no SMS transport is configured.`,
       );
@@ -28,7 +33,7 @@ export class ConsoleSmsAdapter extends SmsPort {
     this.logger.log(
       [
         '',
-        '──────────── SMS (dev console adapter) ────────────',
+        '──────────── SMS (console adapter, not delivered) ─',
         `template : ${message.template}`,
         `to       : ${message.to}`,
         `code     : ${message.code}`,

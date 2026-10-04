@@ -78,18 +78,37 @@ Geliştirme stack'inin davranışı değişmedi; tek fark portların artık yaln
 | `POSTGRES_PASSWORD` | Varsayılan şifre yok. Volume ilk oluşturulduğundaki şifre olmalı (dev compose varsayılanı kullanılmışsa açıkça `taktic_password` yazılır). |
 | `TAKTIC_IMAGE_TAG` | Script'ler hedef SHA ile kendileri verir. |
 
-Önemli diğerleri: `API_NODE_ENV` (varsayılan `production`; Lemon Squeezy
-sandbox veya console SMS kullanan staging `development` yazmalı — bu adapter'lar
-`NODE_ENV=production` altında boot'u reddeder), `NEXT_PUBLIC_API_URL`,
-`NEXT_PUBLIC_WEB_URL`, `TRUST_PROXY`, `WEB_TRUST_PROXY`, origin/URL anahtarları,
-Turnstile, Resend, Lemon ve fingerprint anahtarları. Tam liste
+**Runtime sözleşmesi (STAGING-CUTOVER-BLOCKERS-001).** Staging dahil her
+deploy edilmiş ortam production build'i `NODE_ENV=production` ile çalıştırır;
+prod compose bunu **literal** yazar, `API_NODE_ENV` override'ı kaldırıldı.
+Staging ile production'ı ayıran tek şey `APP_ENVIRONMENT`'tır ve ortama bağlı
+kurallar onu okur:
+
+| | `APP_ENVIRONMENT=staging` | `APP_ENVIRONMENT=production` |
+|---|---|---|
+| `PAYMENT_PROVIDER` | `mock` veya `lemon-squeezy-test` (sandbox) | yalnız `mock` |
+| Live ödeme anahtarları (`LEMON_SQUEEZY_LIVE_*`, `PAYMENT_LIVE_ENABLED`, `LEMON_SQUEEZY_MODE`≠`test`) | boot reddi | boot reddi |
+| `PROMOTION_FINGERPRINT_KEY` | zorunlu, ≥ 32 karakter, geliştirme anahtarı değil | aynı |
+| E-posta | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM` = `noreply@notify.taktick.com.tr` | aynı |
+| Turnstile | `cloudflare`: `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES` (api), `TURNSTILE_SITE_KEY` (web) | aynı |
+| Public URL'ler | `API_PUBLIC_URL`, `WEB_APP_URL`, `WEB_ORIGIN`, `ADMIN_ORIGIN`, `NEXT_PUBLIC_API_URL`: https, loopback değil; `NEXT_PUBLIC_WEB_URL` önerilir (uyarı) | aynı |
+| SMS (sağlayıcı yok) | Console stand-in: kod **yalnız API container log'una** yazılır (`docker logs taktic-api`, host operatörü okur); telefona, response'a, DB'ye, endpoint'e gitmez (preflight PASS) | Console adapter **her gönderimi reddeder**, kod hiçbir yere yazılmaz, audit `TRANSPORT_UNAVAILABLE` (preflight WARN) |
+| `NOTIFICATION_OUTBOX_DIR` (kayıt transport'u) | boot reddi (`NODE_ENV=production`) | boot reddi |
+
+Lemon sandbox ve console SMS aynı kuralı paylaşır
+(`common/app-environment.ts` → `isSandboxIntegrationPermitted`):
+`production` → asla; `staging` → her `NODE_ENV`'de; `local`/bildirilmemiş →
+eskisi gibi yalnız `NODE_ENV≠production`. Staging'de bir testçinin OTP'sini
+okumak: host'ta `docker logs taktic-api 2>&1 | grep -A5 'SMS (console adapter'`.
+
+Diğerleri: `TRUST_PROXY`, `WEB_TRUST_PROXY`, origin/URL anahtarları. Tam liste
 `docker-compose.prod.yml` içinde servis servis yazılıdır; web/admin API'nin
 sırlarını almaz (denetim bunu da kontrol eder).
 
 ## 4. Deploy akışı
 
 ```bash
-scripts/ops/deploy-staging.sh --sha <commit> --check      # yalnız preflight
+scripts/ops/deploy-staging.sh --sha <commit> --check      # yalnız preflight, salt-okunur
 scripts/ops/deploy-staging.sh --sha <commit> --dry-run    # değiştiren her komutu yazdırır
 scripts/ops/deploy-staging.sh --sha <commit>              # deploy
 ```
@@ -102,7 +121,8 @@ script'leriyle yapılır.
 | # | Adım | Başarısızlıkta |
 |---|---|---|
 | 0 | `build-images.sh <sha>` (`git archive` bağlamı; çalışan hiçbir şeye dokunmaz) | durur |
-| 1 | `deploy-preflight.sh` (salt-okunur, aşağıda) | durur, hiçbir şey değişmemiştir |
+| 1 | `deploy-preflight.sh` (salt-okunur, aşağıda): runtime sözleşmesi **ve yeni API image'ının kendi boot kontrolleri** dahil | durur, hiçbir şey değişmemiştir |
+| 1b | (`--fix-uploads-ownership`) API container'ının **bağlı olduğu** uploads volume'u image'ın runtime uid:gid'ine verilir; dosya listesi + sha256 önce/sonra aynı olmalı | durur, hiçbir şey durdurulmamış/migrate edilmemiştir |
 | 2 | API container'ı **durdurulur** | — |
 | 3 | `git checkout --detach <sha>` (yalnız API durduktan sonra) | eski API `docker start` ile açılabilir |
 | 4 | `migrate status` + image/DB migration listesi birebir karşılaştırma | durur |
@@ -116,16 +136,39 @@ script'leriyle yapılır.
 Preflight kontrolleri: araçlar; proje adı; hedef commit `origin/main`'den
 erişilebilir ve izlenen ağaç temiz; dört image doğru `revision` etiketiyle var;
 prod compose çözümlenir ve güvenlik denetiminden geçer (denetimin açık "OK"
-satırı aranır); PostgreSQL çalışıyor, sağlıklı, bu projeye ait, projenin veri
-volume'unda ve ağa yayınlı değil; migration geçmişi temiz (başarısız/yabancı
-migration yok) ve bekleyen yoksa drift sıfır; uploads volume'u projenin ve uid
-1000'e ait; çalışan API'nin **değer taşıyan** her env değişkeni yeni
+satırı aranır); **5b runtime sözleşmesi** (`scripts/ops/runtime-contract.mjs`,
+çözümlenmiş yapılandırma üzerinde: `COMPOSE_PROJECT_NAME` = beklenen proje —
+staging için `taktic-staging`, `--project` ile değişir —, `APP_ENVIRONMENT`
+api+web, `NODE_ENV=production`, `PROMOTION_FINGERPRINT_KEY`, ortamın izinli
+ödeme sağlayıcısı ve sandbox anahtarları, live anahtar yokluğu, public URL'ler,
+e-posta, Turnstile; çıktı yalnız **değişken adı + PASS/WARN/FAIL**);
+**5c boot yapılandırması** (yeni `taktic-api:<sha>` image'ında
+`node dist/boot-config-check.js`, `compose run --rm --no-deps` ile — yeni API'nin
+alacağı env'in birebir aynısıyla, DB bağlantısı ve listener olmadan; API'nin
+`main.ts`'te çalıştırdığı kontrol listesinin aynısı, `apps/api/src/boot-config.ts`);
+PostgreSQL çalışıyor, sağlıklı, bu projeye ait, projenin veri volume'unda ve
+ağa yayınlı değil; migration geçmişi temiz (başarısız/yabancı migration yok) ve
+bekleyen yoksa drift sıfır; uploads: API container'ının gerçekten bağladığı
+volume projenin olanı, **her girdi** image'ın runtime uid:gid'ine ait, link/özel
+dosya yok; çalışan API'nin **değer taşıyan** her env değişkeni yeni
 yapılandırmada da iletiliyor (yalnız adlar, değerler asla yazılmaz); yedek
-dizininde yer var.
+dizininde (yoksa oluşturulacağı üst dizinde) yer var. Preflight dizin
+oluşturmaz, build etmez, hiçbir şeyi durdurmaz.
 
-Bayraklar: `--accept-legacy-postgres-publish`, `--accept-env-drop`,
-`--fix-uploads-ownership` (volume'u uid 1000'e chown eder),
-`--allow-empty-uploads`, `--backup <dump>`, `--skip-build`, `--deploy-ref`.
+Böylece yeni build'in açılışta reddedeceği bir yapılandırma **API durdurulmadan
+ve migration uygulanmadan önce** yakalanır; migration'dan sonra öğrenilen
+startup blocker kalmaz.
+
+**`--check`**: salt-okunur preflight ve dur. `git fetch` yok, image build yok,
+log dosyası/dizin yok; durdurma, checkout, migration, recreate yok. Image'lar
+henüz yoksa image gerektiren kontroller (5c, 7) **NOT RUN** olarak raporlanır
+ve çıkış kodu `3` olur (hata yok ama eksik); tam kontrol için önce
+`scripts/ops/build-images.sh <sha>` çalıştırılır (o zaman çıkış `0`). FAIL → `1`.
+
+Bayraklar: `--environment <staging|production>` (varsayılan staging),
+`--project <ad>`, `--accept-legacy-postgres-publish`, `--accept-env-drop`,
+`--fix-uploads-ownership` (adım 1b), `--allow-empty-uploads`,
+`--backup <dump>`, `--skip-build`, `--deploy-ref`.
 
 ### Migration-before-code garantisi
 
@@ -148,10 +191,11 @@ Staging host bugün dev compose'u (+ takip dışı override) çalıştırıyor. 
 kerelik sıra:
 
 1. Override içinde ne varsa (`APP_ENVIRONMENT`, `TRUST_PROXY`, `WEB_TRUST_PROXY`,
-   port vb.) `.env`'e taşı. `API_NODE_ENV=development` (sandbox adapter'ları
-   kullanılıyorsa), `POSTGRES_PASSWORD` (volume'un gerçek şifresi),
-   `COMPOSE_PROJECT_NAME` (mevcut volume önekiyle aynı), `NEXT_PUBLIC_API_URL`
-   ve `NEXT_PUBLIC_WEB_URL` (public https adresleri) ekle.
+   port vb.) `.env`'e taşı. `POSTGRES_PASSWORD` (volume'un gerçek şifresi),
+   `COMPOSE_PROJECT_NAME` (mevcut volume önekiyle aynı), `PROMOTION_FINGERPRINT_KEY`
+   (≥ 32 karakter, bir kez seçilir), `NEXT_PUBLIC_API_URL` ve
+   `NEXT_PUBLIC_WEB_URL` (public https adresleri) ekle. `API_NODE_ENV` artık
+   yok; `.env`'de kalmışsa etkisizdir.
 2. Checkout henüz bu script'leri içermediği için hedef commit'in script'lerini
    geçici dizine çıkar ve oradan çalıştır:
 
@@ -160,6 +204,7 @@ kerelik sıra:
    ops="$(mktemp -d)"
    git archive <sha> scripts/ops docker-compose.prod.yml | tar -x -C "$ops"
    TAKTIC_REPO_ROOT="$PWD" "$ops/scripts/ops/deploy-staging.sh" --sha <sha> --check
+   TAKTIC_REPO_ROOT="$PWD" "$ops/scripts/ops/build-images.sh" <sha>    # sonra --check yine: tam kontrol
    ```
 3. `--check` çıktısındaki FAIL'leri tek tek kapat. Beklenenler:
    PostgreSQL ağa yayınlı (→ `--accept-legacy-postgres-publish`, sonra 5. adım),

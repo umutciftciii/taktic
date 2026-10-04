@@ -3,17 +3,32 @@
 # anything (OPS-004 / OPS-006 / migration ordering).
 #
 #   scripts/ops/deploy-preflight.sh --sha <commit>
+#       [--environment staging]           staging | production: what this host
+#                                         is; the runtime contract (5b) is
+#                                         checked against it
+#       [--project <name>]                the compose project that must own the
+#                                         volumes (default for staging:
+#                                         taktic-staging; production: required)
 #       [--deploy-ref origin/main]        the target must be reachable from it
 #       [--skip-fetch]                    do not `git fetch` first
+#       [--allow-missing-images]          images not built yet is a warning, and
+#                                         the checks that need them (5c, 7) are
+#                                         reported as not run (exit 3)
 #       [--accept-env-drop]               see check 9
 #       [--accept-legacy-postgres-publish] see check 6
 #       [--allow-uploads-ownership-fix]   see check 8 (the deploy fixes it)
 #
-# Read-only by construction: no container is started, stopped or recreated,
-# the checkout is not moved, and the only things executed against the
-# database are `prisma migrate status` (through the migrate image's guard)
-# and a few SELECTs. Run it as often as you like; deploy-staging.sh runs it
-# first and stops on any FAIL.
+# Read-only by construction: no container is stopped or recreated, nothing is
+# built, no directory is created, the checkout is not moved, and the only
+# things executed against the database are `prisma migrate status` (through
+# the migrate image's guard) and a few SELECTs. The containers it starts are
+# throwaway `--rm` ones: `migrate status`, the API image's boot-configuration
+# check (5c), and read-only helpers that inspect the uploads volume. Run it as
+# often as you like; deploy-staging.sh runs it before it stops anything and
+# stops on any FAIL.
+#
+# Exit status: 0 every check passed; 1 at least one FAIL; 3 no FAIL, but
+# checks that need the images were not run (--allow-missing-images).
 #
 #   1  tools                docker, git, docker compose v2
 #   2  project              COMPOSE_PROJECT_NAME set (never guessed)
@@ -24,6 +39,18 @@
 #                           current NEXT_PUBLIC_API_URL
 #   5  compose              docker-compose.prod.yml resolves with this .env and
 #                           passes scripts/ops/compose-security.mjs
+#   5b runtime contract     scripts/ops/runtime-contract.mjs on the resolved
+#                           configuration: project name, APP_ENVIRONMENT,
+#                           NODE_ENV=production, PROMOTION_FINGERPRINT_KEY,
+#                           the payment provider this environment may run,
+#                           public URLs, e-mail and Turnstile (names and
+#                           PASS/FAIL only, never a value)
+#   5c boot configuration   the API image's own boot checks
+#                           (dist/boot-config-check.js), run through
+#                           `compose run --rm --no-deps` with exactly the
+#                           environment the new API will get: whatever the
+#                           new build would refuse at startup is found here,
+#                           before the API is stopped or anything migrated
 #   6  postgres             running, healthy, owned by this project, on the
 #                           project's data volume, not published beyond
 #                           loopback
@@ -31,19 +58,26 @@
 #                           up to date, or only pending migrations — never a
 #                           failed or diverged history; with nothing pending,
 #                           the read-only drift check must find no difference
-#   8  uploads              the API's uploads volume is the project's, and
-#                           writable by the image's uid 1000
+#   8  uploads              the API's uploads volume is the project's, read
+#                           from the API container's own mount; every entry
+#                           owned by the image's runtime uid:gid, and no link
+#                           or special file in it
 #   9  environment          every variable the running API has *with a value*
 #                           is still forwarded by the new configuration
 #                           (names only; values are never printed)
-#   10 backup space         free space for a dump in $TAKTIC_BACKUP_DIR
+#   10 backup space         free space for a dump in $TAKTIC_BACKUP_DIR (or,
+#                           when it does not exist yet, in the nearest
+#                           existing parent the deploy will create it under)
 
 # shellcheck source=scripts/ops/lib.sh
 source "$(dirname "$0")/lib.sh"
 
 sha_arg=""
 deploy_ref="origin/main"
+environment="staging"
+project=""
 skip_fetch=0
+allow_missing_images=0
 accept_env_drop=0
 accept_legacy_pg=0
 allow_uploads_fix=0
@@ -52,21 +86,32 @@ while [ "$#" -gt 0 ]; do
   case "$1" in
     --sha) sha_arg="${2:?--sha needs a commit}"; shift 2 ;;
     --deploy-ref) deploy_ref="${2:?--deploy-ref needs a ref}"; shift 2 ;;
+    --environment) environment="${2:?--environment needs staging or production}"; shift 2 ;;
+    --project) project="${2:?--project needs a name}"; shift 2 ;;
     --skip-fetch) skip_fetch=1; shift ;;
+    --allow-missing-images) allow_missing_images=1; shift ;;
     --accept-env-drop) accept_env_drop=1; shift ;;
     --accept-legacy-postgres-publish) accept_legacy_pg=1; shift ;;
     --allow-uploads-ownership-fix) allow_uploads_fix=1; shift ;;
-    -h | --help) sed -n '2,40p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,70p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
 [ -n "$sha_arg" ] || die "usage: deploy-preflight.sh --sha <commit> [options]"
 
+case "$environment" in
+  staging | production) ;;
+  *) die "--environment must be staging or production" ;;
+esac
+
 failures=0
 warnings=0
+not_run=0
 ok() { printf '%s  ok   %s\n' "$(_ts)" "$*" >&2; }
 bad() { printf '%s  FAIL %s\n' "$(_ts)" "$*" >&2; failures=$((failures + 1)); }
 note() { warn "$*"; warnings=$((warnings + 1)); }
+# A check that needs an image that is not built yet (--allow-missing-images).
+skipped() { warn "NOT RUN $*"; not_run=$((not_run + 1)); }
 
 # --- 1 tools ---------------------------------------------------------------
 step "1. Tools"
@@ -108,9 +153,14 @@ fi
 # --- 4 images ------------------------------------------------------------------
 step "4. Images for $sha"
 api_url="$(env_or_file NEXT_PUBLIC_API_URL)"
+web_url="$(env_or_file NEXT_PUBLIC_WEB_URL)"
 for target in api web admin migrate; do
   tag="taktic-$target:$sha"
   revision="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$tag" 2>/dev/null || true)"
+  if [ -z "$revision" ] && [ "$allow_missing_images" -eq 1 ]; then
+    note "$tag not built yet (scripts/ops/build-images.sh $sha; the deploy builds it in its step 0)"
+    continue
+  fi
   if [ "$revision" != "$sha" ]; then
     bad "$tag missing or mislabelled; run scripts/ops/build-images.sh $sha"
     continue
@@ -145,6 +195,52 @@ else
   config_json=""
 fi
 rm -f "${TMPDIR:-/tmp}/taktic-preflight-compose.err"
+
+# --- 5b runtime contract -------------------------------------------------------
+step "5b. Runtime contract ($environment)"
+if [ -n "$config_json" ]; then
+  contract_args="--environment $environment"
+  [ -z "$project" ] || contract_args="$contract_args --project $project"
+  # Names and PASS/FAIL only: the tool never prints a value it was given.
+  # shellcheck disable=SC2086
+  if contract="$(printf '%s' "$config_json" | ops_node runtime-contract.mjs $contract_args \
+      --next-public-api-url "$api_url" --next-public-web-url "$web_url" 2>&1)" \
+    && printf '%s\n' "$contract" | grep -qx 'runtime-contract: OK'; then
+    printf '%s\n' "$contract" | sed 's/^/       /' >&2
+    ok "the resolved configuration satisfies the $environment runtime contract"
+  else
+    printf '%s\n' "$contract" | sed 's/^/       /' >&2
+    bad "the resolved configuration breaks the $environment runtime contract (FAIL lines above)"
+  fi
+else
+  bad "skipped: the configuration did not resolve"
+fi
+
+# --- 5c boot configuration -----------------------------------------------------
+step "5c. API boot configuration (taktic-api:$sha)"
+if ! docker image inspect "taktic-api:$sha" >/dev/null 2>&1; then
+  if [ "$allow_missing_images" -eq 1 ]; then
+    skipped "the API image is not built; its boot checks run in the deploy's own preflight, before the API is stopped"
+  else
+    bad "skipped: taktic-api:$sha does not exist"
+  fi
+elif [ -z "$config_json" ]; then
+  bad "skipped: the configuration did not resolve"
+else
+  # A throwaway container of the new image with the new API's exact
+  # environment, running only the boot checks: no database connection, no
+  # listener, no dependency started (--no-deps), removed on exit (--rm).
+  set +e
+  boot_out="$(prod_compose run --rm --no-deps -T api node dist/boot-config-check.js 2>&1)"
+  boot_code=$?
+  set -e
+  printf '%s\n' "$boot_out" | grep -E '^(ok|FAIL) |^boot-config: ' | sed 's/^/       /' >&2
+  if [ "$boot_code" -eq 0 ] && printf '%s\n' "$boot_out" | grep -qx 'boot-config: OK'; then
+    ok "the new API accepts this configuration at boot"
+  else
+    bad "the new API would refuse to start with this configuration (FAIL lines above); nothing has been stopped or migrated"
+  fi
+fi
 
 # --- 6 postgres ----------------------------------------------------------------
 step "6. PostgreSQL ($POSTGRES_CONTAINER)"
@@ -222,6 +318,8 @@ if [ "$pg_ok" -eq 1 ] && docker image inspect "taktic-migrate:$sha" >/dev/null 2
     1:*"have not yet been applied"*) ok "pending migrations listed above will be applied by migrate deploy" ;;
     *) bad "migrate status failed (exit $status_code)" ;;
   esac
+elif [ "$pg_ok" -eq 1 ] && [ "$allow_missing_images" -eq 1 ]; then
+  skipped "the migrate image is not built; the migration status runs in the deploy's own preflight"
 else
   bad "skipped: PostgreSQL or the migrate image is not available"
 fi
@@ -229,6 +327,10 @@ fi
 # --- 8 uploads -----------------------------------------------------------------
 step "8. Uploads volume"
 expected_volume="${COMPOSE_PROJECT_NAME}_taktic-api-uploads"
+# The volume to inspect is the one the API container actually mounts at the
+# upload root — never a name assembled from the project — and only when it is
+# the one docker-compose.prod.yml will mount too.
+uploads_volume=""
 if container_exists "$API_CONTAINER"; then
   current_volume="$(api_uploads_volume)"
   if [ -z "$current_volume" ]; then
@@ -236,25 +338,33 @@ if container_exists "$API_CONTAINER"; then
   elif [ "$current_volume" != "$expected_volume" ]; then
     bad "$API_CONTAINER uses '$current_volume'; docker-compose.prod.yml would mount '$expected_volume' and the uploads would seem to vanish"
   else
-    ok "$API_CONTAINER uses $current_volume"
+    ok "$API_CONTAINER mounts $current_volume at $UPLOADS_MOUNT_POINT"
+    uploads_volume="$current_volume"
   fi
+elif docker volume inspect "$expected_volume" >/dev/null 2>&1; then
+  note "no $API_CONTAINER container; the new one will mount the existing $expected_volume"
+  uploads_volume="$expected_volume"
 else
-  note "no $API_CONTAINER container; the new one will mount $expected_volume"
+  note "no $API_CONTAINER container and no $expected_volume; the first start creates it from the image, owned by the runtime user"
 fi
-if docker volume inspect "$expected_volume" >/dev/null 2>&1; then
-  owners="$(helper_run -v "$expected_volume:/u:ro" "$HELPER_IMAGE" -c 'cd /u && find . -maxdepth 1 -type d -exec stat -c "%u %n" {} +' 2>&1 || true)"
-  foreign="$(printf '%s\n' "$owners" | awk '$1 != "1000"' || true)"
-  if [ -z "$foreign" ]; then
-    ok "owned by uid 1000 (the image's node user)"
-  elif [ "$allow_uploads_fix" -eq 1 ]; then
-    note "not owned by uid 1000 ($(echo "$foreign" | tr '\n' ' ')); deploy-staging.sh --fix-uploads-ownership will chown it"
-  else
-    bad "not writable by the non-root API (owners: $(echo "$foreign" | tr '\n' ' ')); rerun the deploy with --fix-uploads-ownership"
-  fi
-  files="$(helper_run -v "$expected_volume:/u:ro" "$HELPER_IMAGE" -c 'find /u -type f | wc -l' | tr -d ' ')"
+if [ -n "$uploads_volume" ]; then
+  runtime_ids="$(image_runtime_ids "taktic-api:$sha")"
+  docker image inspect "taktic-api:$sha" >/dev/null 2>&1 \
+    || log "taktic-api:$sha not built; checking against the Dockerfile's runtime user $runtime_ids"
+  report="$(uploads_ownership_report "$uploads_volume" "$runtime_ids")" || die "could not inspect $uploads_volume"
+  foreign="${report%% *}"
+  special="${report##* }"
+  files="$(helper_run -v "$uploads_volume:/u:ro" "$HELPER_IMAGE" -c 'find /u -type f | wc -l' | tr -d ' ')"
   log "uploads volume holds $files files"
-else
-  note "volume $expected_volume does not exist yet; the first start creates it from the image (owned by uid 1000)"
+  if [ "$special" -ne 0 ]; then
+    bad "$uploads_volume holds $special link(s) or special file(s); neither the ownership fix nor the uploads backup accepts them — inspect by hand"
+  elif [ "$foreign" -eq 0 ]; then
+    ok "every entry owned by $runtime_ids (the API image's runtime user)"
+  elif [ "$allow_uploads_fix" -eq 1 ]; then
+    note "$foreign entries not owned by $runtime_ids; deploy-staging.sh --fix-uploads-ownership gives them to it before the API is stopped"
+  else
+    bad "$foreign entries not owned by $runtime_ids, so the non-root API cannot write them; deploy with --fix-uploads-ownership"
+  fi
 fi
 
 # --- 9 environment -------------------------------------------------------------
@@ -287,9 +397,15 @@ fi
 
 # --- 10 backup space -------------------------------------------------------------
 step "10. Backup location"
-mkdir -p "$BACKUP_ROOT" 2>/dev/null || true
-if [ -d "$BACKUP_ROOT" ] && [ -w "$BACKUP_ROOT" ]; then
-  free_kb="$(df -Pk "$BACKUP_ROOT" | awk 'NR == 2 { print $4 }')"
+# Read-only: a missing directory is not created here (the deploy creates it).
+# Space and permission are judged on the nearest directory that exists.
+backup_probe="$BACKUP_ROOT"
+while [ ! -d "$backup_probe" ] && [ "$backup_probe" != "/" ]; do
+  backup_probe="$(dirname "$backup_probe")"
+done
+[ "$backup_probe" = "$BACKUP_ROOT" ] || note "$BACKUP_ROOT does not exist yet; the deploy creates it under $backup_probe"
+if [ -d "$backup_probe" ] && [ -w "$backup_probe" ]; then
+  free_kb="$(df -Pk "$backup_probe" | awk 'NR == 2 { print $4 }')"
   if [ "$pg_ok" -eq 1 ]; then
     need_kb=$(( $(pg_query 'SELECT pg_database_size(current_database())') * 3 / 1024 ))
     [ "$free_kb" -gt "$need_kb" ] && ok "$BACKUP_ROOT: ${free_kb} KiB free (needs > ${need_kb} KiB)" \
@@ -298,8 +414,12 @@ if [ -d "$BACKUP_ROOT" ] && [ -w "$BACKUP_ROOT" ]; then
     ok "$BACKUP_ROOT writable (${free_kb} KiB free)"
   fi
 else
-  bad "$BACKUP_ROOT is not a writable directory"
+  bad "$backup_probe is not a writable directory (needed for $BACKUP_ROOT)"
 fi
 
-step "Preflight: $failures failure(s), $warnings warning(s)"
+step "Preflight: $failures failure(s), $warnings warning(s), $not_run check(s) not run"
 [ "$failures" -eq 0 ] || exit 1
+if [ "$not_run" -ne 0 ]; then
+  warn "INCOMPLETE: build the images (scripts/ops/build-images.sh $sha) and run the preflight again for the checks marked NOT RUN"
+  exit 3
+fi

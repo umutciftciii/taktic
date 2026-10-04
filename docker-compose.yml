@@ -117,7 +117,8 @@ services:
       LEMON_SQUEEZY_TIMEOUT_MS: ${LEMON_SQUEEZY_TIMEOUT_MS:-}
       # A test seam: points the checkout adapter at a stand-in sandbox API. The
       # configuration reader accepts it only for https or loopback and refuses
-      # it under NODE_ENV=production.
+      # it under NODE_ENV=production (so on every deployed host, staging
+      # included; docker-compose.prod.yml does not forward it at all).
       LEMON_SQUEEZY_API_BASE_URL: ${LEMON_SQUEEZY_API_BASE_URL:-}
       # Which deployment this is, forwarded exactly as the host declares it
       # and never decided here. Deployed hosts run docker-compose.prod.yml

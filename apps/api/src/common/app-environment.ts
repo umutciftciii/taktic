@@ -72,3 +72,36 @@ export function isTestBehaviourPermitted(): boolean {
   const environment = readAppEnvironment();
   return environment === 'local' || environment === 'staging';
 }
+
+/**
+ * Whether a sandbox stand-in for an external integration may run here: the
+ * Lemon Squeezy sandbox instead of real payments, the console SMS adapter
+ * instead of an SMS provider.
+ *
+ *   APP_ENVIRONMENT=production   never, whatever NODE_ENV says
+ *   APP_ENVIRONMENT=staging      always — including NODE_ENV=production, which
+ *                                is how the staging host runs the immutable
+ *                                production images (docker-compose.prod.yml)
+ *   APP_ENVIRONMENT=local, or    only outside NODE_ENV=production: the rule
+ *   not declared                 these integrations had before staging ran
+ *                                production builds, kept so a developer's
+ *                                stack and the test suite behave as they did
+ *
+ * Unlike {@link isTestBehaviourPermitted} this does not close staging under
+ * NODE_ENV=production: a stand-in is not a bypass of a check, it is the
+ * deployment's declared integration. A value outside the three is refused by
+ * parseAppEnvironment rather than read as "not production".
+ */
+export function isSandboxIntegrationPermitted(env: NodeJS.ProcessEnv = process.env): boolean {
+  const environment = parseAppEnvironment(env.APP_ENVIRONMENT);
+
+  if (environment === 'production') {
+    return false;
+  }
+
+  if (environment === 'staging') {
+    return true;
+  }
+
+  return env.NODE_ENV !== 'production';
+}

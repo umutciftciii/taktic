@@ -96,12 +96,14 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # The build is always production; what the *process* is told is a
-      # deployment decision. Production by default. A staging host that runs
-      # the Lemon Squeezy sandbox or the console SMS adapter — both refused
-      # under NODE_ENV=production — declares API_NODE_ENV=development, which
-      # is what its development-compose API has always run with.
-      NODE_ENV: ${API_NODE_ENV:-production}
+      # Literal, like the loopback addresses: every deployed environment —
+      # staging included — runs the production build as production. What
+      # differs between staging and production is APP_ENVIRONMENT, and the
+      # environment-dependent rules read that (the Lemon Squeezy sandbox, for
+      # one, runs on APP_ENVIRONMENT=staging under NODE_ENV=production). The
+      # former API_NODE_ENV override is gone; the deploy preflight's runtime
+      # contract (scripts/ops/runtime-contract.mjs) fails anything else.
+      NODE_ENV: production
       # The container's own port. The host side is API_PORT, below.
       API_PORT: "3001"
       DATABASE_URL: postgresql://${POSTGRES_USER:-taktic_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for a deployed database}@postgres:5432/${POSTGRES_DB:-taktic}?schema=public
