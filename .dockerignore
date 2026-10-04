@@ -1,0 +1,66 @@
+# Allowlist, not a denylist: everything is excluded unless named below.
+#
+# The production images are normally built from `git archive <sha>` (see
+# scripts/ops/build-images.sh), where an untracked file cannot reach the
+# context at all. This file is the second fence, for a `docker build .` run
+# from a working checkout: a denylist only keeps out what someone remembered
+# to list, and the files that matter most here — `.env`, a backup dump, an
+# override with a secret in it — are exactly the untracked ones nobody lists.
+#
+# scripts/ops/check-image-contents.sh proves the result on a built image.
+*
+
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+
+!apps/api/package.json
+!apps/api/tsconfig.json
+!apps/api/src/
+!apps/api/uploads/.gitkeep
+!apps/api/uploads/category-images/.gitkeep
+
+!apps/web/package.json
+!apps/web/tsconfig.json
+!apps/web/next.config.ts
+!apps/web/next-env.d.ts
+!apps/web/middleware.ts
+!apps/web/app/
+!apps/web/lib/
+!apps/web/public/
+
+!apps/admin/package.json
+!apps/admin/tsconfig.json
+!apps/admin/next.config.ts
+!apps/admin/next-env.d.ts
+!apps/admin/middleware.ts
+!apps/admin/app/
+!apps/admin/components/
+!apps/admin/lib/
+!apps/admin/public/
+
+!packages/shared/
+!packages/tsconfig/
+
+# Lockfile importer only; the browser suite itself never enters an image.
+!e2e/package.json
+
+!prisma/schema.prisma
+!prisma/migrations/
+
+!scripts/ops/prisma-migrate-guard.sh
+
+# Re-excluded inside the allowed trees: build output, dependencies, local
+# secrets and anything a test or editor leaves behind.
+**/node_modules
+**/.next
+**/dist
+**/.turbo
+**/coverage
+**/*.tsbuildinfo
+**/.env
+**/.env.*
+**/*.log
+**/.DS_Store
+**/*.spec.ts
+**/*.spec.tsx

@@ -20,13 +20,14 @@ import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-// The three jobs that make up a full CI run. A PR run is evidence only when
+// The jobs that make up a full CI run. A PR run is evidence only when
 // each of them ran and succeeded in its latest attempt; a skipped one is not
 // evidence. `post-merge-gate.test.mjs` checks these names against ci.yml.
 export const REQUIRED_JOBS = [
   'typecheck · lint · test · build',
   'e2e (chromium)',
   'e2e (webkit · sign-in and mobile shells)',
+  'ops (compose · scripts · production images)',
 ];
 
 export const EVIDENCE_PREFIX = 'ci-tested-commit-';
@@ -210,7 +211,7 @@ async function main() {
         '',
         `${decision.reason}.`,
         '',
-        `The three CI jobs are **skipped** here, not passed: their result for this exact tree is [PR #${decision.pr}, run ${decision.runId}](${decision.runUrl}).`,
+        `The CI jobs are **skipped** here, not passed: their result for this exact tree is [PR #${decision.pr}, run ${decision.runId}](${decision.runUrl}).`,
       ]
     : ['### Full CI runs for this push', '', `No reusable PR result: ${decision.reason}.`];
   appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary.join('\n') + '\n');
