@@ -116,3 +116,26 @@ kök `tsx`/`esbuild`'i enjekte etmesi (budandı).
 | Chromium tam E2E | **488 geçti, 1 başarısız**: `provider-claim.spec.ts:278` — yerel tek PostgreSQL'de bağlantı tükenmesi (Prisma "too many connections"); izole tekrarda 2'de 1 tekrarladı. Bu dalın `apps/ packages/ prisma/ e2e/` diff'i **boş**, uygulama artefaktları main ile aynı → PR kaynaklı değil; CI (her job'a ayrı PostgreSQL) hakem. |
 | WebKit seçili set (`e2e:webkit`) | **307 geçti** |
 | Production imaj build + içerik + compose denetimi + boot/smoke + yedek/restore | §11 |
+
+## 11. Final Docker / ops kontrolleri (`fbfc2fba`, CI `ops` job'unun adımları, izole klon)
+
+| Kontrol | Sonuç |
+|---|---|
+| `bash -n` + shellcheck (warning+) | temiz |
+| `node --test scripts/ops/` | 16/16 |
+| Post-merge gate testleri | 34/34 |
+| `compose-security.mjs prod` / `dev` | OK / OK (prod: api/web/admin 127.0.0.1, postgres yayınsız) |
+| 4 production imajı (`git archive` bağlamı) | build OK |
+| `check-image-contents.sh` | 0 hata (.env/.git/dump yok, uid 1000, kod salt-okunur, devDependency yok, `next.config.mjs`) |
+| Boş DB'ye `migrate deploy` + drift | 86 migration, "No difference detected" |
+| api/web/admin healthy + `smoke.sh` | 0 hata (header'lar, X-Powered-By yok, loopback, non-root, bind mount yok) |
+| Yedek + izole restore provası | 86 migration, 94 tablo, satır sayıları ve drift tuttu |
+
+## 12. Açık kalanlar / yeni blocker
+
+- Yeni blocker yok.
+- OPS-003 açık (staging salt-okunur komutları runbook §7).
+- OPS-007 karar bekliyor (runbook §8).
+- İlk staging geçişi operatör işi (runbook §4 "İlk geçiş"); bu PR'da yapılmadı.
+- Takip: imaj boyutu (swc glibc+musl, playwright peer), API imajındaki Prisma CLI peer.
+- Yerel E2E'de görülen `provider-claim` bağlantı tükenmesi: yerel ortam; CI sonucu ayrıca raporlanacak.
