@@ -13,10 +13,10 @@ import { PackageRefundNotificationOutbox } from './package-refund-notification-o
 import { RequestCancellationOutbox } from './request-cancellation-outbox.service';
 import { ReviewInvitationOutbox } from './review-invitation-outbox.service';
 import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
-import { isNotificationOutboxEnabled } from './notification-outbox';
 import { resolveEmailTransportKind } from './email-transport';
 import { ResendNotificationAdapter } from './resend-notification.adapter';
 import { SmsPort } from './sms.port';
+import { resolveSmsTransportKind } from './sms-transport';
 import { TransactionalMailService } from './transactional-mail.service';
 
 /**
@@ -29,7 +29,8 @@ import { TransactionalMailService } from './transactional-mail.service';
  * NOTIFICATION_OUTBOX_DIR selects the recording transports the browser
  * end-to-end suite reads its one-time codes and claim links from; it cannot be
  * set in production. SMS has no provider yet, so it still follows that switch
- * alone.
+ * alone (sms-transport.ts, which also says where the console adapter may print
+ * a code).
  *
  * Nothing else about the graph changes in any branch — the dispatcher, the
  * audit rows and the masking are the production ones throughout.
@@ -41,7 +42,7 @@ const emailAdapter =
     : emailTransport === 'file-outbox'
       ? FileOutboxNotificationAdapter
       : ConsoleNotificationAdapter;
-const smsAdapter = isNotificationOutboxEnabled() ? FileOutboxSmsAdapter : ConsoleSmsAdapter;
+const smsAdapter = resolveSmsTransportKind() === 'file-outbox' ? FileOutboxSmsAdapter : ConsoleSmsAdapter;
 
 @Global()
 @Module({

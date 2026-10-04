@@ -93,6 +93,13 @@ describe('the staging runtime contract', () => {
     );
   });
 
+  it('boots the console SMS stand-in on staging, and refuses the recorder under the production build', () => {
+    expect(refused()['sms-transport']).toBeUndefined();
+
+    process.env.NOTIFICATION_OUTBOX_DIR = '/tmp/outbox';
+    expect(refused()['sms-transport']).toMatch(/test-only transport/);
+  });
+
   it('never prints a secret in a refusal', () => {
     process.env.LEMON_SQUEEZY_API_KEY = 'not-a-jwt-but-secret-looking-value';
     process.env.RESEND_API_KEY = 'secret-looking-resend-value';
@@ -114,6 +121,7 @@ describe('the staging runtime contract', () => {
       'session-policy',
       'contact-sharing',
       'email-transport',
+      'sms-transport',
       'provider-claim',
       'payment-provider',
       'phone-verification-test-bypass',

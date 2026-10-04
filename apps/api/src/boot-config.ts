@@ -2,6 +2,7 @@ import { assertSessionPolicyConfig } from './modules/auth/auth.constants';
 import { assertContactSharingConfig } from './modules/contact-sharing/contact-sharing.config';
 import { assertEmailBrandingConfig } from './modules/notifications/email-branding.config';
 import { assertEmailTransportConfig } from './modules/notifications/email-transport';
+import { assertSmsTransportConfig } from './modules/notifications/sms-transport';
 import { assertPaymentProviderConfig } from './modules/payments/payment-provider.config';
 import { assertPhoneVerificationTestBypassConfig } from './modules/phone-verification/phone-verification-test-bypass.config';
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
@@ -59,6 +60,12 @@ export const BOOT_CONFIG_CHECKS: ReadonlyArray<{ name: string; assert: () => voi
   // Resend without a key would discover that on the first send — as a FAILED
   // audit row nobody is watching at the time.
   { name: 'email-transport', assert: assertEmailTransportConfig },
+
+  // The SMS stand-in: a recorder configured under NODE_ENV=production stops
+  // the process. The console adapter boots everywhere and decides per send
+  // whether it may print a code — on staging yes, on production never
+  // (sms-transport.ts).
+  { name: 'sms-transport', assert: assertSmsTransportConfig },
 
   // Same reasoning, one flag over. A production process that offers to mail
   // claim links while nothing can actually deliver e-mail would hand out

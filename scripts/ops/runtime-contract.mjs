@@ -243,11 +243,18 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
     fail('TURNSTILE_MODE', 'a bypass mode is refused on a deployed environment');
   }
 
-  // Not a boot failure, and not this check's to fix: the build has no SMS
-  // transport that delivers, and under NODE_ENV=production the console adapter
-  // refuses to "send". Stated so nobody discovers it from a tester.
-  if (nodeEnvProduction) {
-    warn('SMS transport', 'none delivers under NODE_ENV=production; phone-verification codes are not sent');
+  // SMS (apps/api/src/modules/notifications/sms-transport.ts). The build has
+  // no SMS provider. The recorder transport is test-only and refused under
+  // NODE_ENV=production. The console stand-in follows the shared sandbox rule:
+  // on staging it writes each code to the API container's log (read by the
+  // host operator with `docker logs`), on production it refuses every send
+  // and writes no code.
+  if (value(api, 'NOTIFICATION_OUTBOX_DIR')) {
+    fail('NOTIFICATION_OUTBOX_DIR', 'set; the recording transport is test-only and refused on a deployed host');
+  } else if (environment === 'staging') {
+    pass('SMS transport', 'console stand-in: codes go to the API container log only (docker logs), never to a phone or a response');
+  } else {
+    warn('SMS transport', 'no SMS provider in this build; on production the console adapter refuses every send and logs no code');
   }
 
   return results;

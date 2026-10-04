@@ -92,11 +92,14 @@ kurallar onu okur:
 | E-posta | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM` = `noreply@notify.taktick.com.tr` | aynı |
 | Turnstile | `cloudflare`: `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES` (api), `TURNSTILE_SITE_KEY` (web) | aynı |
 | Public URL'ler | `API_PUBLIC_URL`, `WEB_APP_URL`, `WEB_ORIGIN`, `ADMIN_ORIGIN`, `NEXT_PUBLIC_API_URL`: https, loopback değil; `NEXT_PUBLIC_WEB_URL` önerilir (uyarı) | aynı |
-| SMS | Teslim eden SMS adapter'ı yok; `NODE_ENV=production` altında console adapter gönderimi reddeder → telefon doğrulama kodları **gönderilmez** (preflight uyarısı) | aynı |
+| SMS (sağlayıcı yok) | Console stand-in: kod **yalnız API container log'una** yazılır (`docker logs taktic-api`, host operatörü okur); telefona, response'a, DB'ye, endpoint'e gitmez (preflight PASS) | Console adapter **her gönderimi reddeder**, kod hiçbir yere yazılmaz, audit `TRANSPORT_UNAVAILABLE` (preflight WARN) |
+| `NOTIFICATION_OUTBOX_DIR` (kayıt transport'u) | boot reddi (`NODE_ENV=production`) | boot reddi |
 
-Lemon sandbox kuralı `payment-provider.config.ts`
-(`isSandboxPaymentProviderPermitted`): `production` → asla; `staging` → her
-`NODE_ENV`'de; `local`/bildirilmemiş → eskisi gibi yalnız `NODE_ENV≠production`.
+Lemon sandbox ve console SMS aynı kuralı paylaşır
+(`common/app-environment.ts` → `isSandboxIntegrationPermitted`):
+`production` → asla; `staging` → her `NODE_ENV`'de; `local`/bildirilmemiş →
+eskisi gibi yalnız `NODE_ENV≠production`. Staging'de bir testçinin OTP'sini
+okumak: host'ta `docker logs taktic-api 2>&1 | grep -A5 'SMS (console adapter'`.
 
 Diğerleri: `TRUST_PROXY`, `WEB_TRUST_PROXY`, origin/URL anahtarları. Tam liste
 `docker-compose.prod.yml` içinde servis servis yazılıdır; web/admin API'nin

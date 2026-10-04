@@ -57,7 +57,7 @@ Her ikisi de adım 1'de, API durdurulmadan ve checkout/migration'dan önce:
   live anahtar yok, `API_PUBLIC_URL`/`WEB_APP_URL`/`WEB_ORIGIN`/`ADMIN_ORIGIN`
   ve `NEXT_PUBLIC_API_URL` https + loopback değil (`NEXT_PUBLIC_WEB_URL` uyarı),
   `EMAIL_TRANSPORT=resend` + `RESEND_API_KEY` + pinlenmiş gönderici, Turnstile
-  secret/hostnames/site key. SMS için uyarı (aşağıda).
+  secret/hostnames/site key, SMS stand-in (§7).
 - **5c boot yapılandırması**: yeni `taktic-api:<sha>` image'ında
   `node dist/boot-config-check.js`, `compose run --rm --no-deps -T api` ile —
   yeni API'nin alacağı env'in aynısı. `main.ts`'in çalıştırdığı listenin aynısı
@@ -91,8 +91,9 @@ Preflight'ın kendisi de artık yedek dizinini oluşturmuyor.
 | Kapsam | Sonuç |
 |---|---|
 | `apps/api/test/payment-provider-config.spec.ts` (staging+prod+lemon OK, production red, local eski davranış, live red) | 27/27 |
-| `apps/api/test/boot-config.spec.ts` (staging sözleşmesi boot eder, eksik/kısa key, sır basılmaz, liste sırası) | 6/6 |
-| `scripts/ops/runtime-contract.test.mjs` (eksik env, kısa key, yanlış proje, production+lemon, URL'ler, gerçek prod compose çözümlemesi) | 19/19 |
+| `apps/api/test/boot-config.spec.ts` (staging sözleşmesi boot eder, eksik/kısa key, sır basılmaz, SMS stand-in/kayıt transport'u, liste sırası) | 7/7 |
+| `apps/api/test/sms-transport.spec.ts` (staging+production NODE_ENV → kod log'da; production → red, kod/numara hiçbir yerde; local/dev eski davranış; kayıt transport'u reddi; **telefon doğrulama dispatch regression**: gerçek `ConsoleSmsAdapter` ile `NotificationDispatcher.sendSms` → staging `SENT` + audit'te kod yok, production `FAILED`/`TRANSPORT_UNAVAILABLE`) | 17/17 |
+| `scripts/ops/runtime-contract.test.mjs` (eksik env, kısa key, yanlış proje, production+lemon, URL'ler, SMS PASS/WARN/FAIL, gerçek prod compose çözümlemesi) | 20/20 |
 | `scripts/ops/ops-scripts.test.mjs` (sahte `docker` ile gerçek script'ler: preflight FAIL'leri, mutasyon yok, `--check` fetch/build/yazma yok, root uploads ± bayrak, fix tek volume + doğru uid:gid, 1b stop'tan önce) | 15/15 |
 | `scripts/ops/compose-security.test.mjs` | 16/16 |
 | shellcheck `-S warning` (0.11.0), `bash -n` | temiz |
@@ -108,14 +109,40 @@ Resend; yer tutucu değerler), sonra çalışan stack'e karşı preflight ve
 bir sentinel volume'un 0:0 kaldığını, içerik sha256'sının değişmediğini ve
 API'nin yazabildiğini doğrular.
 
-## 7. Bilinen etki: SMS
+## 7. SMS staging sözleşmesi (final SMS blocker fix)
 
-Build'de teslim eden SMS adapter'ı yok. `NODE_ENV=production` altında console
-SMS adapter'ı gönderimi reddeder; telefon doğrulama test bypass'ı da
-kullanılamaz (set edilirse boot reddi — staging `.env`'inde set değil). Staging bu kararla telefon doğrulama kodlarını **göndermeyecek**
-(vitrin lead'i dahil telefon zorunlu akışlar etkilenir). Preflight bunu WARN
-olarak yazar; çözüm ayrı bir karar (gerçek SMS sağlayıcısı ya da staging için
-APP_ENVIRONMENT'a bağlı bir kural).
+Karar: staging'e gerçek SMS sağlayıcısı bağlanmaz, staging `NODE_ENV=production`
+kalır, mevcut console stand-in staging'de çalışır.
+
+`apps/api/src/modules/notifications/sms-transport.ts` +
+`common/app-environment.ts` `isSandboxIntegrationPermitted` (Lemon sandbox ile
+**aynı** kural):
+
+| `APP_ENVIRONMENT` | `NODE_ENV` | Console SMS adapter |
+|---|---|---|
+| `staging` | her değer (`production` dahil) | kodu **yalnız API process log'una** yazar, `SENT` |
+| `production` | her değer | **reddeder**: kod/numara yazılmaz, audit `FAILED` / `TRANSPORT_UNAVAILABLE` |
+| `local` / bildirilmemiş | `production` | reddeder (eski kural) |
+| `local` / bildirilmemiş | diğer | yazar (eski kural) |
+| geçersiz değer | — | boot reddi |
+
+- **Gözlem yöntemi (staging):** host'ta `docker logs taktic-api`. Kod public API
+  response'una konmaz (servis kodu hiçbir ortamda döndürmez — değişmedi), debug
+  endpoint yok, DB'ye yazılmaz (audit satırı yalnız maskeli numara).
+- **Production güvenlik değişmezi:** `APP_ENVIRONMENT=production` console
+  adapter'ı `NODE_ENV`'den bağımsız reddeder; production log'una OTP yazılmaz.
+  Kayıt transport'u (`NOTIFICATION_OUTBOX_DIR`) `NODE_ENV=production` altında
+  (staging dahil) boot'ta reddedilir; gerçek/live SMS sağlayıcısı yok.
+- **Bilinçli tercih:** production console SMS ile **boot eder** (SMS tek kanal;
+  pazar yerinin geri kalanını kapatmamak için); kapanma adapter'ın gönderim
+  reddiyle sağlanır ve runtime sözleşmesi production'da WARN yazar. Production
+  boot'unun SMS sağlayıcısız tamamen reddedilmesi istenirse ayrı karar.
+- **Boot / preflight:** boot listesine `sms-transport` eklendi (geçersiz
+  `APP_ENVIRONMENT`, production'da kayıt transport'u → red; image içi 5c
+  kontrolü bunu da çalıştırır). Runtime sözleşmesi: staging → `PASS SMS
+  transport`, production → `WARN`, `NOTIFICATION_OUTBOX_DIR` set → `FAIL`.
+- Telefon doğrulama **test bypass'ı** değişmedi: `NODE_ENV=production` altında
+  (staging dahil) kullanılamaz; staging'de kod log'dan okunur.
 
 ## 8. Staging'de gerçek deploy için operatör adımları
 
@@ -129,7 +156,8 @@ APP_ENVIRONMENT'a bağlı bir kural).
 ## 9. PR / CI
 
 - PR: [umutciftciii/taktic#143](https://github.com/umutciftciii/taktic/pull/143)
-- CI (head `60ed436`, run 37206532430): **hepsi yeşil**
+- SMS düzeltmesi öncesi head `60ed436` için CI (run 37206532430): **hepsi yeşil**
+  (tablo aşağıda); SMS düzeltmesi sonrası exact-head CI PR'da.
 
 | Job | Sonuç | Süre |
 |---|---|---|

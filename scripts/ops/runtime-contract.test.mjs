@@ -205,6 +205,24 @@ describe('the staging contract', () => {
     assert.match(failed['TURNSTILE_SITE_KEY (web)'], /not set/);
   });
 
+  it('states the SMS stand-in: a PASS on staging, a WARN on production, a FAIL for the recorder', () => {
+    let results = run(stagingConfig());
+    assert.equal(results.find((r) => r.name === 'SMS transport').status, 'PASS');
+
+    const production = stagingConfig();
+    production.name = 'taktic-production';
+    production.services.api.environment.APP_ENVIRONMENT = 'production';
+    production.services.web.environment.APP_ENVIRONMENT = 'production';
+    production.services.api.environment.PAYMENT_PROVIDER = 'mock';
+    results = run(production, { environment: 'production', project: 'taktic-production' });
+    assert.equal(results.find((r) => r.name === 'SMS transport').status, 'WARN');
+    assert.deepEqual(failures(results), {});
+
+    const recorder = stagingConfig();
+    recorder.services.api.environment.NOTIFICATION_OUTBOX_DIR = '/tmp/outbox';
+    assert.match(failures(run(recorder)).NOTIFICATION_OUTBOX_DIR, /test-only/);
+  });
+
   it('reads list-form environments as well as maps', () => {
     const config = stagingConfig();
     config.services.api.environment = Object.entries(config.services.api.environment).map(([k, v]) => `${k}=${v}`);

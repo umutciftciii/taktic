@@ -1,4 +1,4 @@
-import { parseAppEnvironment } from '../../common/app-environment';
+import { isSandboxIntegrationPermitted, parseAppEnvironment } from '../../common/app-environment';
 import { readLemonSqueezyConfig } from './lemon-squeezy.config';
 
 /**
@@ -157,33 +157,15 @@ export function assertPaymentProviderConfig(): void {
 }
 
 /**
- * Whether the sandbox provider (`lemon-squeezy-test`) may run in this process.
- *
- *   APP_ENVIRONMENT=production   never, whatever NODE_ENV says
- *   APP_ENVIRONMENT=staging      always — including NODE_ENV=production, which
- *                                is how the staging host runs the immutable
- *                                production images (docker-compose.prod.yml)
- *   APP_ENVIRONMENT=local, or    only outside NODE_ENV=production: the rule
- *   not declared                 this file had before staging ran production
- *                                builds, kept so a developer's stack and the
- *                                test suite behave exactly as they did
- *
- * A value outside the three is refused by parseAppEnvironment rather than read
- * as "not production". Live mode is a separate refusal
+ * Whether the sandbox provider (`lemon-squeezy-test`) may run in this process:
+ * the shared sandbox rule ({@link isSandboxIntegrationPermitted}) — never on
+ * APP_ENVIRONMENT=production, always on staging (NODE_ENV=production
+ * included), and on a local or undeclared stack only outside
+ * NODE_ENV=production. Live mode is a separate refusal
  * ({@link assertNoLiveModeConfig}) and applies on every environment.
  */
 export function isSandboxPaymentProviderPermitted(env: NodeJS.ProcessEnv = process.env): boolean {
-  const environment = parseAppEnvironment(env.APP_ENVIRONMENT);
-
-  if (environment === 'production') {
-    return false;
-  }
-
-  if (environment === 'staging') {
-    return true;
-  }
-
-  return env.NODE_ENV !== 'production';
+  return isSandboxIntegrationPermitted(env);
 }
 
 function describeAppEnvironment(): string {
