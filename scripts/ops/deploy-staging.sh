@@ -3,14 +3,26 @@
 #
 #   scripts/ops/deploy-staging.sh --sha <commit> [options]
 #
-#   --check                         preflight only, then stop (changes nothing)
+#   --check                         the read-only preflight, then stop. No
+#                                   git fetch, no image build, no log file, no
+#                                   directory created; nothing stopped,
+#                                   checked out, migrated or recreated. Images
+#                                   not built yet are reported, and the checks
+#                                   that need them are marked NOT RUN (exit 3)
+#                                   — build them with scripts/ops/build-images.sh
+#                                   <sha> for a complete check (exit 0)
 #   --dry-run                       run every read-only step, print every
 #                                   mutating command instead of running it
+#   --environment <staging|production> default staging; the runtime contract
+#                                   the preflight checks (deploy-preflight.sh)
+#   --project <name>                the compose project that must own the
+#                                   volumes (default for staging: taktic-staging)
 #   --deploy-ref <ref>              default origin/main
 #   --backup <file.dump>            verify this existing dump instead of
 #                                   taking a fresh one (see step 5)
 #   --allow-empty-uploads           an empty uploads volume is not an error
-#   --fix-uploads-ownership         chown the uploads volume to uid 1000
+#   --fix-uploads-ownership         give the API's mounted uploads volume to
+#                                   the image's runtime uid:gid (step 1b)
 #   --accept-env-drop               } passed through to the preflight;
 #   --accept-legacy-postgres-publish} see deploy-preflight.sh
 #   --skip-build                    images must already exist
@@ -19,7 +31,12 @@
 #
 #    0  build     taktic-*:<sha> from `git archive <sha>` (touches nothing
 #                 that runs; skipped when the images exist)
-#    1  preflight scripts/ops/deploy-preflight.sh — every check, read-only
+#    1  preflight scripts/ops/deploy-preflight.sh — every check, read-only,
+#                 including the runtime contract and the new API image's own
+#                 boot checks: a configuration the new build would refuse
+#                 stops the deploy here, while the old API still serves
+#   1b uploads   (--fix-uploads-ownership) the mounted uploads volume is given
+#                 to the runtime uid:gid, content verified unchanged
 #    2  stop      the API container. From here on no old code can write and
 #                 no new code is running.
 #    3  checkout  `git checkout --detach <sha>` — only now, with the API down
@@ -60,13 +77,14 @@ while [ "$#" -gt 0 ]; do
     --sha) sha_arg="${2:?--sha needs a commit}"; shift 2 ;;
     --deploy-ref) deploy_ref="${2:?--deploy-ref needs a ref}"; shift 2 ;;
     --check) check_only=1; shift ;;
+    --environment | --project) preflight_flags="$preflight_flags $1 ${2:?$1 needs a value}"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --backup) backup_arg="${2:?--backup needs a file}"; shift 2 ;;
     --allow-empty-uploads) allow_empty_uploads=1; shift ;;
     --fix-uploads-ownership) fix_uploads=1; preflight_flags="$preflight_flags --allow-uploads-ownership-fix"; shift ;;
     --accept-env-drop | --accept-legacy-postgres-publish) preflight_flags="$preflight_flags $1"; shift ;;
     --skip-build) skip_build=1; shift ;;
-    -h | --help) sed -n '2,46p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,64p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -75,7 +93,11 @@ export DRY_RUN
 
 require_cmd docker git awk sed comm
 require_project_name
-git -C "$REPO_ROOT" fetch --quiet origin || die "git fetch origin failed"
+# --check reads what the host already has: no fetch (the commit must be here
+# already; `git fetch origin` first otherwise).
+if [ "$check_only" -eq 0 ]; then
+  git -C "$REPO_ROOT" fetch --quiet origin || die "git fetch origin failed"
+fi
 sha="$(resolve_commit "$sha_arg")"
 export TAKTIC_IMAGE_TAG="$sha"
 short="${sha:0:12}"
@@ -93,6 +115,23 @@ if [ "${TAKTIC_DEPLOY_STAGED:-}" != "$sha" ]; then
   log "running the deploy scripts of $short from $stage"
   TAKTIC_DEPLOY_STAGED="$sha" TAKTIC_REPO_ROOT="$REPO_ROOT" TAKTIC_PROD_COMPOSE_FILE="$stage/docker-compose.prod.yml" \
     exec "$stage/scripts/ops/deploy-staging.sh" "${original_args[@]}"
+fi
+
+# --check: the preflight alone, read-only, and nothing written — not even a
+# log file. Images are not built; whatever needs them is reported NOT RUN.
+if [ "$check_only" -eq 1 ]; then
+  log "check $sha against project $COMPOSE_PROJECT_NAME (read-only; nothing is fetched, built or written)"
+  set +e
+  # shellcheck disable=SC2086
+  "$OPS_DIR/deploy-preflight.sh" --sha "$sha" --deploy-ref "$deploy_ref" --skip-fetch --allow-missing-images $preflight_flags
+  check_code=$?
+  set -e
+  case "$check_code" in
+    0) step "--check: preflight passed; nothing was changed" ;;
+    3) step "--check: no failure, but checks that need the images were NOT RUN; nothing was changed" ;;
+    *) step "--check: preflight FAILED; nothing was changed" ;;
+  esac
+  exit "$check_code"
 fi
 
 log_dir="$BACKUP_ROOT/deploy-logs"
@@ -139,10 +178,36 @@ step "1. Preflight"
 "$OPS_DIR/deploy-preflight.sh" --sha "$sha" --deploy-ref "$deploy_ref" --skip-fetch $preflight_flags
 postgres_id="$(container_id "$POSTGRES_CONTAINER")"
 log "PostgreSQL container id: ${postgres_id:0:12} (must be the same at the end)"
-if [ "$check_only" -eq 1 ]; then
-  finished=1
-  step "--check: preflight passed; nothing was changed"
-  exit 0
+
+# --- 1b uploads ownership ---------------------------------------------------------
+# Before anything is stopped or migrated, so a volume that cannot be fixed
+# costs no downtime. Only the volume the API container itself mounts at the
+# upload root, and only when it is the one docker-compose.prod.yml mounts too.
+if [ "$fix_uploads" -eq 1 ]; then
+  current_step="1b uploads ownership"
+  step "1b. Uploads volume ownership"
+  uploads_volume=""
+  expected_volume="${COMPOSE_PROJECT_NAME}_taktic-api-uploads"
+  if container_exists "$API_CONTAINER"; then
+    uploads_volume="$(api_uploads_volume)"
+    [ "$uploads_volume" = "$expected_volume" ] \
+      || die "$API_CONTAINER mounts '${uploads_volume:-nothing}' at $UPLOADS_MOUNT_POINT, not $expected_volume; refusing to change ownership"
+  elif docker volume inspect "$expected_volume" >/dev/null 2>&1; then
+    uploads_volume="$expected_volume"
+  fi
+  if [ -z "$uploads_volume" ]; then
+    log "no uploads volume yet; the first start creates it owned by the runtime user"
+  else
+    runtime_ids="$(image_runtime_ids "taktic-api:$sha")"
+    log "giving $uploads_volume to $runtime_ids (the runtime user of taktic-api:$short)"
+    if [ "$DRY_RUN" = 1 ]; then
+      run_mut uploads_ownership_fix "$uploads_volume" "$runtime_ids"
+    else
+      fixed="$(uploads_ownership_fix "$uploads_volume" "$runtime_ids")" \
+        || die "the ownership fix of $uploads_volume failed; nothing has been stopped or migrated"
+      log "$uploads_volume owned by $runtime_ids, content unchanged ($fixed)"
+    fi
+  fi
 fi
 
 # --- 2 stop the API --------------------------------------------------------------
@@ -271,10 +336,6 @@ fi
 # --- 8 api -------------------------------------------------------------------------
 current_step="8 api"
 step "8. Recreating the API from taktic-api:$sha"
-if [ "$fix_uploads" -eq 1 ]; then
-  run_mut helper_run --cap-add CHOWN -v "${COMPOSE_PROJECT_NAME}_taktic-api-uploads:/u" "$HELPER_IMAGE" -c 'chown -R 1000:1000 /u'
-  log "uploads volume chowned to uid 1000"
-fi
 run_mut prod_compose up -d --no-deps --force-recreate api
 [ "$DRY_RUN" = 1 ] || wait_healthy "$API_CONTAINER" 180
 log "API healthy"

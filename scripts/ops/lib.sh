@@ -199,6 +199,58 @@ helper_run() {
     --security-opt no-new-privileges --entrypoint sh "$@"
 }
 
+# The uid:gid the production API runs as: the Dockerfile's `USER node`. Read
+# from the image itself when it exists, so the uploads volume is matched to
+# the process that will actually write to it; the documented default before
+# the image is built (deploy-staging.sh --check on a host without images).
+API_RUNTIME_IDS_DEFAULT="1000:1000"
+image_runtime_ids() {
+  local image="$1"
+  if docker image inspect "$image" >/dev/null 2>&1; then
+    docker run --rm --network none --cap-drop ALL --security-opt no-new-privileges \
+      --entrypoint sh "$image" -c 'printf "%s:%s" "$(id -u)" "$(id -g)"'
+  else
+    printf '%s' "$API_RUNTIME_IDS_DEFAULT"
+  fi
+}
+
+# Entries of an uploads volume that the runtime uid:gid would not own, and
+# entries that are not plain files or directories (links, devices) — which the
+# ownership fix and the uploads backup both refuse. Read-only mount. Prints
+# "<foreign> <special>".
+uploads_ownership_report() {
+  local volume="$1" ids="$2"
+  helper_run -e "OWNER_UID=${ids%%:*}" -e "OWNER_GID=${ids#*:}" -v "$volume:/u:ro" "$HELPER_IMAGE" -c '
+    foreign=$(find /u \( ! -user "$OWNER_UID" -o ! -group "$OWNER_GID" \) | wc -l)
+    special=$(find /u ! -type f ! -type d | wc -l)
+    echo "$foreign $special"'
+}
+
+# Give one uploads volume to the runtime uid:gid, keeping every byte.
+#
+# The caller names the volume it read from the API container's own mount; this
+# function touches that volume and nothing else (one -v, no other mount). It
+# refuses links and special files instead of following them, changes only the
+# owner of regular files and directories, and proves afterwards that the file
+# list and every file's sha256 are what they were and that nothing is left with
+# another owner. An empty volume is a valid input. CHOWN is the only capability
+# added to the helper.
+uploads_ownership_fix() {
+  local volume="$1" ids="$2"
+  helper_run --cap-add CHOWN -e "OWNER_UID=${ids%%:*}" -e "OWNER_GID=${ids#*:}" \
+    -v "$volume:/u" "$HELPER_IMAGE" -c '
+    set -eu
+    special=$(find /u ! -type f ! -type d | head -n 1)
+    if [ -n "$special" ]; then echo "refusing: ${special#/u/} is not a regular file or directory" >&2; exit 3; fi
+    before=$(cd /u && find . -type f -exec sha256sum {} + | sort)
+    find /u -xdev \( -type f -o -type d \) -exec chown "$OWNER_UID:$OWNER_GID" {} +
+    after=$(cd /u && find . -type f -exec sha256sum {} + | sort)
+    if [ "$before" != "$after" ]; then echo "file list or content changed during the ownership fix" >&2; exit 4; fi
+    left=$(find /u \( ! -user "$OWNER_UID" -o ! -group "$OWNER_GID" \) | wc -l)
+    if [ "$left" -ne 0 ]; then echo "$left entries still have another owner" >&2; exit 5; fi
+    echo "files=$(printf "%s" "$after" | grep -c . || true)"'
+}
+
 # Safety check over a busybox `tar -tzv` listing, whose lines are
 # "<mode> <owner>/<group> <size> <date> <time> <name...>". The name is
 # everything after the fifth field, spaces included. Exits non-zero, printing

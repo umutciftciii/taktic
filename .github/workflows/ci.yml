@@ -397,11 +397,19 @@ jobs:
     #   3. the four production images, built from `git archive` of this commit
     #   4. what is inside them: no .env / .git / dumps, non-root, no dev tools
     #   5. boot: a throwaway prod stack on an empty database — migrate deploy
-    #      through the guard, api/web/admin healthy, then scripts/ops/smoke.sh
-    #   6. backup + isolated restore rehearsal of that database
+    #      through the guard, api/web/admin healthy, then scripts/ops/smoke.sh.
+    #      Configured as staging runs: NODE_ENV=production (the file's literal),
+    #      APP_ENVIRONMENT=staging, Lemon Squeezy's sandbox provider, Resend
+    #   6. the deploy preflight and `deploy-staging.sh --check` against that
+    #      running stack, then the uploads ownership fix on a real root-owned
+    #      volume, with a second volume proving nothing else is touched
+    #   7. backup + isolated restore rehearsal of that database
     #
     # Placeholders only: the .env written below holds no secret (Cloudflare's
-    # published always-pass Turnstile test keys and throwaway values).
+    # published always-pass Turnstile test keys and throwaway values in the
+    # shape each reader expects; nothing here contacts Lemon Squeezy or
+    # Resend). The public URLs are example.test names: the stack is reached
+    # over its loopback ports, and the runtime contract wants public https.
     steps:
       - uses: actions/checkout@v4
 
@@ -417,7 +425,7 @@ jobs:
 
       - name: Compose security
         run: |
-          node --test scripts/ops/compose-security.test.mjs
+          node --test scripts/ops/compose-security.test.mjs scripts/ops/runtime-contract.test.mjs scripts/ops/ops-scripts.test.mjs
           node scripts/ops/compose-security.mjs prod
           node scripts/ops/compose-security.mjs dev
 
@@ -426,18 +434,27 @@ jobs:
           cat > .env <<'EOF'
           COMPOSE_PROJECT_NAME=taktic-ci
           APP_ENVIRONMENT=staging
-          API_NODE_ENV=development
           POSTGRES_PASSWORD=ci-placeholder
-          NEXT_PUBLIC_API_URL=http://127.0.0.1:3001
-          NEXT_PUBLIC_WEB_URL=http://127.0.0.1:3000
-          WEB_ORIGIN=http://127.0.0.1:3000
-          ADMIN_ORIGIN=http://127.0.0.1:3002
+          NEXT_PUBLIC_API_URL=https://api-staging.example.test
+          NEXT_PUBLIC_WEB_URL=https://staging.example.test
+          API_PUBLIC_URL=https://api-staging.example.test
+          WEB_APP_URL=https://staging.example.test
+          WEB_ORIGIN=https://staging.example.test
+          ADMIN_ORIGIN=https://admin-staging.example.test
           TURNSTILE_MODE=cloudflare
           TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
           TURNSTILE_SITE_KEY=1x00000000000000000000AA
-          TURNSTILE_EXPECTED_HOSTNAMES=127.0.0.1
+          TURNSTILE_EXPECTED_HOSTNAMES=staging.example.test
           PROMOTION_FINGERPRINT_KEY=ci-placeholder-fingerprint-key-not-a-secret-0001
           PROMOTION_FINGERPRINT_KEY_VERSION=1
+          EMAIL_TRANSPORT=resend
+          RESEND_API_KEY=re_ciPlaceholderNotARealKey
+          EMAIL_FROM="Taktick <noreply@notify.taktick.com.tr>"
+          PAYMENT_PROVIDER=lemon-squeezy-test
+          LEMON_SQUEEZY_API_KEY=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.ciPlaceholderNotARealCredential
+          LEMON_SQUEEZY_STORE_ID=424242
+          LEMON_SQUEEZY_WEBHOOK_SECRET=ci-placeholder-webhook-secret-not-real
+          LEMON_SQUEEZY_VARIANT_MAP=baslangic:111,profesyonel:222
           EOF
           echo "TAKTIC_IMAGE_TAG=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
           echo "TAKTIC_BACKUP_DIR=$RUNNER_TEMP/taktic-backups" >> "$GITHUB_ENV"
@@ -460,6 +477,48 @@ jobs:
           prod up -d --no-deps --wait --wait-timeout 180 api
           prod up -d --no-deps --wait --wait-timeout 180 web admin
           scripts/ops/smoke.sh --sha "$TAKTIC_IMAGE_TAG"
+          test "$(docker exec taktic-api printenv NODE_ENV)" = production
+
+      - name: Deploy preflight and --check against the running stack
+        run: |
+          set -euo pipefail
+          # Every check passes on the staging contract, including the new
+          # image's own boot checks (5c) and migrate status, and --check
+          # neither fetches nor builds nor writes.
+          scripts/ops/deploy-preflight.sh --sha "$TAKTIC_IMAGE_TAG" --skip-fetch --deploy-ref HEAD --project taktic-ci
+          scripts/ops/deploy-staging.sh --sha "$TAKTIC_IMAGE_TAG" --check --deploy-ref HEAD --project taktic-ci
+          test ! -e "$TAKTIC_BACKUP_DIR"
+
+      - name: Uploads ownership fix on a real volume
+        run: |
+          set -euo pipefail
+          helper() { docker run --rm --network none "$@"; }
+          volume=taktic-ci_taktic-api-uploads
+          sentinel=taktic-ci-ownership-sentinel
+          test "$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/apps/api/uploads"}}{{.Name}}{{end}}{{end}}' taktic-api)" = "$volume"
+          # The staging host's state: a volume the old root dev API wrote, and
+          # a second volume the fix must never touch.
+          helper -v "$volume:/u" postgres:16.6-alpine sh -c 'mkdir -p /u/category-images && printf ci-data > /u/category-images/a.png && chown -R 0:0 /u'
+          docker volume create "$sentinel" >/dev/null
+          helper -v "$sentinel:/s" postgres:16.6-alpine sh -c 'mkdir -p /s/d && printf keep > /s/d/f && chown -R 0:0 /s'
+          before="$(helper -v "$volume:/u:ro" postgres:16.6-alpine sh -c 'cd /u && find . -type f -exec sha256sum {} + | sort')"
+
+          if scripts/ops/deploy-preflight.sh --sha "$TAKTIC_IMAGE_TAG" --skip-fetch --deploy-ref HEAD --project taktic-ci; then
+            echo "the preflight accepted a root-owned uploads volume without --allow-uploads-ownership-fix" >&2
+            exit 1
+          fi
+          scripts/ops/deploy-preflight.sh --sha "$TAKTIC_IMAGE_TAG" --skip-fetch --deploy-ref HEAD --project taktic-ci \
+            --allow-uploads-ownership-fix
+
+          bash -c 'source scripts/ops/lib.sh; uploads_ownership_fix "$1" "$(image_runtime_ids "taktic-api:$2")"' _ "$volume" "$TAKTIC_IMAGE_TAG"
+
+          after="$(helper -v "$volume:/u:ro" postgres:16.6-alpine sh -c 'cd /u && find . -type f -exec sha256sum {} + | sort')"
+          test "$before" = "$after"
+          test -z "$(helper -v "$volume:/u:ro" postgres:16.6-alpine sh -c 'find /u ! -user 1000 -o ! -group 1000')"
+          test "$(helper -v "$sentinel:/s:ro" postgres:16.6-alpine sh -c 'find /s -exec stat -c %u:%g {} + | sort -u')" = "0:0"
+          docker exec taktic-api sh -c 'touch uploads/category-images/.write-probe && rm uploads/category-images/.write-probe'
+          scripts/ops/deploy-preflight.sh --sha "$TAKTIC_IMAGE_TAG" --skip-fetch --deploy-ref HEAD --project taktic-ci
+          docker volume rm "$sentinel" >/dev/null
 
       - name: Backup and isolated restore rehearsal
         run: |
