@@ -405,6 +405,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
       - name: Shell scripts
         run: |
           for f in scripts/ops/*.sh; do bash -n "$f"; done
@@ -413,7 +417,7 @@ jobs:
 
       - name: Compose security
         run: |
-          node --test scripts/ops/
+          node --test scripts/ops/compose-security.test.mjs
           node scripts/ops/compose-security.mjs prod
           node scripts/ops/compose-security.mjs dev
 
