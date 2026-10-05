@@ -143,11 +143,14 @@ services:
       SHOWCASE_LEAD_SLA_CRON: ${SHOWCASE_LEAD_SLA_CRON:-}
       SHOWCASE_PLACEMENT_EXPIRY_CRON: ${SHOWCASE_PLACEMENT_EXPIRY_CRON:-}
       SHOWCASE_SCAN_LIMIT: ${SHOWCASE_SCAN_LIMIT:-}
-      # Deprecated switches: forwarded so a host that still sets one gets the
-      # API's boot warning naming it, exactly as on the development compose.
-      UNVIEWED_OFFER_REFUND_ENABLED: ${UNVIEWED_OFFER_REFUND_ENABLED:-false}
-      REQUEST_EXPIRY_SCHEDULER_ENABLED: ${REQUEST_EXPIRY_SCHEDULER_ENABLED:-false}
-      REQUEST_REMINDER_SCHEDULER_ENABLED: ${REQUEST_REMINDER_SCHEDULER_ENABLED:-false}
+      # Deprecated switches. They decide nothing (the on/off switches are
+      # OperationsSettings rows). Forwarded empty by default, so a host that
+      # sets none boots without a warning; a host that still sets one gets the
+      # API's boot warning naming it. Never give them a default value here: any
+      # non-empty value, "false" included, is a set variable and warns.
+      UNVIEWED_OFFER_REFUND_ENABLED: ${UNVIEWED_OFFER_REFUND_ENABLED:-}
+      REQUEST_EXPIRY_SCHEDULER_ENABLED: ${REQUEST_EXPIRY_SCHEDULER_ENABLED:-}
+      REQUEST_REMINDER_SCHEDULER_ENABLED: ${REQUEST_REMINDER_SCHEDULER_ENABLED:-}
       ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED: ${ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED:-}
       CONTACT_SHARING_ENABLED: ${CONTACT_SHARING_ENABLED:-true}
       CONTACT_DISCLOSURE_URL: ${CONTACT_DISCLOSURE_URL:-}

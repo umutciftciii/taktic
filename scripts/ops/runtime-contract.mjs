@@ -54,6 +54,20 @@ export const LEMON_SQUEEZY_REQUIRED = [
   'LEMON_SQUEEZY_VARIANT_MAP',
 ];
 
+/**
+ * The deprecated scheduler switches (apps/api/src/common/legacy-scheduler-flags.ts).
+ * They decide nothing — whether a job runs is an OperationsSettings row — and
+ * the API logs a deprecation warning at every boot for each one that is set to
+ * anything at all, "false" included. docker-compose.prod.yml forwards them
+ * empty; a non-empty value here comes from the host's .env.
+ */
+export const LEGACY_SCHEDULER_FLAGS = [
+  'ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED',
+  'UNVIEWED_OFFER_REFUND_ENABLED',
+  'REQUEST_EXPIRY_SCHEDULER_ENABLED',
+  'REQUEST_REMINDER_SCHEDULER_ENABLED',
+];
+
 /** Any of these set at all means "take real money"; the API refuses to boot. */
 export const REFUSED_LIVE_MODE_KEYS = [
   'LEMON_SQUEEZY_LIVE_ENABLED',
@@ -242,6 +256,14 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
   } else {
     fail('TURNSTILE_MODE', 'a bypass mode is refused on a deployed environment');
   }
+
+  // Deprecated scheduler switches: harmless, but each one set costs a WARN
+  // line at every API boot, so the contract names it for removal.
+  const legacySet = LEGACY_SCHEDULER_FLAGS.filter((flag) => value(api, flag));
+  for (const flag of legacySet) {
+    warn(flag, 'set but has no effect (the switch is an OperationsSettings row); the API warns at every boot — remove it from the host .env');
+  }
+  if (!legacySet.length) pass('legacy scheduler switches', 'none set; the database settings are the only source');
 
   // SMS (apps/api/src/modules/notifications/sms-transport.ts). The build has
   // no SMS provider. The recorder transport is test-only and refused under
