@@ -18,6 +18,7 @@ import { resolveConfig } from './compose-security.mjs';
 import {
   DEVELOPMENT_FINGERPRINT_KEY,
   FINGERPRINT_KEY_MIN_LENGTH,
+  LEGACY_SCHEDULER_FLAGS,
   PRODUCTION_EMAIL_SENDER,
   checkRuntimeContract,
   publicUrlProblem,
@@ -223,6 +224,26 @@ describe('the staging contract', () => {
     assert.match(failures(run(recorder)).NOTIFICATION_OUTBOX_DIR, /test-only/);
   });
 
+  it('names each deprecated scheduler switch that is set, as a WARN that never prints its value', () => {
+    let results = run(stagingConfig());
+    assert.equal(results.find((r) => r.name === 'legacy scheduler switches').status, 'PASS');
+
+    const config = stagingConfig();
+    config.services.api.environment.REQUEST_EXPIRY_SCHEDULER_ENABLED = 'false';
+    config.services.api.environment.UNVIEWED_OFFER_REFUND_ENABLED = 'true';
+    config.services.api.environment.REQUEST_REMINDER_SCHEDULER_ENABLED = '';
+    results = run(config);
+    assert.deepEqual(failures(results), {});
+    const warned = results.filter((r) => r.status === 'WARN').map((r) => r.name);
+    assert.ok(warned.includes('REQUEST_EXPIRY_SCHEDULER_ENABLED'));
+    assert.ok(warned.includes('UNVIEWED_OFFER_REFUND_ENABLED'));
+    assert.ok(!warned.includes('REQUEST_REMINDER_SCHEDULER_ENABLED'));
+    assert.equal(results.find((r) => r.name === 'legacy scheduler switches'), undefined);
+    for (const { detail } of results.filter((r) => LEGACY_SCHEDULER_FLAGS.includes(r.name))) {
+      assert.doesNotMatch(detail, /true|false/);
+    }
+  });
+
   it('reads list-form environments as well as maps', () => {
     const config = stagingConfig();
     config.services.api.environment = Object.entries(config.services.api.environment).map(([k, v]) => `${k}=${v}`);
@@ -244,6 +265,12 @@ describe('kept in step with the API', () => {
     const source = read('apps/api/src/modules/business-registration/promotion-fingerprint.ts');
     assert.match(source, new RegExp(`DEVELOPMENT_FINGERPRINT_KEY = '${DEVELOPMENT_FINGERPRINT_KEY}'`));
     assert.match(source, new RegExp(`FINGERPRINT_KEY_MIN_LENGTH = ${FINGERPRINT_KEY_MIN_LENGTH};`));
+  });
+
+  it('the deprecated scheduler switches', () => {
+    const source = read('apps/api/src/common/legacy-scheduler-flags.ts');
+    const list = source.match(/LEGACY_ENABLE_FLAGS = \[([^\]]*)\]/)?.[1] ?? '';
+    assert.deepEqual([...list.matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]), LEGACY_SCHEDULER_FLAGS);
   });
 
   it('the pinned production sender', () => {
@@ -289,6 +316,19 @@ describe('docker-compose.prod.yml under the contract', { skip: dockerAvailable()
     const config = resolveConfig('prod', { extraEnv: stagingHostEnv });
     assert.equal(config.services.api.environment.NODE_ENV, 'production');
     assert.deepEqual(failures(run(config)), {});
+  });
+
+  it('forwards no deprecated scheduler switch unless the host .env sets one', () => {
+    let config = resolveConfig('prod', { extraEnv: stagingHostEnv });
+    for (const flag of LEGACY_SCHEDULER_FLAGS) {
+      assert.equal(config.services.api.environment[flag] ?? '', '', `${flag} must resolve empty by default`);
+    }
+    assert.equal(run(config).find((r) => r.name === 'legacy scheduler switches').status, 'PASS');
+
+    config = resolveConfig('prod', { extraEnv: { ...stagingHostEnv, REQUEST_REMINDER_SCHEDULER_ENABLED: 'false' } });
+    const results = run(config);
+    assert.equal(results.find((r) => r.name === 'REQUEST_REMINDER_SCHEDULER_ENABLED').status, 'WARN');
+    assert.deepEqual(failures(results), {});
   });
 
   it('the staging .env without the fingerprint key fails before anything runs', () => {

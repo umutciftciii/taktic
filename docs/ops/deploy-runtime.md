@@ -94,6 +94,7 @@ kurallar onu okur:
 | Public URL'ler | `API_PUBLIC_URL`, `WEB_APP_URL`, `WEB_ORIGIN`, `ADMIN_ORIGIN`, `NEXT_PUBLIC_API_URL`: https, loopback değil; `NEXT_PUBLIC_WEB_URL` önerilir (uyarı) | aynı |
 | SMS (sağlayıcı yok) | Console stand-in: kod **yalnız API container log'una** yazılır (`docker logs taktic-api`, host operatörü okur); telefona, response'a, DB'ye, endpoint'e gitmez (preflight PASS) | Console adapter **her gönderimi reddeder**, kod hiçbir yere yazılmaz, audit `TRANSPORT_UNAVAILABLE` (preflight WARN) |
 | `NOTIFICATION_OUTBOX_DIR` (kayıt transport'u) | boot reddi (`NODE_ENV=production`) | boot reddi |
+| Eski scheduler anahtarları (`ENTITLEMENT_RENEWAL_SCHEDULER_ENABLED`, `UNVIEWED_OFFER_REFUND_ENABLED`, `REQUEST_EXPIRY_SCHEDULER_ENABLED`, `REQUEST_REMINDER_SCHEDULER_ENABLED`) | Etkisiz; tek kaynak DB `OperationsSettings`. Prod compose boş iletir; `.env`'de herhangi bir değerle (`false` dahil) verilirse API her boot'ta deprecation WARN'ı yazar, preflight adıyla WARN verir → `.env`'den silin | aynı |
 
 Lemon sandbox ve console SMS aynı kuralı paylaşır
 (`common/app-environment.ts` → `isSandboxIntegrationPermitted`):
@@ -141,7 +142,7 @@ satırı aranır); **5b runtime sözleşmesi** (`scripts/ops/runtime-contract.mj
 staging için `taktic-staging`, `--project` ile değişir —, `APP_ENVIRONMENT`
 api+web, `NODE_ENV=production`, `PROMOTION_FINGERPRINT_KEY`, ortamın izinli
 ödeme sağlayıcısı ve sandbox anahtarları, live anahtar yokluğu, public URL'ler,
-e-posta, Turnstile; çıktı yalnız **değişken adı + PASS/WARN/FAIL**);
+e-posta, Turnstile, eski scheduler anahtarları (WARN); çıktı yalnız **değişken adı + PASS/WARN/FAIL**);
 **5c boot yapılandırması** (yeni `taktic-api:<sha>` image'ında
 `node dist/boot-config-check.js`, `compose run --rm --no-deps` ile — yeni API'nin
 alacağı env'in birebir aynısıyla, DB bağlantısı ve listener olmadan; API'nin

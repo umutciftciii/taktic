@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LEGACY_ENABLE_FLAGS, warnIfLegacySchedulerFlagSet } from '../src/common/legacy-scheduler-flags';
 import { resolveTurnstileConfig } from '../src/modules/turnstile/turnstile.config';
 
 /**
@@ -21,6 +23,7 @@ import { resolveTurnstileConfig } from '../src/modules/turnstile/turnstile.confi
 const repoRoot = resolve(__dirname, '../../..');
 const base = readFileSync(resolve(repoRoot, 'docker-compose.yml'), 'utf8');
 const local = readFileSync(resolve(repoRoot, 'docker-compose.local.yml'), 'utf8');
+const prod = readFileSync(resolve(repoRoot, 'docker-compose.prod.yml'), 'utf8');
 
 /** The `environment:` lines of one service, from the base file. */
 function serviceEnvironmentLines(source: string, service: string): string[] {
@@ -115,5 +118,47 @@ describe('docker-compose.local.yml — the explicit local declaration', () => {
         TURNSTILE_SITEVERIFY_TIMEOUT_MS: '',
       } as NodeJS.ProcessEnv),
     ).toEqual({ mode: 'test' });
+  });
+});
+
+/**
+ * The deprecated scheduler switches decide nothing — the on/off answer is an
+ * OperationsSettings row — and the API warns at every boot for each one that
+ * is set to anything, "false" included. A compose default of `false` therefore
+ * set them on every host and put three deprecation warnings in every boot log.
+ * They stay forwarded (a host that still sets one must hear about it, and the
+ * deploy preflight compares the running API's variables with what the file
+ * forwards), but empty-when-unset.
+ */
+describe('the deprecated scheduler switches', () => {
+  afterEach(() => {
+    for (const flag of LEGACY_ENABLE_FLAGS) delete process.env[flag];
+  });
+
+  it.each([
+    ['docker-compose.yml', base],
+    ['docker-compose.prod.yml', prod],
+  ])('%s forwards each one to the api empty-when-unset, or not at all', (_file, source) => {
+    const api = serviceEnvironmentLines(source, 'api');
+    for (const flag of LEGACY_ENABLE_FLAGS) {
+      const value = readVariable(api, flag);
+      if (value !== undefined) expect(value, flag).toBe(`\${${flag}:-}`);
+    }
+    expect(source).not.toMatch(/(_SCHEDULER_ENABLED|UNVIEWED_OFFER_REFUND_ENABLED):-[^}]/);
+  });
+
+  it('warns only for a non-empty value, "false" included', () => {
+    const logger = new Logger('test');
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED = '';
+    warnIfLegacySchedulerFlagSet(logger, 'REQUEST_EXPIRY_SCHEDULER_ENABLED');
+    expect(warn).not.toHaveBeenCalled();
+
+    process.env.REQUEST_EXPIRY_SCHEDULER_ENABLED = 'false';
+    warnIfLegacySchedulerFlagSet(logger, 'REQUEST_EXPIRY_SCHEDULER_ENABLED');
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]?.[0]).toMatch(/^REQUEST_EXPIRY_SCHEDULER_ENABLED is set but no longer has any effect/);
+    expect(warn.mock.calls[0]?.[0]).not.toMatch(/false/);
   });
 });
