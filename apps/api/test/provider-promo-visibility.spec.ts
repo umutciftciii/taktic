@@ -103,8 +103,8 @@ describe('GET /providers/me/credits/promo', () => {
     expect(body).toEqual({
       spendableCredits: 13,
       lots: [
-        { id: sooner.lot.id, remainingCredits: 3, expiresAt: sooner.lot.expiresAt.toISOString(), campaignName: soonerCampaign.name },
-        { id: later.lot.id, remainingCredits: 10, expiresAt: later.lot.expiresAt.toISOString(), campaignName: laterCampaign.name },
+        { id: sooner.lot.id, remainingCredits: 3, expiresAt: sooner.lot.expiresAt.toISOString(), campaignName: soonerCampaign.name, spendPriority: 'PROMO_FIRST' },
+        { id: later.lot.id, remainingCredits: 10, expiresAt: later.lot.expiresAt.toISOString(), campaignName: laterCampaign.name, spendPriority: 'PROMO_FIRST' },
       ],
     });
     // The wallet still counts the unswept remainder; the projection does not.

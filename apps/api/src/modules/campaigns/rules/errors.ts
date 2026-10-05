@@ -34,7 +34,9 @@ export type CampaignRuleErrorCode =
   | 'WINDOW_INVALID'
   | 'STACK_POLICY_INVALID'
   | 'PRIORITY_INVALID'
-  | 'CHANNEL_INVALID';
+  | 'CHANNEL_INVALID'
+  | 'CREDIT_POLICY_INVALID'
+  | 'CREDIT_POLICY_NOT_APPLICABLE';
 
 export const CAMPAIGN_RULE_ERROR_CODES =
   CAMPAIGN_RULE_ERROR_CODE_LIST as readonly CampaignRuleErrorCode[];
@@ -75,7 +77,7 @@ export type CampaignActivationError = {
  */
 export const CAMPAIGN_RULE_ERROR_MESSAGES: Readonly<Record<CampaignRuleErrorCode, string>> = {
   SCHEMA_INVALID: 'Kampanya tanımı beklenen yapıda değil.',
-  UNSUPPORTED_SCHEMA_VERSION: 'Yalnızca schemaVersion 1 desteklenir.',
+  UNSUPPORTED_SCHEMA_VERSION: 'Yalnızca schemaVersion 2 desteklenir.',
   UNKNOWN_FIELD: 'Bu alan kampanya tanımında yer alamaz.',
   UNKNOWN_TRIGGER: 'Tetikleyici katalogda yok.',
   UNKNOWN_CONDITION: 'Koşul türü katalogda yok.',
@@ -100,6 +102,9 @@ export const CAMPAIGN_RULE_ERROR_MESSAGES: Readonly<Record<CampaignRuleErrorCode
   STACK_POLICY_INVALID: 'Yalnızca EXCLUSIVE_CREDIT_BONUS politikası desteklenir.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalıdır.',
   CHANNEL_INVALID: 'Kanal yalnızca WEB, MOBILE veya ALL olabilir.',
+  CREDIT_POLICY_INVALID:
+    'Kredi kullanım kuralları eksik veya geçersiz: harcama önceliği PROMO_FIRST/PAID_FIRST, yönetici kesintisi PAID_ONLY/ALLOW_PROMO olmalıdır.',
+  CREDIT_POLICY_NOT_APPLICABLE: 'Kredi üretmeyen bir fayda kredi kullanım kuralı taşıyamaz.',
 };
 
 export const CAMPAIGN_ACTIVATION_ERROR_MESSAGES: Readonly<Record<CampaignActivationErrorCode, string>> = {

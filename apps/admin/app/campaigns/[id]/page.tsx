@@ -24,7 +24,9 @@ import {
   SOURCE_CHANNEL_LABELS,
   STACK_POLICY_LABEL,
   TRIGGER_LABELS,
+  adminDeductPolicyLabel,
   channelLabel,
+  spendPriorityLabel,
   formFromDefinition,
   type CampaignConditionType,
   type CampaignFact,
@@ -128,6 +130,12 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
     },
     { label: 'Son sürüm', value: currentVersion ? `v${currentVersion.versionNumber}` : '—' },
     { label: 'Kanal', value: shownVersion ? channelLabel(shownVersion.channel) : '—' },
+    {
+      label: 'Kredi kuralı',
+      value: shownVersion ? spendPriorityLabel(shownVersion.spendPriority) : '—',
+      note: shownVersion?.adminDeductPolicy ? `kesinti: ${adminDeductPolicyLabel(shownVersion.adminDeductPolicy).toLocaleLowerCase('tr')}` : undefined,
+      testId: 'campaign-fact-credit-policy',
+    },
     { label: 'Hak ediş', value: formatCount(campaign.redemptionCount), testId: 'campaign-fact-redemptions' },
     {
       label: 'Verilen kredi',
@@ -197,7 +205,7 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
             </SectionCard>
 
             <SectionCard title="Sürüm geçmişi" subtitle="Her satır değiştirilemez bir anlık görüntüdür; en yeni üstte." padded={false}>
-              <DataTable caption="Sürüm geçmişi" columns={VERSION_COLUMNS} minWidth={1180} testId="campaign-versions">
+              <DataTable caption="Sürüm geçmişi" columns={VERSION_COLUMNS} minWidth={1420} testId="campaign-versions">
                 {data.versions.map((version) => (
                   <tr key={version.id} data-testid="campaign-version-row" data-version={version.versionNumber} data-active={activeVersion?.id === version.id ? 'true' : 'false'}>
                     <td className="is-num cell-nowrap">
@@ -208,6 +216,12 @@ export default async function CampaignDetailPage({ params, searchParams }: Campa
                     <td>{TRIGGER_LABELS[version.trigger as CampaignTrigger] ?? version.trigger}</td>
                     <td data-testid="campaign-version-channel" data-channel={version.channel}>
                       {channelLabel(version.channel)}
+                    </td>
+                    <td data-testid="campaign-version-spend-priority" data-value={version.spendPriority ?? ''}>
+                      {spendPriorityLabel(version.spendPriority)}
+                    </td>
+                    <td data-testid="campaign-version-admin-deduct-policy" data-value={version.adminDeductPolicy ?? ''}>
+                      {adminDeductPolicyLabel(version.adminDeductPolicy)}
                     </td>
                     <td className="is-num">{version.benefitCredits}</td>
                     <td className="is-num">{version.benefitExpiresInDays}</td>
@@ -455,6 +469,8 @@ const VERSION_COLUMNS: DataColumn[] = [
   { key: 'version', label: 'Sürüm', align: 'end' },
   { key: 'trigger', label: 'Tetikleyici' },
   { key: 'channel', label: 'Kanal' },
+  { key: 'spendPriority', label: 'Harcama önceliği' },
+  { key: 'adminDeductPolicy', label: 'Yönetici kesintisi' },
   { key: 'credits', label: 'Kredi', align: 'end' },
   { key: 'days', label: 'Gün', align: 'end' },
   { key: 'perProvider', label: 'HV başına', align: 'end' },
@@ -651,6 +667,18 @@ function VersionDefinition({ version }: { version: CampaignVersion }) {
       <dd>
         {version.benefitCredits} promosyon kredisi, {version.benefitExpiresInDays} gün içinde kullanılmalı
       </dd>
+      {version.spendPriority || version.adminDeductPolicy ? (
+        <>
+          <dt>Harcama önceliği</dt>
+          <dd data-testid="campaign-definition-spend-priority" data-value={version.spendPriority ?? ''}>
+            {spendPriorityLabel(version.spendPriority)}
+          </dd>
+          <dt>Yönetici kredi kesintisi</dt>
+          <dd data-testid="campaign-definition-admin-deduct-policy" data-value={version.adminDeductPolicy ?? ''}>
+            {adminDeductPolicyLabel(version.adminDeductPolicy)}
+          </dd>
+        </>
+      ) : null}
       <dt>Limitler</dt>
       <dd>
         hizmet veren başına {version.maxRedemptionsPerProvider} · toplam {version.maxRedemptionsGlobal ?? 'sınırsız'} ·

@@ -37,7 +37,7 @@ beforeEach(async () => {
 });
 
 const K2 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
   conditions: {
     all: [
@@ -46,7 +46,7 @@ const K2 = {
       { type: 'NO_PRIOR_REVOCATION' },
     ],
   },
-  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -54,11 +54,11 @@ const K2 = {
 };
 
 const K1 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PROVIDER_ELIGIBILITY_REACHED',
   eligibility: { facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED', 'PHONE_VERIFIED'] },
   conditions: { all: [{ type: 'NO_PRIOR_REVOCATION' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14 },
+  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -163,6 +163,7 @@ describe('creating a draft', () => {
       benefitExpiresInDays: 30,
       maxRedemptionsPerProvider: 1,
       channel: 'ALL',
+      creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' },
       changedFields: [],
     });
     expect(await ctx.prisma.providerCreditTransaction.count()).toBe(0);
@@ -181,7 +182,7 @@ describe('creating a draft', () => {
     const response = await createCampaign(cookie, {
       key: 'bozuk',
       name: 'Bozuk',
-      definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 0, expiresInDays: 30 }, priority: 5000 },
+      definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 0, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } }, priority: 5000 },
     }).expect(400);
 
     expect(response.body.code).toBe('CAMPAIGN_DEFINITION_INVALID');
@@ -239,6 +240,7 @@ describe('validate-only', () => {
         benefitCredits: 5,
         benefitExpiresInDays: 14,
         channel: 'ALL',
+        creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' },
       },
     });
 
@@ -272,7 +274,7 @@ describe('revising a draft', () => {
     const revised = await request(ctx.server)
       .post(`/admin/campaigns/${campaignId}/versions`)
       .set('Cookie', editorCookie)
-      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 15, expiresInDays: 30 }, priority: 50 } })
+      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 15, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } }, priority: 50 } })
       .expect(201);
 
     expect(revised.body.currentVersion).toMatchObject({

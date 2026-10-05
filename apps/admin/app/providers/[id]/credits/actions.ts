@@ -47,7 +47,15 @@ export async function submitCreditOperationAction(
   if (!(await hasConfirmationProof(formData, operation === 'DEDUCT' ? 'credits.deduct' : 'credits.grant'))) {
     return { kind: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE, at: Date.now() };
   }
-  const payload = { amount: amount.value, reason: readFormString(formData, 'reason').trim() };
+  // CAMPAIGN-CREDIT-POLICY-001: the operation's idempotency key, drawn by the
+  // form once per operation and repeated on its retries. The confirmation
+  // proof above is spent by this submission; the key is what lets the API
+  // recognise a retry of an operation it already committed.
+  const idempotencyKey = readFormString(formData, 'idempotencyKey').trim();
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(idempotencyKey)) {
+    return { kind: 'error', message: 'Form henüz hazır değil; sayfayı yenileyip tekrar deneyin. İşlem yapılmadı.', at: Date.now() };
+  }
+  const payload = { amount: amount.value, reason: readFormString(formData, 'reason').trim(), idempotencyKey };
 
   let transaction: ProviderCreditTransaction;
   try {
@@ -85,6 +93,21 @@ function refusalMessage(error: unknown): string {
         ? `İşlem yapılmadı: ekleme sonrası bakiye ${formatCount(max)} üst sınırını aşardı.`
         : `İşlem yapılmadı: ekleme sonrası bakiye ${formatCount(max)} üst sınırını aşardı. Güncel bakiye ${formatCount(current)}; en fazla ${formatCount(Math.max(0, max - current))} kredi eklenebilir. Sayfa eski bakiyeyi gösteriyor olabilir.`;
     }
+    if (error.status === 400 && body.code === 'CREDIT_DEDUCT_EXCEEDS_DEDUCTIBLE') {
+      // CAMPAIGN-CREDIT-POLICY-001: the balance covers it, the deductible part does not.
+      const deductible = typeof body.deductibleCredits === 'number' ? body.deductibleCredits : null;
+      const protectedPromo = typeof body.protectedPromoCredits === 'number' ? body.protectedPromoCredits : null;
+      const balance = typeof body.balance === 'number' ? body.balance : null;
+      return deductible === null || balance === null
+        ? 'İşlem yapılmadı: bu düşüş, kampanya kuralı gereği yönetici kesintisine kapalı krediye dokunurdu.'
+        : `İşlem yapılmadı: bakiye ${formatCount(balance)}, ancak${protectedPromo !== null ? ` ${formatCount(protectedPromo)} kredisi` : ' bir kısmı'} kampanya kuralı gereği yönetici kesintisine kapalı; en fazla ${formatCount(deductible)} kredi düşülebilir. Sayfa eski bakiyeyi gösteriyor olabilir.`;
+    }
+    if (error.status === 409 && body.code === 'IDEMPOTENCY_KEY_REUSED') {
+      return 'Bu işlem anahtarıyla farklı bir kredi işlemi zaten kaydedilmiş; önceki deneme gerçekleşmiş olabilir. Sayfayı yenileyip bakiyeyi kontrol edin.';
+    }
+    if (error.status === 500 && body.code === 'WALLET_INVARIANT_VIOLATION') {
+      return 'İşlem yapılmadı: hizmet verenin bakiye kayıtları tutarsız. Durumu teknik ekibe bildirin.';
+    }
     if (error.status === 400 && error.body.includes('below zero')) {
       return 'Bu düşüş bakiyeyi eksiye düşürürdü; işlem yapılmadı. Bakiye bu arada değişmiş olabilir.';
     }
@@ -98,10 +121,19 @@ function refusalMessage(error: unknown): string {
       return 'Hizmet veren bulunamadı; işlem yapılmadı.';
     }
   }
-  return 'İşlem yapılamadı. Lütfen tekrar deneyin; kredi hareketi oluşmadı.';
+  // Ambiguous: the request may have committed before its answer was lost.
+  // The form keeps the operation's key, so sending it again is safe.
+  return 'İşlemin sonucu doğrulanamadı. Aynı işlemi tekrar gönderebilirsiniz; kredi iki kez hareket etmez. Önce sayfayı yenileyip bakiyeyi kontrol etmeniz önerilir.';
 }
 
-function readBody(raw: string): { code?: unknown; currentBalance?: unknown; maxBalance?: unknown } {
+function readBody(raw: string): {
+  code?: unknown;
+  currentBalance?: unknown;
+  maxBalance?: unknown;
+  deductibleCredits?: unknown;
+  protectedPromoCredits?: unknown;
+  balance?: unknown;
+} {
   try {
     const parsed: unknown = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};

@@ -72,10 +72,10 @@ async function seedDraft(name?: string) {
   const owner = await createAdmin();
   const key = `e2e-faz3e-${uniqueSuffix()}`;
   const definition = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
     conditions: { all: [{ type: 'FIRST_SUCCESSFUL_PAID_PURCHASE' }] },
-    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
     limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null },
     window: { startAt: null, endAt: null },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -93,6 +93,8 @@ async function seedDraft(name?: string) {
       factSetKey: null,
       definition,
       benefitType: 'PROMO_CREDITS',
+      spendPriority: 'PROMO_FIRST',
+      adminDeductPolicy: 'PAID_ONLY',
       benefitCredits: 10,
       benefitExpiresInDays: 30,
       maxRedemptionsPerProvider: 1,

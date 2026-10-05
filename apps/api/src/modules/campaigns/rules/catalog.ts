@@ -40,8 +40,15 @@ export const CAMPAIGN_CONDITIONS: Readonly<Record<string, ConditionSpec>> =
   catalog.conditions as Readonly<Record<string, ConditionSpec>>;
 export const CAMPAIGN_BENEFIT: {
   types: readonly string[];
+  /** CAMPAIGN-CREDIT-POLICY-001: the benefit types that grant credit, and therefore carry a credit policy. */
+  creditProducingTypes: readonly string[];
   credits: Bounds;
   expiresInDays: Bounds;
+  creditPolicy: {
+    spendPriorities: readonly string[];
+    adminDeductPolicies: readonly string[];
+    default: { spendPriority: string; adminDeductPolicy: string };
+  };
 } = catalog.benefit;
 export const CAMPAIGN_LIMITS: Readonly<Record<string, Bounds & { required: boolean }>> =
   catalog.limits;

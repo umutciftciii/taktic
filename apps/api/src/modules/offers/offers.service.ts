@@ -17,6 +17,7 @@ import {
   OfferRejectionReason,
   OfferStatus,
   Prisma,
+  PromoConsumptionSource,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
@@ -25,9 +26,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { mayEmbed } from '../auth/embedded-permissions';
 import {
-  consumePromoCreditsForSpend,
+  debitWallet,
   readUnsweptExpiredPromoCredits,
   restorePromoConsumptionsForRefund,
+  WalletDebitRefused,
 } from '../credits/promo-credit-ledger';
 import { OFFER_RECHARGE_REFERENCE_TYPE } from '../credits/offer-ledger-reference';
 import { summarizeOfferRefundSettlement, type SettledShareForSettlement } from '../credits/offer-refund-settlement';
@@ -1223,8 +1225,8 @@ export const OFFER_ACCEPT_RECHARGE_REASON = 'OFFER_ACCEPTED_AFTER_REFUND';
  *
  * Paid exactly as a submit-time spend is paid: the one-time balance, less any
  * promo credit whose lot has expired but has not been swept (a dead lot never
- * buys anything), and the earliest-expiring valid promo lot is drawn first
- * through {@link consumePromoCreditsForSpend}. Not enough of it and the caller
+ * buys anything), drawn through the canonical wallet debit waterfall of
+ * {@link debitWallet} (CAMPAIGN-CREDIT-POLICY-001). Not enough of it and the caller
  * gets a 409 with nothing written; the throw rolls back the request
  * transition, the consent, the competing rejections and the reveal with it.
  *
@@ -1265,20 +1267,27 @@ async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionCl
     throw offerAcceptInsufficientCreditException();
   }
 
+  // The charge and its promo shares through the shared wallet debit
+  // (CAMPAIGN-CREDIT-POLICY-001): the same canonical waterfall a submit-time
+  // spend uses, so a recharge is paid exactly as the first charge would be.
   let spend;
   try {
-    spend = await tx.providerCreditTransaction.create({
-      data: {
-        providerId: offer.providerId,
-        type: CreditTransactionType.OFFER_SPEND,
-        amount: -offer.creditCost,
-        balanceAfter: balance - offer.creditCost,
+    ({ transaction: spend } = await debitWallet(tx, {
+      providerId: offer.providerId,
+      amount: offer.creditCost,
+      purpose: PromoConsumptionSource.OFFER_SPEND,
+      now,
+      ledger: {
         reason: OFFER_ACCEPT_RECHARGE_REASON,
         referenceType: OFFER_RECHARGE_REFERENCE_TYPE,
         referenceId: offer.id,
+        createdById: null,
       },
-    });
+    }));
   } catch (error) {
+    if (error instanceof WalletDebitRefused) {
+      throw offerAcceptInsufficientCreditException();
+    }
     // "ProviderCreditTransaction_one_recharge_per_offer" fired: charged already.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       throw new ConflictException('Offer credit was already charged on acceptance');
@@ -1293,13 +1302,6 @@ async function chargeRefundedOfferOnAcceptInTransaction(tx: Prisma.TransactionCl
   if (recorded.count !== 1) {
     throw new ConflictException('Offer credit was already charged on acceptance');
   }
-
-  await consumePromoCreditsForSpend(tx, {
-    providerId: offer.providerId,
-    spendTransactionId: spend.id,
-    creditCost: offer.creditCost,
-    now,
-  });
 
   return spend;
 }

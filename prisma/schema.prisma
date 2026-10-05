@@ -498,6 +498,7 @@ model User {
   campaignAuditEntries            CampaignAuditLog[]                   @relation("CampaignAuditActor")
   campaignRedemptions             CampaignRedemption[]                 @relation("CampaignRedemptionUser")
   revokedCampaignRedemptions      CampaignRedemption[]                 @relation("CampaignRedemptionRevokedBy")
+  manualCreditOperations          ManualCreditOperation[]              @relation("ManualCreditOperationActor")
   /// PR-0 admin RBAC. An ADMIN account's capabilities are exactly the union of
   /// the permissions of its live assignments; a SUPER_ADMIN's are everything,
   /// assignment or not.
@@ -1439,6 +1440,7 @@ model ProviderProfile {
   campaignRedemptions             CampaignRedemption[]
   campaignEvaluationLogs          CampaignEvaluationLog[]
   promoCreditLots                 PromoCreditLot[]
+  manualCreditOperations          ManualCreditOperation[]
   campaignProviderCounters        CampaignProviderCounter[]
   /// CMP-006 PR-C.
   businessRegistration            ProviderBusinessRegistration?
@@ -2379,6 +2381,8 @@ model ProviderCreditTransaction {
   promoConsumptionsAsRefund PromoCreditLotConsumption[] @relation("PromoCreditLotConsumptionRefund")
   promoForfeitOf            PromoCreditLotConsumption?  @relation("PromoCreditLotConsumptionForfeit")
   creditHoldSettledBy       PackagePurchaseCreditHold?
+  /// CAMPAIGN-CREDIT-POLICY-001: the idempotency record of a manual grant/deduct.
+  manualOperation           ManualCreditOperation?
 
   // A PostgreSQL partial unique index —
   // "ProviderCreditTransaction_one_refund_per_offer", UNIQUE ("referenceId")
@@ -2463,6 +2467,39 @@ model ServiceRequestCancellation {
 
   request ServiceRequest @relation(fields: [requestId], references: [id])
   actor   User           @relation("ServiceRequestCancelledBy", fields: [actorUserId], references: [id])
+}
+
+/// CAMPAIGN-CREDIT-POLICY-001. The durable idempotency record of one manual
+/// credit movement (ADMIN_GRANT / ADMIN_DEDUCT).
+///
+/// The admin panel's confirmation proof is process-local and is spent by the
+/// first submission; it says nothing about whether the API committed. A
+/// request whose answer was lost can therefore be sent again — with a fresh
+/// proof — and, without this row, would move the credit a second time. The
+/// client draws one `idempotencyKey` per business operation and repeats it on
+/// every retry of that operation. The row is written in the same Serializable
+/// transaction as its ledger row; a second request with the same key and the
+/// same (provider, type, amount, reason, actor) answers the first one's row and
+/// writes nothing, and a different payload under the same key is refused.
+model ManualCreditOperation {
+  id               String                @id @default(cuid())
+  idempotencyKey   String                @unique
+  providerId       String
+  /// ADMIN_GRANT or ADMIN_DEDUCT (CHECK).
+  type             CreditTransactionType
+  /// The positive amount the operator asked for.
+  requestedCredits Int
+  reason           String
+  actorId          String
+  transactionId    String                @unique
+  createdAt        DateTime              @default(now())
+
+  provider    ProviderProfile           @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  actor       User                      @relation("ManualCreditOperationActor", fields: [actorId], references: [id], onDelete: Restrict)
+  transaction ProviderCreditTransaction @relation(fields: [transactionId], references: [id], onDelete: Restrict)
+
+  @@index([providerId, createdAt])
+  @@index([actorId])
 }
 
 model ManualOfferRefundAudit {
@@ -4304,6 +4341,29 @@ enum CampaignStackPolicy {
   EXCLUSIVE_CREDIT_BONUS
 }
 
+/// CAMPAIGN-CREDIT-POLICY-001. Where a credit-producing version's promo credit
+/// sits in the canonical wallet debit waterfall, relative to the one paid pool:
+/// PROMO_FIRST lots pay before paid credit, PAID_FIRST lots only after it.
+enum CampaignCreditSpendPriority {
+  PROMO_FIRST
+  PAID_FIRST
+}
+
+/// CAMPAIGN-CREDIT-POLICY-001. Whether an ADMIN_DEDUCT may take this version's
+/// promo credit (ALLOW_PROMO, in waterfall order) or only paid credit (PAID_ONLY).
+/// Independent of the spend priority.
+enum CampaignAdminDeductPolicy {
+  PAID_ONLY
+  ALLOW_PROMO
+}
+
+/// CAMPAIGN-CREDIT-POLICY-001. Which ledger debit a promo-lot share was taken for.
+/// An ADMIN_DEDUCT share is final: it is never REFUNDED or FORFEITED (CHECK).
+enum PromoConsumptionSource {
+  OFFER_SPEND
+  ADMIN_DEDUCT
+}
+
 /// CMP-006 PR-D. Which source channel a campaign version grants for. ALL is
 /// "no channel condition" and matches WEB, MOBILE and UNKNOWN events alike —
 /// which is what every version written before this column did. WEB and
@@ -4406,7 +4466,7 @@ model Campaign {
 /// written by this code and would be visible if it were written by anything
 /// else.
 model CampaignVersion {
-  id                        String                    @id @default(cuid())
+  id                        String                       @id @default(cuid())
   campaignId                String
   versionNumber             Int
   trigger                   CampaignTrigger
@@ -4436,9 +4496,17 @@ model CampaignVersion {
   /// the column is ALL — honestly: no campaign ever discriminated by channel.
   /// Part of the immutable snapshot: a different channel is a new version,
   /// and the trigger `CampaignVersion_channel_immutable` refuses an UPDATE.
-  channel                   CampaignChannel           @default(ALL)
+  channel                   CampaignChannel              @default(ALL)
+  /// CAMPAIGN-CREDIT-POLICY-001. `definition.benefit.creditPolicy`, denormalised.
+  /// Set exactly when the benefit produces credit (CHECK
+  /// `CampaignVersion_credit_policy_matches_benefit`), equal to the JSON (CHECK
+  /// `CampaignVersion_credit_policy_matches_definition`) and never changed after
+  /// insert (trigger `CampaignVersion_credit_policy_immutable`). No default: a
+  /// writer that forgets them is refused, not silently given a policy.
+  spendPriority             CampaignCreditSpendPriority?
+  adminDeductPolicy         CampaignAdminDeductPolicy?
   createdById               String
-  createdAt                 DateTime                  @default(now())
+  createdAt                 DateTime                     @default(now())
 
   campaign       Campaign                @relation("CampaignVersions", fields: [campaignId], references: [id], onDelete: Restrict)
   createdBy      User                    @relation("CampaignVersionCreatedBy", fields: [createdById], references: [id])
@@ -4728,17 +4796,24 @@ model CampaignEvaluationLog {
 /// row. The wallet invariant every writer keeps:
 /// `balance = paid + Σ remainingCredits (status ∈ {ACTIVE, EXHAUSTED})`.
 model PromoCreditLot {
-  id                  String               @id @default(cuid())
+  id                  String                      @id @default(cuid())
   providerId          String
-  redemptionId        String               @unique
+  redemptionId        String                      @unique
   grantedCredits      Int
   remainingCredits    Int
   expiresAt           DateTime
-  status              PromoCreditLotStatus @default(ACTIVE)
-  expiryTransactionId String?              @unique
-  revokeTransactionId String?              @unique
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  status              PromoCreditLotStatus        @default(ACTIVE)
+  expiryTransactionId String?                     @unique
+  revokeTransactionId String?                     @unique
+  /// CAMPAIGN-CREDIT-POLICY-001. The credit policy of the version this lot was
+  /// granted under, snapshotted at grant: equal to that version's columns
+  /// (trigger `PromoCreditLot_credit_policy_matches_version`) and never changed
+  /// afterwards (trigger `PromoCreditLot_credit_policy_immutable`). A later
+  /// version of the same campaign cannot change what this lot means.
+  spendPriority       CampaignCreditSpendPriority
+  adminDeductPolicy   CampaignAdminDeductPolicy
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
 
   provider          ProviderProfile             @relation(fields: [providerId], references: [id], onDelete: Restrict)
   redemption        CampaignRedemption          @relation(fields: [redemptionId], references: [id], onDelete: Restrict)
@@ -4771,6 +4846,11 @@ model PromoCreditLotConsumption {
   refundedCredits      Int                             @default(0)
   forfeitedCredits     Int                             @default(0)
   status               PromoCreditLotConsumptionStatus @default(CONSUMED)
+  /// CAMPAIGN-CREDIT-POLICY-001. The debit this share was taken for; equal to
+  /// the type of `creditTransaction` (trigger), never changed (trigger), and an
+  /// ADMIN_DEDUCT share stays CONSUMED for ever (CHECK). No default: every
+  /// writer names it.
+  source               PromoConsumptionSource
   /// The OFFER_REFUND row that settled this share. Not unique: one refund
   /// settles every share of its spend.
   refundTransactionId  String?

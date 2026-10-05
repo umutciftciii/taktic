@@ -23,18 +23,29 @@ export async function setEngine(enabled: boolean) {
 }
 
 export const DEFINITION = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PROVIDER_APPROVED',
   conditions: { all: [] },
-  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 5, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: 1 },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
   priority: 100,
 };
 
-/** An ACTIVE campaign whose running version tolerates one revoke a day. */
-export async function seedActiveCampaign(adminUserId: string, key: string) {
+export type SeedCreditPolicy = {
+  spendPriority: 'PROMO_FIRST' | 'PAID_FIRST';
+  adminDeductPolicy: 'PAID_ONLY' | 'ALLOW_PROMO';
+};
+
+/**
+ * An ACTIVE campaign whose running version tolerates one revoke a day.
+ * CAMPAIGN-CREDIT-POLICY-001: the demo policy (PROMO_FIRST + PAID_ONLY) unless
+ * another is given — in the JSON and the columns alike, as the API writes it.
+ */
+export async function seedActiveCampaign(adminUserId: string, key: string, policy?: SeedCreditPolicy) {
+  const creditPolicy: SeedCreditPolicy = policy ?? { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' };
+  const definition = { ...DEFINITION, benefit: { ...DEFINITION.benefit, creditPolicy } };
   const campaign = await prisma().campaign.create({ data: { key, name: `E2E operasyon ${key}`, status: 'DRAFT', createdById: adminUserId } });
   const version = await prisma().campaignVersion.create({
     data: {
@@ -43,8 +54,10 @@ export async function seedActiveCampaign(adminUserId: string, key: string) {
       trigger: 'PROVIDER_APPROVED',
       eligibilityFacts: [],
       factSetKey: null,
-      definition: DEFINITION,
+      definition,
       benefitType: 'PROMO_CREDITS',
+      spendPriority: creditPolicy.spendPriority,
+      adminDeductPolicy: creditPolicy.adminDeductPolicy,
       benefitCredits: 10,
       benefitExpiresInDays: 30,
       maxRedemptionsPerProvider: 5,
@@ -82,6 +95,10 @@ export async function seedGrantedLot(
   // One event per seeded lot: the key is unique, and a provider may be
   // seeded with several lots (the provider promo spec does).
   lotSequence += 1;
+  const version = await prisma().campaignVersion.findUniqueOrThrow({
+    where: { id: campaign.version.id },
+    select: { spendPriority: true, adminDeductPolicy: true },
+  });
   const event = await prisma().campaignTriggerEvent.create({
     data: { triggerEventKey: `PROVIDER_APPROVED:${providerId}:${lotSequence}`, trigger: 'PROVIDER_APPROVED', providerId },
   });
@@ -116,6 +133,9 @@ export async function seedGrantedLot(
       grantedCredits: credits,
       remainingCredits: credits - spent,
       expiresAt: options.expiresAt ?? new Date(Date.now() + 30 * 86_400_000),
+      // CAMPAIGN-CREDIT-POLICY-001: the lot snapshots its version's policy (a trigger checks it).
+      spendPriority: version.spendPriority!,
+      adminDeductPolicy: version.adminDeductPolicy!,
     },
   });
   await prisma().campaignRedemption.update({ where: { id: redemption.id }, data: { grantTransactionId: grant.id } });

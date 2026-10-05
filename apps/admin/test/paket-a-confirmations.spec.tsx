@@ -135,6 +135,8 @@ describe('campaign: the version key and the facts the dialog shows', () => {
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
     priority: 10,
     channel: 'ALL',
+    spendPriority: 'PROMO_FIRST',
+    adminDeductPolicy: 'PAID_ONLY',
     createdAt: '2026-10-01T09:00:00.000Z',
     createdBy: { id: 'a', name: 'A' },
   };

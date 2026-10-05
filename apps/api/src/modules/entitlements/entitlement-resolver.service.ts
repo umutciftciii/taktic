@@ -1,15 +1,15 @@
-import { ConflictException, HttpException, HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import {
-  CreditTransactionType,
   OfferEntitlementSource,
   OfferPackageType,
   Prisma,
+  PromoConsumptionSource,
   ProviderEntitlementStatus,
 } from '@prisma/client';
-import { CreditsService } from '../credits/credits.service';
 import {
-  consumePromoCreditsForSpend,
+  debitWallet,
   readUnsweptExpiredPromoCredits,
+  WalletDebitRefused,
 } from '../credits/promo-credit-ledger';
 import { istanbulDayStart } from './entitlement-period';
 
@@ -87,7 +87,9 @@ export type ResolveInput = {
  */
 @Injectable()
 export class EntitlementResolverService {
-  constructor(@Inject(CreditsService) private readonly credits: CreditsService) {}
+  // CAMPAIGN-CREDIT-POLICY-001: the one-time-credit charge goes through the
+  // shared wallet debit primitive; nothing here needs CreditsService any more.
+  constructor() {}
 
   /**
    * Chooses the right that will pay, and refuses if none can.
@@ -227,27 +229,27 @@ export class EntitlementResolverService {
       return { creditTransactionId: null };
     }
 
-    const transaction = await this.credits.createProviderCreditTransactionInTransaction(tx, {
-      providerId: context.providerId,
-      type: CreditTransactionType.OFFER_SPEND,
-      amount: -decision.creditCost,
-      reason: context.reason,
-      referenceType: 'Offer',
-      referenceId: context.offerId,
-    });
-
-    // Which part of that debit a promo lot paid (CMP-002 S2B1): the
-    // earliest-expiring valid lot first, then the next, and whatever is
-    // left is the paid balance. Runs after the debit on purpose — the row
-    // above is the charge exactly as it has always been, and a debit that
-    // throws never reaches here, so no lot share can exist without it. With
-    // no lot to draw from this is one empty read and nothing else.
-    await consumePromoCreditsForSpend(tx, {
-      providerId: context.providerId,
-      spendTransactionId: transaction.id,
-      creditCost: decision.creditCost,
-      now: context.now,
-    });
+    // One ledger row for the whole cost, and the promo shares that paid it,
+    // through the canonical waterfall (CAMPAIGN-CREDIT-POLICY-001):
+    // PROMO_FIRST lots, then paid credit, then PAID_FIRST lots — per lot,
+    // by the policy of the version each lot was granted under. `resolve`
+    // already judged affordability in this transaction; a refusal here can
+    // only mean the wallet moved, and it answers the same 402.
+    let transaction;
+    try {
+      ({ transaction } = await debitWallet(tx, {
+        providerId: context.providerId,
+        amount: decision.creditCost,
+        purpose: PromoConsumptionSource.OFFER_SPEND,
+        now: context.now,
+        ledger: { reason: context.reason, referenceType: 'Offer', referenceId: context.offerId, createdById: null },
+      }));
+    } catch (error) {
+      if (error instanceof WalletDebitRefused) {
+        throw new HttpException(INSUFFICIENT_CREDIT_MESSAGE, HttpStatus.PAYMENT_REQUIRED);
+      }
+      throw error;
+    }
 
     return { creditTransactionId: transaction.id };
   }

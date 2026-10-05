@@ -10,7 +10,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import request from 'supertest';
 import {
-  consumePromoCreditsForSpend,
+  debitWallet,
   grantPromoCreditLot,
 } from '../src/modules/credits/promo-credit-ledger';
 import {
@@ -191,14 +191,12 @@ export async function consumeLinkedPromo(prisma: PrismaClient, providerId: strin
   // alone check for it among the blocking codes.
   await prisma.$transaction(
     async (tx) => {
-      const spend = await tx.providerCreditTransaction.create({
-        data: { providerId, type: CreditTransactionType.OFFER_SPEND, amount: -1, balanceAfter: 4 },
-      });
-      await consumePromoCreditsForSpend(tx, {
+      await debitWallet(tx, {
         providerId,
-        spendTransactionId: spend.id,
-        creditCost: 1,
+        amount: 1,
+        purpose: 'OFFER_SPEND',
         now: new Date(),
+        ledger: { reason: null, referenceType: null, referenceId: null, createdById: null },
       });
     },
     { isolationLevel: 'Serializable' },

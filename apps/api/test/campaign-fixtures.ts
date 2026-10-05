@@ -1,5 +1,7 @@
 import {
+  type CampaignAdminDeductPolicy,
   type CampaignChannel,
+  type CampaignCreditSpendPriority,
   CampaignStatus,
   type CampaignEligibilityFact,
   type CampaignTrigger,
@@ -37,6 +39,9 @@ export type CampaignFixtureOptions = {
   createdById?: string;
   /** CMP-006 PR-D: omitted = the definition has no channel and the column its default (ALL), like every pre-PR-D version. */
   channel?: CampaignChannel;
+  /** CAMPAIGN-CREDIT-POLICY-001: defaults to the demo policy, PROMO_FIRST + PAID_ONLY. */
+  spendPriority?: CampaignCreditSpendPriority;
+  adminDeductPolicy?: CampaignAdminDeductPolicy;
 };
 
 export async function createCampaignFixture(prisma: PrismaClient, options: CampaignFixtureOptions = {}) {
@@ -51,12 +56,14 @@ export async function createCampaignFixture(prisma: PrismaClient, options: Campa
   const createdById = options.createdById ?? (await createUser(prisma, { role: UserRole.SUPER_ADMIN })).id;
   const status = options.status ?? CampaignStatus.ACTIVE;
 
+  const spendPriority = options.spendPriority ?? 'PROMO_FIRST';
+  const adminDeductPolicy = options.adminDeductPolicy ?? 'PAID_ONLY';
   const definition = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger,
     ...(factSetKey ? { eligibility: { facts } } : {}),
     conditions: { all: options.conditions ?? [] },
-    benefit: { type: 'PROMO_CREDITS', credits, expiresInDays },
+    benefit: { type: 'PROMO_CREDITS', credits, expiresInDays, creditPolicy: { spendPriority, adminDeductPolicy } },
     limits: {
       maxRedemptionsPerProvider: options.maxRedemptionsPerProvider ?? 1,
       maxRedemptionsGlobal: options.maxRedemptionsGlobal ?? null,
@@ -100,6 +107,8 @@ export async function createCampaignFixture(prisma: PrismaClient, options: Campa
       stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
       priority: definition.priority,
       ...(options.channel ? { channel: options.channel } : {}),
+      spendPriority,
+      adminDeductPolicy,
       createdById,
     },
   });
@@ -148,6 +157,9 @@ export type PromoLotFixtureOptions = {
   /** Reuse a campaign (and thereby test a second redemption of the same campaign by another event). */
   campaign?: { campaign: { id: string }; version: { id: string } };
   createdById?: string;
+  /** CAMPAIGN-CREDIT-POLICY-001: the policy of the campaign created for this lot (ignored with `campaign`). */
+  spendPriority?: CampaignCreditSpendPriority;
+  adminDeductPolicy?: CampaignAdminDeductPolicy;
 };
 
 /**
@@ -161,7 +173,13 @@ export async function createPromoLotFixture(prisma: PrismaClient, providerId: st
   const credits = options.credits ?? 10;
   const expiresAt = options.expiresAt ?? new Date(Date.now() + 30 * 86_400_000);
   const { campaign, version } =
-    options.campaign ?? (await createCampaignFixture(prisma, { credits, createdById: options.createdById }));
+    options.campaign ??
+    (await createCampaignFixture(prisma, {
+      credits,
+      createdById: options.createdById,
+      spendPriority: options.spendPriority,
+      adminDeductPolicy: options.adminDeductPolicy,
+    }));
   const suffix = uniqueSuffix();
   const event = await prisma.campaignTriggerEvent.create({
     data: {

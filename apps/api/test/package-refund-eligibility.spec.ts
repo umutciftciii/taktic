@@ -7,7 +7,7 @@ import {
 } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
-  consumePromoCreditsForSpend,
+  debitWallet,
   grantPromoCreditLot,
 } from '../src/modules/credits/promo-credit-ledger';
 import {
@@ -232,21 +232,15 @@ describe('PackageRefundEligibilityService (real rows)', () => {
     await ctx.prisma.$transaction(
       async (tx) => {
         balance -= cost;
-        const spend = await tx.providerCreditTransaction.create({
-          data: {
-            providerId,
-            type: CreditTransactionType.OFFER_SPEND,
-            amount: -cost,
-            balanceAfter: Math.max(balance, 0),
-            createdAt,
-          },
-        });
-        await consumePromoCreditsForSpend(tx, {
+        const { transaction } = await debitWallet(tx, {
           providerId,
-          spendTransactionId: spend.id,
-          creditCost: cost,
+          amount: cost,
+          purpose: 'OFFER_SPEND',
           now: new Date(),
+          ledger: { reason: null, referenceType: null, referenceId: null, createdById: null },
         });
+        // Back-dated the way the facts under test need it; the debit itself is the production one.
+        await tx.providerCreditTransaction.update({ where: { id: transaction.id }, data: { createdAt } });
       },
       { isolationLevel: 'Serializable' },
     );

@@ -401,3 +401,13 @@ export function supportTicketStatusChangeLabel(toStatus: string): string {
       return `Talep durumu ${supportTicketStatusLabel(toStatus)} olarak güncellendi.`;
   }
 }
+
+/**
+ * CAMPAIGN-CREDIT-POLICY-001. How one promotion lot is spent, in the
+ * provider's words: before paid credit, or only after it is used up. Each
+ * campaign version decides; there is no single rule for "promotion credit".
+ */
+export function promoSpendPriorityLabel(spendPriority: string): string {
+  return spendPriority === 'PAID_FIRST' ? 'Ücretli krediden sonra kullanılır' : 'Önce kullanılır';
+}
+

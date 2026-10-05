@@ -515,7 +515,7 @@ describe('offer refund', () => {
     const { offerId } = await submitOffer(fixture);
     const spendId = await spendRowOf(offerId!);
     await expect(
-      ctx.prisma.promoCreditLotConsumption.create({ data: { lotId: granted.lot.id, creditTransactionId: spendId!, consumedCredits: 1 } }),
+      ctx.prisma.promoCreditLotConsumption.create({ data: { lotId: granted.lot.id, creditTransactionId: spendId!, consumedCredits: 1, source: 'OFFER_SPEND' } }),
     ).rejects.toMatchObject({ code: 'P2002' });
   });
 });

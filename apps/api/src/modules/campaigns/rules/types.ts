@@ -14,12 +14,29 @@ export type CampaignCondition = {
 
 export type CampaignAnyGroup = { any: CampaignCondition[] };
 
+/**
+ * CAMPAIGN-CREDIT-POLICY-001. How a credit benefit's promo credit is spent and
+ * whether an admin deduction may take it. Part of the immutable version.
+ */
+export type CampaignCreditPolicy = {
+  spendPriority: 'PROMO_FIRST' | 'PAID_FIRST';
+  adminDeductPolicy: 'PAID_ONLY' | 'ALLOW_PROMO';
+};
+
+export type CampaignBenefit = {
+  type: string;
+  credits: number;
+  expiresInDays: number;
+  /** Required for a credit-producing type, absent for any other (schema v2). */
+  creditPolicy?: CampaignCreditPolicy;
+};
+
 export type CampaignDefinition = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   trigger: string;
   eligibility?: { facts: string[] };
   conditions: { all: Array<CampaignCondition | CampaignAnyGroup> };
-  benefit: { type: string; credits: number; expiresInDays: number };
+  benefit: CampaignBenefit;
   limits: {
     maxRedemptionsPerProvider: number;
     maxRedemptionsGlobal: number | null;
@@ -47,6 +64,8 @@ export type CampaignDefinitionSummary = {
   benefitCredits: number;
   benefitExpiresInDays: number;
   channel: string;
+  /** CAMPAIGN-CREDIT-POLICY-001: null for a benefit that produces no credit. */
+  creditPolicy: CampaignCreditPolicy | null;
 };
 
 export function isAnyGroup(entry: CampaignCondition | CampaignAnyGroup): entry is CampaignAnyGroup {

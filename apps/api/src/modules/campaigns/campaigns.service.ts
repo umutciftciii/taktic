@@ -14,8 +14,10 @@ import {
   CampaignStatus,
   CampaignTriggerEventStatus,
   Prisma,
+  type CampaignAdminDeductPolicy,
   type CampaignBenefitType,
   type CampaignChannel,
+  type CampaignCreditSpendPriority,
   type CampaignEligibilityFact,
   type CampaignEvaluationOutcome,
   type CampaignStackPolicy,
@@ -159,6 +161,9 @@ export type CampaignVersionSummaryView = {
   priority: number;
   /** CMP-006 PR-D: WEB | MOBILE | ALL; every version written before the column is ALL. */
   channel: CampaignChannel;
+  /** CAMPAIGN-CREDIT-POLICY-001: the version's credit policy; null only for a benefit that grants no credit. */
+  spendPriority: CampaignCreditSpendPriority | null;
+  adminDeductPolicy: CampaignAdminDeductPolicy | null;
   createdAt: Date;
   createdBy: ActorView;
 };
@@ -293,6 +298,8 @@ const versionSelect = {
   stackPolicy: true,
   priority: true,
   channel: true,
+  spendPriority: true,
+  adminDeductPolicy: true,
   createdAt: true,
   createdBy: actorSelect,
 } satisfies Prisma.CampaignVersionSelect;
@@ -498,6 +505,10 @@ export class CampaignsService {
         stackPolicy: definition.stackPolicy as CampaignStackPolicy,
         priority: definition.priority,
         channel: definition.channel as CampaignChannel,
+        // CAMPAIGN-CREDIT-POLICY-001: the JSON's policy, denormalised; the
+        // database refuses the row if the two ever disagree.
+        spendPriority: (definition.benefit.creditPolicy?.spendPriority ?? null) as CampaignCreditSpendPriority | null,
+        adminDeductPolicy: (definition.benefit.creditPolicy?.adminDeductPolicy ?? null) as CampaignAdminDeductPolicy | null,
         createdById: args.actorId,
       },
       select: { id: true },
@@ -522,6 +533,7 @@ export class CampaignsService {
           benefitExpiresInDays: definition.benefit.expiresInDays,
           maxRedemptionsPerProvider: definition.limits.maxRedemptionsPerProvider,
           channel: definition.channel,
+          creditPolicy: definition.benefit.creditPolicy ?? null,
           changedFields: changedFields(args.previous, definition),
         },
       },
@@ -729,6 +741,10 @@ export class CampaignsService {
               benefitExpiresInDays: version.benefitExpiresInDays,
               maxRedemptionsPerProvider: version.maxRedemptionsPerProvider,
               channel: version.channel,
+              creditPolicy:
+                version.spendPriority && version.adminDeductPolicy
+                  ? { spendPriority: version.spendPriority, adminDeductPolicy: version.adminDeductPolicy }
+                  : null,
               ...(reason ? { reason } : {}),
             },
           },
@@ -1351,9 +1367,17 @@ function changedFields(previous: Prisma.JsonValue | null, next: CampaignDefiniti
   // the operator did not make.
   const parsed = validateCampaignDefinition(previous);
   const before = (parsed.ok ? parsed.definition : previous) as Record<string, unknown>;
-  return DEFINITION_FIELDS.filter(
+  const changed: string[] = DEFINITION_FIELDS.filter(
     (field) => stableStringify(before[field] ?? null) !== stableStringify(next[field] ?? null),
   );
+  // CAMPAIGN-CREDIT-POLICY-001: the policy lives inside `benefit`; a change to
+  // it is named on its own as well, so the audit says what kind of benefit
+  // change it was.
+  const beforePolicy = (before.benefit as { creditPolicy?: unknown } | undefined)?.creditPolicy ?? null;
+  if (stableStringify(beforePolicy) !== stableStringify(next.benefit.creditPolicy ?? null)) {
+    changed.push('creditPolicy');
+  }
+  return changed;
 }
 
 /** JSON with object keys sorted, so a jsonb round trip (which reorders keys) compares equal. */

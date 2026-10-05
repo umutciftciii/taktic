@@ -5,16 +5,21 @@ import { useActionState, useId, useMemo, useState, type ReactNode } from 'react'
 import { useFormStatus } from 'react-dom';
 import type { CampaignRuleError } from '../../lib/api';
 import {
+  ADMIN_DEDUCT_POLICY_OPTIONS,
   ARGUMENT_LABELS,
   CAMPAIGN_CHANNEL_OPTIONS,
   CAMPAIGN_RULES_CATALOG,
   CAMPAIGN_TRIGGER_OPTIONS,
   ENUM_VALUE_LABELS,
   FACT_LABELS,
+  CREDIT_POLICY_GROUP_LABEL,
+  CREDIT_POLICY_NOTE,
   MOBILE_CHANNEL_WARNING,
+  SPEND_PRIORITY_OPTIONS,
   STACK_POLICY_LABEL,
   TRIGGER_LABELS,
   argumentSpecsOf,
+  benefitProducesCredit,
   buildDefinition,
   channelLabel,
   conditionOptionsFor,
@@ -331,6 +336,69 @@ export function CampaignDefinitionForm({
             />
           </div>
         </fieldset>
+
+        {benefitProducesCredit(definition.benefit.type) ? (
+          <fieldset
+            className="campaign-fieldset"
+            data-testid="campaign-credit-policy"
+            data-spend-priority={form.spendPriority}
+            data-admin-deduct-policy={form.adminDeductPolicy}
+          >
+            <legend>{CREDIT_POLICY_GROUP_LABEL}</legend>
+            <p className="help-text" data-testid="campaign-credit-policy-note">
+              {CREDIT_POLICY_NOTE}
+            </p>
+            <FieldErrors errors={fieldError('creditPolicy')} />
+            <div className="campaign-policy-axis">
+              <p className="campaign-policy-axis-title" id={`${formId}-spend`}>
+                Harcama önceliği
+              </p>
+              <FieldErrors errors={fieldError('spendPriority')} />
+              <div className="campaign-radio-list" role="radiogroup" aria-labelledby={`${formId}-spend`}>
+                {SPEND_PRIORITY_OPTIONS.map((option) => (
+                  <label key={option.value} className={`campaign-radio${form.spendPriority === option.value ? ' is-selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="spend-priority-choice"
+                      value={option.value}
+                      checked={form.spendPriority === option.value}
+                      onChange={() => update('spendPriority', option.value)}
+                      data-testid={`campaign-spend-priority-${option.value}`}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.help}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="campaign-policy-axis">
+              <p className="campaign-policy-axis-title" id={`${formId}-deduct`}>
+                Yönetici kredi kesintisi
+              </p>
+              <FieldErrors errors={fieldError('adminDeductPolicy')} />
+              <div className="campaign-radio-list" role="radiogroup" aria-labelledby={`${formId}-deduct`}>
+                {ADMIN_DEDUCT_POLICY_OPTIONS.map((option) => (
+                  <label key={option.value} className={`campaign-radio${form.adminDeductPolicy === option.value ? ' is-selected' : ''}`}>
+                    <input
+                      type="radio"
+                      name="admin-deduct-policy-choice"
+                      value={option.value}
+                      checked={form.adminDeductPolicy === option.value}
+                      onChange={() => update('adminDeductPolicy', option.value)}
+                      data-testid={`campaign-admin-deduct-policy-${option.value}`}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{option.help}</small>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </fieldset>
+        ) : null}
       </FormGroup>
 
       <FormGroup id={`${formId}-stops`} step="3 · Ne zaman duruyor" title="Limitler, bütçe ve zaman penceresi">

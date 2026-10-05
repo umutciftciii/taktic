@@ -525,10 +525,10 @@ describe('the channel never makes a second event or a second grant', () => {
 
 describe('activation gate', () => {
   const K2 = (channel?: string) => ({
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
     conditions: { all: [{ type: 'FIRST_SUCCESSFUL_PAID_PURCHASE' }] },
-    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
     limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
     window: { startAt: null, endAt: null },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',

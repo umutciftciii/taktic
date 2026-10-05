@@ -86,6 +86,8 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
       tone: credits.balance > 0 ? 'neutral' : 'warning',
       testId: 'credits-fact-balance',
     },
+    // CAMPAIGN-CREDIT-POLICY-001: how much of the balance a manual deduction may take.
+    ...walletFacts(credits),
     { label: 'İşlem sayısı', value: String(transactions.length), note: listedHint },
     { label: 'Elle ekleme', value: String(totalGrant), note: listedHint },
     { label: 'Elle düşme', value: String(totalDeduct), note: listedHint },
@@ -264,6 +266,7 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
                 providerId={id}
                 businessName={provider.businessName}
                 currentBalance={credits.balance}
+                deductibleBalance={credits.walletBreakdown?.deductibleCredits ?? null}
                 canGrant={canGrant}
                 canDeduct={canDeduct}
               />
@@ -295,3 +298,35 @@ export default async function AdminProviderCreditsPage({ params }: AdminProvider
     </main>
   );
 }
+
+/**
+ * The balance split for the header (CAMPAIGN-CREDIT-POLICY-001): paid credit,
+ * campaign credit an admin deduction may take, campaign credit it may not, and
+ * the deductible total — aggregates only, no lot or campaign named.
+ */
+function walletFacts(credits: AdminProviderCredits): SummaryItem[] {
+  const wallet = credits.walletBreakdown;
+  if (!wallet) {
+    return [
+      {
+        label: 'Kesilebilir toplam',
+        value: '—',
+        tone: 'warning',
+        note: 'bakiye tutarsız; kesinti yapılamaz',
+        testId: 'credits-fact-deductible',
+      },
+    ];
+  }
+  return [
+    { label: 'Ücretli', value: String(wallet.paidCredits), testId: 'credits-fact-paid' },
+    { label: 'Kampanya — kesilebilir', value: String(wallet.promoDeductibleCredits), testId: 'credits-fact-promo-deductible' },
+    {
+      label: 'Kampanya — kesintiye kapalı',
+      value: String(wallet.promoProtectedCredits),
+      note: wallet.promoUnsweptExpiredCredits > 0 ? `+${wallet.promoUnsweptExpiredCredits} süresi dolmuş` : undefined,
+      testId: 'credits-fact-promo-protected',
+    },
+    { label: 'Kesilebilir toplam', value: String(wallet.deductibleCredits), testId: 'credits-fact-deductible' },
+  ];
+}
+

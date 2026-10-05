@@ -6,6 +6,7 @@ import {
 import {
   collectPackageSlugs,
   validateCampaignDefinition,
+  validateCreditPolicy,
 } from '../src/modules/campaigns/rules/validator';
 
 /**
@@ -18,7 +19,7 @@ import {
  */
 
 const K2_PACKAGE_BONUS = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
   conditions: {
     all: [
@@ -28,7 +29,7 @@ const K2_PACKAGE_BONUS = {
       { type: 'NO_PRIOR_REVOCATION' },
     ],
   },
-  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: {
     maxRedemptionsPerProvider: 1,
     maxRedemptionsGlobal: 1000,
@@ -42,11 +43,11 @@ const K2_PACKAGE_BONUS = {
 };
 
 const K1_ELIGIBILITY = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PROVIDER_ELIGIBILITY_REACHED',
   eligibility: { facts: ['PHONE_VERIFIED', 'PROVIDER_APPROVED', 'EMAIL_VERIFIED'] },
   conditions: { all: [{ type: 'NO_PRIOR_REVOCATION' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14 },
+  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: {
     maxRedemptionsPerProvider: 1,
     maxRedemptionsGlobal: null,
@@ -59,10 +60,10 @@ const K1_ELIGIBILITY = {
 };
 
 const FIRST_APPROVAL = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PROVIDER_APPROVED',
   conditions: { all: [{ type: 'FIRST_PROVIDER_APPROVAL' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 3, expiresInDays: 7 },
+  benefit: { type: 'PROMO_CREDITS', credits: 3, expiresInDays: 7, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1 },
   window: {},
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -114,6 +115,7 @@ describe('accepted definitions', () => {
       benefitCredits: 10,
       benefitExpiresInDays: 30,
       channel: 'ALL',
+      creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' },
     });
   });
 
@@ -187,8 +189,9 @@ describe('shape and version', () => {
   });
 
   it('rejects a missing or foreign schema version', () => {
-    expectCode({ ...K2_PACKAGE_BONUS, schemaVersion: 2 }, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
-    expectCode({ ...K2_PACKAGE_BONUS, schemaVersion: '1' }, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
+    // CAMPAIGN-CREDIT-POLICY-001: v1 is no longer accepted; every stored version was migrated to v2.
+    expectCode({ ...K2_PACKAGE_BONUS, schemaVersion: 1 }, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
+    expectCode({ ...K2_PACKAGE_BONUS, schemaVersion: '2' }, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
     const { schemaVersion: _omit, ...withoutVersion } = K2_PACKAGE_BONUS;
     expectCode(withoutVersion, 'UNSUPPORTED_SCHEMA_VERSION', 'schemaVersion');
   });
@@ -476,12 +479,12 @@ describe('benefit', () => {
   it('accepts only bounded positive promo credits', () => {
     expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'CHECKOUT_DISCOUNT', percent: 10 } }, 'BENEFIT_INVALID', 'benefit.type');
     expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'SHOWCASE_SLOT', days: 7 } }, 'BENEFIT_INVALID', 'benefit.type');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 0, expiresInDays: 30 } }, 'BENEFIT_INVALID', 'benefit.credits');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: -5, expiresInDays: 30 } }, 'BENEFIT_INVALID', 'benefit.credits');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 1001, expiresInDays: 30 } }, 'BENEFIT_INVALID', 'benefit.credits');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 2.5, expiresInDays: 30 } }, 'BENEFIT_INVALID', 'benefit.credits');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 0 } }, 'BENEFIT_INVALID', 'benefit.expiresInDays');
-    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 366 } }, 'BENEFIT_INVALID', 'benefit.expiresInDays');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 0, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.credits');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: -5, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.credits');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 1001, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.credits');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 2.5, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.credits');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 0, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.expiresInDays');
+    expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 366, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } }, 'BENEFIT_INVALID', 'benefit.expiresInDays');
     expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10 } }, 'BENEFIT_INVALID', 'benefit.expiresInDays');
     expectCode({ ...K2_PACKAGE_BONUS, benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, amountMinor: 500 } }, 'UNKNOWN_FIELD', 'benefit.amountMinor');
     expectCode({ ...K2_PACKAGE_BONUS, benefit: null }, 'BENEFIT_INVALID', 'benefit');
@@ -582,6 +585,7 @@ describe('the error catalogue', () => {
       { ...K2_PACKAGE_BONUS, stackPolicy: 'X' },
       { ...K2_PACKAGE_BONUS, priority: 0 },
       { ...K2_PACKAGE_BONUS, channel: 'web' },
+      { ...K2_PACKAGE_BONUS, benefit: { ...K2_PACKAGE_BONUS.benefit, creditPolicy: undefined } },
     ];
     for (const input of cases) {
       const result = validateCampaignDefinition(input);
@@ -594,10 +598,14 @@ describe('the error catalogue', () => {
       { knownPackageSlugs: new Set() },
     );
     if (!slugCase.ok) for (const error of slugCase.errors) produced.add(error.code);
+    // A non-credit benefit type does not exist in the catalogue yet; its branch is reached directly.
+    validateCreditPolicy({ spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' }, false, {
+      add: (_path, code) => produced.add(code),
+    });
 
     const missing = CAMPAIGN_RULE_ERROR_CODES.filter((code) => !produced.has(code));
     expect(missing).toEqual([]);
-    expect(CAMPAIGN_RULE_ERROR_CODES).toHaveLength(25);
+    expect(CAMPAIGN_RULE_ERROR_CODES).toHaveLength(27);
   });
 });
 
@@ -626,3 +634,49 @@ describe('channel (CMP-006 PR-D)', () => {
     },
   );
 });
+
+describe('credit policy (schema v2, CAMPAIGN-CREDIT-POLICY-001)', () => {
+  const withPolicy = (creditPolicy: unknown) => ({ ...K2_PACKAGE_BONUS, benefit: { ...K2_PACKAGE_BONUS.benefit, creditPolicy } });
+
+  it('accepts each of the four combinations and carries it into the definition and the summary', () => {
+    for (const spendPriority of ['PROMO_FIRST', 'PAID_FIRST']) {
+      for (const adminDeductPolicy of ['PAID_ONLY', 'ALLOW_PROMO']) {
+        const result = validateCampaignDefinition(withPolicy({ spendPriority, adminDeductPolicy }));
+        expect(result.ok).toBe(true);
+        if (!result.ok) continue;
+        expect(result.definition.schemaVersion).toBe(2);
+        expect(result.definition.benefit.creditPolicy).toEqual({ spendPriority, adminDeductPolicy });
+        expect(result.summary.creditPolicy).toEqual({ spendPriority, adminDeductPolicy });
+      }
+    }
+  });
+
+  it('requires the policy on a credit benefit: there is no implicit default', () => {
+    const { creditPolicy: _omit, ...benefit } = K2_PACKAGE_BONUS.benefit;
+    expectCode({ ...K2_PACKAGE_BONUS, benefit }, 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy');
+    expectCode(withPolicy(null), 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy');
+    expectCode(withPolicy('PROMO_FIRST'), 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy');
+  });
+
+  it('refuses unknown values, a missing axis and unknown fields — nothing is coerced', () => {
+    expectCode(withPolicy({ spendPriority: 'promo_first', adminDeductPolicy: 'PAID_ONLY' }), 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy.spendPriority');
+    expectCode(withPolicy({ spendPriority: 'PROMO_FIRST', adminDeductPolicy: true }), 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy.adminDeductPolicy');
+    expectCode(withPolicy({ spendPriority: 'PROMO_FIRST' }), 'CREDIT_POLICY_INVALID', 'benefit.creditPolicy.adminDeductPolicy');
+    expectCode(
+      withPolicy({ spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY', allowNegative: true }),
+      'UNKNOWN_FIELD',
+      'benefit.creditPolicy.allowNegative',
+    );
+  });
+
+  it('forbids a policy on a benefit that grants no credit, and asks for none', () => {
+    const errors: Array<{ path: string; code: string }> = [];
+    const sink = { add: (path: string, code: string) => errors.push({ path, code }) };
+    expect(validateCreditPolicy({ spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' }, false, sink)).toBeUndefined();
+    expect(errors).toEqual([{ path: 'benefit.creditPolicy', code: 'CREDIT_POLICY_NOT_APPLICABLE' }]);
+    errors.length = 0;
+    expect(validateCreditPolicy(undefined, false, sink)).toBeUndefined();
+    expect(errors).toEqual([]);
+  });
+});
+
