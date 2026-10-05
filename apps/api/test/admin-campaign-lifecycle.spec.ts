@@ -40,10 +40,10 @@ afterEach(() => {
 });
 
 const K2 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
   conditions: { all: [{ type: 'FIRST_SUCCESSFUL_PAID_PURCHASE' }, { type: 'NO_PRIOR_REVOCATION' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -51,11 +51,11 @@ const K2 = {
 };
 
 const K1 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PROVIDER_ELIGIBILITY_REACHED',
   eligibility: { facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED', 'PHONE_VERIFIED'] },
   conditions: { all: [{ type: 'NO_PRIOR_REVOCATION' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14 },
+  benefit: { type: 'PROMO_CREDITS', credits: 5, expiresInDays: 14, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -165,7 +165,14 @@ describe('with the engine switch on', () => {
     ]);
     const versionActivated = await ctx.prisma.campaignAuditLog.findFirstOrThrow({ where: { campaignId: campaign.id, action: CampaignAuditAction.VERSION_ACTIVATED } });
     expect(versionActivated).toMatchObject({ campaignVersionId: currentVersion.id, actorId: admin.id });
-    expect(versionActivated.summary).toMatchObject({ versionNumber: 1, previousActiveVersionNumber: null, trigger: 'PACKAGE_PAYMENT_SUCCEEDED', benefitCredits: 10 });
+    expect(versionActivated.summary).toMatchObject({
+      versionNumber: 1,
+      previousActiveVersionNumber: null,
+      trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
+      benefitCredits: 10,
+      // CAMPAIGN-CREDIT-POLICY-001: the policy the version brings into force.
+      creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' },
+    });
     // The version row is bit-for-bit what was stored.
     const stored = await ctx.prisma.campaignVersion.findUniqueOrThrow({ where: { id: currentVersion.id } });
     expect(stored.definition).toEqual({ ...K2, channel: 'ALL' });
@@ -241,7 +248,7 @@ describe('with the engine switch on', () => {
     const revised = await request(ctx.server)
       .post(`/admin/campaigns/${campaign.id}/versions`)
       .set('Cookie', cookie)
-      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 20, expiresInDays: 30 } } })
+      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 20, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } } })
       .expect(201);
     expect(revised.body.campaign.status).toBe('ACTIVE');
     expect(revised.body.activeVersion.versionNumber).toBe(1);
@@ -300,7 +307,7 @@ describe('with the engine switch on', () => {
     const revised = await request(ctx.server)
       .post(`/admin/campaigns/${campaign.id}/versions`)
       .set('Cookie', cookie)
-      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 9, expiresInDays: 30 } } })
+      .send({ definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 9, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } } })
       .expect(201);
     const v2 = revised.body.currentVersion.versionNumber as number;
     // Someone paused it after the operator read "ACTIVE" and confirmed a switch.

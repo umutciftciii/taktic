@@ -242,6 +242,8 @@ describe('PromoCreditLot', () => {
         grantedCredits: 10,
         remainingCredits: 10,
         expiresAt: new Date(Date.now() + 86_400_000),
+        spendPriority: 'PROMO_FIRST',
+        adminDeductPolicy: 'PAID_ONLY',
         ...overrides,
       },
     });
@@ -251,7 +253,15 @@ describe('PromoCreditLot', () => {
     const lot = await lotFixture();
     await expect(
       ctx.prisma.promoCreditLot.create({
-        data: { providerId: lot.providerId, redemptionId: lot.redemptionId, grantedCredits: 5, remainingCredits: 5, expiresAt: lot.expiresAt },
+        data: {
+          providerId: lot.providerId,
+          redemptionId: lot.redemptionId,
+          grantedCredits: 5,
+          remainingCredits: 5,
+          expiresAt: lot.expiresAt,
+          spendPriority: 'PROMO_FIRST',
+          adminDeductPolicy: 'PAID_ONLY',
+        },
       }),
     ).rejects.toSatisfy(isUniqueViolation);
   });

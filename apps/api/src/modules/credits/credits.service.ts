@@ -3,6 +3,8 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  InternalServerErrorException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -11,6 +13,7 @@ import {
   OfferPackageType,
   CatalogAuditEntity,
   Prisma,
+  PromoConsumptionSource,
   ServiceCategoryStatus,
 } from '@prisma/client';
 import { CREDIT_LEDGER_INTEGER_MAX, creditBalanceLimitExceeded, fitsCreditLedger } from '../../common/credit-limits';
@@ -26,7 +29,13 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { assertDeltaPermissions } from '../auth/delta-permissions';
 import { staffActorSelect } from '../auth/embedded-permissions';
-import { readSpendablePromoLots } from './promo-credit-ledger';
+import {
+  debitWallet,
+  readSpendablePromoLots,
+  readWalletBreakdown,
+  WalletDebitRefused,
+  WalletInvariantViolation,
+} from './promo-credit-ledger';
 import { PACKAGE_PERIOD_DAYS } from '../entitlements/entitlement-period';
 import { CreateCreditPackageDto } from './dto/create-credit-package.dto';
 import { ManualCreditTransactionDto } from './dto/manual-credit-transaction.dto';
@@ -46,6 +55,8 @@ type CreditTransactionTx = Prisma.TransactionClient;
 
 @Injectable()
 export class CreditsService {
+  private readonly logger = new Logger(CreditsService.name);
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   /**
@@ -424,8 +435,47 @@ export class CreditsService {
     if (!provider) {
       throw new NotFoundException('Provider not found');
     }
-    const credits = await this.getProviderCredits(providerId, { actorViewer: viewer });
-    return { ...credits, provider };
+    const [credits, wallet] = await Promise.all([
+      this.getProviderCredits(providerId, { actorViewer: viewer }),
+      this.readAdminWalletBreakdown(providerId),
+    ]);
+    return { ...credits, provider, ...wallet };
+  }
+
+  /**
+   * The wallet split an operator needs before a manual deduction
+   * (CAMPAIGN-CREDIT-POLICY-001): aggregates only — no lot, no campaign name,
+   * nothing from the campaign domain beyond how much of the balance the
+   * deduction may take. One RepeatableRead snapshot, so the balance and the
+   * lots agree. A wallet whose promo exceeds its balance is reported as such
+   * rather than turned into a 500 for the whole screen; any deduction on it
+   * is refused by the debit itself.
+   */
+  private async readAdminWalletBreakdown(providerId: string): Promise<{
+    walletBreakdown: AdminWalletBreakdown | null;
+    walletBreakdownError: 'WALLET_INVARIANT_VIOLATION' | null;
+  }> {
+    try {
+      const breakdown = await this.prisma.$transaction((tx) => readWalletBreakdown(tx, providerId, new Date()), {
+        isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+      });
+      return {
+        walletBreakdown: {
+          paidCredits: breakdown.paidCredits,
+          promoDeductibleCredits: breakdown.promoDeductibleCredits,
+          promoProtectedCredits: breakdown.promoProtectedCredits,
+          promoUnsweptExpiredCredits: breakdown.promoUnsweptExpiredCredits,
+          deductibleCredits: breakdown.deductibleCredits,
+        },
+        walletBreakdownError: null,
+      };
+    } catch (error) {
+      if (error instanceof WalletInvariantViolation) {
+        this.logger.error(error.message);
+        return { walletBreakdown: null, walletBreakdownError: 'WALLET_INVARIANT_VIOLATION' };
+      }
+      throw error;
+    }
   }
 
   /**
@@ -465,29 +515,82 @@ export class CreditsService {
   }
 
   grantCredits(providerId: string, dto: ManualCreditTransactionDto, createdById: string) {
-    const amount = normalizePositiveAmount(dto.amount);
-    const reason = normalizeRequiredReason(dto.reason);
-
-    return this.createProviderCreditTransaction({
-      providerId,
-      type: CreditTransactionType.ADMIN_GRANT,
-      amount,
-      reason,
-      createdById,
-    });
+    return this.manualCreditOperation(providerId, CreditTransactionType.ADMIN_GRANT, dto, createdById);
   }
 
+  /**
+   * ADMIN_DEDUCT (CAMPAIGN-CREDIT-POLICY-001): through the canonical wallet
+   * debit with purpose ADMIN_DEDUCT — paid credit, plus the promo lots whose
+   * version allows it (ALLOW_PROMO) in waterfall order. A PAID_ONLY lot is
+   * never touched. All or nothing; one ledger row; promo shares recorded as
+   * `source = ADMIN_DEDUCT`.
+   */
   deductCredits(providerId: string, dto: ManualCreditTransactionDto, createdById: string) {
+    return this.manualCreditOperation(providerId, CreditTransactionType.ADMIN_DEDUCT, dto, createdById);
+  }
+
+  /**
+   * One manual movement, exactly once per idempotency key
+   * (CAMPAIGN-CREDIT-POLICY-001).
+   *
+   * The admin panel's confirmation proof is spent by the first submission and
+   * lives in one process's memory; it cannot tell a retry of a committed
+   * operation from a new one. The key can: the client draws it once per
+   * business operation and repeats it on every retry. Inside one Serializable
+   * transaction the key is looked up first — the same key with the same
+   * payload answers the original ledger row and writes nothing; with another
+   * payload it is a 409 — and otherwise the movement and its
+   * `ManualCreditOperation` row commit together. Two concurrent first
+   * attempts meet at the unique key: the loser re-reads and answers the
+   * winner's row.
+   */
+  private async manualCreditOperation(
+    providerId: string,
+    type: typeof CreditTransactionType.ADMIN_GRANT | typeof CreditTransactionType.ADMIN_DEDUCT,
+    dto: ManualCreditTransactionDto,
+    actorId: string,
+  ) {
     const amount = normalizePositiveAmount(dto.amount);
     const reason = normalizeRequiredReason(dto.reason);
+    const idempotencyKey = normalizeIdempotencyKey(dto.idempotencyKey);
+    const operation = { idempotencyKey, providerId, type, requestedCredits: amount, reason, actorId };
 
-    return this.createProviderCreditTransaction({
-      providerId,
-      type: CreditTransactionType.ADMIN_DEDUCT,
-      amount: -amount,
-      reason,
-      createdById,
-    });
+    try {
+      return await runSerializable(
+        this.prisma,
+        async (tx) => {
+          const replay = await readManualReplay(tx, operation);
+          if (replay) {
+            return replay;
+          }
+          await this.ensureProviderExistsIn(tx, providerId);
+
+          const row =
+            type === CreditTransactionType.ADMIN_GRANT
+              ? await this.createProviderCreditTransactionInTransaction(
+                  tx,
+                  { providerId, type, amount, reason, createdById: actorId },
+                  { maxBalanceAfter: CREDIT_LEDGER_INTEGER_MAX },
+                )
+              : await deductInTransaction(tx, { providerId, amount, reason, actorId });
+
+          await tx.manualCreditOperation.create({
+            data: { ...operation, transactionId: row.id },
+            select: { id: true },
+          });
+          return row;
+        },
+        { label: type === CreditTransactionType.ADMIN_GRANT ? 'credits.manualGrant' : 'credits.manualDeduct' },
+      );
+    } catch (error) {
+      if (isIdempotencyKeyCollision(error)) {
+        const replay = await readManualReplay(this.prisma, operation);
+        if (replay) {
+          return replay;
+        }
+      }
+      throw error;
+    }
   }
 
   async getProviderCreditBalance(providerId: string) {
@@ -499,30 +602,6 @@ export class CreditsService {
     });
 
     return latestTransaction?.balanceAfter ?? 0;
-  }
-
-  /**
-   * A manual grant or deduction (the only callers).
-   *
-   * Serializable, and replayed on a write conflict: a concurrent movement on
-   * the same provider makes this attempt re-read the balance rather than fail
-   * with a database error, and the bounds below are judged against the balance
-   * the committed row will actually follow. Exhausted retries answer the
-   * shared 409 CONCURRENT_MODIFICATION.
-   *
-   * The upper bound is checked here, in the transaction that computes the
-   * final balance, so a grant that would take the balance past the ledger's
-   * integer column is a 400 with nothing written, never a database 500.
-   */
-  async createProviderCreditTransaction(input: CreditTransactionInput) {
-    return runSerializable(
-      this.prisma,
-      async (tx) =>
-        this.createProviderCreditTransactionInTransaction(tx, input, {
-          maxBalanceAfter: CREDIT_LEDGER_INTEGER_MAX,
-        }),
-      { label: 'credits.manualTransaction' },
-    );
   }
 
   /**
@@ -613,6 +692,13 @@ export class CreditsService {
         createdById: normalizeNullableString(input.createdById),
       },
     });
+  }
+
+  private async ensureProviderExistsIn(tx: CreditTransactionTx, providerId: string) {
+    const provider = await tx.providerProfile.findUnique({ where: { id: providerId }, select: { id: true } });
+    if (!provider) {
+      throw new NotFoundException('Provider not found');
+    }
   }
 
   private async ensureProviderExists(providerId: string) {
@@ -862,4 +948,145 @@ function handleCreditPackageWriteError(error: unknown): never {
 async function readCreditPackageAuditSnapshot(tx: Prisma.TransactionClient, id: string) {
   const row = await tx.offerCreditPackage.findUniqueOrThrow({ where: { id }, select: creditPackageAuditSelect });
   return creditPackageAuditSnapshot(row);
+}
+
+// ───────────────────── manual movements (CAMPAIGN-CREDIT-POLICY-001) ─────────────────────
+
+export const CREDIT_BALANCE_INSUFFICIENT = 'CREDIT_BALANCE_INSUFFICIENT';
+export const CREDIT_DEDUCT_EXCEEDS_DEDUCTIBLE = 'CREDIT_DEDUCT_EXCEEDS_DEDUCTIBLE';
+export const IDEMPOTENCY_KEY_REUSED = 'IDEMPOTENCY_KEY_REUSED';
+export const WALLET_INVARIANT_VIOLATION = 'WALLET_INVARIANT_VIOLATION';
+
+/** What the admin credit screen is told about the wallet: aggregates, nothing per lot or per campaign. */
+export type AdminWalletBreakdown = {
+  paidCredits: number;
+  promoDeductibleCredits: number;
+  promoProtectedCredits: number;
+  promoUnsweptExpiredCredits: number;
+  deductibleCredits: number;
+};
+
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
+
+function normalizeIdempotencyKey(value: unknown) {
+  if (typeof value !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(value)) {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+      message: 'idempotencyKey must be 16–128 characters of A–Z, a–z, 0–9, "-" or "_"',
+    });
+  }
+  return value;
+}
+
+type ManualOperationInput = {
+  idempotencyKey: string;
+  providerId: string;
+  type: CreditTransactionType;
+  requestedCredits: number;
+  reason: string;
+  actorId: string;
+};
+
+/**
+ * The original ledger row when this key was already used for exactly this
+ * operation; null when the key is new; a 409 when the key names another
+ * operation (another provider, direction, amount, reason or operator) — a
+ * reused key must never quietly stand for something it did not do.
+ */
+async function readManualReplay(db: CreditTransactionTx | PrismaService, operation: ManualOperationInput) {
+  const existing = await db.manualCreditOperation.findUnique({
+    where: { idempotencyKey: operation.idempotencyKey },
+    select: {
+      providerId: true,
+      type: true,
+      requestedCredits: true,
+      reason: true,
+      actorId: true,
+      transaction: true,
+    },
+  });
+  if (!existing) {
+    return null;
+  }
+  const same =
+    existing.providerId === operation.providerId &&
+    existing.type === operation.type &&
+    existing.requestedCredits === operation.requestedCredits &&
+    existing.reason === operation.reason &&
+    existing.actorId === operation.actorId;
+  if (!same) {
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'Conflict',
+      code: IDEMPOTENCY_KEY_REUSED,
+      message: 'This idempotency key was already used for a different credit operation',
+    });
+  }
+  return existing.transaction;
+}
+
+function isIdempotencyKeyCollision(error: unknown) {
+  if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') {
+    return false;
+  }
+  const target = (error.meta as { target?: unknown } | undefined)?.target;
+  const fields = Array.isArray(target) ? target.map(String) : typeof target === 'string' ? [target] : [];
+  return fields.some((field) => field.includes('idempotencyKey'));
+}
+
+/**
+ * ADMIN_DEDUCT through the shared wallet debit. The refusals an operator can
+ * act on are stable codes; the message of the whole-balance case is the one
+ * the panel has always matched.
+ */
+async function deductInTransaction(
+  tx: CreditTransactionTx,
+  input: { providerId: string; amount: number; reason: string; actorId: string },
+) {
+  try {
+    const { transaction } = await debitWallet(tx, {
+      providerId: input.providerId,
+      amount: input.amount,
+      purpose: PromoConsumptionSource.ADMIN_DEDUCT,
+      now: new Date(),
+      ledger: { reason: input.reason, referenceType: null, referenceId: null, createdById: input.actorId },
+    });
+    return transaction;
+  } catch (error) {
+    if (error instanceof WalletDebitRefused) {
+      const { breakdown } = error;
+      if (error.reason === 'INSUFFICIENT_BALANCE') {
+        throw new BadRequestException({
+          statusCode: 400,
+          error: 'Bad Request',
+          code: CREDIT_BALANCE_INSUFFICIENT,
+          message: 'Credit balance cannot go below zero',
+          requestedCredits: error.requestedCredits,
+          balance: breakdown.balance,
+        });
+      }
+      throw new BadRequestException({
+        statusCode: 400,
+        error: 'Bad Request',
+        code: CREDIT_DEDUCT_EXCEEDS_DEDUCTIBLE,
+        message: 'The deduction exceeds the credit an admin deduction may take',
+        requestedCredits: error.requestedCredits,
+        deductibleCredits: breakdown.deductibleCredits,
+        paidCredits: breakdown.paidCredits,
+        protectedPromoCredits: breakdown.promoProtectedCredits,
+        balance: breakdown.balance,
+      });
+    }
+    if (error instanceof WalletInvariantViolation) {
+      throw new InternalServerErrorException({
+        statusCode: 500,
+        error: 'Internal Server Error',
+        code: WALLET_INVARIANT_VIOLATION,
+        message: 'The provider wallet is inconsistent; nothing was deducted',
+      });
+    }
+    throw error;
+  }
 }

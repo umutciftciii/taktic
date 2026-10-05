@@ -86,7 +86,7 @@ describe('the catalogue projection', () => {
 describe('form → definition', () => {
   it('builds the K2-shaped definition with the any group, typed arguments and explicit nulls', () => {
     expect(buildDefinition(packageBonusForm())).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 2,
       trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
       conditions: {
         all: [
@@ -100,7 +100,7 @@ describe('form → definition', () => {
           },
         ],
       },
-      benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+      benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
       limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000, maxRevokesPerDay: null },
       window: { startAt: '2026-10-01T00:00:00Z', endAt: null },
       stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',

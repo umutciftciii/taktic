@@ -42,6 +42,8 @@ const VERSION: CampaignVersionSummary = {
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
   priority: 100,
   channel: 'WEB',
+  spendPriority: 'PROMO_FIRST',
+  adminDeductPolicy: 'PAID_ONLY',
   createdAt: '2026-09-30T10:00:00.000Z',
   createdBy: { id: 'a1', name: 'Yönetici' },
 };

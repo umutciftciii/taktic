@@ -856,6 +856,26 @@ export type AdminProviderCredits = ProviderCredits & {
     city: string;
     district: string;
   };
+  /**
+   * CAMPAIGN-CREDIT-POLICY-001: the balance split the way a manual deduction
+   * sees it — aggregates only. Null with `walletBreakdownError` set when the
+   * wallet fails its invariant (every deduction is then refused by the API).
+   */
+  walletBreakdown: AdminWalletBreakdown | null;
+  walletBreakdownError: 'WALLET_INVARIANT_VIOLATION' | null;
+};
+
+export type AdminWalletBreakdown = {
+  /** Ücretli. */
+  paidCredits: number;
+  /** Kampanya — kesilebilir (ALLOW_PROMO, still valid). */
+  promoDeductibleCredits: number;
+  /** Kampanya — kesintiye kapalı (PAID_ONLY, still valid). */
+  promoProtectedCredits: number;
+  /** Past expiry, not yet swept: in the balance, payable for nothing. */
+  promoUnsweptExpiredCredits: number;
+  /** Kesilebilir toplam: paid + deductible promo. */
+  deductibleCredits: number;
 };
 
 export type PackagePurchaseStatus = 'PENDING' | 'PAID' | 'FAILED' | 'CANCELLED' | 'EXPIRED' | 'REFUNDED';
@@ -3734,9 +3754,16 @@ export type CampaignVersionSummary = {
   priority: number;
   /** CMP-006 PR-D: WEB | MOBILE | ALL — part of the immutable version; ALL on every version before the field. */
   channel: CampaignChannel;
+  /** CAMPAIGN-CREDIT-POLICY-001: part of the immutable version; null only for a benefit that grants no credit. */
+  spendPriority: CampaignSpendPriority | null;
+  adminDeductPolicy: CampaignAdminDeductPolicy | null;
   createdAt: string;
   createdBy: CampaignActor;
 };
+
+export type CampaignSpendPriority = 'PROMO_FIRST' | 'PAID_FIRST';
+export type CampaignAdminDeductPolicy = 'PAID_ONLY' | 'ALLOW_PROMO';
+export type CampaignCreditPolicy = { spendPriority: CampaignSpendPriority; adminDeductPolicy: CampaignAdminDeductPolicy };
 
 export type CampaignVersion = CampaignVersionSummary & { definition: unknown };
 
@@ -3780,6 +3807,8 @@ export type CampaignAuditEntry = {
     maxRedemptionsPerProvider?: number;
     /** CMP-006 PR-D: on VERSION_CREATED / VERSION_ACTIVATED; absent on older rows (= ALL). */
     channel?: CampaignChannel;
+    /** CAMPAIGN-CREDIT-POLICY-001: on VERSION_CREATED / VERSION_ACTIVATED; absent on older rows. */
+    creditPolicy?: CampaignCreditPolicy | null;
     changedFields?: string[];
     reason?: string;
     /** SYSTEM on a payment reversal's revoke / auto-pause (actor null since CMP-004 S4; nominal on older rows), ADMIN otherwise. */
@@ -3929,6 +3958,8 @@ export type CampaignValidationResponse = {
     benefitExpiresInDays: number;
     /** CMP-006 PR-D. */
     channel?: string;
+    /** CAMPAIGN-CREDIT-POLICY-001. */
+    creditPolicy?: CampaignCreditPolicy | null;
   } | null;
 };
 

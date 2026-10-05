@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "triggers": ["PROVIDER_APPROVED", "PACKAGE_PAYMENT_SUCCEEDED", "PROVIDER_ELIGIBILITY_REACHED"],
   "eligibilityTrigger": "PROVIDER_ELIGIBILITY_REACHED",
   "facts": ["PROVIDER_APPROVED", "EMAIL_VERIFIED", "PHONE_VERIFIED"],
@@ -69,8 +69,14 @@
   },
   "benefit": {
     "types": ["PROMO_CREDITS"],
+    "creditProducingTypes": ["PROMO_CREDITS"],
     "credits": { "min": 1, "max": 1000 },
-    "expiresInDays": { "min": 1, "max": 365 }
+    "expiresInDays": { "min": 1, "max": 365 },
+    "creditPolicy": {
+      "spendPriorities": ["PROMO_FIRST", "PAID_FIRST"],
+      "adminDeductPolicies": ["PAID_ONLY", "ALLOW_PROMO"],
+      "default": { "spendPriority": "PROMO_FIRST", "adminDeductPolicy": "PAID_ONLY" }
+    }
   },
   "limits": {
     "maxRedemptionsPerProvider": { "min": 1, "max": 100, "required": true },
@@ -107,7 +113,9 @@
     "WINDOW_INVALID",
     "STACK_POLICY_INVALID",
     "PRIORITY_INVALID",
-    "CHANNEL_INVALID"
+    "CHANNEL_INVALID",
+    "CREDIT_POLICY_INVALID",
+    "CREDIT_POLICY_NOT_APPLICABLE"
   ],
   "activationErrorCodes": ["FACT_SOURCE_UNAVAILABLE", "LIMIT_BELOW_CONSUMED", "CHANNEL_SOURCE_UNAVAILABLE"]
 }

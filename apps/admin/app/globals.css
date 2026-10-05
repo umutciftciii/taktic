@@ -4971,6 +4971,23 @@ button:disabled {
   font-weight: 500;
 }
 
+/* CAMPAIGN-CREDIT-POLICY-001: the two independent credit-policy axes. */
+.campaign-policy-axis {
+  display: grid;
+  gap: 8px;
+}
+
+.campaign-policy-axis + .campaign-policy-axis {
+  margin-top: 12px;
+}
+
+.campaign-policy-axis-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-neutral-700);
+}
+
 .campaign-empty-rows {
   margin: 0;
   color: var(--muted);

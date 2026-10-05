@@ -1,5 +1,5 @@
 import { Transform } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsString, Max, MinLength, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsString, Matches, Max, MinLength, Min } from 'class-validator';
 import { CREDIT_LEDGER_INTEGER_MAX } from '../../../common/credit-limits';
 
 export class ManualCreditTransactionDto {
@@ -15,4 +15,13 @@ export class ManualCreditTransactionDto {
   @IsNotEmpty()
   @MinLength(3)
   reason!: string;
+
+  /**
+   * CAMPAIGN-CREDIT-POLICY-001. One key per business operation, repeated on
+   * every retry of that operation: the API moves the credit at most once per
+   * key. Drawn by the client (a random UUID); never derived from the payload.
+   */
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{16,128}$/)
+  idempotencyKey!: string;
 }

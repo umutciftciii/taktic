@@ -301,7 +301,7 @@ const CASES: Case[] = [
       const { submitCreditOperationAction } = await import('../app/providers/[id]/credits/actions');
       return submitCreditOperationAction(
         { kind: 'idle' } as never,
-        form({ providerId: 'p-1', operationType: 'GRANT', amount: '10', reason: 'Telafi kaydı' }, proof),
+        form({ providerId: 'p-1', operationType: 'GRANT', amount: '10', reason: 'Telafi kaydı', idempotencyKey: 'grant-key-0000000001' }, proof),
       );
     },
     refused: refusedState,
@@ -313,7 +313,7 @@ const CASES: Case[] = [
       const { submitCreditOperationAction } = await import('../app/providers/[id]/credits/actions');
       return submitCreditOperationAction(
         { kind: 'idle' } as never,
-        form({ providerId: 'p-1', operationType: 'DEDUCT', amount: '10', reason: 'Düzeltme kaydı' }, proof),
+        form({ providerId: 'p-1', operationType: 'DEDUCT', amount: '10', reason: 'Düzeltme kaydı', idempotencyKey: 'deduct-key-000000001' }, proof),
       );
     },
     refused: refusedState,

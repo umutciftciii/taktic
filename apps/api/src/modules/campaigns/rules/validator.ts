@@ -23,6 +23,7 @@ import {
   isAnyGroup,
   type CampaignAnyGroup,
   type CampaignCondition,
+  type CampaignCreditPolicy,
   type CampaignDefinition,
   type CampaignDefinitionSummary,
 } from './types';
@@ -179,7 +180,7 @@ export function validateCampaignDefinition(
   const sortedFacts = isEligibility && facts ? [...facts].sort() : [];
 
   const definition: CampaignDefinition = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger,
     ...(isEligibility ? { eligibility: { facts: sortedFacts } } : {}),
     conditions: { all: conditions },
@@ -202,6 +203,7 @@ export function validateCampaignDefinition(
     benefitCredits: benefit.credits,
     benefitExpiresInDays: benefit.expiresInDays,
     channel,
+    creditPolicy: benefit.creditPolicy ?? null,
   };
 
   return { ok: true, definition, summary };
@@ -487,10 +489,11 @@ function validateBenefit(
     errors.add('benefit', 'BENEFIT_INVALID');
     return null;
   }
-  rejectUnknownFields(value, new Set(['type', 'credits', 'expiresInDays']), 'benefit', errors);
+  rejectUnknownFields(value, new Set(['type', 'credits', 'expiresInDays', 'creditPolicy']), 'benefit', errors);
 
   const before = errors.list.length;
-  if (typeof value.type !== 'string' || !CAMPAIGN_BENEFIT.types.includes(value.type)) {
+  const typeKnown = typeof value.type === 'string' && CAMPAIGN_BENEFIT.types.includes(value.type);
+  if (!typeKnown) {
     errors.add('benefit.type', 'BENEFIT_INVALID', `(${CAMPAIGN_BENEFIT.types.join(', ')})`);
   }
   if (!isIntegerWithin(value.credits, CAMPAIGN_BENEFIT.credits.min, CAMPAIGN_BENEFIT.credits.max)) {
@@ -513,6 +516,12 @@ function validateBenefit(
       `(gün ${CAMPAIGN_BENEFIT.expiresInDays.min}–${CAMPAIGN_BENEFIT.expiresInDays.max})`,
     );
   }
+  // CAMPAIGN-CREDIT-POLICY-001. Judged only for a known type: an unknown one
+  // is already refused above, and whether it would have needed a policy is
+  // not a question with an answer.
+  const creditPolicy = typeKnown
+    ? validateCreditPolicy(value.creditPolicy, CAMPAIGN_BENEFIT.creditProducingTypes.includes(value.type as string), errors)
+    : undefined;
   if (errors.list.length !== before) {
     return null;
   }
@@ -520,6 +529,54 @@ function validateBenefit(
     type: value.type as string,
     credits: value.credits as number,
     expiresInDays: value.expiresInDays as number,
+    ...(creditPolicy ? { creditPolicy } : {}),
+  };
+}
+
+/**
+ * `benefit.creditPolicy` (schema v2, CAMPAIGN-CREDIT-POLICY-001).
+ *
+ * A credit-producing benefit must state both axes — there is no implicit
+ * default, so a stored version always says what it means. A benefit that
+ * produces no credit must not carry one: a policy there would describe
+ * nothing and would read as if it did. Exported so both branches are
+ * testable while the catalogue has a single, credit-producing type.
+ */
+export function validateCreditPolicy(
+  value: unknown,
+  producesCredit: boolean,
+  errors: { add(path: string, code: CampaignRuleErrorCode, detail?: string): void },
+): CampaignCreditPolicy | undefined {
+  if (!producesCredit) {
+    if (value !== undefined) {
+      errors.add('benefit.creditPolicy', 'CREDIT_POLICY_NOT_APPLICABLE');
+    }
+    return undefined;
+  }
+  if (!isPlainObject(value)) {
+    errors.add('benefit.creditPolicy', 'CREDIT_POLICY_INVALID');
+    return undefined;
+  }
+  let ok = true;
+  for (const key of Object.keys(value)) {
+    if (key !== 'spendPriority' && key !== 'adminDeductPolicy') {
+      errors.add(`benefit.creditPolicy.${key}`, 'UNKNOWN_FIELD');
+      ok = false;
+    }
+  }
+  const { spendPriorities, adminDeductPolicies } = CAMPAIGN_BENEFIT.creditPolicy;
+  if (typeof value.spendPriority !== 'string' || !spendPriorities.includes(value.spendPriority)) {
+    errors.add('benefit.creditPolicy.spendPriority', 'CREDIT_POLICY_INVALID', `(${spendPriorities.join(', ')})`);
+    ok = false;
+  }
+  if (typeof value.adminDeductPolicy !== 'string' || !adminDeductPolicies.includes(value.adminDeductPolicy)) {
+    errors.add('benefit.creditPolicy.adminDeductPolicy', 'CREDIT_POLICY_INVALID', `(${adminDeductPolicies.join(', ')})`);
+    ok = false;
+  }
+  if (!ok) return undefined;
+  return {
+    spendPriority: value.spendPriority as CampaignCreditPolicy['spendPriority'],
+    adminDeductPolicy: value.adminDeductPolicy as CampaignCreditPolicy['adminDeductPolicy'],
   };
 }
 

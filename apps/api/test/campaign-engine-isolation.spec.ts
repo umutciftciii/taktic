@@ -115,12 +115,12 @@ async function seedDrafts() {
   const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
   const cookie = await loginAs(ctx.prisma, admin.id);
   const base = {
-    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
     limits: { maxRedemptionsPerProvider: 1 },
     window: {},
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
     priority: 100,
-    schemaVersion: 1,
+    schemaVersion: 2,
   };
   const definitions = [
     { ...base, trigger: 'PROVIDER_APPROVED', conditions: { all: [{ type: 'FIRST_PROVIDER_APPROVAL' }] } },

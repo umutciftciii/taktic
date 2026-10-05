@@ -57,12 +57,15 @@ describe('parseCreditAmount', () => {
   });
 });
 
-function form(amount: string, operationType: 'GRANT' | 'DEDUCT' = 'GRANT') {
+const OPERATION_KEY = '6f1c0b9e-2d4a-4f1e-9a51-3c2b7d8e9f00';
+
+function form(amount: string, operationType: 'GRANT' | 'DEDUCT' = 'GRANT', idempotencyKey: string | null = OPERATION_KEY) {
   const data = new FormData();
   data.set('providerId', 'provider-1');
   data.set('operationType', operationType);
   data.set('amount', amount);
   data.set('reason', 'Birim test gerekçesi');
+  if (idempotencyKey !== null) data.set('idempotencyKey', idempotencyKey);
   return data;
 }
 
@@ -87,7 +90,8 @@ describe('submitCreditOperationAction, called directly', () => {
     expect(apiFetch).toHaveBeenCalledTimes(1);
     const [path, init] = apiFetch.mock.calls[0] as [string, { body: string }];
     expect(path).toBe('/providers/provider-1/credits/deduct');
-    expect(JSON.parse(init.body)).toEqual({ amount: 7, reason: 'Birim test gerekçesi' });
+    // CAMPAIGN-CREDIT-POLICY-001: the operation's key travels with it.
+    expect(JSON.parse(init.body)).toEqual({ amount: 7, reason: 'Birim test gerekçesi', idempotencyKey: OPERATION_KEY });
     expect(state).toMatchObject({ kind: 'done', operation: 'DEDUCT', amount: 7, balanceAfter: 33 });
   });
 
@@ -109,6 +113,50 @@ describe('submitCreditOperationAction, called directly', () => {
     apiFetch.mockRejectedValue(new ApiError(409, JSON.stringify({ code: 'CONCURRENT_MODIFICATION' })));
     const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('10'));
     expect(state.kind === 'error' ? state.message : '').toContain('aynı anda');
+  });
+
+  it('refuses a submission without a well-formed idempotency key, without calling the API', async () => {
+    for (const key of [null, '', 'short', 'has spaces in it 1234']) {
+      const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('5', 'DEDUCT', key));
+      expect(state.kind).toBe('error');
+    }
+    expect(apiFetch).not.toHaveBeenCalled();
+  });
+
+  it('explains a deduction beyond the deductible total with the API’s figures (CAMPAIGN-CREDIT-POLICY-001)', async () => {
+    apiFetch.mockRejectedValue(
+      new ApiError(
+        400,
+        JSON.stringify({
+          code: 'CREDIT_DEDUCT_EXCEEDS_DEDUCTIBLE',
+          requestedCredits: 8,
+          deductibleCredits: 3,
+          paidCredits: 3,
+          protectedPromoCredits: 10,
+          balance: 13,
+        }),
+      ),
+    );
+    const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('8', 'DEDUCT'));
+    const message = state.kind === 'error' ? state.message : '';
+    expect(message).toContain('bakiye 13');
+    expect(message).toContain('10 kredisi kampanya kuralı gereği yönetici kesintisine kapalı');
+    expect(message).toContain('en fazla 3 kredi düşülebilir');
+  });
+
+  it('says a reused key may mean the earlier attempt went through', async () => {
+    apiFetch.mockRejectedValue(new ApiError(409, JSON.stringify({ code: 'IDEMPOTENCY_KEY_REUSED' })));
+    const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('8', 'DEDUCT'));
+    expect(state.kind === 'error' ? state.message : '').toContain('önceki deneme gerçekleşmiş olabilir');
+  });
+
+  it('never claims "nothing happened" when the answer was lost: a resend of the same operation is safe', async () => {
+    apiFetch.mockRejectedValue(new TypeError('fetch failed'));
+    const state = await submitCreditOperationAction(CREDIT_OPERATION_IDLE, form('8', 'DEDUCT'));
+    const message = state.kind === 'error' ? state.message : '';
+    expect(message).toContain('sonucu doğrulanamadı');
+    expect(message).toContain('kredi iki kez hareket etmez');
+    expect(message).not.toContain('kredi hareketi oluşmadı');
   });
 
   it('reads its bound from the shared limits file the API reads', async () => {

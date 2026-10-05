@@ -17,6 +17,13 @@ type CreditOperationFormProps = {
   businessName: string;
   currentBalance: number;
   /**
+   * CAMPAIGN-CREDIT-POLICY-001: paid credit plus the campaign credit whose
+   * version allows an admin deduction. A deduction is judged against this,
+   * not the balance. Null when the API could not split the wallet — then no
+   * deduction is offered.
+   */
+  deductibleBalance: number | null;
+  /**
    * Which operations this session may perform: CREDITS_GRANT and
    * CREDITS_DEDUCT, computed on the server. They are separate permissions, so
    * each tab is offered only when its own permission is held. The caller does
@@ -45,6 +52,7 @@ export function CreditOperationForm({
   providerId,
   businessName,
   currentBalance,
+  deductibleBalance,
   canGrant,
   canDeduct,
 }: CreditOperationFormProps) {
@@ -53,12 +61,23 @@ export function CreditOperationForm({
   const [amountInput, setAmountInput] = useState('');
   const [reason, setReason] = useState('');
 
+  // CAMPAIGN-CREDIT-POLICY-001: one idempotency key per business operation.
+  // Drawn after hydration (never during the server render, so the two renders
+  // agree), kept across every retry — a refusal, a timeout or a lost answer
+  // sends the same key again, so the API moves the credit at most once — and
+  // replaced only once an operation has succeeded.
+  const [operationKey, setOperationKey] = useState('');
+  useEffect(() => {
+    setOperationKey(newOperationKey());
+  }, []);
+
   // A success clears the fields; a refusal leaves them as they were typed.
   const doneAt = state.kind === 'done' ? state.at : null;
   useEffect(() => {
     if (doneAt !== null) {
       setAmountInput('');
       setReason('');
+      setOperationKey(newOperationKey());
     }
   }, [doneAt]);
 
@@ -72,11 +91,17 @@ export function CreditOperationForm({
   const signedDelta = hasAmount ? (operationType === 'GRANT' ? parsedAmount : -parsedAmount) : 0;
   const previewBalance = currentBalance + signedDelta;
   const overdraft = operationType === 'DEDUCT' && hasAmount && parsedAmount > currentBalance;
+  // Within the balance but beyond what a deduction may take: campaign credit
+  // whose version is PAID_ONLY stays out of reach (CAMPAIGN-CREDIT-POLICY-001).
+  const deductUnavailable = operationType === 'DEDUCT' && deductibleBalance === null;
+  const exceedsDeductible =
+    operationType === 'DEDUCT' && hasAmount && !overdraft && deductibleBalance !== null && parsedAmount > deductibleBalance;
   // The balance lives in the same integer column as the amount.
   const overflow = operationType === 'GRANT' && hasAmount && previewBalance > CREDIT_AMOUNT_MAX;
 
   const reasonValid = reason.trim().length >= REASON_MIN_LENGTH;
-  const submitDisabled = !hasAmount || !reasonValid || overdraft || overflow || pending;
+  const submitDisabled =
+    !hasAmount || !reasonValid || overdraft || exceedsDeductible || deductUnavailable || overflow || pending || operationKey === '';
 
   const isDeduct = operationType === 'DEDUCT';
 
@@ -84,6 +109,7 @@ export function CreditOperationForm({
     <form action={formAction} className="credit-operation-form" data-testid="credit-operation-form">
       <input type="hidden" name="providerId" value={providerId} />
       <input type="hidden" name="operationType" value={operationType} />
+      <input type="hidden" name="idempotencyKey" value={operationKey} data-testid="credit-operation-key" />
 
       {canGrant && canDeduct ? (
         <div
@@ -189,6 +215,26 @@ export function CreditOperationForm({
             Bu düşüş mevcut bakiyeyi aşıyor. İşlem sunucu tarafında reddedilir.
           </p>
         ) : null}
+        {isDeduct && deductibleBalance !== null ? (
+          <div className="balance-preview-row">
+            <span className="balance-preview-label">Kesilebilir toplam</span>
+            <span className="balance-preview-value" data-testid="credit-operation-deductible">
+              {deductibleBalance}
+            </span>
+          </div>
+        ) : null}
+        {exceedsDeductible ? (
+          <p className="balance-preview-warning" data-testid="credit-operation-exceeds-deductible">
+            Bu düşüş kesilebilir toplamı ({deductibleBalance}) aşıyor. Bakiyenin {currentBalance - (deductibleBalance ?? 0)}{' '}
+            kredisi, kampanya kuralı gereği yönetici kesintisine kapalı kampanya kredisi (ya da süresi dolmuş kredi). İşlem
+            sunucu tarafında reddedilir.
+          </p>
+        ) : null}
+        {deductUnavailable ? (
+          <p className="balance-preview-warning" data-testid="credit-operation-deduct-unavailable">
+            Bakiye dağılımı okunamadı; kesinti yapılamaz. Durumu teknik ekibe bildirin.
+          </p>
+        ) : null}
       </div>
 
       {state.kind === 'error' ? (
@@ -252,3 +298,9 @@ export function CreditOperationForm({
     </form>
   );
 }
+
+/** A fresh idempotency key: a random UUID, never derived from the operation itself. */
+function newOperationKey(): string {
+  return globalThis.crypto.randomUUID();
+}
+

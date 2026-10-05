@@ -46,7 +46,7 @@ function schemaPermissions(): string[] {
 describe('A) Kredi ekle asks first', () => {
   it('draws the grant trigger as a confirmation, not a plain submit', () => {
     const markup = html(
-      <CreditOperationForm providerId="p-1" businessName="Usta Klima" currentBalance={40} canGrant canDeduct={false} />,
+      <CreditOperationForm providerId="p-1" businessName="Usta Klima" currentBalance={40} deductibleBalance={40} canGrant canDeduct={false} />,
     );
     expect(markup).toMatch(/<button type="submit"[^>]*aria-haspopup="dialog"[^>]*data-testid="credit-operation-grant"/);
     expect(markup).toContain('data-testid="credit-operation-grant-dialog"');

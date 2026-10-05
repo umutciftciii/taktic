@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AdminPermission, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -162,7 +163,7 @@ describe('actors outside the staff permissions (ADMIN-DESIGN-001 Faz 3B)', () =>
         const response = await request(ctx.server)
           .post(`/providers/${providerId}/credits/${path}`)
           .set('Cookie', session)
-          .send(body);
+          .send({ ...body, idempotencyKey: randomUUID() });
         expect(response.status, `${path} on ${providerId}`).toBe(403);
       }
     }
@@ -184,8 +185,8 @@ describe('actors outside the staff permissions (ADMIN-DESIGN-001 Faz 3B)', () =>
       request(ctx.server).get(`/providers/${provider.id}/credits`).set('Cookie', session),
       request(ctx.server).get(`/admin/providers/${provider.id}/credits`).set('Cookie', session),
       request(ctx.server).get(`/admin/providers/${provider.id}/entitlements`).set('Cookie', session),
-      request(ctx.server).post(`/providers/${provider.id}/credits/grant`).set('Cookie', session).send(body),
-      request(ctx.server).post(`/providers/${provider.id}/credits/deduct`).set('Cookie', session).send(body),
+      request(ctx.server).post(`/providers/${provider.id}/credits/grant`).set('Cookie', session).send({ ...body, idempotencyKey: randomUUID() }),
+      request(ctx.server).post(`/providers/${provider.id}/credits/deduct`).set('Cookie', session).send({ ...body, idempotencyKey: randomUUID() }),
     ]);
     for (const response of responses) {
       expect(response.status).toBe(403);
@@ -199,7 +200,7 @@ describe('actors outside the staff permissions (ADMIN-DESIGN-001 Faz 3B)', () =>
     const read = await request(ctx.server).get(`/admin/providers/${provider.id}/credits`);
     const write = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/grant`)
-      .send({ amount: 1, reason: 'anonim' });
+      .send({ idempotencyKey: randomUUID(), amount: 1, reason: 'anonim' });
 
     expect(read.status).toBe(401);
     expect(write.status).toBe(401);
@@ -242,19 +243,19 @@ describe('manual credit writes keep their own permissions', () => {
     const grantByGrant = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/grant`)
       .set('Cookie', grantOnly)
-      .send(body);
+      .send({ ...body, idempotencyKey: randomUUID() });
     const deductByGrant = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/deduct`)
       .set('Cookie', grantOnly)
-      .send(body);
+      .send({ ...body, idempotencyKey: randomUUID() });
     const deductByDeduct = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/deduct`)
       .set('Cookie', deductOnly)
-      .send(body);
+      .send({ ...body, idempotencyKey: randomUUID() });
     const grantByDeduct = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/grant`)
       .set('Cookie', deductOnly)
-      .send(body);
+      .send({ ...body, idempotencyKey: randomUUID() });
 
     expect(grantByGrant.status).toBe(201);
     expect(deductByGrant.status).toBe(403);
@@ -277,15 +278,15 @@ describe('manual credit writes keep their own permissions', () => {
     const granted = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/grant`)
       .set('Cookie', session)
-      .send({ amount: 7, reason: 'Faz 3B denetim: ekleme' });
+      .send({ idempotencyKey: randomUUID(), amount: 7, reason: 'Faz 3B denetim: ekleme' });
     const deducted = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/deduct`)
       .set('Cookie', session)
-      .send({ amount: 4, reason: 'Faz 3B denetim: düşme' });
+      .send({ idempotencyKey: randomUUID(), amount: 4, reason: 'Faz 3B denetim: düşme' });
     const overdraft = await request(ctx.server)
       .post(`/providers/${provider.id}/credits/deduct`)
       .set('Cookie', session)
-      .send({ amount: 100, reason: 'Faz 3B denetim: fazla düşme' });
+      .send({ idempotencyKey: randomUUID(), amount: 100, reason: 'Faz 3B denetim: fazla düşme' });
 
     expect(granted.status).toBe(201);
     expect(deducted.status).toBe(201);
@@ -358,7 +359,7 @@ describe('manual credit writes keep their own permissions', () => {
         request(ctx.server)
           .post(`/providers/${provider.id}/credits/${path}`)
           .set('Cookie', session)
-          .send({ amount, reason: 'Faz 3B sınır testi' });
+          .send({ idempotencyKey: randomUUID(), amount, reason: 'Faz 3B sınır testi' });
 
       const tooLarge = await send('grant', MAX + 1);
       expect(tooLarge.status).toBe(400);
@@ -386,7 +387,7 @@ describe('manual credit writes keep their own permissions', () => {
       const response = await request(ctx.server)
         .post(`/providers/${provider.id}/credits/grant`)
         .set('Cookie', session)
-        .send({ amount: MAX - 4, reason: 'Faz 3B taşma denemesi' });
+        .send({ idempotencyKey: randomUUID(), amount: MAX - 4, reason: 'Faz 3B taşma denemesi' });
 
       expect(response.status).toBe(400);
       expect(response.body).toMatchObject({ code: 'CREDIT_BALANCE_LIMIT_EXCEEDED', currentBalance: 5, maxBalance: MAX });
@@ -397,7 +398,7 @@ describe('manual credit writes keep their own permissions', () => {
       const fits = await request(ctx.server)
         .post(`/providers/${provider.id}/credits/grant`)
         .set('Cookie', session)
-        .send({ amount: MAX - 5, reason: 'Faz 3B sınıra kadar' });
+        .send({ idempotencyKey: randomUUID(), amount: MAX - 5, reason: 'Faz 3B sınıra kadar' });
       expect(fits.status).toBe(201);
       expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(MAX);
     });
@@ -410,7 +411,7 @@ describe('manual credit writes keep their own permissions', () => {
         request(ctx.server)
           .post(`/providers/${provider.id}/credits/grant`)
           .set('Cookie', session)
-          .send({ amount: 6, reason: 'Faz 3B eşzamanlı ekleme' });
+          .send({ idempotencyKey: randomUUID(), amount: 6, reason: 'Faz 3B eşzamanlı ekleme' });
 
       const statuses = (await Promise.all([grant(), grant()])).map((response) => response.status).sort();
 
@@ -429,7 +430,7 @@ describe('manual credit writes keep their own permissions', () => {
       const response = await request(ctx.server)
         .post(`/providers/${provider.id}/credits/${path}`)
         .set('Cookie', session)
-        .send(body);
+        .send({ ...body, idempotencyKey: randomUUID() });
       expect(response.status).toBe(403);
     }
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(0);

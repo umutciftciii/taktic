@@ -30,10 +30,10 @@ async function setEngine(enabled: boolean) {
 }
 
 const K2 = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   trigger: 'PACKAGE_PAYMENT_SUCCEEDED',
   conditions: { all: [{ type: 'FIRST_SUCCESSFUL_PAID_PURCHASE' }, { type: 'NO_PRIOR_REVOCATION' }] },
-  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+  benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
   limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: 1000, maxRedemptionsPerDay: null, budgetCredits: 10000 },
   window: { startAt: null, endAt: null },
   stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',
@@ -52,6 +52,8 @@ async function seedDraft(adminUserId: string, key: string) {
       factSetKey: null,
       definition: K2,
       benefitType: 'PROMO_CREDITS',
+      spendPriority: 'PROMO_FIRST',
+      adminDeductPolicy: 'PAID_ONLY',
       benefitCredits: 10,
       benefitExpiresInDays: 30,
       maxRedemptionsPerProvider: 1,
@@ -247,7 +249,7 @@ test.describe('admin campaign lifecycle', () => {
     const v2 = await prisma().campaignVersion.create({
       data: {
         ...(({ id: _id, createdAt: _at, ...rest }) => rest)(version),
-        definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 20, expiresInDays: 30 } },
+        definition: { ...K2, benefit: { type: 'PROMO_CREDITS', credits: 20, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } } },
         versionNumber: 2,
         benefitCredits: 20,
       },

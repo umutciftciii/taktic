@@ -888,6 +888,11 @@ export type ProviderPromoLot = {
   remainingCredits: number;
   expiresAt: string;
   campaignName: string;
+  /**
+   * CAMPAIGN-CREDIT-POLICY-001: where this lot stands against paid credit —
+   * PROMO_FIRST pays before it, PAID_FIRST only after it is gone.
+   */
+  spendPriority: 'PROMO_FIRST' | 'PAID_FIRST';
 };
 
 /**

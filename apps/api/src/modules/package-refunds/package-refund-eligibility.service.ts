@@ -40,6 +40,10 @@ type FactsRow = {
  *
  * `now` is a parameter for the same reason: the clock is an input, not
  * something read halfway through.
+ *
+ * The linked promo facts count offer spends only (CAMPAIGN-CREDIT-POLICY-001):
+ * promo an operator took back by ADMIN_DEDUCT was not used by the provider,
+ * and must not read as if it had been.
  */
 @Injectable()
 export class PackageRefundEligibilityService {
@@ -85,12 +89,14 @@ export class PackageRefundEligibilityService {
           JOIN "PromoCreditLot" l ON l."id" = c."lotId"
           JOIN "CampaignRedemption" r ON r."id" = l."redemptionId"
           WHERE r."purchaseId" = p."id"
+            AND c."source" = 'OFFER_SPEND'
         ) AS "linkedPromoConsumptionCount",
         (
           SELECT coalesce(sum(c."consumedCredits"), 0)::int FROM "PromoCreditLotConsumption" c
           JOIN "PromoCreditLot" l ON l."id" = c."lotId"
           JOIN "CampaignRedemption" r ON r."id" = l."redemptionId"
           WHERE r."purchaseId" = p."id"
+            AND c."source" = 'OFFER_SPEND'
         ) AS "linkedPromoConsumedCredits"
       FROM "PackagePurchase" p
       LEFT JOIN "OfferCreditPackage" op ON op."id" = p."packageId"

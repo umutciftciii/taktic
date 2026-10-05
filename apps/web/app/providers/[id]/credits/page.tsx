@@ -16,6 +16,7 @@ import {
   formatPrice,
   formatDate,
   formatDateTime,
+  promoSpendPriorityLabel,
 } from '../../../../lib/api';
 import { IconArrowRight } from '../../../landing-icons';
 import { createPackagePurchaseAction } from '../package-purchases/actions';
@@ -169,7 +170,9 @@ export default async function ProviderCreditsPage({
         {/*
           The provider's own promotion (CMP-004 S4), only when there is one:
           the credit that can still pay for an offer and the lots it sits in,
-          soonest expiry first. A lot that has expired or been taken back is
+          in the order they are spent (CAMPAIGN-CREDIT-POLICY-001: each lot's
+          own campaign decides whether it pays before paid credit or after it,
+          and the API returns them in that waterfall). A lot that has expired or been taken back is
           not a "usable" credit and is not listed — the ledger below tells that
           story. The figure is the API's sum, not one computed here.
         */}
@@ -190,14 +193,17 @@ export default async function ProviderCreditsPage({
                   <span className="credit-promo-lot-amount">{lot.remainingCredits} kredi</span>
                   <span className="credit-promo-lot-meta">
                     <span>{lot.campaignName}</span>
+                    <span data-testid="promo-lot-priority" data-priority={lot.spendPriority}>
+                      {promoSpendPriorityLabel(lot.spendPriority)}
+                    </span>
                     <span>Son kullanma: {formatDate(lot.expiresAt)}</span>
                   </span>
                 </li>
               ))}
             </ul>
             <p className="pdash-credit-note" style={{ margin: 0 }}>
-              Promosyon kredisi teklif gönderirken önce kullanılır; süresi dolan kredi bakiyeden düşer.
-              Promosyon kredisi bakiyenizin içindedir.
+              Her promosyonun kullanım sırası kendi kampanyasına göre belirlenir; liste kullanım sırasıyladır.
+              Süresi dolan kredi bakiyeden düşer. Promosyon kredisi bakiyenizin içindedir.
             </p>
           </div>
         ) : null}

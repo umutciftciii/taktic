@@ -1,8 +1,11 @@
 import {
+  CampaignAdminDeductPolicy,
+  type CampaignCreditSpendPriority,
   CampaignRedemptionStatus,
   CampaignRevokeReason,
   CreditTransactionType,
   Prisma,
+  PromoConsumptionSource,
   PromoCreditLotConsumptionStatus,
   PromoCreditLotStatus,
 } from '@prisma/client';
@@ -17,9 +20,16 @@ import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../common/serializable-tran
  * `balanceAfter` of `ProviderCreditTransaction`, which stays the one
  * canonical balance), a `PromoCreditLot`'s `remainingCredits`, and a
  * `PromoCreditLotConsumption` row that says which lot paid what share of one
- * OFFER_SPEND. The invariant every writer keeps:
+ * debit (OFFER_SPEND or, since CAMPAIGN-CREDIT-POLICY-001, ADMIN_DEDUCT). The
+ * invariant every writer keeps, with a paid pool that is never negative:
  *
  *     balance = paid + Σ remainingCredits over lots with status ACTIVE or EXHAUSTED
+ *
+ * Every debit goes through {@link debitWallet}, the one canonical waterfall:
+ * PROMO_FIRST lots, then paid credit, then PAID_FIRST lots — each lot by the
+ * policy of the campaign version it was granted under. Refund, revoke and
+ * expiry never re-plan a debit; they read the consumption rows and lot
+ * remainders that were actually written.
  *
  * Nothing in this file decides *whether* a provider has promo credit; the
  * campaign engine does that (S2B2) by calling {@link grantPromoCreditLot}.
@@ -35,9 +45,6 @@ import { PRISMA_WRITE_CONFLICT_ERROR_CODE } from '../../common/serializable-tran
  */
 
 type Tx = Prisma.TransactionClient;
-
-/** Lots that may pay: valid, still holding credit, earliest-expiring first. */
-export const PROMO_SPENDABLE_LOT_ORDER = [{ expiresAt: 'asc' }, { id: 'asc' }] as const satisfies Prisma.PromoCreditLotOrderByWithRelationInput[];
 
 /** The lot statuses whose `remainingCredits` still sit inside `balanceAfter`. */
 const WALLET_LOT_STATUSES = [PromoCreditLotStatus.ACTIVE, PromoCreditLotStatus.EXHAUSTED] as const;
@@ -173,105 +180,341 @@ export async function readPromoCreditSummary(tx: Tx, providerId: string, now: Da
 
 /**
  * What a provider may be shown of their own promotion (CMP-004 S4): the
- * lots that can still pay — the spend predicate, in the spend order — each
- * with its remainder, its expiry and the campaign's name, and nothing
+ * lots that can still pay — the spend predicate, in the canonical waterfall
+ * order (CAMPAIGN-CREDIT-POLICY-001) — each with its remainder, its expiry,
+ * the campaign's name and where it stands against paid credit, and nothing
  * else about the campaign. Read-only; the total is the sum of the rows.
  */
 export async function readSpendablePromoLots(
   db: Tx | { promoCreditLot: Tx['promoCreditLot'] },
   providerId: string,
   now: Date,
-): Promise<{ spendableCredits: number; lots: Array<{ id: string; remainingCredits: number; expiresAt: Date; campaignName: string }> }> {
+): Promise<{
+  spendableCredits: number;
+  lots: Array<{ id: string; remainingCredits: number; expiresAt: Date; campaignName: string; spendPriority: CampaignCreditSpendPriority }>;
+}> {
   const rows = await db.promoCreditLot.findMany({
     where: { providerId, status: PromoCreditLotStatus.ACTIVE, remainingCredits: { gt: 0 }, expiresAt: { gt: now } },
-    orderBy: [...PROMO_SPENDABLE_LOT_ORDER],
     select: {
       id: true,
       remainingCredits: true,
       expiresAt: true,
+      spendPriority: true,
       redemption: { select: { campaign: { select: { name: true } } } },
     },
   });
-  const lots = rows.map((row) => ({
-    id: row.id,
-    remainingCredits: row.remainingCredits,
-    expiresAt: row.expiresAt,
-    campaignName: row.redemption.campaign.name,
-  }));
+  const lots = rows
+    .map((row) => ({
+      id: row.id,
+      remainingCredits: row.remainingCredits,
+      expiresAt: row.expiresAt,
+      campaignName: row.redemption.campaign.name,
+      spendPriority: row.spendPriority,
+    }))
+    .sort(compareWaterfall);
   return { spendableCredits: lots.reduce((total, lot) => total + lot.remainingCredits, 0), lots };
 }
 
-// ───────────────────────────── spend ─────────────────────────────
+// ───────────────────────────── wallet debit ─────────────────────────────
 
 /**
- * Takes an offer's cost out of the provider's promo lots, earliest-expiring
- * first, and records each lot's share against the OFFER_SPEND row.
- *
- * Called *after* that row exists: the debit is what the offer transaction
- * has always written, its `balanceAfter` already reflects the whole cost,
- * and a debit that failed never reaches this function — so a consumption row
- * without its debit cannot exist. Whatever the lots cannot cover is the paid
- * share, which needs no row: it is the difference the wallet already shows.
- *
- * Returns the split, in lot order; empty when no lot could pay.
+ * Why a debit is being made (CAMPAIGN-CREDIT-POLICY-001). The purpose decides
+ * which promo lots are eligible; the order is the same canonical waterfall
+ * for every purpose.
  */
-export async function consumePromoCreditsForSpend(
-  tx: Tx,
-  input: { providerId: string; spendTransactionId: string; creditCost: number; now: Date },
-): Promise<Array<{ lotId: string; consumedCredits: number }>> {
-  if (input.creditCost <= 0) {
-    return [];
+export type WalletDebitPurpose = typeof PromoConsumptionSource.OFFER_SPEND | typeof PromoConsumptionSource.ADMIN_DEDUCT;
+
+/** One wallet lot as the planner sees it. */
+export type WalletLot = {
+  id: string;
+  remainingCredits: number;
+  expiresAt: Date;
+  status: PromoCreditLotStatus;
+  spendPriority: CampaignCreditSpendPriority;
+  adminDeductPolicy: CampaignAdminDeductPolicy;
+};
+
+/** The wallet split the way a debit and an operator have to see it. */
+export type WalletBreakdown = {
+  /** The canonical balance: the newest ledger row's `balanceAfter`. */
+  balance: number;
+  /** `balance − Σ remainingCredits` over ACTIVE/EXHAUSTED lots. Never negative (or the wallet is refused). */
+  paidCredits: number;
+  /** Promo credit still inside `balance`, valid or not. */
+  promoInWalletCredits: number;
+  /** Promo credit that can still pay (ACTIVE, remaining, not past expiry). */
+  promoSpendableCredits: number;
+  /** Of the spendable promo credit, what an ADMIN_DEDUCT may take (ALLOW_PROMO). */
+  promoDeductibleCredits: number;
+  /** Of the spendable promo credit, what an ADMIN_DEDUCT may never take (PAID_ONLY). */
+  promoProtectedCredits: number;
+  /** Past expiry but not yet swept: inside `balance`, able to pay for nothing. */
+  promoUnsweptExpiredCredits: number;
+  /** What an offer spend can draw: paid + spendable promo. */
+  spendableCredits: number;
+  /** What an ADMIN_DEDUCT can draw: paid + deductible promo. */
+  deductibleCredits: number;
+};
+
+export type WalletDebitShare = { lotId: string; credits: number; exhausts: boolean };
+
+export type WalletDebitPlan = {
+  purpose: WalletDebitPurpose;
+  amount: number;
+  breakdown: WalletBreakdown;
+  /** Promo shares, in waterfall order (tier, expiresAt, id). */
+  promoShares: WalletDebitShare[];
+  /** The paid pool's share. Has no row of its own: it is what the ledger already shows. */
+  paidShare: number;
+};
+
+export type WalletDebitRefusal =
+  /** More than the whole balance. */
+  | 'INSUFFICIENT_BALANCE'
+  /** An offer spend that the spendable credit (paid + valid promo) cannot cover. */
+  | 'INSUFFICIENT_SPENDABLE'
+  /** An ADMIN_DEDUCT that the deductible credit (paid + ALLOW_PROMO promo) cannot cover. */
+  | 'EXCEEDS_DEDUCTIBLE';
+
+/**
+ * The wallet does not satisfy `balance = paid + Σ promo remaining` with a
+ * non-negative paid pool. Nothing is written; this is a fault to investigate,
+ * never a state to "repair" by guessing which pool a past movement came from.
+ */
+export class WalletInvariantViolation extends Error {
+  constructor(
+    readonly providerId: string | null,
+    readonly balance: number,
+    readonly promoInWalletCredits: number,
+  ) {
+    super(
+      `Wallet invariant violated${providerId ? ` for provider ${providerId}` : ''}: balance ${balance} < promo in wallet ${promoInWalletCredits}`,
+    );
+    this.name = 'WalletInvariantViolation';
+  }
+}
+
+/** A debit the wallet cannot cover. Thrown before anything is written. */
+export class WalletDebitRefused extends Error {
+  constructor(
+    readonly reason: WalletDebitRefusal,
+    readonly requestedCredits: number,
+    readonly breakdown: WalletBreakdown,
+  ) {
+    super(`Wallet debit refused (${reason}): ${requestedCredits} requested`);
+    this.name = 'WalletDebitRefused';
+  }
+}
+
+/** Where a spend priority sits relative to the paid pool (tier 1). */
+const SPEND_TIER: Readonly<Record<CampaignCreditSpendPriority, 0 | 2>> = {
+  PROMO_FIRST: 0,
+  PAID_FIRST: 2,
+};
+
+function isSpendable(lot: WalletLot, now: Date) {
+  return lot.status === PromoCreditLotStatus.ACTIVE && lot.remainingCredits > 0 && lot.expiresAt > now;
+}
+
+/**
+ * The canonical waterfall order of promo lots: PROMO_FIRST lots (tier 0)
+ * before PAID_FIRST lots (tier 2), each tier earliest-expiring first, equal
+ * expiry by id. Ids compare by code unit — the same answer on every database
+ * collation. The paid pool (tier 1) sits between the two tiers.
+ */
+export function compareWaterfall(a: Pick<WalletLot, 'id' | 'expiresAt' | 'spendPriority'>, b: Pick<WalletLot, 'id' | 'expiresAt' | 'spendPriority'>) {
+  const tier = SPEND_TIER[a.spendPriority] - SPEND_TIER[b.spendPriority];
+  if (tier !== 0) return tier;
+  const expiry = a.expiresAt.getTime() - b.expiresAt.getTime();
+  if (expiry !== 0) return expiry;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/**
+ * The wallet as a debit sees it: pure. Throws {@link WalletInvariantViolation}
+ * when the promo inside the wallet exceeds the balance — a paid pool below
+ * zero means some earlier movement was booked against the wrong pool, and no
+ * debit may build on that.
+ */
+export function walletBreakdown(input: { balance: number; lots: readonly WalletLot[]; now: Date; providerId?: string }): WalletBreakdown {
+  const walletLots = input.lots.filter((lot) => (WALLET_LOT_STATUSES as readonly PromoCreditLotStatus[]).includes(lot.status));
+  const promoInWalletCredits = walletLots.reduce((total, lot) => total + lot.remainingCredits, 0);
+  const paidCredits = input.balance - promoInWalletCredits;
+  if (paidCredits < 0) {
+    throw new WalletInvariantViolation(input.providerId ?? null, input.balance, promoInWalletCredits);
+  }
+  const spendable = walletLots.filter((lot) => isSpendable(lot, input.now));
+  const promoSpendableCredits = spendable.reduce((total, lot) => total + lot.remainingCredits, 0);
+  const promoDeductibleCredits = spendable
+    .filter((lot) => lot.adminDeductPolicy === CampaignAdminDeductPolicy.ALLOW_PROMO)
+    .reduce((total, lot) => total + lot.remainingCredits, 0);
+  return {
+    balance: input.balance,
+    paidCredits,
+    promoInWalletCredits,
+    promoSpendableCredits,
+    promoDeductibleCredits,
+    promoProtectedCredits: promoSpendableCredits - promoDeductibleCredits,
+    promoUnsweptExpiredCredits: promoInWalletCredits - promoSpendableCredits,
+    spendableCredits: paidCredits + promoSpendableCredits,
+    deductibleCredits: paidCredits + promoDeductibleCredits,
+  };
+}
+
+/**
+ * Plans one debit through the canonical waterfall, without writing anything:
+ *
+ *   1. PROMO_FIRST eligible lots (expiresAt ↑, id ↑)
+ *   2. the paid pool
+ *   3. PAID_FIRST eligible lots (expiresAt ↑, id ↑)
+ *
+ * Eligible: ACTIVE, something left, not past `expiresAt`; for ADMIN_DEDUCT
+ * also `adminDeductPolicy = ALLOW_PROMO`. All or nothing: a debit the
+ * eligible sources cannot cover is refused whole.
+ */
+export function planWalletDebit(input: {
+  balance: number;
+  lots: readonly WalletLot[];
+  amount: number;
+  purpose: WalletDebitPurpose;
+  now: Date;
+  providerId?: string;
+}): { ok: true; plan: WalletDebitPlan } | { ok: false; reason: WalletDebitRefusal; breakdown: WalletBreakdown } {
+  if (!Number.isInteger(input.amount) || input.amount < 1) {
+    throw new Error(`Wallet debit: amount must be a positive integer, got ${input.amount}`);
+  }
+  const breakdown = walletBreakdown(input);
+  if (input.amount > breakdown.balance) {
+    return { ok: false, reason: 'INSUFFICIENT_BALANCE', breakdown };
+  }
+  const isDeduct = input.purpose === PromoConsumptionSource.ADMIN_DEDUCT;
+  const available = isDeduct ? breakdown.deductibleCredits : breakdown.spendableCredits;
+  if (input.amount > available) {
+    return { ok: false, reason: isDeduct ? 'EXCEEDS_DEDUCTIBLE' : 'INSUFFICIENT_SPENDABLE', breakdown };
   }
 
-  const lots = await tx.promoCreditLot.findMany({
-    where: {
+  const eligible = input.lots
+    .filter((lot) => isSpendable(lot, input.now))
+    .filter((lot) => !isDeduct || lot.adminDeductPolicy === CampaignAdminDeductPolicy.ALLOW_PROMO)
+    .sort(compareWaterfall);
+
+  let outstanding = input.amount;
+  const promoShares: WalletDebitShare[] = [];
+  const take = (lot: WalletLot) => {
+    if (outstanding <= 0) return;
+    const credits = Math.min(lot.remainingCredits, outstanding);
+    promoShares.push({ lotId: lot.id, credits, exhausts: credits === lot.remainingCredits });
+    outstanding -= credits;
+  };
+  for (const lot of eligible) if (SPEND_TIER[lot.spendPriority] === 0) take(lot);
+  const paidShare = Math.min(breakdown.paidCredits, outstanding);
+  outstanding -= paidShare;
+  for (const lot of eligible) if (SPEND_TIER[lot.spendPriority] === 2) take(lot);
+
+  if (outstanding !== 0) {
+    // Unreachable: `available` is exactly the sum of what the loops can take.
+    throw new Error('Wallet debit: plan does not cover the amount');
+  }
+  return { ok: true, plan: { purpose: input.purpose, amount: input.amount, breakdown, promoShares, paidShare } };
+}
+
+const walletLotSelect = {
+  id: true,
+  remainingCredits: true,
+  expiresAt: true,
+  status: true,
+  spendPriority: true,
+  adminDeductPolicy: true,
+} satisfies Prisma.PromoCreditLotSelect;
+
+/** The provider's wallet lots (ACTIVE/EXHAUSTED), read inside the caller's transaction. */
+export async function readWalletLots(db: Tx | { promoCreditLot: Tx['promoCreditLot'] }, providerId: string): Promise<WalletLot[]> {
+  return db.promoCreditLot.findMany({
+    where: { providerId, status: { in: [...WALLET_LOT_STATUSES] } },
+    select: walletLotSelect,
+  });
+}
+
+/** The provider's wallet split, read the way a debit reads it. */
+export async function readWalletBreakdown(tx: Tx, providerId: string, now: Date): Promise<WalletBreakdown> {
+  const [balance, lots] = await Promise.all([readWalletBalance(tx, providerId), readWalletLots(tx, providerId)]);
+  return walletBreakdown({ balance, lots, now, providerId });
+}
+
+/**
+ * The one way credit leaves a wallet by debit (CAMPAIGN-CREDIT-POLICY-001):
+ * OFFER_SPEND (offer submit and the acceptance recharge) and ADMIN_DEDUCT.
+ *
+ * Inside the caller's Serializable transaction, in this order: read the
+ * balance and every wallet lot; plan through {@link planWalletDebit} (paid
+ * below zero → {@link WalletInvariantViolation}; not enough eligible credit →
+ * {@link WalletDebitRefused}; either way nothing written); append the one
+ * ledger row (`−amount`); then, per promo share, a conditional lot UPDATE and
+ * a consumption row naming the ledger row and the purpose. A lot that moved
+ * between the read and the write fails its condition and the whole
+ * transaction is replayed (P2034) — never half a debit.
+ */
+export async function debitWallet(
+  tx: Tx,
+  input: {
+    providerId: string;
+    amount: number;
+    purpose: WalletDebitPurpose;
+    now: Date;
+    ledger: { reason: string | null; referenceType: string | null; referenceId: string | null; createdById: string | null };
+  },
+) {
+  const [balance, lots] = await Promise.all([readWalletBalance(tx, input.providerId), readWalletLots(tx, input.providerId)]);
+  const planned = planWalletDebit({ balance, lots, amount: input.amount, purpose: input.purpose, now: input.now, providerId: input.providerId });
+  if (!planned.ok) {
+    throw new WalletDebitRefused(planned.reason, input.amount, planned.breakdown);
+  }
+  const { plan } = planned;
+
+  const transaction = await tx.providerCreditTransaction.create({
+    data: {
       providerId: input.providerId,
-      status: PromoCreditLotStatus.ACTIVE,
-      remainingCredits: { gt: 0 },
-      expiresAt: { gt: input.now },
+      // The two purposes are also the two ledger types.
+      type: input.purpose === PromoConsumptionSource.ADMIN_DEDUCT ? CreditTransactionType.ADMIN_DEDUCT : CreditTransactionType.OFFER_SPEND,
+      amount: -input.amount,
+      balanceAfter: balance - input.amount,
+      reason: input.ledger.reason,
+      referenceType: input.ledger.referenceType,
+      referenceId: input.ledger.referenceId,
+      createdById: input.ledger.createdById,
     },
-    orderBy: [...PROMO_SPENDABLE_LOT_ORDER],
-    select: { id: true, remainingCredits: true },
   });
 
-  const split: Array<{ lotId: string; consumedCredits: number }> = [];
-  let outstanding = input.creditCost;
-  for (const lot of lots) {
-    if (outstanding <= 0) break;
-    const take = Math.min(lot.remainingCredits, outstanding);
-    const exhausts = take === lot.remainingCredits;
-
+  for (const share of plan.promoShares) {
     const updated = await tx.promoCreditLot.updateMany({
       where: {
-        id: lot.id,
+        id: share.lotId,
+        providerId: input.providerId,
         status: PromoCreditLotStatus.ACTIVE,
-        remainingCredits: { gte: take },
+        remainingCredits: { gte: share.credits },
         expiresAt: { gt: input.now },
       },
       data: {
-        remainingCredits: { decrement: take },
-        ...(exhausts ? { status: PromoCreditLotStatus.EXHAUSTED } : {}),
+        remainingCredits: { decrement: share.credits },
+        ...(share.exhausts ? { status: PromoCreditLotStatus.EXHAUSTED } : {}),
       },
     });
     if (updated.count !== 1) {
-      throw new PromoCreditWriteConflict(`promo lot ${lot.id}`);
+      throw new PromoCreditWriteConflict(`promo lot ${share.lotId}`);
     }
-
     await tx.promoCreditLotConsumption.create({
       data: {
-        lotId: lot.id,
-        creditTransactionId: input.spendTransactionId,
-        consumedCredits: take,
+        lotId: share.lotId,
+        creditTransactionId: transaction.id,
+        consumedCredits: share.credits,
         consumedAt: input.now,
+        source: input.purpose,
       },
       select: { id: true },
     });
-
-    split.push({ lotId: lot.id, consumedCredits: take });
-    outstanding -= take;
   }
 
-  return split;
+  return { transaction, plan };
 }
 
 // ───────────────────────────── refund ─────────────────────────────
@@ -313,7 +556,13 @@ export async function restorePromoConsumptionsForRefund(
   input: { providerId: string; spendTransactionId: string; refundTransactionId: string; now: Date; createdById?: string | null },
 ): Promise<PromoRefundOutcome> {
   const shares = await tx.promoCreditLotConsumption.findMany({
-    where: { creditTransactionId: input.spendTransactionId, status: PromoCreditLotConsumptionStatus.CONSUMED },
+    // An ADMIN_DEDUCT share is final (CHECK) and never belongs to a refund;
+    // naming the source keeps it out even if a caller passed the wrong id.
+    where: {
+      creditTransactionId: input.spendTransactionId,
+      status: PromoCreditLotConsumptionStatus.CONSUMED,
+      source: PromoConsumptionSource.OFFER_SPEND,
+    },
     orderBy: { id: 'asc' },
     select: {
       id: true,
@@ -407,10 +656,23 @@ export async function grantPromoCreditLot(
 
   const redemption = await tx.campaignRedemption.findUnique({
     where: { id: input.redemptionId },
-    select: { providerId: true, grantTransactionId: true, status: true },
+    select: {
+      providerId: true,
+      grantTransactionId: true,
+      status: true,
+      campaignVersion: { select: { spendPriority: true, adminDeductPolicy: true } },
+    },
   });
   if (!redemption || redemption.providerId !== input.providerId) {
     throw new Error(`Promo credit ledger: redemption ${input.redemptionId} does not belong to provider ${input.providerId}`);
+  }
+  // CAMPAIGN-CREDIT-POLICY-001: the lot carries the policy of the version it
+  // is granted under, read here from that version and nowhere else (the
+  // database checks the same equality on insert). A version without one
+  // grants no credit, so it cannot reach this function legitimately.
+  const { spendPriority, adminDeductPolicy } = redemption.campaignVersion;
+  if (spendPriority === null || adminDeductPolicy === null) {
+    throw new Error(`Promo credit ledger: redemption ${input.redemptionId} was granted under a version without a credit policy`);
   }
   if (redemption.grantTransactionId !== null) {
     throw new PromoCreditWriteConflict(`redemption ${input.redemptionId} (already granted)`);
@@ -431,6 +693,8 @@ export async function grantPromoCreditLot(
       grantedCredits: input.credits,
       remainingCredits: input.credits,
       expiresAt: input.expiresAt,
+      spendPriority,
+      adminDeductPolicy,
       createdAt: input.now,
     },
     select: { id: true },

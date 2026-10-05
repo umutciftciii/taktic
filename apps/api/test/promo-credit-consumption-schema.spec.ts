@@ -67,6 +67,8 @@ async function fixture() {
       grantedCredits: 10,
       remainingCredits: 10,
       expiresAt: new Date(Date.now() + 86_400_000),
+      spendPriority: 'PROMO_FIRST',
+      adminDeductPolicy: 'PAID_ONLY',
     },
   });
   const grant = await grantCredits(ctx.prisma, provider.id, 10);
@@ -85,7 +87,7 @@ async function fixture() {
 
 function consumption(lotId: string, creditTransactionId: string, data: Partial<Prisma.PromoCreditLotConsumptionUncheckedCreateInput> = {}) {
   return ctx.prisma.promoCreditLotConsumption.create({
-    data: { lotId, creditTransactionId, consumedCredits: 3, ...data },
+    data: { lotId, creditTransactionId, consumedCredits: 3, source: 'OFFER_SPEND', ...data },
   });
 }
 

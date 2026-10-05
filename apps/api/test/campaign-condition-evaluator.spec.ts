@@ -46,10 +46,10 @@ function paidPurchase(overrides: Partial<NonNullable<EvaluationFacts['purchase']
 
 function definition(all: CampaignDefinition['conditions']['all'], trigger = 'PACKAGE_PAYMENT_SUCCEEDED'): CampaignDefinition {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger,
     conditions: { all },
-    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30 },
+    benefit: { type: 'PROMO_CREDITS', credits: 10, expiresInDays: 30, creditPolicy: { spendPriority: 'PROMO_FIRST', adminDeductPolicy: 'PAID_ONLY' } },
     limits: { maxRedemptionsPerProvider: 1, maxRedemptionsGlobal: null, maxRedemptionsPerDay: null, budgetCredits: null, maxRevokesPerDay: null },
     window: { startAt: null, endAt: null },
     stackPolicy: 'EXCLUSIVE_CREDIT_BONUS',

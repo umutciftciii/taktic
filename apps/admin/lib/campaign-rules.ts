@@ -20,6 +20,8 @@ export type CampaignFact = (typeof catalog.facts)[number];
 export type CampaignConditionType = keyof typeof catalog.conditions;
 export type ConditionGroup = 'all' | 'any';
 export type CampaignChannelChoice = (typeof catalog.channels.values)[number];
+export type CampaignSpendPriority = (typeof catalog.benefit.creditPolicy.spendPriorities)[number];
+export type CampaignAdminDeductPolicy = (typeof catalog.benefit.creditPolicy.adminDeductPolicies)[number];
 
 type ArgumentSpec =
   | { kind: 'integer'; min: number; max: number }
@@ -129,6 +131,54 @@ export function channelLabel(channel: string | null | undefined): string {
   return CHANNEL_LABELS[channel ?? catalog.channels.default] ?? String(channel);
 }
 
+// CAMPAIGN-CREDIT-POLICY-001. The version's credit policy: two independent axes.
+export const CREDIT_POLICY_GROUP_LABEL = 'Kredi kullanım kuralları';
+export const CREDIT_POLICY_NOTE =
+  'Kurallar bu kampanya sürümünün parçasıdır. Değişiklik yeni sürüm gerektirir; önceden verilen krediler eski sürüm kurallarını korur.';
+
+export const SPEND_PRIORITY_LABELS: Record<string, string> = {
+  PROMO_FIRST: 'Önce kampanya kredisi',
+  PAID_FIRST: 'Önce ücretli kredi',
+};
+
+export const SPEND_PRIORITY_HELP: Record<string, string> = {
+  PROMO_FIRST: 'Teklif gönderirken önce bu kampanyanın kredisi, sonra ücretli kredi kullanılır.',
+  PAID_FIRST: 'Ücretli kredi bitene kadar bu kampanyanın kredisine dokunulmaz; ücretli kredi varken süresi dolabilir.',
+};
+
+export const ADMIN_DEDUCT_POLICY_LABELS: Record<string, string> = {
+  PAID_ONLY: 'Yalnız ücretli krediden',
+  ALLOW_PROMO: 'Kampanya kredisinden de kesilebilir',
+};
+
+export const ADMIN_DEDUCT_POLICY_HELP: Record<string, string> = {
+  PAID_ONLY: 'Yönetici kredi kesintisi bu kampanyanın kredisini azaltamaz.',
+  ALLOW_PROMO: 'Kesinti, harcama önceliği sırasıyla bu kampanyanın kredisine de uygulanabilir.',
+};
+
+export const SPEND_PRIORITY_OPTIONS: Array<{ value: CampaignSpendPriority; label: string; help: string }> =
+  catalog.benefit.creditPolicy.spendPriorities.map((value) => ({
+    value,
+    label: SPEND_PRIORITY_LABELS[value] ?? value,
+    help: SPEND_PRIORITY_HELP[value] ?? '',
+  }));
+
+export const ADMIN_DEDUCT_POLICY_OPTIONS: Array<{ value: CampaignAdminDeductPolicy; label: string; help: string }> =
+  catalog.benefit.creditPolicy.adminDeductPolicies.map((value) => ({
+    value,
+    label: ADMIN_DEDUCT_POLICY_LABELS[value] ?? value,
+    help: ADMIN_DEDUCT_POLICY_HELP[value] ?? '',
+  }));
+
+/** A version's spend priority for a table cell; `—` for a version that grants no credit. */
+export function spendPriorityLabel(value: string | null | undefined): string {
+  return value ? (SPEND_PRIORITY_LABELS[value] ?? value) : '—';
+}
+
+export function adminDeductPolicyLabel(value: string | null | undefined): string {
+  return value ? (ADMIN_DEDUCT_POLICY_LABELS[value] ?? value) : '—';
+}
+
 const RULE_ERROR_FALLBACKS: Record<string, string> = {
   SCHEMA_INVALID: 'Tanım beklenen yapıda değil.',
   UNSUPPORTED_SCHEMA_VERSION: 'Desteklenmeyen şema sürümü.',
@@ -155,6 +205,8 @@ const RULE_ERROR_FALLBACKS: Record<string, string> = {
   STACK_POLICY_INVALID: 'Desteklenmeyen stack politikası.',
   PRIORITY_INVALID: 'Öncelik 1–1000 arası tam sayı olmalı.',
   CHANNEL_INVALID: 'Kanal Web, Mobil veya Tümü olmalı.',
+  CREDIT_POLICY_INVALID: 'Harcama önceliği ve yönetici kredi kesintisi seçilmeli.',
+  CREDIT_POLICY_NOT_APPLICABLE: 'Kredi üretmeyen fayda kredi kullanım kuralı taşıyamaz.',
   // Activation-only refusals (CMP-002 S2B2); the API's own sentence is preferred.
   FACT_SOURCE_UNAVAILABLE: 'Bu olgunun hizmet veren yazıcısı kayıtlı değil; sürüm etkinleştirilemez.',
   LIMIT_BELOW_CONSUMED: 'Limit, kampanyanın zaten tükettiği değerin altında.',
@@ -220,6 +272,9 @@ export type CampaignForm = {
   priority: string;
   /** CMP-006 PR-D. */
   channel: CampaignChannelChoice;
+  /** CAMPAIGN-CREDIT-POLICY-001. */
+  spendPriority: CampaignSpendPriority;
+  adminDeductPolicy: CampaignAdminDeductPolicy;
 };
 
 export function emptyForm(): CampaignForm {
@@ -238,6 +293,8 @@ export function emptyForm(): CampaignForm {
     windowEndAt: '',
     priority: String(catalog.priority.default),
     channel: catalog.channels.default as CampaignChannelChoice,
+    spendPriority: catalog.benefit.creditPolicy.default.spendPriority as CampaignSpendPriority,
+    adminDeductPolicy: catalog.benefit.creditPolicy.default.adminDeductPolicy as CampaignAdminDeductPolicy,
   };
 }
 
@@ -295,11 +352,16 @@ function conditionArguments(row: ConditionRow): Record<string, unknown> {
 }
 
 export type CampaignDefinitionDraft = {
-  schemaVersion: 1;
+  schemaVersion: 2;
   trigger: string;
   eligibility?: { facts: string[] };
   conditions: { all: unknown[] };
-  benefit: { type: string; credits: unknown; expiresInDays: unknown };
+  benefit: {
+    type: string;
+    credits: unknown;
+    expiresInDays: unknown;
+    creditPolicy?: { spendPriority: string; adminDeductPolicy: string };
+  };
   limits: Record<string, unknown>;
   window: { startAt: unknown; endAt: unknown };
   stackPolicy: string;
@@ -332,15 +394,20 @@ export function buildDefinition(form: CampaignForm): CampaignDefinitionDraft {
     all[anyIndex] = { any };
   }
 
+  const benefitType = catalog.benefit.types[0]!;
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     trigger: form.trigger,
     ...(isEligibilityTrigger(form.trigger) ? { eligibility: { facts: form.facts } } : {}),
     conditions: { all },
     benefit: {
-      type: catalog.benefit.types[0]!,
+      type: benefitType,
       credits: numberOrRaw(form.credits),
       expiresInDays: numberOrRaw(form.expiresInDays),
+      // Only a credit-producing benefit carries a policy; the API refuses one anywhere else.
+      ...(benefitProducesCredit(benefitType)
+        ? { creditPolicy: { spendPriority: form.spendPriority, adminDeductPolicy: form.adminDeductPolicy } }
+        : {}),
     },
     limits: {
       maxRedemptionsPerProvider: numberOrRaw(form.maxRedemptionsPerProvider),
@@ -354,6 +421,11 @@ export function buildDefinition(form: CampaignForm): CampaignDefinitionDraft {
     priority: numberOrRaw(form.priority),
     channel: form.channel,
   };
+}
+
+/** Whether a benefit type grants credit — and therefore shows and sends the credit policy. */
+export function benefitProducesCredit(type: string): boolean {
+  return (catalog.benefit.creditProducingTypes as readonly string[]).includes(type);
 }
 
 function stringOf(value: unknown): string {
@@ -410,6 +482,16 @@ export function formFromDefinition(definition: unknown): CampaignForm {
   const benefit = (record.benefit ?? {}) as Record<string, unknown>;
   form.credits = stringOf(benefit.credits);
   form.expiresInDays = stringOf(benefit.expiresInDays);
+  const policy = (benefit.creditPolicy ?? {}) as Record<string, unknown>;
+  if (typeof policy.spendPriority === 'string' && (catalog.benefit.creditPolicy.spendPriorities as readonly string[]).includes(policy.spendPriority)) {
+    form.spendPriority = policy.spendPriority as CampaignSpendPriority;
+  }
+  if (
+    typeof policy.adminDeductPolicy === 'string' &&
+    (catalog.benefit.creditPolicy.adminDeductPolicies as readonly string[]).includes(policy.adminDeductPolicy)
+  ) {
+    form.adminDeductPolicy = policy.adminDeductPolicy as CampaignAdminDeductPolicy;
+  }
   const limits = (record.limits ?? {}) as Record<string, unknown>;
   form.maxRedemptionsPerProvider = stringOf(limits.maxRedemptionsPerProvider);
   form.maxRedemptionsGlobal = stringOf(limits.maxRedemptionsGlobal);
@@ -432,6 +514,7 @@ export function formFromDefinition(definition: unknown): CampaignForm {
 export type ErrorTarget =
   | { field: 'form' }
   | { field: 'trigger' | 'facts' | 'conditions' | 'credits' | 'expiresInDays' | 'priority' | 'channel' }
+  | { field: 'spendPriority' | 'adminDeductPolicy' | 'creditPolicy' }
   | { field: 'maxRedemptionsPerProvider' | 'maxRedemptionsGlobal' | 'maxRedemptionsPerDay' | 'budgetCredits' | 'maxRevokesPerDay' }
   | { field: 'windowStartAt' | 'windowEndAt' }
   | { field: 'condition'; conditionId: string; argument: string | null };
@@ -448,6 +531,9 @@ export function errorFieldOf(path: string, form: CampaignForm): ErrorTarget {
   if (path === 'benefit.expiresInDays') return { field: 'expiresInDays' };
   if (path === 'priority') return { field: 'priority' };
   if (path === 'channel') return { field: 'channel' };
+  if (path === 'benefit.creditPolicy.spendPriority') return { field: 'spendPriority' };
+  if (path === 'benefit.creditPolicy.adminDeductPolicy') return { field: 'adminDeductPolicy' };
+  if (path.startsWith('benefit.creditPolicy')) return { field: 'creditPolicy' };
   const limit = /^limits\.(maxRedemptionsPerProvider|maxRedemptionsGlobal|maxRedemptionsPerDay|budgetCredits|maxRevokesPerDay)$/.exec(path);
   if (limit) return { field: limit[1] as 'maxRedemptionsPerProvider' };
   if (path === 'window.startAt') return { field: 'windowStartAt' };
