@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, ServiceRequestStatus } from '@prisma/client';
+import { BackgroundRuns, type BackgroundWorkOwner } from '../../common/background-work';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { deliverPendingIntents, IntentDeliveryResult, intentRow } from './notification-intents';
@@ -34,7 +35,7 @@ const DEFAULT_DELIVERY_LIMIT = 200;
 export type ReviewInvitationOutboxResult = IntentDeliveryResult;
 
 @Injectable()
-export class ReviewInvitationOutbox implements OnModuleDestroy {
+export class ReviewInvitationOutbox implements OnModuleDestroy, BackgroundWorkOwner {
   private readonly logger = new Logger(ReviewInvitationOutbox.name);
 
   /**
@@ -46,6 +47,9 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
    * caller in *this* process can rely on.
    */
   private inFlight: Promise<ReviewInvitationOutboxResult> | null = null;
+
+  /** Every `deliverSoon` call not yet finished, queued ones included. */
+  private readonly background = new BackgroundRuns();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -165,8 +169,14 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
    * it is just a slower path than finishing.
    */
   async onModuleDestroy(): Promise<void> {
-    while (this.inFlight) {
-      await this.inFlight.catch(() => undefined);
+    await this.whenIdle();
+  }
+
+  /** Resolves once no sweep is running or queued in this process. */
+  async whenIdle(): Promise<void> {
+    while (this.background.busy || this.inFlight) {
+      await this.background.whenIdle();
+      await this.inFlight?.catch(() => undefined);
     }
   }
 
@@ -178,11 +188,13 @@ export class ReviewInvitationOutbox implements OnModuleDestroy {
    * and the next sweep, on any instance, picks it up.
    */
   deliverSoon(): void {
-    void this.deliverPending().catch((error: unknown) => {
-      this.logger.error(
-        'Review invitation delivery failed',
-        error instanceof Error ? error.stack : String(error),
-      );
-    });
+    this.background.start(() =>
+      this.deliverPending().catch((error: unknown) => {
+        this.logger.error(
+          'Review invitation delivery failed',
+          error instanceof Error ? error.stack : String(error),
+        );
+      }),
+    );
   }
 }

@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, ServiceRequestStatus } from '@prisma/client';
+import { BackgroundRuns, type BackgroundWorkOwner } from '../../common/background-work';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { deliverPendingIntents, IntentDeliveryResult, intentRow } from './notification-intents';
@@ -35,7 +36,7 @@ const DEFAULT_DELIVERY_LIMIT = 200;
 export type RequestPublishOutboxResult = IntentDeliveryResult;
 
 @Injectable()
-export class RequestPublishOutbox implements OnModuleDestroy {
+export class RequestPublishOutbox implements OnModuleDestroy, BackgroundWorkOwner {
   private readonly logger = new Logger(RequestPublishOutbox.name);
 
   /**
@@ -47,6 +48,9 @@ export class RequestPublishOutbox implements OnModuleDestroy {
    * caller in *this* process can rely on.
    */
   private inFlight: Promise<RequestPublishOutboxResult> | null = null;
+
+  /** Every `deliverSoon` call not yet finished, queued ones included. */
+  private readonly background = new BackgroundRuns();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -178,8 +182,14 @@ export class RequestPublishOutbox implements OnModuleDestroy {
    * it is just a slower path than finishing.
    */
   async onModuleDestroy(): Promise<void> {
-    while (this.inFlight) {
-      await this.inFlight.catch(() => undefined);
+    await this.whenIdle();
+  }
+
+  /** Resolves once no sweep is running or queued in this process. */
+  async whenIdle(): Promise<void> {
+    while (this.background.busy || this.inFlight) {
+      await this.background.whenIdle();
+      await this.inFlight?.catch(() => undefined);
     }
   }
 
@@ -191,11 +201,13 @@ export class RequestPublishOutbox implements OnModuleDestroy {
    * and the next sweep, on any instance, picks them up.
    */
   deliverSoon(): void {
-    void this.deliverPending().catch((error: unknown) => {
-      this.logger.error(
-        'Request publish delivery failed',
-        error instanceof Error ? error.stack : String(error),
-      );
-    });
+    this.background.start(() =>
+      this.deliverPending().catch((error: unknown) => {
+        this.logger.error(
+          'Request publish delivery failed',
+          error instanceof Error ? error.stack : String(error),
+        );
+      }),
+    );
   }
 }

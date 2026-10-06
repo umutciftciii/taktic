@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { BackgroundRuns, type BackgroundWorkOwner } from '../../common/background-work';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { deliverPendingIntents, IntentDeliveryResult, intentRow } from './notification-intents';
@@ -111,11 +112,14 @@ export async function enqueueRequestCancellationNotices(
 }
 
 @Injectable()
-export class RequestCancellationOutbox implements OnModuleDestroy {
+export class RequestCancellationOutbox implements OnModuleDestroy, BackgroundWorkOwner {
   private readonly logger = new Logger(RequestCancellationOutbox.name);
 
   /** The sweep currently running in this process, if any (see ReviewInvitationOutbox). */
   private inFlight: Promise<IntentDeliveryResult> | null = null;
+
+  /** Every `deliverSoon` call not yet finished, queued ones included. */
+  private readonly background = new BackgroundRuns();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -148,18 +152,26 @@ export class RequestCancellationOutbox implements OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
-    while (this.inFlight) {
-      await this.inFlight.catch(() => undefined);
+    await this.whenIdle();
+  }
+
+  /** Resolves once no sweep is running or queued in this process. */
+  async whenIdle(): Promise<void> {
+    while (this.background.busy || this.inFlight) {
+      await this.background.whenIdle();
+      await this.inFlight?.catch(() => undefined);
     }
   }
 
   /** Fire after a commit; never awaited by a request handler. */
   deliverSoon(): void {
-    void this.deliverPending().catch((error: unknown) => {
-      this.logger.error(
-        'Request cancellation notice delivery failed',
-        error instanceof Error ? error.stack : String(error),
-      );
-    });
+    this.background.start(() =>
+      this.deliverPending().catch((error: unknown) => {
+        this.logger.error(
+          'Request cancellation notice delivery failed',
+          error instanceof Error ? error.stack : String(error),
+        );
+      }),
+    );
   }
 }

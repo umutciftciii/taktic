@@ -1,5 +1,6 @@
-import { ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger } from '@nestjs/common';
+import { ConflictException, HttpException, HttpStatus, Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Prisma, RequestDraftFormType } from '@prisma/client';
+import { BackgroundRuns, type BackgroundWorkOwner } from '../../common/background-work';
 import { PrismaService } from '../../prisma/prisma.service';
 import { RequestIdentityService } from '../auth/request-identity.service';
 import { RequestDraftPayload } from './dto/create-request-draft.dto';
@@ -25,11 +26,13 @@ function liveWhere(now: Date) {
 }
 
 @Injectable()
-export class RequestDraftsService {
+export class RequestDraftsService implements OnModuleDestroy, BackgroundWorkOwner {
   private readonly logger = new Logger(RequestDraftsService.name);
   /** Overridable in tests; the env-derived default otherwise. */
   maxActive = REQUEST_DRAFT_MAX_ACTIVE;
   private lastSweepAt = 0;
+  /** The expiry sweep a save schedules and nobody awaits. */
+  private readonly background = new BackgroundRuns();
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
@@ -99,7 +102,7 @@ export class RequestDraftsService {
       });
     });
 
-    setImmediate(() => void this.sweepExpired().catch((error) => this.logger.warn(`draft sweep failed: ${String(error)}`)));
+    this.sweepSoon();
     return { token, expiresAt };
   }
 
@@ -155,6 +158,24 @@ export class RequestDraftsService {
     if (!row || !sameKey(row, key)) return;
     if (row.expectedUserId !== null && row.expectedUserId !== customerId) return;
     await tx.requestDraft.update({ where: { id: row.id }, data: { consumedAt: now, userId: customerId } });
+  }
+
+  /** Waits for a sweep a save scheduled; on shutdown, and by the test harness before it empties the database. */
+  whenIdle(): Promise<void> {
+    return this.background.whenIdle();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.whenIdle();
+  }
+
+  /** After the save's response, on a later turn of the event loop, never awaited by the request. */
+  private sweepSoon(): void {
+    this.background.start(() =>
+      new Promise<void>((resolve) => setImmediate(resolve))
+        .then(() => this.sweepExpired())
+        .catch((error) => this.logger.warn(`draft sweep failed: ${String(error)}`)),
+    );
   }
 
   /**
