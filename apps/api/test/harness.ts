@@ -1,5 +1,6 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
+import { ModulesContainer } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { AdminPermission, BusinessRegistrationType, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, SourceChannel, UserRole } from '@prisma/client';
@@ -27,6 +28,7 @@ import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-ent
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { type BackgroundWorkOwner, isBackgroundWorkOwner } from '../src/common/background-work';
 
 /**
  * Stands in for the outbound transport so tests can read what the application
@@ -179,6 +181,16 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
 
   await app.init();
 
+  // Closing waits for the background work first, so a sweep is never cut off
+  // under a client that is going away and nothing of this app outlives it.
+  liveApps.add(app);
+  const close = app.close.bind(app);
+  app.close = async () => {
+    await drainBackgroundWork(app);
+    liveApps.delete(app);
+    await close();
+  };
+
   return {
     app,
     prisma: app.get(PrismaService),
@@ -197,8 +209,47 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
  * halfway through. Clearing the counter between cases keeps the limiter itself
  * exactly as it is in production; only the accumulated history goes.
  */
+/**
+ * Every provider in `app` that can start work nobody awaits — see
+ * {@link BackgroundWorkOwner}. Found by walking the module graph rather than
+ * listed by hand, so a new owner is drained without anybody remembering to add
+ * it here.
+ */
+export function backgroundWorkOwners(app: INestApplication): BackgroundWorkOwner[] {
+  const owners = new Set<BackgroundWorkOwner>();
+  for (const module of app.get(ModulesContainer).values()) {
+    for (const wrapper of module.providers.values()) {
+      if (isBackgroundWorkOwner(wrapper.instance)) {
+        owners.add(wrapper.instance);
+      }
+    }
+  }
+  return [...owners];
+}
+
+/**
+ * Waits until no background work `app` started is still running. A run that
+ * finishing starts another (none does today) is waited for too.
+ */
+export async function drainBackgroundWork(app: INestApplication): Promise<void> {
+  const owners = backgroundWorkOwners(app);
+  await Promise.all(owners.map((owner) => owner.whenIdle()));
+}
+
+/**
+ * The applications this worker has booted and not yet closed — whose
+ * background work `resetDatabase` must wait for before it touches a table.
+ */
+const liveApps = new Set<INestApplication>();
+
 export function resetAuthThrottle(app: INestApplication): void {
   const storage = app.get<ThrottlerStorageService>(ThrottlerStorage, { strict: false });
+  // Each counter has expiry timers that look the counter up when they fire;
+  // clearing the counters without them leaves timers that throw a TypeError
+  // into whichever case is running a minute later. The storage's own shutdown
+  // hook is the public way to cancel them.
+  storage.onApplicationShutdown();
+  (storage as unknown as { timeoutIds: Map<string, unknown[]> }).timeoutIds.clear();
   storage.storage.clear();
 }
 
@@ -324,23 +375,33 @@ const TRUNCATED_TABLES = [
 /**
  * Empties every table between cases.
  *
- * The TRUNCATE takes an exclusive lock on each table in turn, so a query the
- * app's own background work issues at that moment (a cron tick, an outbox
- * pass) can close a lock cycle with it, and PostgreSQL aborts one side with a
- * deadlock (40P01). The abort rolls the whole TRUNCATE back, so trying again is
- * safe; a few attempts with a short pause is enough for the other side to
- * finish. Anything else is still thrown at once.
+ * First it waits for every live application's background work
+ * (TEST-FLAKE-003). A case's request handler may start an outbox sweep after
+ * its commit and return before the sweep is done; a TRUNCATE issued while that
+ * sweep was still reading used to deadlock with it (40P01) — the TRUNCATE locks
+ * its tables in list order, a multi-table SELECT such as the publish outbox's
+ * audience query locks them in its own, and each ended up waiting on the
+ * other. With the drain the two never overlap, so there is nothing to retry.
+ *
+ * A 40P01 here therefore means some background work the harness does not know
+ * about is still talking to the database, and it is reported as exactly that
+ * rather than retried away.
  */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
+  await Promise.all([...liveApps].map((app) => drainBackgroundWork(app)));
+
   const list = TRUNCATED_TABLES.map((table) => `"public"."${table}"`).join(', ');
-  for (let attempt = 1; ; attempt += 1) {
-    try {
-      await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
-      return;
-    } catch (error) {
-      if (attempt >= 4 || !isDeadlock(error)) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 100 * attempt));
+  try {
+    await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
+  } catch (error) {
+    if (isDeadlock(error)) {
+      throw new Error(
+        'resetDatabase deadlocked with another database session. Background work that is not a ' +
+          'BackgroundWorkOwner (src/common/background-work.ts) is still running from an earlier case.',
+        { cause: error },
+      );
     }
+    throw error;
   }
 }
 

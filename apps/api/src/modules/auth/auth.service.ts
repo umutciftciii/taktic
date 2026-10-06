@@ -8,7 +8,6 @@ import {
 import { AdminPermission, CustomerOrigin, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import {
-  assertEmailFreeForAccountKind,
   conflictsWithAccountKind,
   crossRoleEmailConflictException,
   findAccountByEmail,
@@ -287,23 +286,16 @@ export class AuthService {
     const phone = normalizeOptionalPhone(dto.phone);
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    // Asked before the write only so the visitor gets the rule's own sentence
-    // rather than a duplicate-account one. It is not what enforces the rule —
-    // two simultaneous registrations can both pass it — which is why the catch
-    // below asks the same question again of the account that actually won.
-    await assertEmailFreeForAccountKind(this.prisma, email, role);
+    // The pre-read is not what enforces anything — two simultaneous
+    // registrations can both pass it; the unique indexes do. Every refusal,
+    // from here or from the insert below, goes through refuseIdentityConflict
+    // so the loser's answer depends only on who holds the address once the
+    // race is decided, never on which read ran before the winner committed.
     try {
       await this.assertContactFree(email, phone);
     } catch (error) {
-      // The two reads above are not one snapshot: a cross-role registration
-      // for the same address can commit between them, and this second read
-      // would then answer with the generic identity refusal instead of the
-      // rule's own sentence. When the address is what collided, ask the
-      // cross-role question again of the account that is now there — the
-      // same re-read the unique-violation branch below does. (Seen as a CI
-      // race in account-email-role-conflict.spec.ts; CMP-006 PR-C.1.)
-      if (error instanceof AccountIdentityConflictException && error.field !== 'phone') {
-        await assertEmailFreeForAccountKind(this.prisma, email, role);
+      if (error instanceof AccountIdentityConflictException) {
+        return this.refuseIdentityConflict(email, role, error);
       }
       throw error;
     }
@@ -345,26 +337,46 @@ export class AuthService {
     } catch (error) {
       // The unique indexes on User.phone and User.email are what actually keep
       // one number and one address to one account, so this branch is where a
-      // lost race lands. Whoever won it is committed by now, so reading them
-      // back is the same question the pre-check asked — and it gives the loser
-      // of a cross-role race the same sentence as the caller who was simply
-      // second.
+      // lost race lands. Whoever won it is committed by now. Which index the
+      // violation names is a physical detail — a row breaking both reports
+      // whichever PostgreSQL checks first — so it only picks the fallback;
+      // the cross-role question is asked either way.
       const field = uniqueViolationField(error);
-      if (field === 'phone') {
-        throw new AccountIdentityConflictException('phone', phone);
+      if (field === null) {
+        throw error;
       }
 
-      if (field === 'email') {
-        const winner = await findAccountByEmail(this.prisma, email);
-        if (winner && conflictsWithAccountKind(winner, role)) {
-          throw crossRoleEmailConflictException();
-        }
-
-        throw new AccountIdentityConflictException('email', email);
-      }
-
-      throw error;
+      return this.refuseIdentityConflict(
+        email,
+        role,
+        new AccountIdentityConflictException(field, field === 'phone' ? phone : email),
+      );
     }
+  }
+
+  /**
+   * The one verdict for a registration that collided with an existing account
+   * (TEST-FLAKE-001).
+   *
+   * Asked of the account that holds the address *now*, after the collision:
+   * if it is the other kind of account, the answer is the cross-role rule's
+   * own sentence; otherwise the identity refusal the caller already built.
+   * Cross-role wins over the identity refusal so a visitor who lost a race gets
+   * exactly what they would have got had the winner simply been there first,
+   * whichever of the pre-read or the unique index noticed the collision and
+   * whichever field it noticed it on.
+   */
+  private async refuseIdentityConflict(
+    email: string,
+    role: MarketplaceAccountKind,
+    fallback: AccountIdentityConflictException,
+  ): Promise<never> {
+    const holder = await findAccountByEmail(this.prisma, email);
+    if (holder && conflictsWithAccountKind(holder, role)) {
+      throw crossRoleEmailConflictException();
+    }
+
+    throw fallback;
   }
 
   /**

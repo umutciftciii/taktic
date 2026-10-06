@@ -1,7 +1,8 @@
-import { CustomerOrigin, UserRole } from '@prisma/client';
+import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CROSS_ROLE_EMAIL_CONFLICT_CODE } from '../src/common/account-email';
+import { CUSTOMER_IDENTITY_CONFLICT_CODE } from '../src/common/account-identity';
 import { AuthService } from '../src/modules/auth/auth.service';
 import { ProviderClaimRateLimiter } from '../src/modules/provider-claim/provider-claim.rate-limiter';
 import {
@@ -268,7 +269,10 @@ describe('two simultaneous cross-role registrations cannot both win', () => {
     expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
     expect(loser.body.message).toBe(CONFLICT_MESSAGE);
 
-    expect(await countUsersFor(CONTESTED)).toBe(1);
+    // One account under the address, and it is the winner's.
+    const stored = await ctx.prisma.user.findMany({ where: { email: CONTESTED } });
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.role).toBe(asCustomer.status === 201 ? UserRole.CUSTOMER : UserRole.PROVIDER);
   });
 
   /*
@@ -280,7 +284,7 @@ describe('two simultaneous cross-role registrations cannot both win', () => {
   it.each([
     ['customer wins, provider loses', UserRole.CUSTOMER, registerProvider],
     ['provider wins, customer loses', UserRole.PROVIDER, registerCustomer],
-  ] as const)('%s between the two pre-reads: still EMAIL_ROLE_CONFLICT', async (_label, winnerRole, loserRegisters) => {
+  ] as const)('%s before the contact pre-read: still EMAIL_ROLE_CONFLICT', async (_label, winnerRole, loserRegisters) => {
     const auth = ctx.app.get(AuthService) as unknown as { assertContactFree: (email: string, phone: string | null) => Promise<void> };
     const original = auth.assertContactFree.bind(auth);
     const spy = vi.spyOn(auth, 'assertContactFree').mockImplementationOnce(async (email, phone) => {
@@ -299,6 +303,124 @@ describe('two simultaneous cross-role registrations cannot both win', () => {
     }
   });
 
+  /*
+   * The same race when the loser's number is also taken (TEST-FLAKE-001).
+   *
+   * The answer must be a function of who holds the address once the race is
+   * decided, not of which read happened to run before the winner committed.
+   * Had the winner been there first, the loser would have read the rule's own
+   * sentence; the race must not turn that into the generic identity refusal,
+   * whether the collision surfaces in the contact pre-read or as the unique
+   * index's violation.
+   */
+  describe('when the loser’s number belongs to a third account', () => {
+    const TAKEN_PHONE = '05554440009';
+
+    async function seedPhoneHolder() {
+      await createUser(ctx.prisma, {
+        role: UserRole.CUSTOMER,
+        email: 'ucuncu@example.test',
+        phone: TAKEN_PHONE,
+        customerOrigin: CustomerOrigin.REGISTERED,
+      });
+    }
+
+    function spyOnContactCheck() {
+      const auth = ctx.app.get(AuthService) as unknown as {
+        assertContactFree: (email: string, phone: string | null) => Promise<void>;
+      };
+      return { auth, original: auth.assertContactFree.bind(auth) };
+    }
+
+    it.each([
+      ['customer wins, provider loses', UserRole.CUSTOMER, registerProvider],
+      ['provider wins, customer loses', UserRole.PROVIDER, registerCustomer],
+    ] as const)('%s before the contact read: still EMAIL_ROLE_CONFLICT', async (_label, winnerRole, loserRegisters) => {
+      await seedPhoneHolder();
+      const { auth, original } = spyOnContactCheck();
+      const spy = vi.spyOn(auth, 'assertContactFree').mockImplementationOnce(async (email, phone) => {
+        await createUser(ctx.prisma, { role: winnerRole, email: CONTESTED, phone: '05553330001' });
+        return original(email, phone);
+      });
+      try {
+        const loser = await loserRegisters(CONTESTED, { phone: TAKEN_PHONE });
+        expect(loser.status).toBe(409);
+        expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
+        expect(loser.body.message).toBe(CONFLICT_MESSAGE);
+        expect(spy).toHaveBeenCalledTimes(1);
+        expect(await countUsersFor(CONTESTED)).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it.each([
+      ['customer wins, provider loses', UserRole.CUSTOMER, registerProvider],
+      ['provider wins, customer loses', UserRole.PROVIDER, registerCustomer],
+    ] as const)('%s after both reads: still EMAIL_ROLE_CONFLICT from the unique index', async (_label, winnerRole, loserRegisters) => {
+      await seedPhoneHolder();
+      const { auth } = spyOnContactCheck();
+      // Both pre-reads passed before the winner committed: only the insert's
+      // unique violation is left to notice, on whichever index it reports.
+      const spy = vi.spyOn(auth, 'assertContactFree').mockImplementationOnce(async () => {
+        await createUser(ctx.prisma, { role: winnerRole, email: CONTESTED, phone: '05553330001' });
+      });
+      try {
+        const loser = await loserRegisters(CONTESTED, { phone: TAKEN_PHONE });
+        expect(loser.status).toBe(409);
+        expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
+        expect(loser.body.message).toBe(CONFLICT_MESSAGE);
+        expect(await countUsersFor(CONTESTED)).toBe(1);
+        expect(await ctx.prisma.user.count({ where: { phone: { contains: '5554440009' } } })).toBe(1);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    /*
+     * Which index PostgreSQL names when a row breaks two of them is a physical
+     * detail (index creation order), not part of the rule. The verdict must not
+     * depend on it: a violation reported on the phone index still gets the
+     * cross-role sentence when the address now belongs to the other kind.
+     */
+    it.each([
+      ['customer wins, provider loses', UserRole.CUSTOMER, registerProvider],
+      ['provider wins, customer loses', UserRole.PROVIDER, registerCustomer],
+    ] as const)('%s with the violation reported on the phone index: still EMAIL_ROLE_CONFLICT', async (_label, winnerRole, loserRegisters) => {
+      const { auth } = spyOnContactCheck();
+      const contactSpy = vi.spyOn(auth, 'assertContactFree').mockImplementationOnce(async () => {});
+      const createSpy = vi.spyOn(ctx.prisma.user, 'create').mockImplementationOnce((async () => {
+        await createUser(ctx.prisma, { role: winnerRole, email: CONTESTED, phone: '05553330001' });
+        throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed on the fields: (`phone`)', {
+          code: 'P2002',
+          clientVersion: Prisma.prismaVersion.client,
+          meta: { modelName: 'User', target: ['phone'] },
+        });
+      }) as never);
+      try {
+        const loser = await loserRegisters(CONTESTED, { phone: TAKEN_PHONE });
+        expect(loser.status).toBe(409);
+        expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
+        // Twice: the forced insert, and the winner it commits inside it.
+        expect(createSpy).toHaveBeenCalledTimes(2);
+        expect(await countUsersFor(CONTESTED)).toBe(1);
+      } finally {
+        createSpy.mockRestore();
+        contactSpy.mockRestore();
+      }
+    });
+
+    it('answers the same when the winner was simply there first', async () => {
+      await seedPhoneHolder();
+      await createUser(ctx.prisma, { role: UserRole.PROVIDER, email: CONTESTED, phone: '05553330001' });
+
+      const loser = await registerCustomer(CONTESTED, { phone: TAKEN_PHONE });
+
+      expect(loser.status).toBe(409);
+      expect(loser.body.code).toBe(CROSS_ROLE_EMAIL_CONFLICT_CODE);
+    });
+  });
+
   it('lets exactly one of many simultaneous attempts through', async () => {
     const attempts = await Promise.all([
       registerCustomer(CONTESTED, { phone: '05552220001' }),
@@ -307,8 +429,23 @@ describe('two simultaneous cross-role registrations cannot both win', () => {
       registerProvider(CONTESTED, { phone: '05552220004' }),
     ]);
 
-    expect(attempts.filter((attempt) => attempt.status === 201)).toHaveLength(1);
-    expect(await countUsersFor(CONTESTED)).toBe(1);
+    const roles = [UserRole.CUSTOMER, UserRole.PROVIDER, UserRole.CUSTOMER, UserRole.PROVIDER];
+    const winners = attempts.flatMap((attempt, index) => (attempt.status === 201 ? [roles[index]] : []));
+    expect(winners).toHaveLength(1);
+
+    // Every loser gets the answer its relation to the winner calls for: the
+    // rule's own sentence across kinds, the ordinary duplicate refusal within
+    // one — never a status or code that depends on how the race interleaved.
+    attempts.forEach((attempt, index) => {
+      if (attempt.status === 201) return;
+      expect(attempt.status).toBe(409);
+      expect(attempt.body.code).toBe(
+        roles[index] === winners[0] ? CUSTOMER_IDENTITY_CONFLICT_CODE : CROSS_ROLE_EMAIL_CONFLICT_CODE,
+      );
+    });
+
+    const stored = await ctx.prisma.user.findMany({ where: { email: CONTESTED } });
+    expect(stored.map((user) => user.role)).toEqual([winners[0]]);
   });
 });
 
