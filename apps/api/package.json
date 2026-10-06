@@ -9,7 +9,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "backfill:display-numbers": "tsx src/scripts/backfill-display-numbers.ts",
-    "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts"
+    "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts",
+    "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

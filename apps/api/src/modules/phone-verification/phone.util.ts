@@ -47,10 +47,28 @@ export function normalizePhoneNumber(value: string): string {
   throw new BadRequestException('Phone number format is not supported');
 }
 
+/**
+ * The one shape a stored number may have: E.164, a plus and 8 to 15 digits
+ * with no leading zero.
+ *
+ * E.164 allows at most 15 digits; below 8 is not a reachable subscriber number
+ * in any plan we care about. This is exactly the set of values
+ * {@link normalizePhoneNumber} can return, and every value in it is returned
+ * unchanged — which is what lets `User_phone_e164_check` (migration
+ * `user_phone_e164_check`) state the same rule in SQL without a second
+ * normalisation algorithm: the database only refuses what this function would
+ * never produce. The source is written with `[0-9]` rather than `\d` so the
+ * migration can carry it byte for byte; a test holds the two together.
+ */
+export const CANONICAL_PHONE_PATTERN = /^\+[1-9][0-9]{7,14}$/;
+
+/** Whether `value` is already in the one stored form. */
+export function isCanonicalPhone(value: string): boolean {
+  return CANONICAL_PHONE_PATTERN.test(value);
+}
+
 function assertPlausible(e164: string): string {
-  // E.164 allows at most 15 digits; below 8 is not a reachable subscriber
-  // number in any plan we care about.
-  if (!/^\+[1-9]\d{7,14}$/.test(e164)) {
+  if (!isCanonicalPhone(e164)) {
     throw new BadRequestException('Phone number format is not supported');
   }
 

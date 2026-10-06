@@ -234,8 +234,8 @@ describe('provider phone proof — the happy path', () => {
     const after = await proofs(user.id);
     expect(after.phoneVerifiedAt).not.toBeNull();
     expect(after.emailVerifiedAt).toBeNull();
-    // The stored spelling is untouched: the proof is about the number, not its format.
-    expect(after.phone).toBe(PROVIDER_PHONE);
+    // The stored number is untouched: the proof records a fact about it.
+    expect(after.phone).toBe(PROVIDER_PHONE_E164);
 
     expect((await proofs(bystander.id)).phoneVerifiedAt).toBeNull();
     expect((await ctx.prisma.phoneVerification.findUniqueOrThrow({ where: { id: row.id } })).consumedAt).not.toBeNull();

@@ -85,7 +85,8 @@ describe('GET /account/profile', () => {
       id: customer.id,
       name: 'Ayşe Yılmaz',
       email: customer.email,
-      phone: '05551110001',
+      // Stored, and so answered, in the one form the column holds.
+      phone: '+905551110001',
       city: null,
       hasPassword: true,
     });
@@ -155,7 +156,7 @@ describe('PATCH /account/profile', () => {
 
     const untouched = await storedUser(other.id);
     expect(untouched.name).toBe('Başkası');
-    expect(untouched.phone).toBe('05559990000');
+    expect(untouched.phone).toBe('+905559990000');
   });
 
   it('refuses a provider, an operator and a caller with no session', async () => {
@@ -224,7 +225,7 @@ describe('PATCH /account/profile', () => {
         .expect(400);
     }
 
-    expect((await storedUser(customer.id)).phone).toBe('05551110001');
+    expect((await storedUser(customer.id)).phone).toBe('+905551110001');
   });
 
   it('refuses a city that is not a province', async () => {
@@ -276,9 +277,9 @@ describe('PATCH /account/profile', () => {
       phone: '05327778899',
     });
 
-    // The same number, written the way this screen writes it. The other row
-    // stores the national spelling, so only a check that knows they are one
-    // number catches this.
+    // The same number, in a different spelling from the one the fixture was
+    // written in. Both canonicalise to one E.164 value, which the unique index
+    // on User.phone then refuses to hold twice.
     const response = await request(ctx.server)
       .patch('/account/profile')
       .set('Cookie', cookie)
@@ -286,7 +287,7 @@ describe('PATCH /account/profile', () => {
       .expect(409);
 
     expect(response.body.message).toContain('başka bir hesaba ait');
-    expect((await storedUser(customer.id)).phone).toBe('05551110001');
+    expect((await storedUser(customer.id)).phone).toBe('+905551110001');
   });
 
   it('stays the contact source for a request created afterwards', async () => {

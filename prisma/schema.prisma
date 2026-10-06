@@ -398,6 +398,18 @@ model User {
   /// Nullable, and several rows use that: an account may exist without an
   /// address, and PostgreSQL treats NULLs as distinct in a unique index.
   email           String?         @unique
+  /// The account's telephone number, stored only in canonical E.164 —
+  /// `normalizePhoneNumber`'s output — which a CHECK constraint enforces
+  /// (`User_phone_e164_check`, added by the migration `user_phone_e164_check`).
+  ///
+  /// The same rule as `email` above, for the number: the unique index alone is
+  /// byte-exact and kept `0532…` and `+90532…` apart, so one number could hold
+  /// several accounts. With a single storable form the index is the guarantee,
+  /// race included. Every write path canonicalises first (AUTH-REG-001); a
+  /// CHECK violation therefore means a path that forgot, and is left to fail
+  /// loudly rather than being reported as a conflict.
+  ///
+  /// Nullable: an account may exist without a number, and several do.
   phone           String?         @unique
   name            String?
   role            UserRole

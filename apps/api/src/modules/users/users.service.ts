@@ -2,12 +2,18 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UserRole } from '@prisma/client';
-import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
+import { normalizeAccountEmail } from '../../common/account-email';
+import {
+  canonicalAccountPhone,
+  findAccountByPhone,
+  uniqueViolationField,
+} from '../../common/account-identity';
 import { AuditPageQueryDto } from '../../common/admin-audit';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -29,6 +35,33 @@ import { UpdateUserStatusDto } from './dto/update-user-status.dto';
  * what it lacks is the account kind the target demands.
  */
 export const SUPER_ADMIN_TARGET_REQUIRES_SUPER_ADMIN = 'SUPER_ADMIN_TARGET_REQUIRES_SUPER_ADMIN';
+
+/**
+ * The refusals for a staff account whose address or number another account
+ * already holds (AUTH-REG-002). Machine-readable so the admin screen can say
+ * which field to change without parsing a sentence; the sentences are the ones
+ * this route has always given. Unlike the marketplace's identity refusal these
+ * may name the field — the caller is an operator with ADMIN_USERS_CREATE, who
+ * can read every account anyway.
+ *
+ * The same answer comes from the pre-read and from the unique index, so the
+ * loser of two simultaneous creates is told exactly what it would have been
+ * told had the winner been there first.
+ */
+export const ADMIN_USER_EMAIL_CONFLICT = 'ADMIN_USER_EMAIL_CONFLICT';
+export const ADMIN_USER_PHONE_CONFLICT = 'ADMIN_USER_PHONE_CONFLICT';
+
+function adminUserConflictException(field: 'email' | 'phone'): ConflictException {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: field === 'phone' ? ADMIN_USER_PHONE_CONFLICT : ADMIN_USER_EMAIL_CONFLICT,
+    message:
+      field === 'phone'
+        ? 'Bu telefon başka bir kullanıcıya ait.'
+        : 'Bu e-posta başka bir kullanıcıya ait.',
+  });
+}
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -56,7 +89,9 @@ export class UsersService {
 
   async create(dto: CreateUserDto, actor: AuthUser) {
     const name = dto.name.trim();
-    const email = dto.email.trim().toLowerCase();
+    // The one normalisation an address goes through anywhere — the form
+    // `User_email_normalized_check` admits.
+    const email = normalizeAccountEmail(dto.email) ?? '';
     // E.164 like every other path that writes User.phone, so the unique index
     // is a rule about numbers rather than about spellings.
     const phone = dto.phone && dto.phone.trim() ? canonicalAccountPhone(dto.phone) : null;
@@ -70,14 +105,13 @@ export class UsersService {
       select: { id: true },
     });
     if (existingEmail) {
-      throw new ConflictException('Bu e-posta başka bir kullanıcıya ait.');
+      throw adminUserConflictException('email');
     }
 
     if (phone) {
-      // Widened to the older spellings rows may still carry.
       const existingPhone = await findAccountByPhone(this.prisma, phone);
       if (existingPhone) {
-        throw new ConflictException('Bu telefon başka bir kullanıcıya ait.');
+        throw adminUserConflictException('phone');
       }
     }
 
@@ -138,14 +172,13 @@ export class UsersService {
         expiresAt: result.invite.expiresAt,
       };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        const target = Array.isArray(error.meta?.target)
-          ? error.meta.target.join(',')
-          : String(error.meta?.target ?? '');
-        if (target.includes('phone')) {
-          throw new ConflictException('Bu telefon başka bir kullanıcıya ait.');
-        }
-        throw new ConflictException('Bu e-posta başka bir kullanıcıya ait.');
+      // A lost race lands here: the unique index on User.email or User.phone is
+      // what decided it. Anything else — a CHECK violation included, which
+      // would mean a value reached the insert without being canonicalised — is
+      // a programming error and is left to surface as one.
+      const field = uniqueViolationField(error);
+      if (field !== null) {
+        throw adminUserConflictException(field);
       }
       throw error;
     }

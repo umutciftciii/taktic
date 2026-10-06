@@ -6,6 +6,7 @@ import {
   createCustomer,
   createProvider,
   prisma,
+  storedPhone,
   uniqueLocation,
   uniquePhone,
   uniqueSuffix,
@@ -1156,7 +1157,7 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
 
       // Between the check and the submission the number and the address each
       // become another customer's.
-      await prisma().user.update({ where: { id: phoneOwner.id }, data: { phone: contact.phone } });
+      await prisma().user.update({ where: { id: phoneOwner.id }, data: { phone: storedPhone(contact.phone) } });
       await prisma().user.update({ where: { id: emailOwner.id }, data: { email: contact.email } });
       const before = await counts();
 
