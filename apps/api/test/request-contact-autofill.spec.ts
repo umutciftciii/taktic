@@ -152,9 +152,9 @@ describe('service request contact details', () => {
       // customer of the platform.
       customerId: customer.id,
       customerName: 'Ali Vekil',
-      // Normalised the same way a guest's would be: punctuation out of the
-      // number, the address folded to lower case.
-      customerPhone: '05551110004',
+      // Normalised the same way a guest's would be: the number in canonical
+      // E.164, the address folded to lower case.
+      customerPhone: '+905551110004',
       customerEmail: 'ali.vekil@example.test',
     });
 
@@ -265,7 +265,7 @@ describe('service request contact details', () => {
     expect(await storedContact(response.body.id)).toEqual({
       customerId: customer.id,
       customerName: 'Vekil Kişi',
-      customerPhone: '05551110007',
+      customerPhone: '+905551110007',
       customerEmail: 'vekil@example.test',
     });
   });
@@ -286,7 +286,7 @@ describe('service request contact details', () => {
 
     const stored = await storedContact(response.body.id);
     expect(stored.customerName).toBe('Misafir Müşteri');
-    expect(stored.customerPhone).toBe('05551110008');
+    expect(stored.customerPhone).toBe('+905551110008');
     expect(stored.customerEmail).toBe('misafir@example.test');
 
     // The password-less account a guest request creates behind the scenes, as

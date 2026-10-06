@@ -25,7 +25,8 @@ export const SERVICE_REQUEST_THROTTLE_LIMIT = positiveInt(
 /**
  * The per-phone limits enforced inside `createServiceRequest`'s own
  * transaction, not by the throttler above: they count rows for one
- * `customerPhone`, regardless of which IP submitted them. Hard-coded —
+ * `customerPhone` — in any of its stored spellings — regardless of which IP
+ * submitted them. Hard-coded —
  * these are the product's own rule about how many requests one phone number
  * may have in flight, not a deployment knob.
  */

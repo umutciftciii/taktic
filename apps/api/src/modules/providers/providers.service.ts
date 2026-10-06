@@ -10,6 +10,7 @@ import {
   NotFoundException,
   type OnModuleInit,
 } from '@nestjs/common';
+import { canonicalAccountPhone } from '../../common/account-identity';
 import {
   AdminPermission,
   type BusinessRegistrationType,
@@ -3014,6 +3015,13 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   return trimmed;
 }
 
+/**
+ * The business's contact number, stored in canonical E.164 like every other
+ * number the platform keeps (CONTACT-PHONE-DATA-HYGIENE-001). The canonicaliser
+ * is the platform's one `normalizePhoneNumber`, through the wrapper that turns
+ * its refusal into a sentence the person at the form can act on. This is
+ * contact data, not an identity: no uniqueness is asked of it.
+ */
 function normalizePhone(value: string) {
-  return normalizeRequiredString(value, 'Phone').replace(/[^\d+]/g, '');
+  return canonicalAccountPhone(normalizeRequiredString(value, 'Phone'));
 }

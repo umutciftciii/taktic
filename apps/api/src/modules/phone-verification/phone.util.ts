@@ -8,8 +8,10 @@ import { BadRequestException } from '@nestjs/common';
  * already-E.164 international input. Anything else is rejected rather than
  * guessed — a wrong guess here would send a code to a stranger.
  *
- * ServiceRequest.customerPhone is already stripped to digits and "+" on write,
- * so this mostly has to decide what the leading digits mean.
+ * New ServiceRequest.customerPhone and ProviderProfile.phone values are
+ * written through this function; older request snapshots are digits-only and
+ * are canonicalised here on read, so this mostly has to decide what the
+ * leading digits mean.
  */
 export function normalizePhoneNumber(value: string): string {
   const trimmed = value.trim();

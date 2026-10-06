@@ -5,6 +5,7 @@ import {
   createCustomer,
   prisma,
   requestFormValues,
+  storedPhone,
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -177,7 +178,7 @@ test.describe('request contact autofill', () => {
         // The alternate person is a contact for this request, not its owner.
         customerId: customerAccount.id,
         customerName: values.customerName,
-        customerPhone: values.customerPhone,
+        customerPhone: storedPhone(values.customerPhone),
         customerEmail: values.customerEmail,
       });
     } finally {
@@ -216,7 +217,7 @@ test.describe('request contact autofill', () => {
       });
       expect(stored).toEqual({
         customerName: values.customerName,
-        customerPhone: values.customerPhone,
+        customerPhone: storedPhone(values.customerPhone),
         customerEmail: values.customerEmail,
       });
     } finally {
@@ -272,7 +273,7 @@ test.describe('request contact autofill', () => {
       expect(stored).toEqual({
         customerId: customerAccount.id,
         customerName: values.customerName,
-        customerPhone: values.customerPhone,
+        customerPhone: storedPhone(values.customerPhone),
       });
     } finally {
       await customer.close();

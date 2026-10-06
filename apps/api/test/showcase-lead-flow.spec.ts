@@ -175,6 +175,16 @@ describe('opening a lead', () => {
     expect(lead.slaHoursSnapshot).toBe(36);
   });
 
+  it('stores a guest lead’s request number in E.164 (CONTACT-PHONE-DATA-HYGIENE-001)', async () => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, { customerPhone: '0555 777 12 34' });
+    expect(response.status).toBe(201);
+
+    const lead = await ctx.prisma.showcaseLead.findFirstOrThrow({ include: { request: true } });
+    expect(lead.request.customerPhone).toBe('+905557771234');
+  });
+
   it('ignores an SLA the client tried to set for itself', async () => {
     const { card, category } = await published({ urgentHours: 3 });
 
