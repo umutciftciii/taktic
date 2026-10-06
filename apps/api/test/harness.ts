@@ -431,11 +431,17 @@ export async function createUser(
 ) {
   const suffix = uniqueSuffix();
   const password = overrides.password === undefined ? 'Password123!' : overrides.password;
+  // Stored the way every application path stores it (AUTH-REG-002): the
+  // database refuses anything but E.164, so a fixture may be written in any
+  // spelling a person would type and lands as the canonical number. A test
+  // that needs a non-canonical row on purpose writes it with raw SQL into a
+  // scratch schema — the real table can no longer hold one.
+  const phone = overrides.phone === undefined ? `0555000${suffix.padStart(4, '0')}` : overrides.phone;
 
   return prisma.user.create({
     data: {
       email: overrides.email ?? `user-${suffix}@example.test`,
-      phone: overrides.phone === undefined ? `0555000${suffix.padStart(4, '0')}` : overrides.phone,
+      phone: phone === null ? null : normalizePhoneNumber(phone),
       name: overrides.name === undefined ? `User ${suffix}` : overrides.name,
       role: overrides.role,
       isActive: overrides.isActive ?? true,

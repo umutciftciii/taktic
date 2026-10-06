@@ -68,9 +68,10 @@ describe('POST /auth/request-identity-check', () => {
     expect((await check({ phone: '05551110002', email: 'ACTIVE@example.test ' })).body).toEqual({ status: 'login-required' });
   });
 
-  it('matches a stored phone regardless of which un-canonicalised spelling wrote it', async () => {
-    // Rows written before every path canonicalised carry whatever the visitor
-    // typed, and they are still somebody's account.
+  it('matches a stored phone whichever spelling the visitor types', async () => {
+    // The fixtures are written from a bare subscriber number and from the
+    // country code without "+"; the table holds both as E.164 (AUTH-REG-002),
+    // and the check is asked in the national and the international spelling.
     await activeCustomer('5551110012', 'bare@example.test');
     await activeCustomer('905551110013', 'countrycode@example.test');
 
@@ -201,7 +202,7 @@ describe('POST /auth/request-identity-check/activate', () => {
       role: UserRole.CUSTOMER, phone: '05552220005', email: undefined, password: null,
       customerOrigin: CustomerOrigin.AUTO_CREATED_REQUEST,
     });
-    await ctx.prisma.user.update({ where: { phone: '05552220005' }, data: { email: null } });
+    await ctx.prisma.user.update({ where: { phone: '+905552220005' }, data: { email: null } });
 
     for (const body of [
       { phone: FRESH.phone, email: FRESH.email },                       // new-customer

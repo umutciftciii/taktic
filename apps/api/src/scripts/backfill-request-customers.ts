@@ -1,4 +1,6 @@
 import { Prisma, PrismaClient, UserRole } from '@prisma/client';
+import { normalizeAccountEmail } from '../common/account-email';
+import { normalizePhoneNumber } from '../modules/phone-verification/phone.util';
 
 type Mode = 'dry-run' | 'apply';
 
@@ -53,15 +55,23 @@ function parseMode(argv: string[]): Mode {
   return 'dry-run';
 }
 
-function normalizePhone(value: string): string {
-  return value.trim().replace(/[^\d+]/g, '');
+/**
+ * The number in the one form `User.phone` may hold (E.164, enforced by
+ * `User_phone_e164_check`), or null when the product's canonicaliser refuses
+ * it. Deliberately the application's own `normalizePhoneNumber` — this script
+ * used to strip to digits and "+" by itself, which stored `0532…` spellings the
+ * unique index could not see as the same number (AUTH-REG-002).
+ */
+function normalizePhone(value: string): string | null {
+  try {
+    return normalizePhoneNumber(value);
+  } catch {
+    return null;
+  }
 }
 
 function normalizeEmail(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return trimmed.toLowerCase();
+  return normalizeAccountEmail(value);
 }
 
 async function loadNullRequests(prisma: PrismaClient): Promise<RequestRow[]> {
@@ -147,7 +157,7 @@ async function processRequest(
   if (!normPhone) {
     return {
       status: 'error',
-      message: 'normalized customer phone is empty; cannot resolve or create user',
+      message: 'customer phone is empty or not a supported number; cannot resolve or create user',
     };
   }
 
@@ -387,7 +397,7 @@ async function main(): Promise<void> {
           report.conflicts.push({
             requestId: row.id,
             requestNumber: row.requestNumber,
-            normalizedPhone: normalizePhone(row.customerPhone),
+            normalizedPhone: normalizePhone(row.customerPhone) ?? '(unsupported)',
             normalizedEmail: normalizeEmail(row.customerEmail),
             phoneUserId: outcome.phoneUserId,
             emailUserId: outcome.emailUserId,

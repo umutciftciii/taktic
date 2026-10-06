@@ -7,6 +7,7 @@ import {
   createProvider,
   prisma,
   requestFormValues,
+  storedPhone,
   uniqueLocation,
 } from '../src/fixtures';
 import { confirmThrough } from '../src/confirm-dialog';
@@ -675,7 +676,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       // Between the proof and the submission, the number and the address each
       // become another customer's.
-      await prisma().user.update({ where: { id: phoneOwner.id }, data: { phone: customerPhone } });
+      await prisma().user.update({ where: { id: phoneOwner.id }, data: { phone: storedPhone(customerPhone) } });
       await prisma().user.update({ where: { id: emailOwner.id }, data: { email: customerEmail } });
 
       const requestsBefore = await prisma().serviceRequest.count();

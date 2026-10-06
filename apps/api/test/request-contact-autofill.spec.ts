@@ -85,7 +85,7 @@ describe('service request contact details', () => {
     expect(await storedContact(response.body.id)).toEqual({
       customerId: customer.id,
       customerName: 'Ayşe Yılmaz',
-      customerPhone: '05551110001',
+      customerPhone: '+905551110001',
       customerEmail: 'ayse@example.test',
     });
   });
@@ -118,7 +118,7 @@ describe('service request contact details', () => {
     expect(await storedContact(response.body.id)).toEqual({
       customerId: customer.id,
       customerName: 'Mehmet Demir',
-      customerPhone: '05551110002',
+      customerPhone: '+905551110002',
       customerEmail: 'mehmet@example.test',
     });
   });
@@ -165,7 +165,7 @@ describe('service request contact details', () => {
     });
     expect(account).toEqual({
       name: 'Zeynep Kaya',
-      phone: '05551110003',
+      phone: '+905551110003',
       email: 'zeynep@example.test',
       role: UserRole.CUSTOMER,
     });

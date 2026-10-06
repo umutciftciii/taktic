@@ -464,9 +464,9 @@ describe('the body is the marketplace request body', () => {
     expect(response.status).toBe(201);
     const stored = await ctx.prisma.serviceRequest.findFirstOrThrow();
     expect(stored.customerId).toBe(customer.id);
-    // The account's own number, in the form the request service stores it —
-    // the proof below is looked up under its E.164 spelling.
-    expect(stored.customerPhone).toBe('05557778899');
+    // The account's own number, copied from the account — which stores E.164
+    // only — and the spelling the proof below is looked up under.
+    expect(stored.customerPhone).toBe('+905557778899');
     expect(stored.phoneVerifiedAt).not.toBeNull();
 
     const proof = await ctx.prisma.phoneVerification.findFirstOrThrow({

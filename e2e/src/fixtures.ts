@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { getCities, getDistrictsOfEachCity } from 'turkey-neighbourhoods';
+import { normalizePhoneNumber } from '../../apps/api/src/modules/phone-verification/phone.util';
 import { e2ePrisma } from './database';
 import { E2E_LEMON_PACKAGE_SLUG, locationClaimDir } from './runtime';
 
@@ -129,6 +130,17 @@ function resolveWorkerIndex(kind: string, blocks: number): number {
 
 /** This worker process's allocator, so the sequence never restarts mid-process. */
 export const uniquePhone = createPhoneAllocator();
+
+/**
+ * A number as `User.phone` stores it: E.164, through the application's own
+ * canonicaliser. The column refuses any other spelling
+ * (`User_phone_e164_check`, AUTH-REG-002), so every fixture that writes an
+ * account's number directly goes through this; what a person types into a
+ * form can stay in whatever spelling the test wants.
+ */
+export function storedPhone(typed: string): string {
+  return normalizePhoneNumber(typed);
+}
 
 export type SeededCustomer = {
   id: string;
@@ -282,7 +294,7 @@ export async function createCustomer(name = 'E2E Müşteri'): Promise<SeededCust
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(),
+      phone: storedPhone(uniquePhone()),
       name: `${name} ${suffix}`,
       role: 'CUSTOMER',
       isActive: true,
@@ -318,7 +330,7 @@ export async function createClaimableCustomer(
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(),
+      phone: storedPhone(uniquePhone()),
       name: `${name} ${suffix}`,
       role: 'CUSTOMER',
       isActive: true,
@@ -346,7 +358,7 @@ export async function createStaffAdmin(permissions: string[]): Promise<SeededCus
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(),
+      phone: storedPhone(uniquePhone()),
       name: `E2E Personel ${suffix}`,
       role: 'ADMIN',
       isActive: true,
@@ -384,7 +396,7 @@ export async function createAdmin(): Promise<SeededCustomer> {
   const user = await prisma().user.create({
     data: {
       email,
-      phone: uniquePhone(),
+      phone: storedPhone(uniquePhone()),
       name: `E2E Yönetici ${suffix}`,
       role: 'SUPER_ADMIN',
       isActive: true,
@@ -543,7 +555,7 @@ export async function createProvider(options: {
   const user = await prisma().user.create({
     data: {
       email,
-      phone,
+      phone: storedPhone(phone),
       name: businessName,
       role: 'PROVIDER',
       isActive: true,

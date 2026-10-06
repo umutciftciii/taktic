@@ -163,9 +163,18 @@ describe('POST /auth/register-customer', () => {
     expect(await snapshot()).toEqual(before);
   });
 
-  it('refuses a number that an older row stores in its national spelling', async () => {
-    // Rows written before canonicalisation carry whatever the visitor typed.
-    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05321234567' });
+  it('cannot meet an older row in its national spelling, because the table no longer holds one', async () => {
+    // Rows written before canonicalisation used to carry whatever the visitor
+    // typed, and the lookup had to widen to every spelling to find them.
+    // User_phone_e164_check (AUTH-REG-002) refuses such a row outright, so the
+    // byte-exact unique index over the one stored form is the whole rule.
+    await expect(
+      ctx.prisma.user.create({
+        data: { role: UserRole.CUSTOMER, phone: '05321234567', email: 'older@example.test' },
+      }),
+    ).rejects.toThrow(/User_phone_e164_check/);
+
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: CANONICAL });
     const before = await snapshot();
 
     expectIdentityConflict(
@@ -512,7 +521,7 @@ describe('POST /users by an operator', () => {
 
   it('stores the number in E.164 and refuses every other spelling of one already on file', async () => {
     const cookie = await adminCookie();
-    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05321234567', email: 'legacy@example.test' });
+    await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: CANONICAL, email: 'holder@example.test' });
 
     const refused = await request(ctx.server)
       .post('/users')
