@@ -1018,7 +1018,8 @@ describe('claimed applications — what may still change', () => {
     const provider = await ctx.prisma.providerProfile.findUniqueOrThrow({
       where: { id: providerId },
     });
-    expect(provider.phone).toBe('05559998877');
+    // Stored canonical, like every write of the business's number.
+    expect(provider.phone).toBe('+905559998877');
     expect(provider.email).toBe(APPLICANT_EMAIL);
   });
 
@@ -1170,7 +1171,7 @@ describe('unclaimed owned profiles — the claim lock does not reach them', () =
     const updated = await ctx.prisma.providerProfile.findUniqueOrThrow({
       where: { id: provider.id },
     });
-    expect(updated.phone).toBe('05557776655');
+    expect(updated.phone).toBe('+905557776655');
     expect(updated.email).toBe(provider.email);
   });
 });

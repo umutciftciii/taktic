@@ -101,8 +101,8 @@ describe('POST /service-requests rate limits', () => {
     expect(last.status).toBe(429);
     expect(last.body.code).toBe('REQUEST_RATE_LIMITED');
 
-    // Nothing was written for the refused attempt.
-    expect(await ctx.prisma.serviceRequest.count({ where: { customerPhone: phone } })).toBe(
+    // Nothing was written for the refused attempt. Stored canonical.
+    expect(await ctx.prisma.serviceRequest.count({ where: { customerPhone: '+905552220001' } })).toBe(
       SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY,
     );
   });
@@ -110,6 +110,10 @@ describe('POST /service-requests rate limits', () => {
   it('answers 429 REQUEST_RATE_LIMITED once a phone has 10 open APPROVED requests, isolated from the 24h count', async () => {
     const category = await createCategory(ctx.prisma);
     const phone = '05553330001';
+    // Seeded in the digits-only spelling requests were stored with before
+    // CONTACT-PHONE-DATA-HYGIENE-001, while the POSTs below are stored in
+    // E.164: the ceiling has to count both as the one number they are.
+    //
     // Older than the 24h window the other rule counts, so only the open-count
     // rule can fire here: if the open-count check were deleted, every one of
     // these calls would still succeed, because none of these rows (nor the

@@ -10,6 +10,7 @@
     "test": "vitest run",
     "backfill:display-numbers": "tsx src/scripts/backfill-display-numbers.ts",
     "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts",
+    "canonicalize:provider-phones": "tsx src/scripts/canonicalize-provider-phones.ts",
     "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts"
   },
   "dependencies": {

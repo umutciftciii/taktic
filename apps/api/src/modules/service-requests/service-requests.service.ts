@@ -17,7 +17,7 @@ import {
 } from '../../common/account-identity';
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
-import { normalizePhoneNumber } from '../phone-verification/phone.util';
+import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
 import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -548,17 +548,22 @@ export class ServiceRequestsService {
       // checkout has no account yet, and because the limit is about how many
       // requests one real phone number is allowed to have in flight,
       // regardless of which session created them.
+      //
+      // Counted across every spelling of the number: new rows are E.164, but
+      // a request stored before that keeps its digits-only snapshot, and an
+      // exact-text count would let those slip out of the budget.
       const phoneWindowStart = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      const phoneSpellings = { in: equivalentPhoneSpellings(requestData.customerPhone) };
       const [recentByPhone, openByPhone] = await Promise.all([
         tx.serviceRequest.count({
           where: {
-            customerPhone: requestData.customerPhone,
+            customerPhone: phoneSpellings,
             submittedAt: { gte: phoneWindowStart },
             status: { in: [ServiceRequestStatus.SUBMITTED, ServiceRequestStatus.APPROVED] },
           },
         }),
         tx.serviceRequest.count({
-          where: { customerPhone: requestData.customerPhone, status: ServiceRequestStatus.APPROVED },
+          where: { customerPhone: phoneSpellings, status: ServiceRequestStatus.APPROVED },
         }),
       ]);
       if (
@@ -2027,8 +2032,8 @@ async function resolveCustomerForCreate(
     return user.id;
   }
 
-  // Stored in E.164 and nothing else. The request keeps the number in its own
-  // column exactly as before; it is the account that has to be spelled one way.
+  // Stored in E.164 and nothing else — the request's own column already holds
+  // it in that form (see normalizePhone), so this is the same value.
   const phone = canonicalAccountPhone(data.customerPhone);
   const email = data.customerEmail;
 
@@ -2443,8 +2448,18 @@ function normalizeRequiredString(value: unknown, fieldName: string) {
   return trimmed;
 }
 
+/**
+ * The contact number a new request is stored with: canonical E.164, through
+ * the platform's one canonicaliser (CONTACT-PHONE-DATA-HYGIENE-001).
+ *
+ * `ServiceRequest.customerPhone` is a snapshot — written once here and never
+ * updated — so rows from before this change keep the digits-only spelling they
+ * were written with. Every reader either canonicalises on read (phone proof,
+ * the vitrin) or matches every spelling (the per-phone budget below, through
+ * `equivalentPhoneSpellings`); none of them needs the old rows rewritten.
+ */
 function normalizePhone(value: unknown) {
-  return normalizeRequiredString(value, 'Customer phone').replace(/[^\d+]/g, '');
+  return canonicalAccountPhone(normalizeRequiredString(value, 'Customer phone'));
 }
 
 function normalizeRequiredEmail(value: unknown) {

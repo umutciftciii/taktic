@@ -534,12 +534,13 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
         if (kind === 'marketplace') {
           const requestId = await finishMarketplaceForm(visitor.page, stage.location);
           const request = await prisma().serviceRequest.findUniqueOrThrow({ where: { id: requestId } });
-          expect(request.customerPhone).toBe(contact.phone);
+          // Stored in E.164 whatever spelling was typed (CONTACT-PHONE-DATA-HYGIENE-001).
+          expect(request.customerPhone).toBe(storedPhone(contact.phone));
         } else {
           await proveShowcasePhone(visitor.page, contact.phone);
           await submitShowcaseLead(visitor.page);
           const request = await leadRequestFor(stage.card!.id);
-          expect(request.customerPhone).toBe(contact.phone);
+          expect(request.customerPhone).toBe(storedPhone(contact.phone));
         }
 
         // No draft was ever parked for a visitor who never left, and the

@@ -7,6 +7,7 @@ import {
   createProvider,
   prisma,
   requestFormValues,
+  storedPhone,
   uniqueLocation,
 } from '../src/fixtures';
 import {
@@ -213,8 +214,9 @@ test.describe('contact sharing', () => {
       await winner.gotoWeb(`/providers/${winnerAccount.id}/offers/${winningOfferId}`);
       const winnerCard = winner.page.getByTestId('matched-contact');
       await expect(winnerCard).toBeVisible();
+      // The number as the request stored it: E.164 (CONTACT-PHONE-DATA-HYGIENE-001).
       await expect(winnerCard.getByTestId('matched-contact-phone')).toHaveText(
-        values.customerPhone,
+        storedPhone(values.customerPhone),
       );
       await assertNoErrorScreen(winner.page);
 

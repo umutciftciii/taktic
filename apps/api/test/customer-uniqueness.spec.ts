@@ -384,7 +384,7 @@ describe('a signed-in customer naming a different contact person', () => {
 
     expect(response.status).toBe(201);
     expect(response.body.customerId).toBe(customer.id);
-    expect(response.body.customerPhone).toBe('05321234567');
+    expect(response.body.customerPhone).toBe('+905321234567');
     expect(await ctx.prisma.user.count()).toBe(usersBefore);
     expect(await ctx.prisma.user.findFirst({ where: { email: 'fatma@example.test' } })).toBeNull();
   });
