@@ -26,8 +26,10 @@ import { formatCount, pageWindow } from '../../lib/pagination';
  * `15-hizmet-verenler`).
  *
  * The API returns the whole list (`GET /providers` has no paging); the city,
- * category and ownership filters narrow it in the API and the search and the
- * status here, as before. The design adds only presentation of data this page
+ * category, ownership and search filters narrow it in the API and the status
+ * here. The search moved to the API (ADMIN-SEARCH-NORMALIZATION-001) so a
+ * number typed as `0555…` finds the `+90555…` stored — the one phone
+ * canonicaliser lives there. The design adds only presentation of data this page
  * already holds: saved views counted from the same list, and pages of 50.
  *
  * Not rendered: the design's "Elle işletme ekle" (no operator create API).
@@ -113,10 +115,6 @@ function normalizeOwnership(value: string | undefined): OwnershipFilter {
   return lower === 'unclaimed' || lower === 'claimed' ? lower : 'all';
 }
 
-function toLower(value: string | null | undefined) {
-  return (value ?? '').toLocaleLowerCase('tr-TR');
-}
-
 export default async function AdminProvidersPage({ searchParams }: AdminProvidersPageProps) {
   const { can } = await requireAdmin('PROVIDERS_READ');
   const canReadProviderDetail = can('PROVIDERS_READ_DETAIL');
@@ -152,31 +150,15 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   if (cityFilter) apiQuery.set('city', cityFilter);
   if (categoryId) apiQuery.set('categoryId', categoryId);
   if (ownership !== 'all') apiQuery.set('ownership', ownership);
+  if (query) apiQuery.set('q', query);
   const queryString = apiQuery.toString();
   const providersPath = queryString ? `/providers?${queryString}` : '/providers';
 
+  // Every filter except the status: the saved views count from this.
   const providers = await apiFetch<ProviderProfile[]>(providersPath);
 
-  const normalizedQuery = toLower(query);
-
-  // Every filter except the status: the saved views count from this.
-  const matchingOtherFilters = providers.filter((provider) => {
-    if (!normalizedQuery) return true;
-    const haystack = [
-      provider.businessName,
-      provider.contactName,
-      provider.phone,
-      provider.email,
-      provider.city,
-      provider.district,
-    ]
-      .map(toLower)
-      .join(' ');
-    return haystack.includes(normalizedQuery);
-  });
-
   const filtered =
-    status === 'all' ? matchingOtherFilters : matchingOtherFilters.filter((provider) => provider.status === status);
+    status === 'all' ? providers : providers.filter((provider) => provider.status === status);
 
   const range = pageWindow({ page, pageSize: PAGE_SIZE, total: filtered.length });
   const pageRows = filtered.slice(range.start > 0 ? range.start - 1 : 0, range.end);
@@ -201,11 +183,11 @@ export default async function AdminProvidersPage({ searchParams }: AdminProvider
   };
 
   const views: TabItem[] = [
-    { key: '', label: 'Tümü', count: matchingOtherFilters.length, testId: 'provider-view-all' },
+    { key: '', label: 'Tümü', count: providers.length, testId: 'provider-view-all' },
     ...VIEW_STATUSES.map((value) => ({
       key: value,
       label: statusLabel(value),
-      count: matchingOtherFilters.filter((provider) => provider.status === value).length,
+      count: providers.filter((provider) => provider.status === value).length,
       testId: `provider-view-${value.toLowerCase()}`,
     })),
   ];

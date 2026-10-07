@@ -63,9 +63,10 @@ export class ProvidersController {
     @Query('city') city?: string,
     @Query('categoryId') categoryId?: string,
     @Query('ownership') ownership?: string,
+    @Query('q') q?: string,
     @CurrentUser() user?: AuthUser,
   ) {
-    return this.providersService.listProviders({ status, city, categoryId, ownership }, user ?? null);
+    return this.providersService.listProviders({ status, city, categoryId, ownership, q }, user ?? null);
   }
 
   @Get('me')

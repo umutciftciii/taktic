@@ -5,6 +5,7 @@ import {
   PackagePurchaseStatus,
   Prisma,
 } from '@prisma/client';
+import { parseAdminSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
@@ -693,15 +694,15 @@ function buildProviderFinanceWhere(
   filters: ListProviderFinanceDto,
   providerContact: boolean,
 ): Prisma.ProviderProfileWhereInput {
-  if (!filters.q) return {};
-  const term = filters.q;
+  const search = parseAdminSearch(filters.q);
+  if (!search) return {};
   return {
     OR: [
-      { businessName: { contains: term, mode: 'insensitive' } },
+      { businessName: { contains: search.text, mode: 'insensitive' } },
       ...(providerContact
         ? ([
-            { phone: { contains: term, mode: 'insensitive' } },
-            { email: { contains: term, mode: 'insensitive' } },
+            ...phoneColumnMatchers(search).map((phone) => ({ phone })),
+            { email: { contains: search.text, mode: 'insensitive' } },
           ] satisfies Prisma.ProviderProfileWhereInput[])
         : []),
     ],
@@ -897,19 +898,19 @@ function buildCreditLedgerWhere(
     where.createdAt = createdAt;
   }
 
-  if (filters.q) {
-    const term = filters.q;
+  const search = parseAdminSearch(filters.q);
+  if (search) {
     where.OR = [
-      { reason: { contains: term, mode: 'insensitive' } },
+      { reason: { contains: search.text, mode: 'insensitive' } },
       {
         provider: {
           is: {
             OR: [
-              { businessName: { contains: term, mode: 'insensitive' } },
+              { businessName: { contains: search.text, mode: 'insensitive' } },
               ...(providerContact
                 ? ([
-                    { phone: { contains: term, mode: 'insensitive' } },
-                    { email: { contains: term, mode: 'insensitive' } },
+                    ...phoneColumnMatchers(search).map((phone) => ({ phone })),
+                    { email: { contains: search.text, mode: 'insensitive' } },
                   ] satisfies Prisma.ProviderProfileWhereInput[])
                 : []),
             ],

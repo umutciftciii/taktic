@@ -11,6 +11,7 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import { canonicalAccountPhone } from '../../common/account-identity';
+import { matchesAdminSearch, parseAdminSearch } from '../../common/admin-search';
 import {
   AdminPermission,
   type BusinessRegistrationType,
@@ -118,6 +119,8 @@ type ProviderListFilters = {
   city?: string;
   categoryId?: string;
   ownership?: string;
+  /** The operator's free-text box (ADMIN-SEARCH-NORMALIZATION-001). */
+  q?: string;
 };
 
 type RequestDiscoveryFilters = {
@@ -448,8 +451,9 @@ export class ProvidersService implements OnModuleInit {
     const city = normalizeNullableString(filters.city);
     const categoryId = normalizeNullableString(filters.categoryId);
     const ownership = normalizeOptionalOwnership(filters.ownership);
+    const search = parseAdminSearch(filters.q);
 
-    const providers = await this.prisma.providerProfile.findMany({
+    const rows = await this.prisma.providerProfile.findMany({
       where: {
         ...(status ? { status } : {}),
         // "Providers who serve this city", not "providers whose profile names
@@ -478,6 +482,20 @@ export class ProvidersService implements OnModuleInit {
       orderBy: { createdAt: 'desc' },
       include: providerInclude,
     });
+
+    // The search runs here, on the rows already read, rather than in the
+    // query: these are the columns the operator's list has always searched,
+    // folded the Turkish way it has always folded them, which the database's
+    // `ILIKE` cannot reproduce ("Işık" vs "ışık"). The phone column also
+    // matches every stored spelling of a whole number typed into the box.
+    const providers = search
+      ? rows.filter((provider) =>
+          matchesAdminSearch(search, {
+            text: [provider.businessName, provider.contactName, provider.email, provider.city, provider.district],
+            phone: [provider.phone],
+          }),
+        )
+      : rows;
 
     if (providers.length === 0) {
       return providers;
