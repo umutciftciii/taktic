@@ -20,6 +20,7 @@ const PATHS: Record<NavIconName | 'chevronDown' | 'chevronRight' | 'panel' | 'me
   list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01',
   settings: 'M4 21v-6M4 11V3M12 21v-9M12 8V3M20 21v-4M20 13V3M1 15h6M9 8h6M17 17h6',
   shield: 'M12 3l8 3v6c0 4.5-3.4 8.2-8 9-4.6-.8-8-4.5-8-9V6zM9 12l2 2 4-4',
+  search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14M21 21l-4.35-4.35',
   chevronDown: 'M6 9l6 6 6-6',
   chevronRight: 'M9 18l6-6-6-6',
   panel: 'M3 3h18v18H3zM9 3v18',

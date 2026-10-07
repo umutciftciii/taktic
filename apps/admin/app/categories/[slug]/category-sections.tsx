@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CategoryImageUploader } from '../category-image-uploader';
 import type { CategoryPlacementImpact } from '../category-changes';
@@ -88,6 +89,8 @@ export function CategoryInfoSection({
   canUpload,
   updateAction,
   placementImpact = null,
+  slugChangeHref = null,
+  publiclyReachable = false,
 }: {
   category: Category;
   /** The categories that may be its parent: groups other than itself. */
@@ -98,6 +101,14 @@ export function CategoryInfoSection({
   updateAction: FormAction;
   /** The vitrin runs a status move would touch, for the save's dialog; null when not countable. */
   placementImpact?: CategoryPlacementImpact;
+  /**
+   * SEO-004 PR B: the address window (`/seo/slugs?kategori=…`), for a session
+   * that may open and save it; null otherwise. The form itself no longer sends
+   * a slug — the window is the one way to change it.
+   */
+  slugChangeHref?: string | null;
+  /** Whether the category is public now: a change of its address then writes a 301. */
+  publiclyReachable?: boolean;
 }) {
   return (
     <SectionCard
@@ -120,11 +131,31 @@ export function CategoryInfoSection({
               <span>Kategori adı *</span>
               <input name="name" required defaultValue={category.name} />
             </label>
-            <label className="field field-4">
-              <span>Kısa ad (slug) *</span>
-              <input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" defaultValue={category.slug} />
-              <span className="help-text">Kısa ad değişirse mevcut bağlantılar kırılır.</span>
-            </label>
+            {/*
+              SEO-004 PR B: read-only. The address changes only in the SEO
+              slug window, through the one server-side slug lifecycle (a public
+              category gets its mandatory 301 in the same transaction). The form
+              sends no slug, so a save here can never move it.
+            */}
+            <div className="field field-4" data-testid="category-slug-field">
+              <span>Adres (kısa ad)</span>
+              <div className="locked-field seo-slug-locked">
+                <code className="locked-field-value cell-break" data-testid="category-slug-value">
+                  /categories/{category.slug}
+                </code>
+                {slugChangeHref ? (
+                  <Link className="btn btn-link btn-sm" href={slugChangeHref} scroll={false} data-testid="category-slug-change">
+                    Adresi değiştir
+                  </Link>
+                ) : null}
+              </div>
+              <span className="help-text" data-testid="category-slug-help">
+                {publiclyReachable
+                  ? 'Adres değiştiğinde eski adres otomatik olarak yeni adrese 301 ile yönlendirilir.'
+                  : 'Kategori herkese açık değil; adres değişirse yönlendirme oluşturulmaz.'}
+                {slugChangeHref ? null : ' Adresi değiştirmek için kategori yazma ve SEO okuma yetkisi gerekir.'}
+              </span>
+            </div>
             <label className="field field-4">
               <span>Üst kategori</span>
               <select name="parentId" defaultValue={category.parentId ?? ''}>
@@ -285,9 +316,9 @@ export function CategoryInfoSection({
               </span>
             </label>
           </div>
-          <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde geçerlidir. Kısa ad değişirse mevcut bağlantılar kırılır.">
+          <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde geçerlidir. Adres bu formdan değişmez.">
             {/*
-              Asks first when the save moves the slug, type or parent, the
+              Asks first when the save moves the type or parent, the
               offer price, switches unlimited eligibility on or moves the
               status (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B); the action
               judges the same against the stored category.

@@ -50,7 +50,7 @@ export default async function NewCategoryPage({
         info={
           <span className="popover-list">
             <span>Kaydettikten sonra kategorinin detay ekranı açılır; soru seti, durum ve davetler oradan yönetilir.</span>
-            <span>Kısa ad (slug) yalnız küçük harf, rakam ve tire içerir; örn. elektrik-tesisati. Değiştirilirse mevcut bağlantılar kırılır.</span>
+            <span>Kısa ad (slug) yalnız küçük harf, rakam ve tire içerir; örn. elektrik-tesisati. Kategorinin adresi olur: /categories/kısa-ad. Sonradan yalnız “SEO ve adresler → Adresler” ekranından değiştirilir.</span>
             <span>Soru sırası müşteri formundaki gösterim sırasını belirler.</span>
             <span>{STATUS_HINTS.DRAFT}</span>
             <span>{KIND_HINTS.ROUTER}</span>

@@ -37,7 +37,7 @@ function groupOf(href: string): string | undefined {
 }
 
 describe('the groups', () => {
-  it('are exactly eight, in the design’s order', () => {
+  it('are exactly nine, in the design’s order', () => {
     expect(navGroups.map((group) => group.title)).toEqual([
       'Talepler',
       'Teklifler',
@@ -45,10 +45,11 @@ describe('the groups', () => {
       'Finans',
       'Vitrin',
       'Katalog',
+      'SEO ve adresler',
       'Operasyon',
       'Yönetim',
     ]);
-    expect(navGroups).toHaveLength(8);
+    expect(navGroups).toHaveLength(9);
   });
 
   it('keep "Genel görünüm" out of them: it is one top-level dashboard row, not a group', () => {
@@ -65,8 +66,7 @@ describe('the groups', () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it('carry no SEO group and no "Eşleşmeler" row (SEO-004, K8)', () => {
-    expect(navGroups.some((group) => /seo/i.test(group.title) || group.key === 'seo')).toBe(false);
+  it('carry no "Eşleşmeler" row (K8)', () => {
     expect(rows.some((entry) => entry.label === 'Eşleşmeler')).toBe(false);
   });
 
@@ -187,10 +187,10 @@ describe('filterNavMenu — the dashboard row and the groups, by one rule', () =
     expect(without.groups.map((group) => group.key)).toEqual(['kisiler']);
   });
 
-  it('gives a super admin the row and all eight groups', () => {
+  it('gives a super admin the row and all nine groups', () => {
     const menu = filterNavMenu(() => true, true);
     expect(menu.home).toBe(navHome);
-    expect(menu.groups).toHaveLength(8);
+    expect(menu.groups).toHaveLength(9);
   });
 });
 
@@ -222,5 +222,34 @@ describe('findActiveNavEntry — the top bar reads the filtered menu (F18)', () 
     // The queue belongs to REQUEST_REPORTS_READ. The list row is not lit on it
     // either: specificity is judged against the whole menu.
     expect(findActiveNavEntry(menu, '/requests/reports')).toBeNull();
+  });
+});
+
+describe('SEO ve adresler (SEO-004 PR B)', () => {
+  const seo = navGroups.find((group) => group.key === 'seo');
+  const only = (...held: string[]) => (permission: string) => held.includes(permission);
+
+  it('is one group of four rows, every one on SEO_READ', () => {
+    expect(seo?.title).toBe('SEO ve adresler');
+    expect(seo?.items.map((entry) => [entry.href, entry.label, entry.permission])).toEqual([
+      ['/seo', 'Arama motoru durumu', 'SEO_READ'],
+      ['/seo/indexing', 'İndekslenmeyen sayfalar', 'SEO_READ'],
+      ['/seo/slugs', 'Adresler', 'SEO_READ'],
+      ['/seo/redirects', 'Yönlendirmeler', 'SEO_READ'],
+    ]);
+  });
+
+  it('is absent without SEO_READ — the write permissions alone do not reveal it', () => {
+    expect(filterNavMenu(only('SEO_CONTENT_WRITE', 'SEO_REDIRECTS_WRITE', 'CATALOG_READ')).groups.map((group) => group.key)).toEqual([
+      'katalog',
+    ]);
+    expect(filterNavMenu(only('SEO_READ')).groups.map((group) => group.key)).toEqual(['seo']);
+  });
+
+  it('lights exactly one row per SEO screen: the overview does not stay lit under its siblings', () => {
+    expect(activeHrefs('/seo')).toEqual(['/seo']);
+    expect(activeHrefs('/seo/indexing')).toEqual(['/seo/indexing']);
+    expect(activeHrefs('/seo/slugs')).toEqual(['/seo/slugs']);
+    expect(activeHrefs('/seo/redirects')).toEqual(['/seo/redirects']);
   });
 });

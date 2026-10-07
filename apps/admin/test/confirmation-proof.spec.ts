@@ -779,14 +779,58 @@ const CASES: Case[] = [
     refused: refusedRedirect('/categories/new?error=CONFIRMATION_REQUIRED'),
   },
   {
-    name: 'categories: kısa ad değişimi',
+    name: 'categories: üst kategori değişimi',
     key: 'category.structure-update',
     read: [STORED_CATEGORY],
     run: async (proof) => {
       const { updateCategoryAction } = await import('../app/categories/actions');
-      return updateCategoryAction(form({ ...CATEGORY_FIELDS, slug: 'klima-servisi' }, proof));
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, parentId: 'grp-1' }, proof));
     },
     refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  // SEO-004 PR B: the slug window, removing a redirect, and both 404 decisions.
+  {
+    name: 'seo: adres (slug) değişikliği',
+    key: 'seo.slug-change',
+    write: { category: { slug: 'klima-servisi', path: '/categories/klima-servisi' }, redirect: { sourcePath: '/categories/klima' } },
+    run: async (proof) => {
+      const { changeCategorySlugAction } = await import('../app/seo/actions');
+      return changeCategorySlugAction(
+        { kind: 'idle' },
+        form({ categoryId: 'cat-1', slug: 'klima-servisi', returnTo: 'list' }, proof),
+      );
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'seo: yönlendirmeyi kaldır',
+    key: 'seo.redirect-deactivate',
+    run: async (proof) => {
+      const { deactivateRedirectAction } = await import('../app/seo/actions');
+      return deactivateRedirectAction(form({ redirectId: 'r-1', back: '/seo/redirects' }, proof));
+    },
+    refused: refusedRedirect('/seo/redirects?hata=CONFIRMATION_REQUIRED'),
+  },
+  {
+    name: 'seo: 404 önerisini onayla',
+    key: 'seo.suggestion-approve',
+    run: async (proof) => {
+      const { approveSuggestionAction } = await import('../app/seo/actions');
+      return approveSuggestionAction(
+        { kind: 'idle' },
+        form({ suggestionId: 's-1', targetPath: '/categories/klima', type: 'PERMANENT', reason: '' }, proof),
+      );
+    },
+    refused: refusedState,
+  },
+  {
+    name: 'seo: 404 önerisini reddet',
+    key: 'seo.suggestion-reject',
+    run: async (proof) => {
+      const { rejectSuggestionAction } = await import('../app/seo/actions');
+      return rejectSuggestionAction(form({ suggestionId: 's-1', reason: '' }, proof));
+    },
+    refused: refusedRedirect('/seo/redirects?sekme=oneriler&hata=CONFIRMATION_REQUIRED'),
   },
   {
     name: 'categories: teklif kredisi değişimi',
@@ -1008,6 +1052,15 @@ describe('guarded server actions refuse a submission without a good proof, and w
       expect(writes()).toHaveLength(2);
     });
 
+    it('SEO-004 PR B: a slug that reaches the category edit is never sent, and asks nothing', async () => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      primeReads([STORED_CATEGORY]);
+      const saved = await outcome(() => updateCategoryAction(form({ ...CATEGORY_FIELDS, slug: 'klima-servisi' })));
+      expect(saved.redirect).toBe('/categories/klima');
+      expect(writes()).toHaveLength(1);
+      expect(JSON.parse((writes()[0]![1] as { body: string }).body)).not.toHaveProperty('slug');
+    });
+
     it('switching unlimited eligibility off, and a save without the status permission', async () => {
       const { updateCategoryAction } = await import('../app/categories/actions');
       primeReads([{ ...STORED_CATEGORY, unlimitedPackageEligible: true }]);
@@ -1058,10 +1111,10 @@ describe('guarded server actions refuse a submission without a good proof, and w
   });
 
   describe('Paket B: the delta is the server\'s, never the form\'s', () => {
-    it('a category save that moves the slug and the status needs both proofs; either alone is refused', async () => {
+    it('a category save that moves the parent and the status needs both proofs; either alone is refused', async () => {
       const { updateCategoryAction } = await import('../app/categories/actions');
       primeReads([STORED_CATEGORY]);
-      const fields = { ...CATEGORY_FIELDS, slug: 'klima-servisi', status: 'INACTIVE' };
+      const fields = { ...CATEGORY_FIELDS, parentId: 'grp-1', status: 'INACTIVE' };
       const structure = await issueConfirmationProof('category.structure-update');
       expect((await outcome(() => updateCategoryAction(form(fields, structure)))).redirect).toContain('CONFIRMATION_REQUIRED');
       const status = await issueConfirmationProof('category.deactivate');

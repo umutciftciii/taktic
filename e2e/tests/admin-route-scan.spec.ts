@@ -26,7 +26,7 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
  * ADMIN-DESIGN-001 / Faz 1: every signed-in screen still renders inside the new
  * shell.
  *
- * The redesign changed the stylesheet every one of the 53 screens reads and
+ * The redesign changed the stylesheet every one of the 57 screens reads and
  * the frame every one of them sits in, while converting none of their content.
  * So each one is opened once, as a super admin, at 1440px and at 390px — and
  * every screen a Faz 2/3 slice converted (CONVERTED_ROUTES) at 320px as well —
@@ -159,6 +159,11 @@ const CONVERTED_ROUTES = [
   '/roles/[id]',
   // Faz 4: the staff account list, the one list Faz 3G left on the old toolbar.
   '/users',
+  // SEO-004 PR B: SEO ve adresler.
+  '/seo',
+  '/seo/indexing',
+  '/seo/slugs',
+  '/seo/redirects',
 ];
 
 const STATIC_ROUTES = [
@@ -196,6 +201,10 @@ const STATIC_ROUTES = [
   '/users/new',
   '/roles',
   '/company-settings',
+  '/seo',
+  '/seo/indexing',
+  '/seo/slugs',
+  '/seo/redirects',
 ];
 
 async function detailTargets(): Promise<Target[]> {
@@ -325,11 +334,11 @@ async function detailTargets(): Promise<Target[]> {
 }
 
 test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
-  test('all 53 signed-in screens render inside the shell at 1440, 1024, 768 and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
+  test('all 57 signed-in screens render inside the shell at 1440, 1024, 768 and 390px (and the converted screens at 320px)', async ({ browser }, testInfo) => {
     test.setTimeout(1_200_000);
     const account = await createAdmin();
     const targets: Target[] = [...STATIC_ROUTES.map((route) => ({ route, path: route })), ...(await detailTargets())];
-    expect(targets).toHaveLength(53);
+    expect(targets).toHaveLength(57);
     // A new screen fails here until it has a target — and so is scanned.
     const onDisk = routesOnDisk().filter((route) => !OUTSIDE_THE_SHELL.includes(route)).sort();
     expect(onDisk, 'signed-in routes on disk vs. routes this scan opens').toEqual(
@@ -337,7 +346,7 @@ test.describe('admin route scan (ADMIN-DESIGN-001)', () => {
     );
 
     const skipped = targets.filter((target) => !target.path);
-    console.log(`[admin-route-scan] opening ${targets.length - skipped.length}/53; skipped: ${skipped.map((target) => target.route).join(', ') || 'none'}`);
+    console.log(`[admin-route-scan] opening ${targets.length - skipped.length}/57; skipped: ${skipped.map((target) => target.route).join(', ') || 'none'}`);
     if (skipped.length > 0) {
       testInfo.annotations.push({
         type: 'skipped-routes',

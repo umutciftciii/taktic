@@ -103,7 +103,7 @@ describe('sidebar row ↔ page gate', () => {
 
 describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-001)', () => {
   /**
-   * All 52 signed-in page.tsx files, kept by hand. The first test fails the
+   * All 57 signed-in page.tsx files, kept by hand. The first test fails the
    * moment a page is added or removed without this table changing with it, so
    * a new screen cannot arrive without somebody deciding which row lights on
    * it and which gate it asks for.
@@ -164,6 +164,11 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       exception: 'A creation form also needs the write it performs.',
     },
     '/categories/[slug]': { row: '/categories', gate: ['CATALOG_READ'] },
+    // SEO-004 PR B: the four SEO screens, each on SEO_READ like its row.
+    '/seo': { row: '/seo', gate: ['SEO_READ'] },
+    '/seo/indexing': { row: '/seo/indexing', gate: ['SEO_READ'] },
+    '/seo/slugs': { row: '/seo/slugs', gate: ['SEO_READ'] },
+    '/seo/redirects': { row: '/seo/redirects', gate: ['SEO_READ'] },
     '/credit-packages': { row: '/credit-packages', gate: ['CREDIT_PACKAGES_READ'] },
     '/credit-packages/new': {
       row: '/credit-packages',
@@ -221,7 +226,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
-    expect(onDisk).toHaveLength(53);
+    expect(onDisk).toHaveLength(57);
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {

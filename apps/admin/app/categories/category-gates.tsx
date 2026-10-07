@@ -90,7 +90,7 @@ export function CategoryCreateSubmit() {
 
 /**
  * "Kategoriyi kaydet" on the category's own screen: asks when the save moves
- * the slug, the type or the parent (`category.structure-update`), the offer
+ * the type or the parent (`category.structure-update`), the offer
  * price (`category.offer-credit-update`), switches unlimited-package
  * eligibility on (`category.unlimited-enable`) or moves "Durum"
  * (`category.activate` / `category.deactivate`) — one dialog, one proof per
@@ -111,7 +111,7 @@ export function CategoryEditSubmit({
     const changes = categoryChanges(stored, categoryPayload(new FormData(form)));
     const proofs = categoryProofKeys(changes);
     if (proofs.length === 0) return null;
-    const structural = Boolean(changes.slug || changes.kind || changes.parent);
+    const structural = Boolean(changes.kind || changes.parent);
     const deactivating = changes.status !== null && changes.status.to !== 'ACTIVE';
     return {
       proofs,
@@ -237,18 +237,10 @@ export function CategoryChangeConsequence({
   const parentLabel = (id: string | null) => (id === null ? 'üst seviye' : (parentNames[id] ?? 'bilinmeyen grup'));
   const sections: ReactNode[] = [];
 
-  if (changes.slug || changes.kind || changes.parent) {
+  if (changes.kind || changes.parent) {
     sections.push(
       <div key="structure" data-testid="category-structure-change">
         <dl className="confirm-dialog-facts">
-          {changes.slug ? (
-            <div>
-              <dt>Kısa ad</dt>
-              <dd>
-                <code>{changes.slug.from}</code> → <strong><code>{changes.slug.to}</code></strong>
-              </dd>
-            </div>
-          ) : null}
           {changes.kind ? (
             <div>
               <dt>Tip</dt>
@@ -266,18 +258,10 @@ export function CategoryChangeConsequence({
             </div>
           ) : null}
         </dl>
-        {changes.slug ? (
-          <p>
-            Kısa ad kategorinin adresidir: <strong>eski adrese verilmiş dış bağlantılar ve arama motoru kayıtları
-            kırılabilir</strong> (eski adres yeni adrese yönlenmez).
-          </p>
-        ) : null}
-        {changes.kind || changes.parent ? (
-          <p>
-            <strong>Kategori ağacı değişir:</strong> kategorinin katalogdaki yeri
-            {changes.kind ? ' ve talep alıp almadığı (tipine göre)' : ''} bu kayıtla birlikte değişir.
-          </p>
-        ) : null}
+        <p>
+          <strong>Kategori ağacı değişir:</strong> kategorinin katalogdaki yeri
+          {changes.kind ? ' ve talep alıp almadığı (tipine göre)' : ''} bu kayıtla birlikte değişir.
+        </p>
       </div>,
     );
   }
