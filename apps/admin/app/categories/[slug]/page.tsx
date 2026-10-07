@@ -30,6 +30,8 @@ import { DetailHeader } from '../../../components/detail-header';
 import type { SummaryItem } from '../../../components/summary-strip';
 import { Tabs, type TabItem } from '../../../components/tabs';
 import { inviteActivity } from './category-activity';
+import { CategorySeoSection } from './category-seo-section';
+import type { CategorySeoContent } from '../../../lib/seo';
 import {
   KIND_HINTS,
   KIND_LABELS,
@@ -53,13 +55,16 @@ import {
  * One category (#40), on the design's tabbed detail screen (ADMIN-DESIGN-001
  * Faz 3F.1): a way back to the list, the summary card — status, type and
  * supply badges, the slug and where it hangs, the name, and a strip with the
- * figures a release is decided on — then four tabs as links (`?tab=`):
+ * figures a release is decided on — then up to five tabs as links (`?tab=`):
  *
  * - Kategori bilgileri (the plain URL): the category form, then the cards that
  *   decide its status — the release checklist on a draft, the status desk and,
  *   on a router, what a router is.
  * - Sorular (QUESTIONS_READ): the routing map on a router and the question set.
  * - Hizmet veren davetleri (a service + PROVIDER_INVITES_READ): the desk.
+ * - Arama motoru (SEO_READ; SEO-004 PR B): whether the public page is open to
+ *   search engines and the rules it fails, with the API's own numbers, and the
+ *   SEO content — saved with SEO_CONTENT_WRITE on its own route.
  * - Neler oldu: the category's change log (ADMIN-ACTION-AUDIT-001) — each
  *   create, edit and status move with its field diff and its operator — and,
  *   for a service, its invitations with who issued and who withdrew them.
@@ -76,6 +81,8 @@ import {
  *
  * - CATEGORIES_WRITE: the category form, otherwise its values read-only. The
  *   status select in it moves only with CATEGORIES_STATUS (`statusLocked`).
+ *   The slug is not a field of it (SEO-004 PR B): "Adresi değiştir" opens the
+ *   SEO slug window, offered with SEO_READ and CATEGORIES_WRITE.
  * - UPLOADS_WRITE: the upload buttons; the URL fields are part of the form.
  * - QUESTIONS_READ: the question set and, on a router, the routing map.
  *   QUESTIONS_WRITE on top of it: the edit forms, the condition editor, the
@@ -92,15 +99,15 @@ import {
 
 type CategoryDetailPageProps = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ tab?: string; error?: string; gecmisSayfa?: string }>;
+  searchParams: Promise<{ tab?: string; error?: string; gecmisSayfa?: string; adres?: string; yonlendirme?: string }>;
 };
 
-type TabKey = '' | 'sorular' | 'davetler' | 'gecmis';
+type TabKey = '' | 'sorular' | 'davetler' | 'arama-motoru' | 'gecmis';
 
 export default async function CategoryDetailPage({ params, searchParams }: CategoryDetailPageProps) {
   const { can } = await requireAdmin('CATALOG_READ');
   const { slug } = await params;
-  const { tab, error, gecmisSayfa } = await searchParams;
+  const { tab, error, gecmisSayfa, adres, yonlendirme } = await searchParams;
   // Each control below is offered only to a session the API would let through;
   // the API still checks every one of them.
   const canWriteCategory = can('CATEGORIES_WRITE');
@@ -111,6 +118,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
   const canReadQuestions = can('QUESTIONS_READ');
   const canWriteQuestions = canReadQuestions && can('QUESTIONS_WRITE');
   const canReadInvites = can('PROVIDER_INVITES_READ');
+  // SEO-004 PR B: the "Arama motoru" tab reads with SEO_READ and saves with
+  // SEO_CONTENT_WRITE. The address is changed in the SEO slug window — reached
+  // from the form's "Adresi değiştir" — which needs SEO_READ to open and
+  // CATEGORIES_WRITE (the API's slug route) to save.
+  const canReadSeo = can('SEO_READ');
+  const canChangeSlug = canReadSeo && canWriteCategory;
 
   const category = await fetchOrNotFound(() => apiFetch<Category>(`/admin/categories/${slug}`));
   const [questions, allCategories] = await Promise.all([
@@ -206,6 +219,7 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
     ...(invites
       ? [{ key: 'davetler', label: 'Hizmet veren davetleri', count: invites.invites.length, testId: 'category-tab-davetler' }]
       : []),
+    ...(canReadSeo ? [{ key: 'arama-motoru', label: 'Arama motoru', testId: 'category-tab-arama-motoru' }] : []),
     { key: 'gecmis', label: 'Neler oldu', testId: 'category-tab-gecmis' },
   ];
   const activeTab = resolveTab<TabKey>(
@@ -216,6 +230,11 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
   // ADMIN-ACTION-AUDIT-001: the category's change log, read on its own tab.
   const history =
     activeTab === 'gecmis' ? await getCategoryHistory(category.slug, parsePage(gecmisSayfa)) : null;
+  const seoContent =
+    activeTab === 'arama-motoru'
+      ? await apiFetch<CategorySeoContent>(`/admin/seo/categories/${encodeURIComponent(category.id)}/content`)
+      : null;
+  const publiclyReachable = category.status === 'ACTIVE' && (category.kind === 'LEAF' || category.kind === 'ROUTER');
 
   return (
     <main className="catalog-page catalog-detail-page">
@@ -254,6 +273,15 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
         testId="category-header"
       />
 
+      {adres && adres === `/categories/${category.slug}` ? (
+        <div className="notice notice-success detail-notice" role="status" data-testid="category-slug-changed">
+          Adres değiştirildi: <code>{adres}</code>.{' '}
+          {yonlendirme === '1'
+            ? 'Eski adres kalıcı (301) olarak yeni adrese yönlendiriliyor.'
+            : 'Kategori herkese açık olmadığı için yönlendirme oluşturulmadı.'}
+        </div>
+      ) : null}
+
       {error === 'CONFIRMATION_REQUIRED' ? (
         <div className="notice notice-error detail-notice" role="alert" data-testid="category-error">
           {CONFIRMATION_PROOF_REFUSAL_MESSAGE}
@@ -272,6 +300,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
             canUpload={canUpload}
             updateAction={updateCategoryAction}
             placementImpact={placementImpact}
+            slugChangeHref={
+              canChangeSlug
+                ? `/seo/slugs?${new URLSearchParams({ kategori: category.id, geri: 'kategori' }).toString()}`
+                : null
+            }
+            publiclyReachable={publiclyReachable}
           />
 
           {category.status === 'DRAFT' || canChangeStatus || isRouter ? (
@@ -337,6 +371,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
             categorySlug={category.slug}
             invites={invites.invites}
           />
+        </div>
+      ) : null}
+
+      {activeTab === 'arama-motoru' && seoContent ? (
+        <div className="detail-tab-panel" data-testid="category-panel-arama-motoru">
+          <CategorySeoSection content={seoContent} canWrite={can('SEO_CONTENT_WRITE')} />
         </div>
       ) : null}
 

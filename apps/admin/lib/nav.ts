@@ -42,7 +42,8 @@ export type NavIconName =
   | 'store'
   | 'list'
   | 'settings'
-  | 'shield';
+  | 'shield'
+  | 'search';
 
 export type NavGroup = {
   /** Stable id: the open/closed state and the DOM ids hang off it, not the title. */
@@ -74,10 +75,11 @@ export const NAV_HOME_ICON: NavIconName = 'grid';
 /**
  * The sidebar, grouped by what an operator is looking at (ADMIN-DESIGN-001).
  *
- * Exactly eight groups, under the standalone `navHome` row: the design's own,
- * with its "SEO ve adresler" group left out (SEO-004 has no screens yet) and its
+ * Nine groups, under the standalone `navHome` row: the design's own, with its
  * "Sistem" group split into Operasyon and Yönetim, so the five screens the
- * design had no row for have a place (K1):
+ * design had no row for have a place (K1). "SEO ve adresler" arrived with
+ * SEO-004 PR B — four rows on SEO_READ, the permission every admin SEO read
+ * asks for (the API's route map holds the same):
  * Paket iadeleri under Finans, Vitrin kartları and Vitrin metin onayları under
  * Vitrin, Kampanya uygunluk incelemesi under Operasyon and Roller ve izinler
  * under Yönetim.
@@ -168,6 +170,18 @@ export const navGroups: NavGroup[] = [
       { href: '/categories', label: 'Hizmet kategorileri', permission: 'CATALOG_READ' },
       { href: '/showcase/packages', label: 'Vitrin paketleri', permission: 'SHOWCASE_PACKAGES_READ' },
       { href: '/credit-packages', label: 'Kredi paketleri', permission: 'CREDIT_PACKAGES_READ' },
+    ],
+  },
+  {
+    key: 'seo',
+    title: 'SEO ve adresler',
+    icon: 'search',
+    items: [
+      // `exact`: the overview is `/seo`, and its three siblings sit under it.
+      { href: '/seo', label: 'Arama motoru durumu', exact: true, permission: 'SEO_READ' },
+      { href: '/seo/indexing', label: 'İndekslenmeyen sayfalar', permission: 'SEO_READ' },
+      { href: '/seo/slugs', label: 'Adresler', permission: 'SEO_READ' },
+      { href: '/seo/redirects', label: 'Yönlendirmeler', permission: 'SEO_READ' },
     ],
   },
   {

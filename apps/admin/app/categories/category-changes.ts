@@ -17,7 +17,12 @@ import type { ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
 /** The PATCH/POST body the category form produces — exactly what the API receives. */
 export type CategoryPayload = {
   name: string;
-  slug: string;
+  /**
+   * Only on create. The edit form carries no slug since SEO-004 PR B: an
+   * address changes only through the SEO slug window, so a category save can
+   * never move it.
+   */
+  slug?: string;
   description: string | null;
   imageUrl: string | null;
   coverImageUrl: string | null;
@@ -37,7 +42,7 @@ export function categoryPayload(formData: FormData): CategoryPayload {
 
   return {
     name: readFormString(formData, 'name'),
-    slug: readFormString(formData, 'slug'),
+    ...(formData.has('slug') ? { slug: readFormString(formData, 'slug') } : {}),
     description: readOptionalFormString(formData, 'description'),
     imageUrl: readOptionalFormString(formData, 'imageUrl'),
     coverImageUrl: readOptionalFormString(formData, 'coverImageUrl'),
@@ -85,7 +90,6 @@ export type CategoryStored = Pick<
 >;
 
 export type CategoryChanges = {
-  slug: { from: string; to: string } | null;
   kind: { from: CategoryKind; to: CategoryKind } | null;
   parent: { from: string | null; to: string | null } | null;
   status: { from: CategoryStatus; to: CategoryStatus } | null;
@@ -100,10 +104,8 @@ export type CategoryChanges = {
  * change, a value sent back unchanged is not a change.
  */
 export function categoryChanges(stored: CategoryStored, payload: CategoryPayload): CategoryChanges {
-  const slug = payload.slug.trim();
   const status = payload.status !== undefined && payload.status !== stored.status ? payload.status : null;
   return {
-    slug: slug !== stored.slug ? { from: stored.slug, to: slug } : null,
     kind: payload.kind !== stored.kind ? { from: stored.kind, to: payload.kind } : null,
     parent:
       (payload.parentId ?? null) !== (stored.parentId ?? null)
@@ -126,7 +128,7 @@ export function categoryStatusProofKey(to: CategoryStatus): ConfirmationProofKey
 /** One proof per guarded change; an empty list means the save asks nothing. */
 export function categoryProofKeys(changes: CategoryChanges): ConfirmationProofKey[] {
   const keys: ConfirmationProofKey[] = [];
-  if (changes.slug || changes.kind || changes.parent) keys.push('category.structure-update');
+  if (changes.kind || changes.parent) keys.push('category.structure-update');
   if (changes.offerCreditCost) keys.push('category.offer-credit-update');
   if (changes.unlimitedEnable) keys.push('category.unlimited-enable');
   if (changes.status) keys.push(categoryStatusProofKey(changes.status.to));

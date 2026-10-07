@@ -8889,3 +8889,526 @@ a.dashboard-kpi-note {
 .audit-pagination {
   padding: 0.75rem 1rem;
 }
+
+/* ---- SEO-004 PR B: SEO ve adresler ----------------------------------------
+   Arama motoru durumu, İndekslenmeyen sayfalar, Adresler, Yönlendirmeler and
+   the category's "Arama motoru" tab (design paket 4, 38–43). Tokens only. */
+
+.seo-page .data-list-card {
+  margin-top: 16px;
+}
+
+/* The "site aramaya açık / kapalı" band: a 3px left rule, the design's tint. */
+.seo-site-band {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px 32px;
+  margin-top: 18px;
+  padding: 18px 20px;
+  border-left: 3px solid var(--color-success);
+  background: var(--color-success-bg);
+}
+
+.seo-site-band.is-closed {
+  border-left-color: var(--color-warning);
+  background: var(--color-warning-bg);
+}
+
+.seo-site-band-text {
+  flex: 1 1 420px;
+  min-width: 0;
+}
+
+.seo-site-band-title {
+  margin: 0 0 6px;
+  color: var(--color-success);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.seo-site-band.is-closed .seo-site-band-title {
+  color: var(--color-warning);
+}
+
+.seo-site-band-text p {
+  margin: 0;
+  max-width: 720px;
+  color: var(--color-neutral-800);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.seo-site-band-facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.seo-site-band-facts div {
+  display: flex;
+  gap: 6px;
+}
+
+.seo-site-band-facts dt {
+  color: var(--color-neutral-700);
+}
+
+.seo-site-band-facts dt::after {
+  content: ':';
+}
+
+.seo-site-band-facts dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.seo-stat-grid {
+  margin-top: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.seo-metric.is-good {
+  color: var(--color-success);
+}
+
+.seo-metric.is-warn {
+  color: var(--color-warning);
+}
+
+.seo-overview-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.seo-overview-grid > .section-card {
+  margin-top: 18px;
+}
+
+@media (max-width: 1100px) {
+  .seo-overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .seo-overview-grid > .section-card + .section-card {
+    margin-top: 0;
+  }
+}
+
+/* The emphasised card head: a 2px ink rule under the title (design). */
+.seo-emphasis-card > .section-card-header {
+  border-bottom: 2px solid var(--color-text);
+}
+
+.seo-type-list,
+.seo-rule-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seo-type-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 1.1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-neutral-200);
+}
+
+.seo-type-row:last-child {
+  border-bottom: 0;
+}
+
+.seo-type-text {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-size: 13.5px;
+}
+
+.seo-type-text .cell-muted {
+  font-size: 12.5px;
+}
+
+.seo-type-bar {
+  height: 6px;
+  background: var(--color-neutral-200);
+}
+
+.seo-type-bar span {
+  display: block;
+  height: 100%;
+  background: var(--color-text);
+}
+
+.seo-type-count {
+  min-width: 64px;
+  font-size: 13px;
+  font-weight: 800;
+  text-align: right;
+  white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+  .seo-type-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .seo-type-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.seo-rule-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin: 0 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-neutral-200);
+  font-size: 13.5px;
+}
+
+.seo-rule-list li .cell-muted {
+  flex-basis: 100%;
+  font-size: 12.5px;
+}
+
+.seo-rule-limit {
+  color: var(--color-accent-700);
+  font-weight: 600;
+}
+
+.seo-rule-foot {
+  margin: 0;
+  padding: 14px 20px 18px;
+  color: var(--color-neutral-700);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Why a page is closed: one line per failed rule, its numbers under it. */
+.seo-reason-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.seo-reason-list li {
+  display: grid;
+  gap: 2px;
+}
+
+.seo-reason-list .cell-muted {
+  font-size: 12px;
+}
+
+.seo-reason-list-card {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.seo-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.seo-row-actions form {
+  margin: 0;
+}
+
+/* ---- the windows (slug, redirect, 404 approval) ---- */
+
+.seo-modal-form {
+  display: grid;
+  gap: 16px;
+}
+
+.seo-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.seo-field-label {
+  padding: 0;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.seo-field-pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.seo-readonly-value {
+  padding: 10px 12px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+
+/* A fixed prefix in front of the typed part: "/categories/" + slug. */
+.seo-prefix-input {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--color-neutral-400);
+  background: var(--surface);
+}
+
+.seo-prefix-input:focus-within {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+.seo-prefix {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-right: 1px solid var(--color-neutral-300);
+  background: var(--color-neutral-100);
+  color: var(--color-neutral-700);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.seo-prefix-input input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  outline: none;
+}
+
+.seo-canonical-preview {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.seo-modal-form .help-text,
+.seo-content-form .help-text {
+  color: var(--color-neutral-700);
+  font-size: 12px;
+}
+
+.seo-modal-form .help-text.is-error,
+.seo-content-form .help-text.is-error {
+  margin: 0;
+  color: var(--color-accent-700);
+  font-weight: 600;
+}
+
+/* "Kaydettiğinde ne olacak": the design's accent block. */
+.seo-consequence {
+  display: grid;
+  gap: 6px;
+  padding: 14px 18px;
+  border-left: 3px solid var(--color-accent);
+  background: var(--color-accent-100);
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.seo-consequence strong:first-child {
+  color: var(--color-accent-700);
+}
+
+.seo-consequence p {
+  margin: 0;
+}
+
+.seo-check-note {
+  padding: 12px 16px;
+  border-left: 3px solid var(--color-text);
+  background: var(--color-neutral-100);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.seo-type-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.seo-type-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.seo-type-option.is-selected {
+  border: 2px solid var(--color-text);
+  padding: 13px 15px;
+}
+
+.seo-type-option > span {
+  display: grid;
+  gap: 4px;
+  font-size: 13.5px;
+}
+
+.seo-type-option .cell-muted {
+  font-size: 12.5px;
+}
+
+/* ---- the category's "Arama motoru" tab ---- */
+
+.seo-slug-locked .btn-link {
+  flex: none;
+  padding: 0;
+}
+
+.seo-status-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 13.5px;
+}
+
+.seo-counter {
+  margin-left: 6px;
+  color: var(--color-neutral-600);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.seo-counter.is-over {
+  color: var(--color-accent-700);
+}
+
+.seo-faq {
+  display: grid;
+  gap: 12px;
+  margin: 18px 0 0;
+  padding: 16px 0 0;
+  border: 0;
+  border-top: 1px solid var(--color-neutral-200);
+}
+
+.seo-faq legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.seo-faq-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.seo-faq-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--color-neutral-300);
+  background: var(--color-neutral-100);
+}
+
+.seo-faq-row .field {
+  display: grid;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.seo-faq-row .btn-link {
+  align-self: end;
+}
+
+@media (max-width: 760px) {
+  .seo-faq-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .seo-faq-row .btn-link {
+    justify-self: start;
+  }
+}
+
+.seo-faq > .btn {
+  justify-self: start;
+}
+
+.seo-faq-readonly {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.seo-faq-readonly li {
+  display: grid;
+  gap: 2px;
+}
+
+.seo-content-form .notice {
+  margin-top: 14px;
+}
+
+.seo-type-text .cell-muted a {
+  color: inherit;
+  font-weight: 400;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.seo-page .data-table .seo-reason-list {
+  min-width: 280px;
+}
+
+.seo-page .filter-field:not(.is-wide) {
+  max-width: 260px;
+}
+
+.seo-slug-locked {
+  flex-wrap: wrap;
+}
+
+.seo-type-option input[type='radio'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-height: 0;
+  margin: 2px 0 0;
+  padding: 0;
+  accent-color: var(--color-accent);
+}
+
+.seo-modal-form .locked-field {
+  flex-wrap: wrap;
+}

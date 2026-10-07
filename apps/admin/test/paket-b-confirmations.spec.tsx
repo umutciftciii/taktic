@@ -78,13 +78,14 @@ describe('category save: which change asks, judged against the stored category',
     ).toEqual([]);
   });
 
-  it('a slug, type or parent change is one structural proof', () => {
-    expect(keysFor({ slug: ' klima-servisi ' })).toEqual(['category.structure-update']);
+  it('a type or parent change is one structural proof; a slug is not the form\'s to change (SEO-004 PR B)', () => {
     expect(keysFor({ kind: 'ROUTER' })).toEqual(['category.structure-update']);
     expect(keysFor({ parentId: 'grp-1' })).toEqual(['category.structure-update']);
-    expect(keysFor({ slug: 'x', parentId: 'grp-1' })).toEqual(['category.structure-update']);
-    // The trimmed slug is the stored one: not a change.
-    expect(keysFor({ slug: '  klima  ' })).toEqual([]);
+    expect(keysFor({ kind: 'ROUTER', parentId: 'grp-1' })).toEqual(['category.structure-update']);
+    // The address moves only in the SEO slug window: a slug reaching the edit
+    // form is no change here, and the action drops it before the PATCH.
+    expect(keysFor({ slug: 'klima-servisi' })).toEqual([]);
+    expect(categoryChanges(STORED, categoryPayload(formData({ ...FIELDS, slug: 'x' })))).not.toHaveProperty('slug');
   });
 
   it('the offer price asks; a router carries none, so it cannot change it', () => {
@@ -111,7 +112,7 @@ describe('category save: which change asks, judged against the stored category',
   });
 
   it('several changes, several proofs — in one dialog', () => {
-    expect(keysFor({ slug: 'klima-2', offerCreditCost: '4', unlimitedPackageEligible: 'on', status: 'INACTIVE' })).toEqual([
+    expect(keysFor({ parentId: 'grp-1', offerCreditCost: '4', unlimitedPackageEligible: 'on', status: 'INACTIVE' })).toEqual([
       'category.structure-update',
       'category.offer-credit-update',
       'category.deactivate',
@@ -129,7 +130,7 @@ describe('category save: which change asks, judged against the stored category',
 });
 
 describe('category dialogs say what the API does', () => {
-  it('structure: slug old → new and that outside links can break; the tree changes', () => {
+  it('structure: the tree changes — and no longer the old "links break" warning (SEO-004 PR B)', () => {
     const said = html(
       <CategoryChangeConsequence
         changes={categoryChanges(STORED, categoryPayload(formData({ ...FIELDS, slug: 'klima-servisi', parentId: 'grp-1' })))}
@@ -137,8 +138,9 @@ describe('category dialogs say what the API does', () => {
         impact={null}
       />,
     );
-    expect(said).toContain('<code>klima</code> → <strong><code>klima-servisi</code></strong>');
-    expect(said).toContain('dış bağlantılar ve arama motoru kayıtları');
+    expect(said).not.toContain('klima-servisi');
+    expect(said).not.toContain('dış bağlantılar');
+    expect(said).not.toContain('kırıl');
     expect(said).toContain('üst seviye → <strong>Ev hizmetleri</strong>');
     expect(said).toContain('Kategori ağacı değişir');
   });

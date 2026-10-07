@@ -29,7 +29,7 @@ const SHOTS = resolve(artifactsDir, 'admin-design');
 
 /**
  * The full menu, in order, as a super admin sees it: the standalone dashboard
- * row first, then exactly eight groups.
+ * row first, then exactly nine groups (SEO ve adresler since SEO-004 PR B).
  */
 const HOME_ROW = 'Genel görünüm';
 const FULL_MENU: Array<[group: string, rows: string[]]> = [
@@ -60,6 +60,7 @@ const FULL_MENU: Array<[group: string, rows: string[]]> = [
     ],
   ],
   ['Katalog', ['Hizmet kategorileri', 'Vitrin paketleri', 'Kredi paketleri']],
+  ['SEO ve adresler', ['Arama motoru durumu', 'İndekslenmeyen sayfalar', 'Adresler', 'Yönlendirmeler']],
   ['Operasyon', ['Operasyon ayarları', 'Kampanyalar', 'Kampanya uygunluk incelemesi', 'Gönderilen bildirimler']],
   ['Yönetim', ['Yönetici hesapları', 'Roller ve izinler', 'Şirket ve e-posta bilgileri']],
 ];
@@ -120,7 +121,7 @@ test.describe('admin shell (ADMIN-DESIGN-001)', () => {
       // dashboard row is not one of them and sits inside none of them.
       expect(await sidebarGroupTitles(admin.page)).toEqual(FULL_MENU.map(([group]) => group));
       expect(await sidebarGroupNames(admin.page)).toEqual(FULL_MENU.map(([group]) => group));
-      await expect(admin.page.locator('#admin-sidebar [role="group"]')).toHaveCount(8);
+      await expect(admin.page.locator('#admin-sidebar [role="group"]')).toHaveCount(9);
       await expectHomeRowOutsideGroups(admin.page);
       await expect(admin.page.getByTestId('admin-nav-home')).toHaveAttribute('aria-current', 'page');
       await expect(admin.page.getByTestId('admin-account-role')).toHaveText('Süper yönetici');

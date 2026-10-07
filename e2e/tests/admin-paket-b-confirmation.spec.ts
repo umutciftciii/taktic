@@ -206,18 +206,26 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket B', () => {
       await expect(page).toHaveURL(new RegExp(`/categories/${slug}$`));
       expect((await prisma().serviceCategory.findUniqueOrThrow({ where: { slug } })).status).toBe('ACTIVE');
 
-      // ---- the slug and the price in one save: one dialog, both lines -----
+      // ---- the parent and the price in one save: one dialog, both lines ---
+      // (SEO-004 PR B: the slug is no longer a field of this form — an address
+      // changes only in the SEO slug window, which has its own spec.)
+      const group = await createCategory(null, { kind: 'GROUP', namePrefix: 'E2E PaketB Grup' });
+      await page.reload();
       const form = page.locator('form', { has: page.getByTestId('category-save') });
-      await form.locator('input[name="slug"]').fill(`${slug}-yeni`);
+      await expect(form.locator('input[name="slug"]')).toHaveCount(0);
+      await form.locator('select[name="parentId"]').selectOption(group.id);
       await form.locator('input[name="offerCreditCost"]').fill('5');
       await confirmThrough(form.getByTestId('category-save'), 'Evet, kaydet', async (dialog) => {
-        await expect(dialog.getByTestId('category-structure-change')).toContainText(`${slug}-yeni`);
-        await expect(dialog.getByTestId('category-structure-change')).toContainText('dış bağlantılar');
+        await expect(dialog.getByTestId('category-structure-change')).toContainText(group.name);
+        await expect(dialog.getByTestId('category-structure-change')).toContainText('Kategori ağacı değişir');
         await expect(dialog.getByTestId('category-offer-credit-change')).toContainText('1 kredi → 5 kredi');
       });
       await expect
-        .poll(async () => (await prisma().serviceCategory.findUnique({ where: { slug: `${slug}-yeni` } }))?.offerCreditCost)
-        .toBe(5);
+        .poll(async () => {
+          const saved = await prisma().serviceCategory.findUnique({ where: { slug } });
+          return [saved?.parentId, saved?.offerCreditCost];
+        })
+        .toEqual([group.id, 5]);
 
       // ---- a category with a live run: closing counts and suspends it -----
       await actor.gotoAdmin(`/categories/${run.category.slug}`);

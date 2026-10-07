@@ -53,11 +53,13 @@ export async function createCategoryAction(formData: FormData) {
 
 export async function updateCategoryAction(formData: FormData) {
   const id = readFormString(formData, 'id');
-  const slug = readFormString(formData, 'slug');
+  // The edit form sends no slug (SEO-004 PR B): the address changes only in
+  // the SEO slug window. One that arrives anyway is dropped, never sent.
   const payload = categoryPayload(formData);
+  delete payload.slug;
 
   // What this save changes is judged against the category as the API has it
-  // now, never on the form's word: a new slug, type or parent, a new offer
+  // now, never on the form's word: a new type or parent, a new offer
   // price, the unlimited-package switch going on, or a status move each need
   // their own proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A save of
   // the name, description, pictures or order needs none.
@@ -67,11 +69,14 @@ export async function updateCategoryAction(formData: FormData) {
     redirect(`${stored ? `/categories/${stored.slug}` : '/categories'}?error=${CONFIRMATION_REQUIRED}`);
   }
 
-  await apiFetch<Category>(`/categories/${id}`, {
+  const saved = await apiFetch<Category>(`/categories/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });
 
+  // The address this save cannot have moved: the stored one, or — when it
+  // could not be read — the one the API answered with.
+  const slug = stored?.slug ?? saved.slug;
   revalidatePath('/categories');
   revalidatePath(`/categories/${slug}`);
   redirect(`/categories/${slug}`);

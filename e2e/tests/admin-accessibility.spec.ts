@@ -59,6 +59,10 @@ const LIST_SCREENS = [
   '/users/new',
   '/roles',
   '/company-settings',
+  '/seo',
+  '/seo/indexing',
+  '/seo/slugs',
+  '/seo/redirects',
 ];
 
 type Structure = { mains: number; h1s: string[]; unnamed: string[] };
