@@ -1,0 +1,241 @@
+{
+  "$comment": "SEO-004. The one address contract the API (apps/api/src/modules/seo/seo-paths.ts, category-slug.ts) and the web middleware (apps/web/lib/seo-paths.ts) both implement. The two implementations are separate code (the API cannot import this package's TypeScript), so they are held to the same limits and the same cases here: both test suites run every case below.",
+  "pathMaxLength": 200,
+  "slugMaxLength": 80,
+  "publicFamilies": [
+    "categories",
+    "isletme",
+    "vitrin"
+  ],
+  "reservedTopLevelSegments": [
+    "_next",
+    "account",
+    "activate-customer",
+    "api",
+    "brand",
+    "claim-provider",
+    "destek",
+    "e-posta-dogrula",
+    "login",
+    "logout",
+    "mesajlar",
+    "provider-invite",
+    "providers",
+    "register",
+    "requests",
+    "sifre-sifirla",
+    "sifre-unuttum",
+    "sozlesmeler"
+  ],
+  "reservedSlugs": [
+    "new",
+    "yeni",
+    "edit",
+    "duzenle",
+    "index",
+    "api",
+    "admin",
+    "null",
+    "undefined"
+  ],
+  "normalizeCases": [
+    {
+      "input": "/categories/kombi-servisi",
+      "path": "/categories/kombi-servisi"
+    },
+    {
+      "input": "/categories/kombi-servisi/",
+      "path": "/categories/kombi-servisi"
+    },
+    {
+      "input": "/Categories/Kombi-Servisi",
+      "path": "/categories/kombi-servisi"
+    },
+    {
+      "input": "/kategori/ev-temizli%C4%9Fi",
+      "path": "/kategori/ev-temizliği"
+    },
+    {
+      "input": "/kategori/ev-temizliği",
+      "path": "/kategori/ev-temizliği"
+    },
+    {
+      "input": "/kategori/IŞIK",
+      "path": "/kategori/işik"
+    },
+    {
+      "input": "/kategori/e%CC%81",
+      "path": "/kategori/é"
+    },
+    {
+      "input": "/",
+      "path": "/"
+    },
+    {
+      "input": "",
+      "refusal": "EMPTY"
+    },
+    {
+      "input": "categories/x",
+      "refusal": "NOT_ROOTED"
+    },
+    {
+      "input": "//evil.com",
+      "refusal": "PROTOCOL_RELATIVE"
+    },
+    {
+      "input": "//evil.com/categories/x",
+      "refusal": "PROTOCOL_RELATIVE"
+    },
+    {
+      "input": "https://evil.com/x",
+      "refusal": "ABSOLUTE_URL"
+    },
+    {
+      "input": "javascript:alert(1)",
+      "refusal": "ABSOLUTE_URL"
+    },
+    {
+      "input": "/x/https://evil.com",
+      "refusal": "ABSOLUTE_URL"
+    },
+    {
+      "input": "/\\evil.com",
+      "refusal": "BACKSLASH"
+    },
+    {
+      "input": "/categories\\x",
+      "refusal": "BACKSLASH"
+    },
+    {
+      "input": "/%5Cevil.com",
+      "refusal": "ENCODED_SEPARATOR"
+    },
+    {
+      "input": "/%2Fevil.com",
+      "refusal": "ENCODED_SEPARATOR"
+    },
+    {
+      "input": "/categories/a%2fb",
+      "refusal": "ENCODED_SEPARATOR"
+    },
+    {
+      "input": "/categories/a%252Fb",
+      "refusal": "DOUBLE_ENCODED"
+    },
+    {
+      "input": "/categories/%E0%A4%A",
+      "refusal": "MALFORMED_ENCODING"
+    },
+    {
+      "input": "/categories/a%00b",
+      "refusal": "CONTROL_CHARACTER"
+    },
+    {
+      "input": "/categories/a\u0007b",
+      "refusal": "CONTROL_CHARACTER"
+    },
+    {
+      "input": "/categories/a b",
+      "refusal": "WHITESPACE"
+    },
+    {
+      "input": "/categories/a%20b",
+      "refusal": "WHITESPACE"
+    },
+    {
+      "input": "/categories/../admin",
+      "refusal": "DOT_SEGMENT"
+    },
+    {
+      "input": "/categories/%2e%2e/admin",
+      "refusal": "DOT_SEGMENT"
+    },
+    {
+      "input": "/./categories",
+      "refusal": "DOT_SEGMENT"
+    },
+    {
+      "input": "/categories//x",
+      "refusal": "EMPTY_SEGMENT"
+    },
+    {
+      "input": "/categories/x//",
+      "refusal": "EMPTY_SEGMENT"
+    },
+    {
+      "input": "/categories/x?utm=1",
+      "refusal": "QUERY"
+    },
+    {
+      "input": "/categories/x%3Fa",
+      "refusal": "QUERY"
+    },
+    {
+      "input": "/categories/x#top",
+      "refusal": "FRAGMENT"
+    },
+    {
+      "input": "/categories/x%23top",
+      "refusal": "FRAGMENT"
+    },
+    {
+      "input": "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": "TOO_LONG"
+    }
+  ],
+  "slugCases": [
+    {
+      "input": "kombi-servisi",
+      "slug": "kombi-servisi"
+    },
+    {
+      "input": "Kombi Bakım Servisi",
+      "slug": "kombi-bakim-servisi"
+    },
+    {
+      "input": "  Şofben & Doğalgaz  ",
+      "slug": "sofben-dogalgaz"
+    },
+    {
+      "input": "ÇİÇEK—SULAMA",
+      "slug": "cicek-sulama"
+    },
+    {
+      "input": "Işık Ölçümü",
+      "slug": "isik-olcumu"
+    },
+    {
+      "input": "--a---b--",
+      "slug": "a-b"
+    },
+    {
+      "input": "café",
+      "slug": "cafe"
+    },
+    {
+      "input": "",
+      "refusal": "EMPTY"
+    },
+    {
+      "input": "---",
+      "refusal": "EMPTY"
+    },
+    {
+      "input": "日本",
+      "refusal": "EMPTY"
+    },
+    {
+      "input": "yeni",
+      "refusal": "RESERVED"
+    },
+    {
+      "input": "Admin",
+      "refusal": "RESERVED"
+    },
+    {
+      "input": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "refusal": "TOO_LONG"
+    }
+  ]
+}

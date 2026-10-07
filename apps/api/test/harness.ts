@@ -260,6 +260,11 @@ const TRUNCATED_TABLES = [
   // ProviderProfile and (by id only) the catalogue. TRUNCATE does not fire the
   // append-only triggers.
   'CatalogAuditLog',
+  // SEO-004: suggestions point at redirects, both at accounts. TRUNCATE does
+  // not fire the redirect table's no-delete row trigger.
+  'SeoAuditLog',
+  'SeoNotFoundPath',
+  'SeoRedirect',
   'CompanySettingsChange',
   'ProviderStatusChange',
   'AccountStatusChange',

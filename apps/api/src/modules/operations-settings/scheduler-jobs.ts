@@ -24,6 +24,21 @@ export const SCHEDULER_JOB_KEYS = [
 
 export type SchedulerJobKey = (typeof SCHEDULER_JOB_KEYS)[number];
 
+/**
+ * Jobs that record their runs in `SchedulerRun` (and so hold its lease) but
+ * have no operations switch: they are always on, because what they do is
+ * housekeeping nobody needs to stop. Not in {@link SCHEDULER_JOB_KEYS}, so the
+ * operations screen does not offer a switch that would do nothing.
+ *
+ *   seo-not-found-retention  SEO-004: drops 404 suggestions nobody has hit in
+ *                            90 days and rejected ones after 180.
+ */
+export const RECORDED_ONLY_JOB_KEYS = ['seo-not-found-retention'] as const;
+export type RecordedOnlyJobKey = (typeof RECORDED_ONLY_JOB_KEYS)[number];
+
+/** Every job key a `SchedulerRun` row may carry. */
+export type RecordedJobKey = SchedulerJobKey | RecordedOnlyJobKey;
+
 export function isSchedulerJobKey(value: string): value is SchedulerJobKey {
   return (SCHEDULER_JOB_KEYS as readonly string[]).includes(value);
 }

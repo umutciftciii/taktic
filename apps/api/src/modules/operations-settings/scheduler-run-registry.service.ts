@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, OnApplicationBootstrap } from '@nestjs/comm
 import { Cron } from '@nestjs/schedule';
 import { Prisma, SchedulerRunStatus, SchedulerRunTrigger } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { SCHEDULER_JOB_KEYS, SchedulerJobKey } from './scheduler-jobs';
+import { RecordedJobKey, SCHEDULER_JOB_KEYS, SchedulerJobKey } from './scheduler-jobs';
 
 /**
  * Every execution of every background job, kept in the database
@@ -131,7 +131,7 @@ export class SchedulerRunRegistry implements OnApplicationBootstrap {
    * CHECK holds the pair together.
    */
   async start(
-    job: SchedulerJobKey,
+    job: RecordedJobKey,
     trigger: SchedulerRunTrigger = SchedulerRunTrigger.SCHEDULER,
     options: { actorId?: string | null } = {},
   ): Promise<SchedulerRunHandle> {
@@ -213,7 +213,7 @@ export class SchedulerRunRegistry implements OnApplicationBootstrap {
    * out, as FAILED with {@link PROCESS_INTERRUPTED}. Returns how many it
    * closed. Database clock throughout, so instances with drifting clocks agree.
    */
-  async recoverStale(job: SchedulerJobKey | null = null): Promise<number> {
+  async recoverStale(job: RecordedJobKey | null = null): Promise<number> {
     const leaseMs = SCHEDULER_RUN_LEASE_MS;
     const jobFilter = job === null ? Prisma.empty : Prisma.sql`AND "jobKey" = ${job}`;
     return this.prisma.$executeRaw`
@@ -226,7 +226,7 @@ export class SchedulerRunRegistry implements OnApplicationBootstrap {
         ${jobFilter}`;
   }
 
-  private async recoverStaleSafely(job: SchedulerJobKey | null) {
+  private async recoverStaleSafely(job: RecordedJobKey | null) {
     try {
       const closed = await this.recoverStale(job);
       if (closed > 0) {

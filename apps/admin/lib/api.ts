@@ -4106,6 +4106,8 @@ export function adminPermissionLabel(permission: AdminPermission): {
     NOTIFICATION: 'Bildirimler',
     UPLOADS: 'Yüklemeler',
     ADMIN: 'Admin hesapları',
+    // SEO-004: the search-engine screens.
+    SEO: 'SEO ve adresler',
   };
   const ACTIONS: Record<string, string> = {
     READ: 'okuma',
@@ -4146,6 +4148,14 @@ export function adminPermissionLabel(permission: AdminPermission): {
     return { area: 'Kampanya', action: 'promosyon uygunluk incelemesi ve kararı' };
   }
 
+  // SEO-004: two write permissions in one area, so each names what it writes.
+  if (permission === 'SEO_CONTENT_WRITE') {
+    return { area: 'SEO ve adresler', action: 'kategori SEO başlığı, açıklaması ve içerik blokları' };
+  }
+  if (permission === 'SEO_REDIRECTS_WRITE') {
+    return { area: 'SEO ve adresler', action: 'yönlendirmeler ve 404 önerisi kararları' };
+  }
+
   // PR #118: the operations cancel and its one audited exception.
   if (permission === 'REQUESTS_CANCEL') {
     return { area: 'Talepler', action: 'iptal (eşleşmiş talep dahil; kredi iadeleriyle)' };
@@ -4173,7 +4183,10 @@ export type AdminAuditDomain =
   | 'COMPANY_SETTINGS'
   | 'CATEGORY'
   | 'CREDIT_PACKAGE'
-  | 'SHOWCASE_PACKAGE';
+  | 'SHOWCASE_PACKAGE'
+  // SEO-004: redirect and 404-suggestion writes (SeoAuditLog).
+  | 'SEO_REDIRECT'
+  | 'SEO_NOT_FOUND_PATH';
 
 export type AuditRef = { id: string; name: string | null };
 export type AuditValue = string | number | boolean | null | AuditRef | AuditRef[] | string[];

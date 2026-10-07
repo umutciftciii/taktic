@@ -27,7 +27,8 @@ import { RatingSummaryLine } from './review-stars';
 export type ShowcaseFaceData = {
   kind: ShowcaseCardKind;
   categoryName: string;
-  categorySlug?: string | null;
+  /** The category illustration's key (SEO-004: it no longer follows the slug). */
+  categoryIllustrationKey?: string | null;
   title: string;
   summary: string;
   imageUrl: string | null;
@@ -77,7 +78,7 @@ export function ShowcaseCardFace({
    */
   titleAs?: 'h2' | 'h3';
 }) {
-  const art = card.imageUrl ?? categoryImageSrc(null, card.categorySlug ?? null);
+  const art = card.imageUrl ?? categoryImageSrc(null, card.categoryIllustrationKey ?? null);
   const areas = card.areaLabels.length > 0 ? card.areaLabels.join(' · ') : 'Bölge belirtilmedi';
   const Title = titleAs;
 
@@ -123,7 +124,7 @@ export function faceFromFeedCard(card: ShowcaseFeedCard): ShowcaseFaceData {
   return {
     kind: card.kind,
     categoryName: card.category.name,
-    categorySlug: card.category.slug,
+    categoryIllustrationKey: card.category.illustrationKey ?? null,
     title: card.title,
     summary: card.summary,
     imageUrl: card.imageUrl,
@@ -142,7 +143,7 @@ export function faceFromVersion(
   return {
     kind: card.kind,
     categoryName: card.category.name,
-    categorySlug: card.category.slug,
+    categoryIllustrationKey: card.category.illustrationKey ?? null,
     title: version.title,
     summary: version.summary,
     imageUrl: version.imageUrl,

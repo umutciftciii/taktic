@@ -194,7 +194,7 @@ function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceReque
     <article className="datarow" data-testid="request-card" data-request-id={request.id}>
       <span className="datarow-media">
         <CategoryVisual
-          slug={request.category?.slug}
+          illustrationKey={request.category?.illustrationKey}
           name={request.category?.name ?? 'Talep'}
           iconSize={26}
           alt=""

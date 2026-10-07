@@ -35,7 +35,7 @@ export const showcaseVersionInclude = {
 } satisfies Prisma.ShowcaseCardVersionInclude;
 
 export const showcaseCardInclude = {
-  category: { select: { id: true, name: true, slug: true, kind: true, status: true } },
+  category: { select: { id: true, name: true, slug: true, kind: true, status: true, illustrationKey: true } },
   liveVersion: { include: showcaseVersionInclude },
   draftVersion: { include: showcaseVersionInclude },
   /*

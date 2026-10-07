@@ -243,6 +243,8 @@ type FeedRow = {
   categoryId: string;
   categoryName: string;
   categorySlug: string;
+  /** SEO-004: the packaged illustration's key, which no longer follows the slug. */
+  categoryIllustrationKey: string | null;
   providerBusinessName: string;
   providerCity: string;
   providerDistrict: string;
@@ -309,7 +311,12 @@ function toFeedCard(row: FeedRow) {
     imageUrl: row.imageUrl,
     responseSlaUrgentHours: row.responseSlaUrgentHours,
     responseSlaNormalHours: row.responseSlaNormalHours,
-    category: { id: row.categoryId, name: row.categoryName, slug: row.categorySlug },
+    category: {
+      id: row.categoryId,
+      name: row.categoryName,
+      slug: row.categorySlug,
+      illustrationKey: row.categoryIllustrationKey,
+    },
     areaLabel: describeArea({
       city: row.areaCity,
       district: row.areaDistrict,
@@ -442,6 +449,7 @@ function buildFeedQuery(input: {
         cat."id"   AS "categoryId",
         cat."name" AS "categoryName",
         cat."slug" AS "categorySlug",
+        cat."illustrationKey" AS "categoryIllustrationKey",
         pr."businessName" AS "providerBusinessName",
         pr."city"         AS "providerCity",
         pr."district"     AS "providerDistrict",
@@ -532,6 +540,7 @@ function buildSingleCardQuery(cardId: string, now: Date): Prisma.Sql {
       cat."id"   AS "categoryId",
       cat."name" AS "categoryName",
       cat."slug" AS "categorySlug",
+        cat."illustrationKey" AS "categoryIllustrationKey",
       pr."businessName" AS "providerBusinessName",
       pr."city"         AS "providerCity",
       pr."district"     AS "providerDistrict",

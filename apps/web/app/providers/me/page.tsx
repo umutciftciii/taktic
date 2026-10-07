@@ -189,7 +189,7 @@ export default async function MyProviderPage() {
                 <article className="datarow" key={request.id}>
                   <span className="datarow-media">
                     <CategoryVisual
-                      slug={request.category.slug}
+                      illustrationKey={request.category.illustrationKey}
                       name={request.category.name}
                       iconSize={24}
                       alt=""

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { SeoModule } from '../seo/seo.module';
 import { PrismaModule } from '../../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { CampaignEngineModule } from '../campaigns/engine/campaign-engine.module';
@@ -14,6 +15,8 @@ import { ProvidersService } from './providers.service';
 @Module({
   imports: [
     PrismaModule,
+    // SEO-004: a public profile lookup that answers 404 is a suggestion.
+    SeoModule,
     AuthModule,
     NumberingModule,
     ProviderClaimModule,

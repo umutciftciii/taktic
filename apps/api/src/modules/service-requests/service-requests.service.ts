@@ -1794,7 +1794,8 @@ export class ServiceRequestsService {
  */
 const customerRequestInclude = {
   category: {
-    select: { id: true, name: true, slug: true },
+    // SEO-004: the packaged illustration's key, which no longer follows the slug.
+    select: { id: true, name: true, slug: true, illustrationKey: true },
   },
   _count: {
     // The customer's own count is of offers they can still act on. An

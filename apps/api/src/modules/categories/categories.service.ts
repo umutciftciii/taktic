@@ -15,6 +15,7 @@ import {
   ServiceCategory,
   ServiceCategoryKind,
   ServiceCategoryStatus,
+  SeoNotFoundRouteFamily,
   ShowcasePlacementSuspendReason,
 } from '@prisma/client';
 import { AuditPageQueryDto } from '../../common/admin-audit';
@@ -34,7 +35,22 @@ import {
   isRouterCategory,
   providerEnrollmentCategoryWhere,
 } from './category-taxonomy';
-import { isCategoryIndexable } from '../seo/seo-index-eligibility';
+import { categoryIndexFacts, isCategoryIndexable } from '../seo/seo-index-eligibility';
+import { normalizeCategorySlug } from '../seo/category-slug';
+import {
+  CATEGORY_SEO_CONTENT_FIELDS,
+  type CategorySeoContentPatch,
+  readStoredFaq,
+  seoContentData,
+} from '../seo/category-seo-content';
+import { SeoNotFoundRecorder } from '../seo/seo-not-found.recorder';
+import {
+  lockRedirectGraph,
+  SeoRedirectGraphService,
+  type SlugChangeOutcome,
+  translateRedirectWriteError,
+} from '../seo/seo-redirect-graph.service';
+import { SEO_ERROR_CODES, seoBadRequest, seoConflict } from '../seo/seo.errors';
 import {
   normalizeCategoryIconKey,
   normalizeCategoryImageUrl,
@@ -130,6 +146,26 @@ const approvedProviderCount = {
  * package. That is a commercial decision about what providers can buy, and a
  * customer browsing the catalogue has no reader for it at all.
  */
+/**
+ * SEO-004: a category's SEO title, meta description and editorial blocks are
+ * the content of its own page, read from `GET /categories/:slug`. The listing
+ * is a list of links; carrying up to 18 KB of editorial text per row in it
+ * would make the catalogue page pay for every page's body.
+ */
+function withoutPageContent<T extends Record<(typeof CATEGORY_SEO_CONTENT_FIELDS)[number], unknown>>(
+  category: T,
+): Omit<T, (typeof CATEGORY_SEO_CONTENT_FIELDS)[number]> {
+  const {
+    seoTitle: _seoTitle,
+    seoDescription: _seoDescription,
+    editorialDecisionGuide: _editorialDecisionGuide,
+    editorialPriceFactors: _editorialPriceFactors,
+    editorialFaq: _editorialFaq,
+    ...rest
+  } = category;
+  return rest;
+}
+
 function withoutOperatorColumns<
   T extends { providerEnrollmentOpen: boolean; unlimitedPackageEligible: boolean },
 >(category: T): Omit<T, 'providerEnrollmentOpen' | 'unlimitedPackageEligible'> {
@@ -280,6 +316,7 @@ export type ProviderEnrollmentCategory = {
   slug: string;
   iconKey: string | null;
   imageUrl: string | null;
+  illustrationKey: string | null;
   parent: { id: string; name: string; slug: string } | null;
   availability: 'LIVE' | 'UPCOMING';
 };
@@ -290,6 +327,8 @@ export class CategoriesService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ShowcasePlacementService)
     private readonly placements: ShowcasePlacementService,
+    @Inject(SeoRedirectGraphService) private readonly redirects: SeoRedirectGraphService,
+    @Inject(SeoNotFoundRecorder) private readonly notFound: SeoNotFoundRecorder,
   ) {}
 
   /**
@@ -343,7 +382,7 @@ export class CategoriesService {
         },
       });
 
-      return publicCategories.map(withoutOperatorColumns);
+      return publicCategories.map((category) => withoutPageContent(withoutOperatorColumns(category)));
     }
 
     const categories = await this.prisma.serviceCategory.findMany({
@@ -388,6 +427,7 @@ export class CategoriesService {
         slug: true,
         iconKey: true,
         imageUrl: true,
+        illustrationKey: true,
         status: true,
         parent: { select: { id: true, name: true, slug: true } },
       },
@@ -440,14 +480,12 @@ export class CategoriesService {
       include: { ...include, _count: { select: { children: true } } },
     });
 
-    if (!category) {
-      throw new NotFoundException('Category not found');
-    }
-
     // A category the public may not reach is indistinguishable from one that
     // does not exist — a 403 would confirm the slug of an unreleased service to
-    // anybody who guessed it.
-    if (!isPubliclyReachable(category)) {
+    // anybody who guessed it. Both are one 404 suggestion too (SEO-004): the
+    // recorder keeps the address only, and an operator decides.
+    if (!category || !isPubliclyReachable(category)) {
+      this.notFound.record(SeoNotFoundRouteFamily.CATEGORY, `/categories/${encodeURIComponent(slug)}`);
       throw new NotFoundException('Category not found');
     }
 
@@ -456,10 +494,12 @@ export class CategoriesService {
         ...category,
         questions: serializeQuestions(category.questions),
       }),
-      // Whether the page may be indexed (SEO-003) — false for every category
-      // until the editorial blocks exist (B4). A boolean and nothing about
-      // why: the page reads it, the sitemap applies the same rule.
-      seoIndexable: isCategoryIndexable(category),
+      // SEO-004: a stored FAQ is served only in the shape the API writes.
+      editorialFaq: readStoredFaq(category.editorialFaq),
+      // Whether the page may be indexed (SEO-003). A boolean and nothing about
+      // why — the reasons are the admin API's (SEO_READ): the page reads this,
+      // the sitemap applies the same rule.
+      seoIndexable: isCategoryIndexable(categoryIndexFacts(category)),
     };
   }
 
@@ -771,6 +811,20 @@ export class CategoriesService {
     dto: UpdateCategoryDto,
     actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>,
   ) {
+    return (await this.updateCategoryWithOutcome(id, dto, actor)).category;
+  }
+
+  /**
+   * {@link updateCategory}, also saying what a slug change did to the
+   * redirect graph (SEO-004). Every slug change goes through here — the
+   * category form's PATCH and the SEO slug route alike — so there is one
+   * place that decides whether an old address gets its 301.
+   */
+  async updateCategoryWithOutcome(
+    id: string,
+    dto: UpdateCategoryDto,
+    actor: Pick<AuthUser, 'id' | 'role' | 'permissions'>,
+  ): Promise<{ category: ServiceCategory; slugChange: SlugChangeOutcome | null }> {
     const existing = await this.ensureCategoryExists(id);
 
     const imageUrl = normalizeCategoryImageUrl(dto.imageUrl, 'imageUrl');
@@ -802,6 +856,12 @@ export class CategoriesService {
       return await runSerializable(
         this.prisma,
         async (tx) => {
+          // SEO-004: a request that names a slug may move the redirect graph,
+          // so it queues behind every other graph writer before it reads.
+          if (slug !== undefined) {
+            await lockRedirectGraph(tx);
+          }
+
           const current = await tx.serviceCategory.findUnique({ where: { id } });
           if (!current) {
             throw new NotFoundException('Category not found');
@@ -869,6 +929,22 @@ export class CategoriesService {
             await this.applyStatusChange(tx, id, current.status, resultingStatus, now);
           }
 
+          // SEO-004: the slug and its redirect move together or not at all. A
+          // category that was public before this write keeps its old address
+          // as a 301 to the new one; one that was not gets no redirect — its
+          // old address answered 404 and still does. Anything this throws rolls
+          // the slug back with it.
+          let slugChange: SlugChangeOutcome | null = null;
+          if (slug !== undefined && slug !== current.slug) {
+            slugChange = await this.redirects.applyCategorySlugChange(tx, {
+              categoryId: id,
+              oldSlug: current.slug,
+              newSlug: slug,
+              wasPublic: isPubliclyReachable(current),
+              actorId: actor.id,
+            });
+          }
+
           // ADMIN-ACTION-AUDIT-001: the stored row before and after this
           // write; an echo of unchanged values records nothing.
           await recordCatalogAudit(tx, {
@@ -879,13 +955,36 @@ export class CategoriesService {
             actorId: actor.id,
           });
 
-          return updated;
+          return { category: updated, slugChange };
         },
         { label: 'categories.update' },
       );
     } catch (error) {
       handleCategoryWriteError(error);
     }
+  }
+
+  /**
+   * SEO-004: a category's SEO title, meta description and editorial blocks
+   * (SEO_CONTENT_WRITE, checked by the route). Audited with the category, in
+   * the same transaction; a save that changes nothing records nothing.
+   */
+  async updateSeoContent(id: string, patch: CategorySeoContentPatch, actor: Pick<AuthUser, 'id'>) {
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.serviceCategory.findUnique({ where: { id } });
+      if (!current) {
+        throw new NotFoundException('Category not found');
+      }
+      const updated = await tx.serviceCategory.update({ where: { id }, data: seoContentData(patch) });
+      await recordCatalogAudit(tx, {
+        entityType: CatalogAuditEntity.CATEGORY,
+        entityId: id,
+        before: await categoryAuditSnapshot(tx, current),
+        after: await categoryAuditSnapshot(tx, updated),
+        actorId: actor.id,
+      });
+      return updated;
+    });
   }
 
   /**
@@ -1157,13 +1256,22 @@ function normalizeSlug(value: string) {
     throw new BadRequestException('Category slug must be lowercase and URL-safe');
   }
 
-  return slug;
+  // SEO-004: the same rule the slug route derives a slug by — a value already
+  // in slug form comes back as it is, unless it is too long or reserved.
+  const checked = normalizeCategorySlug(slug);
+  if (!checked.ok) {
+    throw seoBadRequest(SEO_ERROR_CODES.SLUG_INVALID, 'Kısa ad kullanılamaz.', { refusal: checked.refusal });
+  }
+  return checked.slug;
 }
 
 function handleCategoryWriteError(error: unknown): never {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    if (error.code === 'P2002' && error.meta?.modelName === 'SeoRedirect') {
+      throw translateRedirectWriteError(error);
+    }
     if (error.code === 'P2002') {
-      throw new ConflictException('Category slug already exists');
+      throw seoConflict(SEO_ERROR_CODES.SLUG_TAKEN, 'Category slug already exists');
     }
 
     if (error.code === 'P2003') {

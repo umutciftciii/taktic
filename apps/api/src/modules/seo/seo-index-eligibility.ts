@@ -59,10 +59,10 @@ export const SEO_INDEX_THRESHOLDS = {
 
 /**
  * The editorial blocks a category page must carry to be indexable — the
- * decision guide, the price factors and the FAQ of SEO-002 §5.2. No column
- * holds them yet (that is B4); until one does, callers pass nothing here and
- * no category is indexable. When the model arrives, the block texts go in
- * `editorialBlocks` and this rule needs no change.
+ * decision guide, the price factors and the FAQ of SEO-002 §5.2. SEO-004 gave
+ * them columns (`editorialDecisionGuide`, `editorialPriceFactors`,
+ * `editorialFaq`); {@link categoryIndexFacts} reads them into
+ * `editorialBlocks`, and the rule itself did not change.
  */
 export const CATEGORY_EDITORIAL_BLOCKS = ['decisionGuide', 'priceFactors', 'faq'] as const;
 export type CategoryEditorialBlock = (typeof CATEGORY_EDITORIAL_BLOCKS)[number];
@@ -132,6 +132,73 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Reasons (SEO-004)
+// ---------------------------------------------------------------------------
+
+/**
+ * Why a page is not indexable, in machine-readable form — one code per rule
+ * above that the facts failed, and nothing else. There is no code for a rule
+ * this file does not have: every `evaluate*` below is the same sequence of
+ * checks its `is*` twin always made, recording each failure instead of
+ * returning at the first one.
+ *
+ * The codes reach the admin API only (SEO_READ). A public projection still
+ * carries the one boolean, `indexable`, and never the reasons: the public
+ * contract of SEO-003 is unchanged.
+ */
+export const SEO_INDEX_REASON_CODES = [
+  'INPUT_UNRECOGNIZED',
+  'CATEGORY_NOT_ACTIVE',
+  'CATEGORY_NOT_LEAF',
+  'CATEGORY_DESCRIPTION_TOO_SHORT',
+  'CATEGORY_EDITORIAL_BLOCK_MISSING',
+  'CATEGORY_EDITORIAL_BLOCK_TOO_SHORT',
+  'PROVIDER_NOT_APPROVED',
+  'PROVIDER_DESCRIPTION_TOO_SHORT',
+  'PROVIDER_LOCATION_MISSING',
+  'PROVIDER_NO_PUBLIC_CATEGORY',
+  'PROVIDER_NO_SERVICE_AREA',
+  'PROVIDER_SERVICE_AREA_INCOMPLETE',
+  'CARD_NOT_LIVE',
+  'CARD_PROVIDER_NOT_INDEXABLE',
+  'CARD_SUMMARY_DUPLICATED',
+  'CARD_SUMMARY_TOO_SHORT',
+  'CARD_SCOPE_INCLUDED_TOO_FEW',
+  'CARD_SCOPE_EXCLUDED_TOO_FEW',
+  'SHELF_TOO_FEW_INDEXABLE_CARDS',
+] as const;
+export type SeoIndexReasonCode = (typeof SEO_INDEX_REASON_CODES)[number];
+
+/** One failed rule. `required`/`actual` are the threshold and the count the rule compared. */
+export type SeoIndexReason = {
+  code: SeoIndexReasonCode;
+  required?: number;
+  actual?: number;
+  /** For the two editorial-block codes: which block. */
+  block?: CategoryEditorialBlock;
+};
+
+export type SeoIndexEvaluation = { indexable: boolean; reasons: SeoIndexReason[] };
+
+function evaluation(reasons: SeoIndexReason[]): SeoIndexEvaluation {
+  return { indexable: reasons.length === 0, reasons };
+}
+
+const UNRECOGNIZED: SeoIndexEvaluation = Object.freeze({
+  indexable: false,
+  reasons: [{ code: 'INPUT_UNRECOGNIZED' }],
+}) as SeoIndexEvaluation;
+
+function lengthReason(
+  code: SeoIndexReasonCode,
+  value: unknown,
+  required: number,
+): SeoIndexReason | null {
+  const actual = meaningfulLength(value);
+  return actual >= required ? null : { code, required, actual };
+}
+
+// ---------------------------------------------------------------------------
 // Category
 // ---------------------------------------------------------------------------
 
@@ -139,22 +206,77 @@ export type CategoryIndexFacts = {
   status: unknown;
   kind: unknown;
   description: unknown;
-  /** Absent until B4 gives the category a home for these; absent is not eligible. */
+  /** The three editorial blocks as text; absent or not a record is not eligible. */
   editorialBlocks?: unknown;
 };
 
+/**
+ * A category row's facts, the editorial blocks read from the SEO-004
+ * columns. The FAQ is a list of question/answer pairs; its text for the rule
+ * is every question and answer together, so a FAQ counts by what it says.
+ * Anything that is not that list is no text at all (fail closed).
+ */
+export function categoryIndexFacts(row: {
+  status: unknown;
+  kind: unknown;
+  description: unknown;
+  editorialDecisionGuide?: unknown;
+  editorialPriceFactors?: unknown;
+  editorialFaq?: unknown;
+}): CategoryIndexFacts {
+  return {
+    status: row.status,
+    kind: row.kind,
+    description: row.description,
+    editorialBlocks: {
+      decisionGuide: row.editorialDecisionGuide,
+      priceFactors: row.editorialPriceFactors,
+      faq: faqText(row.editorialFaq),
+    },
+  };
+}
+
+/** Every question and answer of a stored FAQ, as one text; `null` for anything else. */
+export function faqText(value: unknown): string | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const parts: string[] = [];
+  for (const item of value) {
+    if (!isRecord(item) || typeof item.question !== 'string' || typeof item.answer !== 'string') return null;
+    parts.push(item.question, item.answer);
+  }
+  return parts.join('\n');
+}
+
+/** Every rule of {@link isCategoryIndexable}, each failure recorded. */
+export function evaluateCategoryIndexability(facts: CategoryIndexFacts | null | undefined): SeoIndexEvaluation {
+  if (!isRecord(facts)) return UNRECOGNIZED;
+  const reasons: SeoIndexReason[] = [];
+  if (facts.status !== ServiceCategoryStatus.ACTIVE) reasons.push({ code: 'CATEGORY_NOT_ACTIVE' });
+  if (facts.kind !== ServiceCategoryKind.LEAF) reasons.push({ code: 'CATEGORY_NOT_LEAF' });
+  const description = lengthReason(
+    'CATEGORY_DESCRIPTION_TOO_SHORT',
+    facts.description,
+    SEO_INDEX_THRESHOLDS.categoryDescriptionMinChars,
+  );
+  if (description) reasons.push(description);
+
+  const blocks = isRecord(facts.editorialBlocks) ? facts.editorialBlocks : {};
+  for (const block of CATEGORY_EDITORIAL_BLOCKS) {
+    const text = blocks[block];
+    const required = SEO_INDEX_THRESHOLDS.categoryEditorialBlockMinChars;
+    const actual = meaningfulLength(text);
+    if (actual === 0) {
+      reasons.push({ code: 'CATEGORY_EDITORIAL_BLOCK_MISSING', block, required, actual });
+    } else if (actual < required) {
+      reasons.push({ code: 'CATEGORY_EDITORIAL_BLOCK_TOO_SHORT', block, required, actual });
+    }
+  }
+  return evaluation(reasons);
+}
+
 /** An ACTIVE leaf with a real description and every editorial block written. */
 export function isCategoryIndexable(facts: CategoryIndexFacts | null | undefined): boolean {
-  if (!isRecord(facts)) return false;
-  if (facts.status !== ServiceCategoryStatus.ACTIVE) return false;
-  if (facts.kind !== ServiceCategoryKind.LEAF) return false;
-  if (!hasMeaningfulText(facts.description, SEO_INDEX_THRESHOLDS.categoryDescriptionMinChars)) return false;
-
-  const blocks = facts.editorialBlocks;
-  if (!isRecord(blocks)) return false;
-  return CATEGORY_EDITORIAL_BLOCKS.every((block) =>
-    hasMeaningfulText(blocks[block], SEO_INDEX_THRESHOLDS.categoryEditorialBlockMinChars),
-  );
+  return evaluateCategoryIndexability(facts).indexable;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +322,35 @@ function isCompleteServiceArea(area: unknown): boolean {
   }
 }
 
+/** Every rule of {@link isProviderIndexable}, each failure recorded. */
+export function evaluateProviderIndexability(facts: ProviderIndexFacts | null | undefined): SeoIndexEvaluation {
+  if (!isRecord(facts)) return UNRECOGNIZED;
+  const reasons: SeoIndexReason[] = [];
+  if (facts.status !== ProviderStatus.APPROVED) reasons.push({ code: 'PROVIDER_NOT_APPROVED' });
+  const description = lengthReason(
+    'PROVIDER_DESCRIPTION_TOO_SHORT',
+    facts.description,
+    SEO_INDEX_THRESHOLDS.providerDescriptionMinChars,
+  );
+  if (description) reasons.push(description);
+  if (!isNonEmptyString(facts.city) || !isNonEmptyString(facts.district)) {
+    reasons.push({ code: 'PROVIDER_LOCATION_MISSING' });
+  }
+
+  const bindings = facts.serviceCategories;
+  if (!Array.isArray(bindings) || !bindings.some(isPublicCategoryBinding)) {
+    reasons.push({ code: 'PROVIDER_NO_PUBLIC_CATEGORY' });
+  }
+
+  const areas = facts.serviceAreas;
+  if (!Array.isArray(areas) || areas.length === 0) {
+    reasons.push({ code: 'PROVIDER_NO_SERVICE_AREA' });
+  } else if (!areas.every(isCompleteServiceArea)) {
+    reasons.push({ code: 'PROVIDER_SERVICE_AREA_INCOMPLETE' });
+  }
+  return evaluation(reasons);
+}
+
 /**
  * An approved business with an "about" text of its own, at least one
  * category the public can browse to, and a place: the profile's own
@@ -207,17 +358,7 @@ function isCompleteServiceArea(area: unknown): boolean {
  * image rule because the model has no image column (SEO-002 P6 / B9).
  */
 export function isProviderIndexable(facts: ProviderIndexFacts | null | undefined): boolean {
-  if (!isRecord(facts)) return false;
-  if (facts.status !== ProviderStatus.APPROVED) return false;
-  if (!hasMeaningfulText(facts.description, SEO_INDEX_THRESHOLDS.providerDescriptionMinChars)) return false;
-  if (!isNonEmptyString(facts.city) || !isNonEmptyString(facts.district)) return false;
-
-  const bindings = facts.serviceCategories;
-  if (!Array.isArray(bindings) || !bindings.some(isPublicCategoryBinding)) return false;
-
-  const areas = facts.serviceAreas;
-  if (!Array.isArray(areas) || areas.length === 0) return false;
-  return areas.every(isCompleteServiceArea);
+  return evaluateProviderIndexability(facts).indexable;
 }
 
 // ---------------------------------------------------------------------------
@@ -247,28 +388,62 @@ function distinctScopeItems(value: unknown): number {
   return seen.size;
 }
 
+/** Every rule of {@link isShowcaseCardIndexable}, each failure recorded. */
+export function evaluateShowcaseCardIndexability(
+  facts: ShowcaseCardIndexFacts | null | undefined,
+): SeoIndexEvaluation {
+  if (!isRecord(facts)) return UNRECOGNIZED;
+  const reasons: SeoIndexReason[] = [];
+  if (facts.live !== true) reasons.push({ code: 'CARD_NOT_LIVE' });
+  if (facts.providerIndexable !== true) reasons.push({ code: 'CARD_PROVIDER_NOT_INDEXABLE' });
+  if (facts.summaryDuplicated !== false) reasons.push({ code: 'CARD_SUMMARY_DUPLICATED' });
+  const summary = lengthReason('CARD_SUMMARY_TOO_SHORT', facts.summary, SEO_INDEX_THRESHOLDS.showcaseSummaryMinChars);
+  if (summary) reasons.push(summary);
+
+  const included = distinctScopeItems(facts.scopeIncluded);
+  if (included < SEO_INDEX_THRESHOLDS.showcaseScopeIncludedMinItems) {
+    reasons.push({
+      code: 'CARD_SCOPE_INCLUDED_TOO_FEW',
+      required: SEO_INDEX_THRESHOLDS.showcaseScopeIncludedMinItems,
+      actual: included,
+    });
+  }
+  const excluded = distinctScopeItems(facts.scopeExcluded);
+  if (excluded < SEO_INDEX_THRESHOLDS.showcaseScopeExcludedMinItems) {
+    reasons.push({
+      code: 'CARD_SCOPE_EXCLUDED_TOO_FEW',
+      required: SEO_INDEX_THRESHOLDS.showcaseScopeExcludedMinItems,
+      actual: excluded,
+    });
+  }
+  return evaluation(reasons);
+}
+
 /**
  * A live card of an indexable business, with a summary of its own and a
  * scope a customer can hold the price against: three things it covers and at
  * least one it does not.
  */
 export function isShowcaseCardIndexable(facts: ShowcaseCardIndexFacts | null | undefined): boolean {
-  if (!isRecord(facts)) return false;
-  if (facts.live !== true) return false;
-  if (facts.providerIndexable !== true) return false;
-  if (facts.summaryDuplicated !== false) return false;
-  if (!hasMeaningfulText(facts.summary, SEO_INDEX_THRESHOLDS.showcaseSummaryMinChars)) return false;
-  if (distinctScopeItems(facts.scopeIncluded) < SEO_INDEX_THRESHOLDS.showcaseScopeIncludedMinItems) return false;
-  return distinctScopeItems(facts.scopeExcluded) >= SEO_INDEX_THRESHOLDS.showcaseScopeExcludedMinItems;
+  return evaluateShowcaseCardIndexability(facts).indexable;
+}
+
+/** Every rule of {@link isShowcaseShelfIndexable}, the failure recorded. */
+export function evaluateShowcaseShelfIndexability(indexableLiveCardCount: unknown): SeoIndexEvaluation {
+  if (typeof indexableLiveCardCount !== 'number' || !Number.isInteger(indexableLiveCardCount)) {
+    return UNRECOGNIZED;
+  }
+  const required = SEO_INDEX_THRESHOLDS.showcaseShelfMinIndexableCards;
+  return evaluation(
+    indexableLiveCardCount >= required
+      ? []
+      : [{ code: 'SHELF_TOO_FEW_INDEXABLE_CARDS', required, actual: indexableLiveCardCount }],
+  );
 }
 
 /** The shelf lists enough indexable cards to be a list rather than an empty page. */
 export function isShowcaseShelfIndexable(indexableLiveCardCount: unknown): boolean {
-  return (
-    typeof indexableLiveCardCount === 'number' &&
-    Number.isInteger(indexableLiveCardCount) &&
-    indexableLiveCardCount >= SEO_INDEX_THRESHOLDS.showcaseShelfMinIndexableCards
-  );
+  return evaluateShowcaseShelfIndexability(indexableLiveCardCount).indexable;
 }
 
 /**

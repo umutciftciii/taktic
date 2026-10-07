@@ -11,12 +11,11 @@ import {
   getMarketplacePublishPolicy,
 } from '../../../lib/api';
 import { breadcrumbSchema, categoryServiceSchema } from '../../../lib/seo-json-ld';
+import { categoryPageDescription, categoryPageTitle } from '../../../lib/category-editorial';
 import {
   SEO_DEFAULT_IMAGE,
-  SEO_DESCRIPTION_MAX,
   privatePageMetadata,
   publicPageMetadata,
-  seoText,
   structuredDataOrigin,
 } from '../../../lib/seo-metadata';
 import { JsonLd } from '../../json-ld';
@@ -28,6 +27,7 @@ import { CategoryVisual } from '../../category-visual';
 import { submitServiceRequestAction } from '../actions';
 import { RequestForm } from './request-form';
 import { readTurnstileWebConfig } from '../../../lib/turnstile';
+import { CategoryEditorial } from './category-editorial';
 import { RouterStep } from './router-step';
 
 type CategoryPageProps = {
@@ -62,8 +62,8 @@ const loadCategory = cache(async (slug: string): Promise<Category | null> => {
 
 /**
  * Indexable on the clean path only, and only when the API says the category
- * is index-eligible (`seoIndexable`, SEO-003 — no category is until the
- * editorial blocks exist). `?entry=` and `?r=` are a routed flow in progress,
+ * is index-eligible (`seoIndexable`, SEO-003 — it needs the editorial blocks
+ * SEO-004 gave a home to). `?entry=` and `?r=` are a routed flow in progress,
  * the same page mid-conversation, and are noindex. The description is the
  * operator's own text made safe for a snippet, with a plain fallback when
  * there is none.
@@ -78,10 +78,10 @@ export async function generateMetadata({ params, searchParams }: CategoryPagePro
   return publicPageMetadata({
     route: '/categories/:slug',
     params: { slug: category.slug },
-    title: category.name,
-    description:
-      seoText(category.description, SEO_DESCRIPTION_MAX) ??
-      `${category.name} için talep oluşturun; bölgenizdeki onaylı hizmet verenlerden teklif alın.`,
+    // SEO-004: the operator's SEO title and description when written; the
+    // name and the description-derived text otherwise (category-editorial.ts).
+    title: categoryPageTitle(category),
+    description: categoryPageDescription(category),
     image: category.coverImageUrl ?? category.imageUrl ?? SEO_DEFAULT_IMAGE,
     searchParams: await searchParams,
     indexEligible: category.seoIndexable === true,
@@ -217,7 +217,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
           <div className="req-head-media">
             <CategoryVisual
               imageUrl={category.imageUrl ?? category.coverImageUrl}
-              slug={category.slug}
+              illustrationKey={category.illustrationKey}
               iconKey={category.iconKey}
               name={category.name}
               iconSize={48}
@@ -263,6 +263,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             autoPublishEnabled={autoPublishEnabled}
           />
         )}
+        <CategoryEditorial category={category} />
       </div>
     </main>
   );

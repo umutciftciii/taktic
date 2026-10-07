@@ -52,6 +52,7 @@ type Entries = {
   categories: { slug: string; updatedAt: string }[];
   providers: { id: string; updatedAt: string }[];
   showcaseCards: { cardId: string }[];
+  showcaseShelf: { indexable: boolean };
 };
 
 async function entries(): Promise<Entries> {
@@ -110,7 +111,7 @@ async function seedEligibleProvider(categoryId: string) {
 }
 
 describe('GET /sitemap/entries — what is listed', () => {
-  it('lists no category today: an ACTIVE leaf is public, but no category carries the editorial blocks', async () => {
+  it('lists no category without its editorial blocks: an ACTIVE leaf is public, and still not indexable', async () => {
     const live = await createCategory(ctx.prisma, 'Canlı Hizmet');
     // Even a long description does not do it: the editorial blocks have no home yet (B4).
     await ctx.prisma.serviceCategory.update({
@@ -245,6 +246,8 @@ describe('GET /sitemap/entries — what is listed', () => {
     await seedCard({ providerId: provider.id, categoryId: category.id, live: true, title: 'İnce 2' });
 
     expect((await request(ctx.server).get('/showcase/feed').expect(200)).body.seoIndexable).toBe(false);
+    // SEO-004: the sitemap says the same about `/vitrin` itself.
+    expect((await entries()).showcaseShelf).toEqual({ indexable: false });
 
     cards.push((await seedCard({ providerId: provider.id, categoryId: category.id, live: true, title: `Kart ${needed}`, eligible: true })).id);
 
@@ -253,13 +256,19 @@ describe('GET /sitemap/entries — what is listed', () => {
     expect((await request(ctx.server).get('/showcase/feed?limit=1').expect(200)).body.seoIndexable).toBe(true);
     expect((await request(ctx.server).get('/showcase/feed?city=Ankara').expect(200)).body.seoIndexable).toBe(true);
     expect((await entries()).showcaseCards.map((row) => row.cardId).sort()).toEqual([...cards].sort());
+    expect((await entries()).showcaseShelf).toEqual({ indexable: true });
   });
 
   it('is empty rather than an error with nothing public', async () => {
     await createCategory(ctx.prisma, 'Taslak', { status: ServiceCategoryStatus.DRAFT });
     await createProviderProfile(ctx.prisma, { status: ProviderStatus.PENDING_REVIEW });
 
-    expect(await entries()).toEqual({ categories: [], providers: [], showcaseCards: [] });
+    expect(await entries()).toEqual({
+      categories: [],
+      providers: [],
+      showcaseCards: [],
+      showcaseShelf: { indexable: false },
+    });
   });
 });
 
@@ -272,7 +281,8 @@ describe('GET /sitemap/entries — what never travels', () => {
     const response = await request(ctx.server).get('/sitemap/entries').expect(200);
     const body = response.body as Entries;
 
-    expect(Object.keys(body).sort()).toEqual(['categories', 'providers', 'showcaseCards']);
+    expect(Object.keys(body).sort()).toEqual(['categories', 'providers', 'showcaseCards', 'showcaseShelf']);
+    expect(body.showcaseShelf).toEqual({ indexable: false });
     expect(body.categories).toEqual([]);
     expect(Object.keys(body.providers[0]!).sort()).toEqual(['id', 'updatedAt']);
     expect(Object.keys(body.showcaseCards[0]!)).toEqual(['cardId']);

@@ -35,8 +35,9 @@ import {
  * sitemap lists by. Two stages are seeded below — one of everything public
  * but thin (`seedStage`, what today's real inventory looks like) and one of
  * everything eligible (`seedEligibleStage`) — and the two are told apart by
- * their `<head>` and by the sitemap alone. A category is never eligible yet:
- * the editorial blocks it would need have no column (B4).
+ * their `<head>` and by the sitemap alone. Neither stage writes a category's
+ * editorial blocks (SEO-004 gave them columns), so no category here is
+ * eligible; seo-redirects.spec.ts covers one that is.
  *
  * Everything asserted here is read from the served HTML and the two text
  * routes: the robots meta, the canonical link, the Open Graph URL, the JSON-LD
@@ -552,9 +553,12 @@ test.describe('SEO: production-like web (APP_ENVIRONMENT=production + public ori
       categories: { slug: string; updatedAt: string }[];
       providers: { id: string; updatedAt: string }[];
       showcaseCards: { cardId: string }[];
+      showcaseShelf: { indexable: boolean };
     };
-    expect(Object.keys(entries).sort()).toEqual(['categories', 'providers', 'showcaseCards']);
-    // No category is eligible yet, whatever its status.
+    expect(Object.keys(entries).sort()).toEqual(['categories', 'providers', 'showcaseCards', 'showcaseShelf']);
+    // SEO-004: `/vitrin` is listed above because the shelf itself is indexable.
+    expect(entries.showcaseShelf).toEqual({ indexable: true });
+    // No category here carries the editorial blocks, whatever its status.
     expect(entries.categories.map((row) => row.slug)).not.toContain(stage.category.slug);
     expect(entries.categories.map((row) => row.slug)).not.toContain(thin.category.slug);
     expect(entries.categories.map((row) => row.slug)).not.toContain(thin.draftCategory.slug);

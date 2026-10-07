@@ -239,6 +239,7 @@ describe('the provider enrollment catalogue', () => {
       'availability',
       'iconKey',
       'id',
+      'illustrationKey',
       'imageUrl',
       'name',
       'parent',
