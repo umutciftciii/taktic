@@ -15,6 +15,7 @@ import {
   findAccountByPhone,
   uniqueViolationField,
 } from '../../common/account-identity';
+import { matchesAdminSearch, parseAdminSearch } from '../../common/admin-search';
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
@@ -845,8 +846,14 @@ export class ServiceRequestsService {
    * customer *account* behind it is CUSTOMERS_READ's and is carried only for a
    * caller holding that, absent otherwise (`customerId` stays: it is the
    * request's own reference, not the account).
+   *
+   * `q` is the operator's free-text box, searched over the request's own
+   * columns only — never the embedded account — with `customerPhone` matched
+   * in every stored spelling of a whole number (ADMIN-SEARCH-NORMALIZATION-001).
+   * In memory, as the list was always searched, for the Turkish case folding.
    */
-  async listServiceRequests(viewer: AuthUser | null = null) {
+  async listServiceRequests(viewer: AuthUser | null = null, q?: string) {
+    const search = parseAdminSearch(q);
     const customerAccount = mayEmbed(viewer, AdminPermission.CUSTOMERS_READ);
     const requests = await this.prisma.serviceRequest.findMany({
       orderBy: { submittedAt: 'desc' },
@@ -863,7 +870,16 @@ export class ServiceRequestsService {
       },
     });
 
-    return requests.map(({ _count, ...request }) => ({
+    const matching = search
+      ? requests.filter((request) =>
+          matchesAdminSearch(search, {
+            text: [request.customerName, request.customerEmail, request.category.name, request.city, request.district],
+            phone: [request.customerPhone],
+          }),
+        )
+      : requests;
+
+    return matching.map(({ _count, ...request }) => ({
       ...withQualityLabel(request),
       offersCount: _count.offers,
     }));

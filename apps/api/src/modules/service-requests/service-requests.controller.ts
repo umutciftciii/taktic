@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission, UserRole } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
@@ -44,8 +44,8 @@ export class ServiceRequestsController {
   @Get()
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.REQUESTS_READ)
-  listServiceRequests(@CurrentUser() user: AuthUser) {
-    return this.serviceRequestsService.listServiceRequests(user);
+  listServiceRequests(@CurrentUser() user: AuthUser, @Query('q') q?: string) {
+    return this.serviceRequestsService.listServiceRequests(user, q);
   }
 
   @Get('my')

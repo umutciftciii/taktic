@@ -27,7 +27,11 @@ import { formatCount, pageWindow } from '../../lib/pagination';
  * Talepler (#2), design `requests` (ADMIN-DESIGN-001 Faz 3A).
  *
  * The API returns the whole list (`GET /service-requests` has no paging), and
- * every filter is applied here, on the server, exactly as before. What the
+ * every filter but the search is applied here, on the server, exactly as
+ * before. The search is the API's (`?q=`, ADMIN-SEARCH-NORMALIZATION-001): a
+ * number typed in any spelling finds the request whatever spelling its
+ * `customerPhone` snapshot was stored in, which needs the API's one phone
+ * canonicaliser. What the
  * design adds on top is only presentation of data this page already holds:
  * the saved views count their rows from the same list, and the table is cut
  * into pages of 50 so a long list is not one enormous table.
@@ -191,11 +195,12 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   const page = parsePage(params.page);
 
   const [requests, categories] = await Promise.all([
-    apiFetch<ServiceRequest[]>('/service-requests'),
+    apiFetch<ServiceRequest[]>(
+      query ? `/service-requests?${new URLSearchParams({ q: query }).toString()}` : '/service-requests',
+    ),
     listCatalogueForFilter(),
   ]);
 
-  const normalizedQuery = toLower(query);
   const normalizedCity = toLower(cityFilter);
 
   // Every filter except the status: the saved views count from this.
@@ -209,20 +214,6 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
       if (Number.isNaN(submitted.getTime())) return false;
       if (fromDate && submitted < fromDate) return false;
       if (toDate && submitted > toDate) return false;
-    }
-
-    if (normalizedQuery) {
-      const haystack = [
-        request.customerName,
-        request.customerPhone,
-        request.customerEmail,
-        request.category.name,
-        request.city,
-        request.district,
-      ]
-        .map(toLower)
-        .join(' ');
-      if (!haystack.includes(normalizedQuery)) return false;
     }
 
     return true;

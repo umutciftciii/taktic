@@ -10,6 +10,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { AuditPageQueryDto } from '../../common/admin-audit';
+import { parseAdminSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
@@ -105,12 +106,12 @@ export class CustomersService {
       role: UserRole.CUSTOMER,
     };
 
-    if (filters.q) {
-      const term = filters.q;
+    const search = parseAdminSearch(filters.q);
+    if (search) {
       userWhere.OR = [
-        { name: { contains: term, mode: 'insensitive' } },
-        { email: { contains: term, mode: 'insensitive' } },
-        { phone: { contains: term, mode: 'insensitive' } },
+        { name: { contains: search.text, mode: 'insensitive' } },
+        { email: { contains: search.text, mode: 'insensitive' } },
+        ...phoneColumnMatchers(search).map((phone) => ({ phone })),
       ];
     }
 
