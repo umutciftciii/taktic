@@ -94,6 +94,23 @@ test.describe('SEO-004: redirects as a crawler meets them', () => {
     const answer = await eventually(request, source, 302);
     expect(answer.location).toBe(`${SEO_PRODUCTION_ORIGIN}/vitrin`);
 
+    // A stack that names no public origin (the primary one, like a local
+    // dev stack) still answers a real redirect: an absolute Location on its
+    // own origin — Next refuses a relative one with a 500 — never cached.
+    await expect
+      .poll(async () => (await request.get(`${primaryRuntime.webUrl}${source}`, { maxRedirects: 0 })).status(), {
+        timeout: 90_000,
+        intervals: [1_000, 2_000, 5_000],
+      })
+      .toBe(302);
+    const local = await request.get(`${primaryRuntime.webUrl}${source}`, { maxRedirects: 0 });
+    // Next names the server's own host (`localhost` for 127.0.0.1); what
+    // matters is an absolute URL on this server, at the target.
+    const location = new URL(local.headers()['location']!);
+    const self = new URL(primaryRuntime.webUrl);
+    expect([location.protocol, location.port, location.pathname, location.search]).toEqual([self.protocol, self.port, '/vitrin', '']);
+    expect(local.headers()['cache-control']).toBe('no-store');
+
     expect((await head(request, `/eski-kampanya-yok-${uniqueSuffix()}`)).status).toBe(404);
   });
 });
