@@ -44,6 +44,13 @@ export const CATEGORY_AUDIT_FIELDS = [
   'iconKey',
   'imageUrl',
   'coverImageUrl',
+  // SEO-004: the page's own SEO content. The FAQ is recorded as its JSON
+  // text, so a change to any question or answer is one visible diff.
+  'seoTitle',
+  'seoDescription',
+  'editorialDecisionGuide',
+  'editorialPriceFactors',
+  'editorialFaq',
 ] as const;
 
 export const CREDIT_PACKAGE_AUDIT_FIELDS = [
@@ -106,6 +113,11 @@ type CategoryRow = {
   iconKey: string | null;
   imageUrl: string | null;
   coverImageUrl: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  editorialDecisionGuide: string | null;
+  editorialPriceFactors: string | null;
+  editorialFaq: Prisma.JsonValue | null;
 };
 
 /** A category row as audited values; the parent is resolved to `{ id, name }`. */
@@ -135,6 +147,11 @@ export async function categoryAuditSnapshot(
     iconKey: row.iconKey,
     imageUrl: row.imageUrl,
     coverImageUrl: row.coverImageUrl,
+    seoTitle: row.seoTitle,
+    seoDescription: row.seoDescription,
+    editorialDecisionGuide: row.editorialDecisionGuide,
+    editorialPriceFactors: row.editorialPriceFactors,
+    editorialFaq: row.editorialFaq === null ? null : JSON.stringify(row.editorialFaq),
   };
 }
 

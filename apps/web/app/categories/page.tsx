@@ -161,7 +161,7 @@ export default async function CategoriesPage({ searchParams }: CategoriesPagePro
                     <span className="cat-row-media">
                       <CategoryVisual
                         imageUrl={category.imageUrl}
-                        slug={category.slug}
+                        illustrationKey={category.illustrationKey}
                         iconKey={category.iconKey}
                         name={category.name}
                         iconSize={28}

@@ -195,7 +195,7 @@ function PopularCategories({ categories }: { categories: Category[] }) {
                 <span className="lp-cat-media">
                   <CategoryVisual
                     imageUrl={c.imageUrl}
-                    slug={c.slug}
+                    illustrationKey={c.illustrationKey}
                     iconKey={c.iconKey}
                     name={c.name}
                     imgClassName="lp-cat-img"

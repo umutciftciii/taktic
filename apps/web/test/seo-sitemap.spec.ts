@@ -18,7 +18,9 @@ function fakeApi(response: unknown) {
 }
 
 const EMPTY = { categories: [], providers: [], showcaseCards: [] };
-const STATIC = ['https://taktick.example', 'https://taktick.example/categories', 'https://taktick.example/vitrin'];
+/** The two surfaces listed whatever the API says. `/vitrin` is the API's call (SEO-004). */
+const STATIC = ['https://taktick.example', 'https://taktick.example/categories'];
+const SHELF = 'https://taktick.example/vitrin';
 
 describe('buildSitemap', () => {
   it('is empty on a closed site and asks the API for nothing', async () => {
@@ -33,7 +35,7 @@ describe('buildSitemap', () => {
     expect(api.calls).toEqual(['/sitemap/entries']);
   });
 
-  it('lists the three static surfaces in the canonical form, without a made-up date', async () => {
+  it('lists the two static surfaces in the canonical form, without a made-up date', async () => {
     const entries = await buildSitemap(OPEN, fakeApi(EMPTY).fetch);
     expect(entries.map((entry) => entry.url)).toEqual(STATIC);
     for (const entry of entries) expect(entry).not.toHaveProperty('lastModified');
@@ -55,7 +57,7 @@ describe('buildSitemap', () => {
         showcaseCards: [{ cardId: 'c1' }, { cardId: 'c2' }],
       }).fetch,
     );
-    expect(entries.slice(3)).toEqual([
+    expect(entries.slice(2)).toEqual([
       { url: 'https://taktick.example/categories/klima-bakimi', lastModified: new Date('2026-09-01T10:00:00.000Z') },
       { url: 'https://taktick.example/categories/weird%20slug%2Fx', lastModified: new Date('2026-09-02T10:00:00.000Z') },
       { url: 'https://taktick.example/categories/no-date' },
@@ -73,6 +75,7 @@ describe('buildSitemap', () => {
         categories: [{ slug: 'klima' }],
         providers: [{ id: 'p1' }],
         showcaseCards: [{ cardId: 'c1' }],
+        showcaseShelf: { indexable: true },
       }).fetch,
     );
     expect(entries.map((entry) => entry.url)).toEqual([
@@ -83,6 +86,15 @@ describe('buildSitemap', () => {
       canonicalUrl(OPEN.origin, '/isletme/:id', { id: 'p1' }),
       canonicalUrl(OPEN.origin, '/vitrin/:cardId', { cardId: 'c1' }),
     ]);
+  });
+
+  it('lists /vitrin only when the API says the shelf itself is indexable (SEO-004)', async () => {
+    const listed = await buildSitemap(OPEN, fakeApi({ ...EMPTY, showcaseShelf: { indexable: true } }).fetch);
+    expect(listed.map((entry) => entry.url)).toEqual([...STATIC, SHELF]);
+    for (const shelf of [{ indexable: false }, { indexable: 'true' }, true, null, undefined]) {
+      const entries = await buildSitemap(OPEN, fakeApi({ ...EMPTY, showcaseShelf: shelf }).fetch);
+      expect(entries.map((entry) => entry.url), JSON.stringify(shelf)).toEqual(STATIC);
+    }
   });
 
   it('lists a record once however many times the API repeats it', async () => {

@@ -2,8 +2,9 @@ import { canonicalUrl } from './seo-routes';
 import type { SeoSite } from './seo-site';
 
 /**
- * What `sitemap.xml` lists: the six allow-listed routes, the three static ones
- * by name and the three dynamic ones filled in from one API answer.
+ * What `sitemap.xml` lists: the six allow-listed routes — `/` and
+ * `/categories` by name, `/vitrin` when the API says the shelf is indexable,
+ * and the three dynamic ones — filled in from one API answer.
  *
  * ## One request, one source
  *
@@ -25,7 +26,8 @@ import type { SeoSite } from './seo-site';
  * ## Fails closed
  *
  * An API that errors, or a body this module does not recognise, yields the
- * three static rows and nothing dynamic: a page that could not be confirmed
+ * two static rows and nothing else (not `/vitrin`, whose indexability is the
+ * API's answer): a page that could not be confirmed
  * public is not listed. A row without the field it needs is skipped, and a
  * record the API happens to repeat is listed once.
  */
@@ -46,12 +48,19 @@ export async function buildSitemap(site: SeoSite, fetchJson: SitemapFetch): Prom
   const entries: SitemapEntry[] = [
     { url: canonicalUrl(origin, '/', {}) },
     { url: canonicalUrl(origin, '/categories', {}) },
-    { url: canonicalUrl(origin, '/vitrin', {}) },
   ];
 
   const body = await readEntries(fetchJson);
   if (!body) {
     return entries;
+  }
+
+  // SEO-004: `/vitrin` is listed only when the API says the shelf itself is
+  // indexable — the same rule its own `<head>` reads. It used to be listed
+  // unconditionally, beside a page that said `noindex`. Absent or anything
+  // but a literal `true` keeps it out (fail closed).
+  if (body.showcaseShelfIndexable) {
+    entries.push({ url: canonicalUrl(origin, '/vitrin', {}) });
   }
 
   const seen = new Set<string>();
@@ -81,7 +90,12 @@ export async function buildSitemap(site: SeoSite, fetchJson: SitemapFetch): Prom
   return entries;
 }
 
-type EntriesBody = { categories: unknown[]; providers: unknown[]; showcaseCards: unknown[] };
+type EntriesBody = {
+  categories: unknown[];
+  providers: unknown[];
+  showcaseCards: unknown[];
+  showcaseShelfIndexable: boolean;
+};
 
 /** The API's answer, or null for an error or a body of any other shape. */
 async function readEntries(fetchJson: SitemapFetch): Promise<EntriesBody | null> {
@@ -93,9 +107,13 @@ async function readEntries(fetchJson: SitemapFetch): Promise<EntriesBody | null>
   }
 
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
-  const { categories, providers, showcaseCards } = body as Record<string, unknown>;
+  const { categories, providers, showcaseCards, showcaseShelf } = body as Record<string, unknown>;
   if (!Array.isArray(categories) || !Array.isArray(providers) || !Array.isArray(showcaseCards)) return null;
-  return { categories, providers, showcaseCards };
+  const showcaseShelfIndexable =
+    typeof showcaseShelf === 'object' &&
+    showcaseShelf !== null &&
+    (showcaseShelf as Record<string, unknown>).indexable === true;
+  return { categories, providers, showcaseCards, showcaseShelfIndexable };
 }
 
 function stringField(row: unknown, name: string): string | null {

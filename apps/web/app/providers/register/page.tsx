@@ -208,7 +208,7 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
               <div className="rail-media">
                 <CategoryVisual
                   imageUrl={firstCategory.imageUrl}
-                  slug={firstCategory.slug}
+                  illustrationKey={firstCategory.illustrationKey}
                   iconKey={firstCategory.iconKey}
                   name={firstCategory.name}
                   iconSize={48}

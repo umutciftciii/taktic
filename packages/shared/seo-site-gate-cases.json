@@ -1,0 +1,17 @@
+{
+  "$comment": "SEO-004. The site gate as the web decides it (apps/web/lib/seo-site.ts) and as the admin API reports it (apps/api/src/modules/seo/seo-site-gate.ts). Both suites run every case, so the overview screen cannot say 'open' about a site the web keeps closed.",
+  "cases": [
+    { "env": {}, "open": false, "reason": "ENVIRONMENT_UNDECLARED" },
+    { "env": { "APP_ENVIRONMENT": "local", "WEB_APP_URL": "https://taktick.com" }, "open": false, "reason": "ENVIRONMENT_NOT_PRODUCTION" },
+    { "env": { "APP_ENVIRONMENT": "staging", "WEB_APP_URL": "https://taktick.com" }, "open": false, "reason": "ENVIRONMENT_NOT_PRODUCTION" },
+    { "env": { "APP_ENVIRONMENT": "prod", "WEB_APP_URL": "https://taktick.com" }, "open": false, "reason": "ENVIRONMENT_INVALID" },
+    { "env": { "APP_ENVIRONMENT": "production" }, "open": false, "reason": "ORIGIN_MISSING" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_APP_URL": "not a url" }, "open": false, "reason": "ORIGIN_MALFORMED" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_APP_URL": "https://taktick.com/app" }, "open": false, "reason": "ORIGIN_NOT_AN_ORIGIN" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_APP_URL": "http://taktick.com" }, "open": false, "reason": "ORIGIN_INSECURE" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_APP_URL": "https://localhost" }, "open": false, "reason": "ORIGIN_LOOPBACK" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_APP_URL": "https://taktick.com" }, "open": true, "origin": "https://taktick.com" },
+    { "env": { "APP_ENVIRONMENT": "production", "WEB_ORIGIN": "https://taktick.com/" }, "open": true, "origin": "https://taktick.com" },
+    { "env": { "APP_ENVIRONMENT": " production ", "NEXT_PUBLIC_WEB_URL": "https://www.taktick.com" }, "open": true, "origin": "https://www.taktick.com" }
+  ]
+}

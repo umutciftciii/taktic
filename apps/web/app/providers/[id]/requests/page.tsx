@@ -152,7 +152,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
             <article className="datarow" key={request.id}>
               <span className="datarow-media datarow-media-lg">
                 <CategoryVisual
-                  slug={request.category.slug}
+                  illustrationKey={request.category.illustrationKey}
                   name={request.category.name}
                   iconSize={28}
                   alt=""

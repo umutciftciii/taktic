@@ -105,6 +105,8 @@ export type Category = {
   id: string;
   name: string;
   slug: string;
+  /** SEO-004: the packaged illustration's key; it does not follow the slug. */
+  illustrationKey?: string | null;
   description: string | null;
   imageUrl?: string | null;
   coverImageUrl?: string | null;
@@ -125,7 +127,20 @@ export type Category = {
    * as `=== true`, so absent is closed.
    */
   seoIndexable?: boolean;
+  /**
+   * SEO-004, public detail only. The page's own `<title>` and meta
+   * description as an operator wrote them; null falls back (name, then the
+   * description-derived text). Plain text.
+   */
+  seoTitle?: string | null;
+  seoDescription?: string | null;
+  /** The editorial blocks the index rule reads — plain text, rendered as text. */
+  editorialDecisionGuide?: string | null;
+  editorialPriceFactors?: string | null;
+  editorialFaq?: CategoryFaqItem[] | null;
 };
+
+export type CategoryFaqItem = { question: string; answer: string };
 
 /** One step of a routed flow, as the customer's browser carries it. */
 export type RouterSelection = {
@@ -220,6 +235,7 @@ export type CustomerServiceRequest = {
     id: string;
     name: string;
     slug: string;
+    illustrationKey?: string | null;
   };
   /**
    * The vitrin lead this request came from, when it came from one.
@@ -287,6 +303,7 @@ export type ProviderEnrollmentCategory = {
   slug: string;
   iconKey: string | null;
   imageUrl: string | null;
+  illustrationKey?: string | null;
   parent: { id: string; name: string; slug: string } | null;
   /** LIVE takes requests today; UPCOMING has not been released yet. */
   availability: 'LIVE' | 'UPCOMING';
@@ -414,6 +431,7 @@ export type ProviderRequestListItem = {
     id: string;
     name: string;
     slug: string;
+    illustrationKey?: string | null;
     isActive: boolean;
     offerCreditCost: number | null;
   };
@@ -1623,7 +1641,7 @@ export type ShowcaseCard = {
   id: string;
   kind: ShowcaseCardKind;
   status: ShowcaseCardStatus;
-  category: { id: string; name: string; slug: string; kind: CategoryKind; status: string };
+  category: { id: string; name: string; slug: string; kind: CategoryKind; status: string; illustrationKey?: string | null };
   liveVersion: ShowcaseCardVersion | null;
   draftVersion: ShowcaseCardVersion | null;
   /**
@@ -1839,7 +1857,7 @@ export type ShowcaseFeedCard = {
   imageUrl: string | null;
   responseSlaUrgentHours: number;
   responseSlaNormalHours: number;
-  category: { id: string; name: string; slug: string };
+  category: { id: string; name: string; slug: string; illustrationKey?: string | null };
   /** The area that matched the visitor's query, or the closest one. */
   areaLabel: string;
   areaScope: ServiceAreaScope;

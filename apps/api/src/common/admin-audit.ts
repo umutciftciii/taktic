@@ -26,7 +26,9 @@ export type AdminAuditDomain =
   | 'COMPANY_SETTINGS'
   | 'CATEGORY'
   | 'CREDIT_PACKAGE'
-  | 'SHOWCASE_PACKAGE';
+  | 'SHOWCASE_PACKAGE'
+  | 'SEO_REDIRECT'
+  | 'SEO_NOT_FOUND_PATH';
 
 /** A reference to another record, with the name it had when the row was written. */
 export type AuditRef = { id: string; name: string | null };

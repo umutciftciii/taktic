@@ -6,8 +6,11 @@ import { iconByKey, iconForCategory } from './landing-icons';
 
 type CategoryVisualProps = {
   imageUrl?: string | null;
-  /** Falls back to the packaged handoff illustration for this slug. */
-  slug?: string | null;
+  /**
+   * Falls back to the packaged handoff illustration with this key — the
+   * category's `illustrationKey`, which does not change with its slug.
+   */
+  illustrationKey?: string | null;
   iconKey?: string | null;
   name: string;
   iconSize?: number;
@@ -19,7 +22,7 @@ type CategoryVisualProps = {
 
 export function CategoryVisual({
   imageUrl,
-  slug,
+  illustrationKey,
   iconKey,
   name,
   iconSize = 22,
@@ -29,7 +32,7 @@ export function CategoryVisual({
   alt,
 }: CategoryVisualProps) {
   const [imageBroken, setImageBroken] = useState(false);
-  const src = categoryImageSrc(imageUrl, slug);
+  const src = categoryImageSrc(imageUrl, illustrationKey);
 
   if (src && !imageBroken) {
     return (

@@ -15,6 +15,7 @@ import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ShowcaseModule } from './modules/showcase/showcase.module';
 import { SitemapModule } from './modules/sitemap/sitemap.module';
+import { SeoAdminModule } from './modules/seo/admin/seo-admin.module';
 import { SupportTicketsModule } from './modules/support-tickets/support-tickets.module';
 import { ProviderClaimModule } from './modules/provider-claim/provider-claim.module';
 import { ProviderInvitesModule } from './modules/provider-invites/provider-invites.module';
@@ -99,6 +100,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     OperationsSettingsModule,
     NotificationLogsModule,
     SitemapModule,
+    SeoAdminModule,
     NumberingModule,
     UsersModule,
     AdminRolesModule,

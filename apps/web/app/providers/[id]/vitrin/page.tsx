@@ -189,7 +189,7 @@ function CardGrid({
                   : {
                       kind: card.kind,
                       categoryName: card.category.name,
-                      categorySlug: card.category.slug,
+                      categoryIllustrationKey: card.category.illustrationKey ?? null,
                       title: 'Adsız kart',
                       summary: '',
                       imageUrl: null,

@@ -1,12 +1,16 @@
 /**
  * The category illustrations that shipped with the design handoff.
  *
- * These are the real brand illustrations, keyed by the category slugs the seed
- * creates. A slug that is not listed here — Nakliyat is the known one — has no
- * illustration, and the screens fall back to the icon set rather than inventing
- * a stand-in. An `imageUrl` coming from the API always wins over this map.
+ * Keyed by the category's `illustrationKey` (SEO-004), not by its slug. The
+ * map used to be keyed by slug, so renaming a slug — which an operator may now
+ * do, with a 301 from the old address — silently dropped the picture. The key
+ * is a column of its own that does not move when the slug does; the migration
+ * set it to the seven slugs the illustrations shipped for, which is exactly
+ * what this map looked up before. A category without a key — Nakliyat is the
+ * known one — has no illustration, and the screens fall back to the icon set
+ * rather than inventing a stand-in. An `imageUrl` from the API always wins.
  */
-const ILLUSTRATION_BY_SLUG: Readonly<Record<string, string>> = {
+const ILLUSTRATION_BY_KEY: Readonly<Record<string, string>> = {
   'klima-servisi': '/categories/cat-klima-servisi.png',
   'klima-montaji': '/categories/cat-klima-montaji.png',
   'kombi-servisi': '/categories/cat-kombi-servisi.png',
@@ -16,15 +20,15 @@ const ILLUSTRATION_BY_SLUG: Readonly<Record<string, string>> = {
   'ev-temizligi': '/categories/cat-ev-temizligi.png',
 };
 
-export function categoryIllustration(slug: string | null | undefined): string | null {
-  if (!slug) return null;
-  return ILLUSTRATION_BY_SLUG[slug] ?? null;
+export function categoryIllustration(illustrationKey: string | null | undefined): string | null {
+  if (!illustrationKey) return null;
+  return Object.hasOwn(ILLUSTRATION_BY_KEY, illustrationKey) ? ILLUSTRATION_BY_KEY[illustrationKey]! : null;
 }
 
 /** The image a category screen should draw: the API's, then the packaged one. */
 export function categoryImageSrc(
   imageUrl: string | null | undefined,
-  slug: string | null | undefined,
+  illustrationKey: string | null | undefined,
 ): string | null {
-  return imageUrl || categoryIllustration(slug);
+  return imageUrl || categoryIllustration(illustrationKey);
 }

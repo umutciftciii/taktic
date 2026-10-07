@@ -6922,3 +6922,34 @@ body.has-drawer-open {
   .offers-table-actions-cell { grid-column: 1 / -1; padding-top: var(--space-2); border-top: 1px solid var(--color-divider); }
   .offers-table-slot:empty { display: none; }
 }
+
+/* SEO-004: a category's editorial blocks, below the request form. */
+.category-editorial {
+  margin: 40px 0 56px;
+  display: grid;
+  gap: 32px;
+  max-width: 760px;
+}
+.category-editorial-section h2 {
+  font-size: 1.25rem;
+  margin: 0 0 12px;
+}
+.category-editorial-section p {
+  margin: 0 0 12px;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+.category-editorial-faq {
+  margin: 0;
+  display: grid;
+  gap: 16px;
+}
+.category-editorial-faq dt {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.category-editorial-faq dd {
+  margin: 0;
+  line-height: 1.6;
+  white-space: pre-line;
+}

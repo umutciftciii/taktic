@@ -80,6 +80,7 @@ const sharedEnv = {
   UNVIEWED_OFFER_REFUND_CRON: '0 0 1 1 *',
   REQUEST_EXPIRY_SCHEDULER_CRON: '0 0 1 1 *',
   REQUEST_REMINDER_SCHEDULER_CRON: '0 0 1 1 *',
+  SEO_NOT_FOUND_RETENTION_CRON: '0 0 1 1 *',
   // The credential throttle keys on the client IP, and every actor in the suite
   // is 127.0.0.1 — at the shipped budget of 10 per minute the run would only be
   // measuring how many people it signed in. The limit itself is a configurable

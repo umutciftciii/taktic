@@ -222,6 +222,25 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/users/:id', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id/status-history', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'PATCH', path: '/users/:id/status', permission: AdminPermission.ADMIN_USERS_STATUS },
+  // SEO-004: the SEO screens. Reads need SEO_READ; content and redirects have
+  // their own write permissions. A slug change is a category edit
+  // (CATEGORIES_WRITE): its 301 is that edit's consequence, written in the
+  // same transaction, not a separate grant.
+  { method: 'GET', path: '/admin/seo/overview', permission: AdminPermission.SEO_READ },
+  { method: 'GET', path: '/admin/seo/pages', permission: AdminPermission.SEO_READ },
+  { method: 'GET', path: '/admin/seo/slugs', permission: AdminPermission.SEO_READ },
+  { method: 'GET', path: '/admin/seo/categories/:id/slug-preview', permission: AdminPermission.SEO_READ },
+  { method: 'POST', path: '/admin/seo/categories/:id/slug', permission: AdminPermission.CATEGORIES_WRITE },
+  { method: 'GET', path: '/admin/seo/categories/:id/content', permission: AdminPermission.SEO_READ },
+  { method: 'PATCH', path: '/admin/seo/categories/:id/content', permission: AdminPermission.SEO_CONTENT_WRITE },
+  { method: 'GET', path: '/admin/seo/redirects', permission: AdminPermission.SEO_READ },
+  { method: 'GET', path: '/admin/seo/redirects/:id', permission: AdminPermission.SEO_READ },
+  { method: 'POST', path: '/admin/seo/redirects', permission: AdminPermission.SEO_REDIRECTS_WRITE },
+  { method: 'PATCH', path: '/admin/seo/redirects/:id', permission: AdminPermission.SEO_REDIRECTS_WRITE },
+  { method: 'POST', path: '/admin/seo/redirects/:id/deactivate', permission: AdminPermission.SEO_REDIRECTS_WRITE },
+  { method: 'GET', path: '/admin/seo/not-found', permission: AdminPermission.SEO_READ },
+  { method: 'POST', path: '/admin/seo/not-found/:id/approve', permission: AdminPermission.SEO_REDIRECTS_WRITE },
+  { method: 'POST', path: '/admin/seo/not-found/:id/reject', permission: AdminPermission.SEO_REDIRECTS_WRITE },
 ];
 
 /**

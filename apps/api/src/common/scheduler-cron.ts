@@ -62,6 +62,17 @@ export function readCampaignEvaluationCron(): string {
   return readCron(CAMPAIGN_EVALUATION_RETRY_CRON.variable, CAMPAIGN_EVALUATION_RETRY_CRON.fallback);
 }
 
+/**
+ * SEO-004: the 404-suggestion retention sweep. Daily, early morning; nothing
+ * depends on the hour, and an hourly pass would only ever find what the daily
+ * one already removed.
+ */
+export const SEO_NOT_FOUND_RETENTION_CRON = { variable: 'SEO_NOT_FOUND_RETENTION_CRON', fallback: '40 4 * * *' } as const;
+
+export function readSeoNotFoundRetentionCron(): string {
+  return readCron(SEO_NOT_FOUND_RETENTION_CRON.variable, SEO_NOT_FOUND_RETENTION_CRON.fallback);
+}
+
 export function readSchedulerCron(job: SchedulerJobKey): string {
   const { variable, fallback } = SCHEDULER_CRON_CONFIG[job];
   return readCron(variable, fallback);

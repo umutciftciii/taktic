@@ -539,6 +539,14 @@ model User {
   companySettingsChanges          CompanySettingsChange[]              @relation("CompanySettingsChangeActor")
   catalogAuditEntries             CatalogAuditLog[]                    @relation("CatalogAuditActor")
   revokedProviderInvites          ProviderInviteToken[]                @relation("ProviderInviteTokenRevokedBy")
+  /// SEO-004. Redirects and 404 suggestions this operator created, edited,
+  /// deactivated or decided, and the SEO audit rows they authored. Restrict on
+  /// the other side, as for every audit actor.
+  seoRedirectsCreated             SeoRedirect[]                        @relation("SeoRedirectCreatedBy")
+  seoRedirectsUpdated             SeoRedirect[]                        @relation("SeoRedirectUpdatedBy")
+  seoRedirectsDeactivated         SeoRedirect[]                        @relation("SeoRedirectDeactivatedBy")
+  seoNotFoundDecisions            SeoNotFoundPath[]                    @relation("SeoNotFoundPathDecidedBy")
+  seoAuditEntries                 SeoAuditLog[]                        @relation("SeoAuditActor")
 
   @@index([role])
   @@index([isActive])
@@ -886,6 +894,25 @@ model ServiceCategory {
   unlimitedPackageEligible Boolean               @default(false)
   isActive                 Boolean               @default(true)
   sortOrder                Int                   @default(0)
+  /// SEO-004. The page's own `<title>` text (≤ 70, a CHECK says so). NULL
+  /// means "use the category name" — the web falls back, nothing is copied.
+  seoTitle                 String?
+  /// SEO-004. The meta description (≤ 160). NULL falls back to the
+  /// description-derived text the page already printed.
+  seoDescription           String?
+  /// SEO-004 / SEO-002 §5.2 (B4): the three editorial blocks the index rule
+  /// asks for. Plain text, written by an operator holding SEO_CONTENT_WRITE;
+  /// NULL is "not written yet", which keeps the category out of the index.
+  editorialDecisionGuide   String?
+  editorialPriceFactors    String?
+  /// `[{ question, answer }]` — a CHECK holds it to a JSON array; the API
+  /// validates each item. Rendered as plain text, never as FAQPage JSON-LD.
+  editorialFaq             Json?
+  /// SEO-004. Which packaged illustration the web draws for this category
+  /// (apps/web/app/category-art.ts). It used to be looked up by slug, so a
+  /// renamed slug lost its picture; this key does not move when the slug does.
+  /// NULL draws the icon set, as an unlisted slug always did.
+  illustrationKey          String?
   createdAt                DateTime              @default(now())
   updatedAt                DateTime              @updatedAt
 
@@ -4941,7 +4968,7 @@ model CampaignRevokeDailyCounter {
 /// that guards nothing" — a box an operator can tick that opens no route — is
 /// unrepresentable rather than merely discouraged.
 ///
-/// The 76 values are the route-level mapping in
+/// The values are the route-level mapping in
 /// `docs/superpowers/plans/2026-09-22-pr0-route-permission-map.md`, and that
 /// document is the test's input (`route-permission-map.spec.ts`): a guarded
 /// admin route with no entry, and an entry naming no route, both fail.
@@ -5113,6 +5140,16 @@ enum AdminPermission {
 
   ADMIN_USERS_READ
   ADMIN_USERS_STATUS
+
+  /// SEO-004. The search-engine screens: index state and its reasons, slugs,
+  /// redirects and the 404 suggestions. Read only.
+  SEO_READ
+  /// A category's SEO title/description and its three editorial blocks — the
+  /// content the index rule reads. Not the catalogue structure.
+  SEO_CONTENT_WRITE
+  /// Manual redirects (create, edit, deactivate) and the decision on a 404
+  /// suggestion. A slug change's own 301 is written under CATEGORIES_WRITE.
+  SEO_REDIRECTS_WRITE
 }
 
 /// What a role did to itself, or to somebody's access.
@@ -5677,4 +5714,153 @@ model CatalogAuditLog {
 
   @@index([entityType, entityId, createdAt, id])
   @@index([actorId])
+}
+
+/// SEO-004. A redirect's HTTP meaning: PERMANENT is a 301, TEMPORARY a 302.
+/// A slug change only ever writes PERMANENT (a CHECK says so).
+enum SeoRedirectType {
+  PERMANENT
+  TEMPORARY
+}
+
+/// Where a redirect came from.
+enum SeoRedirectOrigin {
+  /// An operator wrote it on the redirects screen.
+  MANUAL
+  /// A public category's slug changed; the old address now leads to the new.
+  SLUG_CHANGE
+  /// An operator approved a 404 suggestion.
+  NOT_FOUND_SUGGESTION
+}
+
+/// SEO-004. One address the web answers with a 301/302, and where to.
+///
+/// Paths are stored in the one canonical form `seo-paths.ts` produces —
+/// decoded once, NFC, lower case, no trailing slash, no query, no fragment —
+/// so equality here is equality of addresses. A source is unique among the
+/// active rows (a partial unique index in the migration); an inactive row is
+/// history and is never deleted. Nothing here is served directly: the web
+/// reads `GET /seo/redirects/active`, which also drops a row whose target is
+/// not a live page or whose source has become one.
+///
+/// Graph invariants (no chain, no cycle) are kept by SeoRedirectGraphService
+/// under a transaction-scoped advisory lock; the database holds the parts a
+/// row can hold on its own (source ≠ target, deactivation bookkeeping, a slug
+/// change being permanent and naming its category).
+model SeoRedirect {
+  id              String            @id @default(cuid())
+  sourcePath      String
+  targetPath      String
+  type            SeoRedirectType
+  active          Boolean           @default(true)
+  origin          SeoRedirectOrigin
+  /// Why, as the operator wrote it (or the system's own sentence for a slug
+  /// change). Shown in the audit; never parsed.
+  reason          String?
+  /// The category a SLUG_CHANGE row was written for. No foreign key, like
+  /// CatalogAuditLog.entityId: a deleted category's history stays readable.
+  categoryId      String?
+  createdById     String
+  updatedById     String?
+  deactivatedById String?
+  deactivatedAt   DateTime?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  createdBy     User              @relation("SeoRedirectCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy     User?             @relation("SeoRedirectUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deactivatedBy User?             @relation("SeoRedirectDeactivatedBy", fields: [deactivatedById], references: [id], onDelete: Restrict)
+  suggestions   SeoNotFoundPath[]
+
+  @@index([categoryId])
+  @@index([createdById])
+  @@index([updatedById])
+  @@index([deactivatedById])
+}
+
+/// Which public lookup answered 404 for a recorded path.
+enum SeoNotFoundRouteFamily {
+  CATEGORY
+  PROVIDER
+  SHOWCASE_CARD
+}
+
+enum SeoNotFoundStatus {
+  OPEN
+  APPROVED
+  REJECTED
+}
+
+/// SEO-004. A public address that answered 404, aggregated — a suggestion an
+/// operator may turn into a redirect, never one by itself.
+///
+/// Only the normalised path is kept: no query, no fragment, no IP, no user
+/// agent, no cookie, no user. A path whose segment looks like a phone number
+/// or carries an `@` is never recorded at all.
+model SeoNotFoundPath {
+  id                  String                 @id @default(cuid())
+  path                String                 @unique
+  routeFamily         SeoNotFoundRouteFamily
+  firstSeenAt         DateTime
+  lastSeenAt          DateTime
+  occurrenceCount     Int
+  /// How many distinct UTC days it was seen on.
+  seenDays            Int
+  status              SeoNotFoundStatus      @default(OPEN)
+  /// Set only by the one deterministic rule: the path, normalised, is a live
+  /// category's canonical address under a different spelling. Never a guess.
+  candidateTargetPath String?
+  decidedById         String?
+  decidedAt           DateTime?
+  redirectId          String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  decidedBy User?        @relation("SeoNotFoundPathDecidedBy", fields: [decidedById], references: [id], onDelete: Restrict)
+  redirect  SeoRedirect? @relation(fields: [redirectId], references: [id], onDelete: Restrict)
+
+  @@index([status, occurrenceCount])
+  @@index([lastSeenAt])
+  @@index([decidedById])
+  @@index([redirectId])
+}
+
+enum SeoAuditEntity {
+  REDIRECT
+  NOT_FOUND_PATH
+}
+
+enum SeoAuditAction {
+  REDIRECT_CREATED
+  REDIRECT_UPDATED
+  REDIRECT_DEACTIVATED
+  /// A slug change moved this redirect's target to the new address, so it
+  /// never leads to an address that itself redirects (no chain).
+  REDIRECT_RETARGETED
+  /// A category took back one of its own former addresses; the redirect that
+  /// led away from it was deactivated in the same transaction.
+  REDIRECT_RECLAIMED
+  SUGGESTION_APPROVED
+  SUGGESTION_REJECTED
+}
+
+/// SEO-004. Append-only audit of redirect and suggestion writes. A slug change
+/// and a category's SEO content are audited in CatalogAuditLog with the rest
+/// of the category; the redirects they cause are audited here.
+model SeoAuditLog {
+  id         String         @id @default(cuid())
+  entityType SeoAuditEntity
+  /// No foreign key, like CatalogAuditLog.entityId.
+  entityId   String
+  action     SeoAuditAction
+  changes    Json
+  reason     String?
+  actorId    String
+  createdAt  DateTime       @default(now())
+
+  actor User @relation("SeoAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([entityType, entityId, createdAt, id])
+  @@index([actorId])
+  @@index([createdAt, id])
 }

@@ -1,13 +1,19 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { PUBLICLY_VISIBLE_PROVIDER_STATUSES } from '../providers/provider-visibility';
 import { livePlacementPredicate } from '../showcase/showcase-live-placement';
 import {
+  categoryIndexFacts,
+  evaluateCategoryIndexability,
+  evaluateProviderIndexability,
+  evaluateShowcaseCardIndexability,
+  evaluateShowcaseShelfIndexability,
+  isCategoryIndexable,
   isProviderIndexable,
-  isShowcaseCardIndexable,
   isShowcaseShelfIndexable,
   markDuplicateSummaries,
+  type SeoIndexEvaluation,
 } from './seo-index-eligibility';
 
 /**
@@ -32,6 +38,8 @@ import {
 type LiveCardFactsRow = {
   cardId: string;
   providerId: string;
+  title: string;
+  providerName: string;
   summary: string | null;
   scopeIncluded: unknown;
   scopeExcluded: unknown;
@@ -42,6 +50,40 @@ type LiveCardFactsRow = {
   providerAreas: unknown;
   providerBindings: unknown;
 };
+
+export type LiveCardEvaluation = {
+  cardId: string;
+  title: string;
+  providerId: string;
+  providerName: string;
+  evaluation: SeoIndexEvaluation;
+};
+
+/** The columns the category rule reads, and the labels the admin list shows. */
+const categoryFactsSelect = {
+  id: true,
+  name: true,
+  slug: true,
+  kind: true,
+  status: true,
+  description: true,
+  editorialDecisionGuide: true,
+  editorialPriceFactors: true,
+  editorialFaq: true,
+  updatedAt: true,
+} satisfies Prisma.ServiceCategorySelect;
+
+const providerFactsSelect = {
+  id: true,
+  businessName: true,
+  updatedAt: true,
+  status: true,
+  description: true,
+  city: true,
+  district: true,
+  serviceCategories: { select: { category: { select: { status: true, kind: true } } } },
+  serviceAreas: { select: { scope: true, city: true, district: true, neighborhood: true } },
+} satisfies Prisma.ProviderProfileSelect;
 
 @Injectable()
 export class SeoIndexEligibilityService {
@@ -56,6 +98,19 @@ export class SeoIndexEligibilityService {
     now: Date,
     scope: { ofCard?: string } = {},
   ): Promise<Map<string, boolean>> {
+    const evaluations = await this.liveShowcaseCardEvaluations(now, scope);
+    return new Map([...evaluations].map(([cardId, card]) => [cardId, card.evaluation.indexable]));
+  }
+
+  /**
+   * SEO-004: the same answer with its reasons, and the two labels an
+   * operator needs to recognise the card (its title, its business). Read by
+   * the admin API only; the public readers take the boolean above.
+   */
+  async liveShowcaseCardEvaluations(
+    now: Date,
+    scope: { ofCard?: string } = {},
+  ): Promise<Map<string, LiveCardEvaluation>> {
     const providerFilter = scope.ofCard
       ? Prisma.sql`AND pr."id" = (SELECT sc."providerId" FROM "ShowcaseCard" sc WHERE sc."id" = ${scope.ofCard})`
       : Prisma.empty;
@@ -64,6 +119,8 @@ export class SeoIndexEligibilityService {
       SELECT DISTINCT ON (c."id")
         c."id"            AS "cardId",
         pr."id"           AS "providerId",
+        v."title"         AS "title",
+        pr."businessName" AS "providerName",
         v."summary"       AS "summary",
         v."scopeIncluded" AS "scopeIncluded",
         v."scopeExcluded" AS "scopeExcluded",
@@ -118,14 +175,20 @@ export class SeoIndexEligibilityService {
     return new Map(
       marked.map((row) => [
         row.cardId,
-        isShowcaseCardIndexable({
-          live: true,
-          providerIndexable: providerIndexable.get(row.providerId) ?? false,
-          summary: row.summary,
-          scopeIncluded: row.scopeIncluded,
-          scopeExcluded: row.scopeExcluded,
-          summaryDuplicated: row.summaryDuplicated,
-        }),
+        {
+          cardId: row.cardId,
+          title: row.title,
+          providerId: row.providerId,
+          providerName: row.providerName,
+          evaluation: evaluateShowcaseCardIndexability({
+            live: true,
+            providerIndexable: providerIndexable.get(row.providerId) ?? false,
+            summary: row.summary,
+            scopeIncluded: row.scopeIncluded,
+            scopeExcluded: row.scopeExcluded,
+            summaryDuplicated: row.summaryDuplicated,
+          }),
+        },
       ]),
     );
   }
@@ -154,23 +217,81 @@ export class SeoIndexEligibilityService {
    * leave this method.
    */
   async listIndexableProviders(): Promise<Array<{ id: string; updatedAt: Date }>> {
-    const providers = await this.prisma.providerProfile.findMany({
-      where: { status: { in: [...PUBLICLY_VISIBLE_PROVIDER_STATUSES] } },
-      select: {
-        id: true,
-        updatedAt: true,
-        status: true,
-        description: true,
-        city: true,
-        district: true,
-        serviceCategories: { select: { category: { select: { status: true, kind: true } } } },
-        serviceAreas: { select: { scope: true, city: true, district: true, neighborhood: true } },
-      },
-      orderBy: { id: 'asc' },
-    });
-
+    const providers = await this.publicProviderRows();
     return providers
       .filter((provider) => isProviderIndexable(provider))
       .map((provider) => ({ id: provider.id, updatedAt: provider.updatedAt }));
+  }
+
+  /**
+   * SEO-004: every publicly visible business with its evaluation, for the
+   * admin API. The name is the one the public profile already prints.
+   */
+  async providerEvaluations(): Promise<
+    Array<{ id: string; name: string; updatedAt: Date; evaluation: SeoIndexEvaluation }>
+  > {
+    const providers = await this.publicProviderRows();
+    return providers.map((provider) => ({
+      id: provider.id,
+      name: provider.businessName,
+      updatedAt: provider.updatedAt,
+      evaluation: evaluateProviderIndexability(provider),
+    }));
+  }
+
+  private publicProviderRows() {
+    return this.prisma.providerProfile.findMany({
+      where: { status: { in: [...PUBLICLY_VISIBLE_PROVIDER_STATUSES] } },
+      select: providerFactsSelect,
+      orderBy: { id: 'asc' },
+    });
+  }
+
+  /**
+   * The categories the sitemap lists: the public catalogue's ACTIVE leaves
+   * (as `GET /categories` serves them) that pass the category rule, read with
+   * the editorial blocks (SEO-004) the public listing does not carry.
+   */
+  async listIndexableCategories(): Promise<Array<{ slug: string; updatedAt: Date }>> {
+    const categories = await this.prisma.serviceCategory.findMany({
+      where: { status: ServiceCategoryStatus.ACTIVE, kind: ServiceCategoryKind.LEAF },
+      select: categoryFactsSelect,
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    return categories
+      .filter((category) => isCategoryIndexable(categoryIndexFacts(category)))
+      .map((category) => ({ slug: category.slug, updatedAt: category.updatedAt }));
+  }
+
+  /**
+   * SEO-004: every category with a public page — an ACTIVE leaf or router,
+   * `isPubliclyReachable` — with its evaluation. A router's page is public and
+   * never indexable (the rule wants a leaf), and says so.
+   */
+  async categoryEvaluations(): Promise<
+    Array<{ id: string; name: string; slug: string; kind: ServiceCategoryKind; updatedAt: Date; evaluation: SeoIndexEvaluation }>
+  > {
+    const categories = await this.prisma.serviceCategory.findMany({
+      where: {
+        status: ServiceCategoryStatus.ACTIVE,
+        kind: { in: [ServiceCategoryKind.LEAF, ServiceCategoryKind.ROUTER] },
+      },
+      select: categoryFactsSelect,
+      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+    });
+    return categories.map((category) => ({
+      id: category.id,
+      name: category.name,
+      slug: category.slug,
+      kind: category.kind,
+      updatedAt: category.updatedAt,
+      evaluation: evaluateCategoryIndexability(categoryIndexFacts(category)),
+    }));
+  }
+
+  /** SEO-004: the shelf's evaluation, from the same live-card answers the feed uses. */
+  async shelfEvaluation(now: Date): Promise<SeoIndexEvaluation> {
+    const ids = await this.listIndexableLiveShowcaseCardIds(now);
+    return evaluateShowcaseShelfIndexability(ids.length);
   }
 }

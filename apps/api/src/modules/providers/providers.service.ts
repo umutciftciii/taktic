@@ -28,6 +28,7 @@ import {
   ServiceCategoryKind,
   ServiceCategoryStatus,
   ServiceRequestStatus,
+  SeoNotFoundRouteFamily,
   UserRole,
   SourceChannel,
 } from '@prisma/client';
@@ -68,6 +69,7 @@ import {
   writeBusinessRegistration,
 } from '../business-registration/business-registration.writer';
 import { isStaff } from '../auth/admin-permissions';
+import { SeoNotFoundRecorder } from '../seo/seo-not-found.recorder';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
@@ -238,6 +240,7 @@ export class ProvidersService implements OnModuleInit {
     private readonly showcasePlacements: ShowcasePlacementService,
     @Inject(ProviderReviewsService) private readonly reviews: ProviderReviewsService,
     @Inject(CampaignEngineHooks) private readonly campaignHooks: CampaignEngineHooks,
+    @Inject(SeoNotFoundRecorder) private readonly notFound: SeoNotFoundRecorder,
   ) {}
 
   /**
@@ -527,6 +530,10 @@ export class ProvidersService implements OnModuleInit {
    * never hand this straight to an HTTP response. Public reads must go through
    * getProviderForViewer.
    */
+  private recordPublicNotFound(id: string) {
+    this.notFound.record(SeoNotFoundRouteFamily.PROVIDER, `/isletme/${encodeURIComponent(id)}`);
+  }
+
   async getProvider(id: string) {
     const provider = await this.prisma.providerProfile.findUnique({
       where: { id },
@@ -549,7 +556,13 @@ export class ProvidersService implements OnModuleInit {
    * - SUPER_ADMIN                        -> full record, any status
    */
   async getProviderForViewer(id: string, user: AuthUser | null) {
-    const provider = await this.getProvider(id);
+    const provider = await this.prisma.providerProfile.findUnique({ where: { id }, include: providerInclude });
+    if (!provider) {
+      // SEO-004: a public profile address that is not there is a 404
+      // suggestion — unless an operator is the one asking.
+      if (!user || !isStaff(user)) this.recordPublicNotFound(id);
+      throw new NotFoundException('Provider not found');
+    }
     const visibility = resolveProviderVisibility(provider, user);
 
     if (visibility === 'public') {
@@ -558,6 +571,7 @@ export class ProvidersService implements OnModuleInit {
       // rejected. An unlistable profile must be indistinguishable from a
       // non-existent one.
       if (!isPubliclyVisibleProvider(provider.status)) {
+        if (!user || !isStaff(user)) this.recordPublicNotFound(id);
         throw new NotFoundException('Provider not found');
       }
 
@@ -1294,6 +1308,8 @@ export class ProvidersService implements OnModuleInit {
             id: true,
             name: true,
             slug: true,
+            // SEO-004: the illustration key, which survives a slug change.
+            illustrationKey: true,
             isActive: true,
             offerCreditCost: true,
           },
@@ -1325,6 +1341,8 @@ export class ProvidersService implements OnModuleInit {
             id: true,
             name: true,
             slug: true,
+            // SEO-004: the illustration key, which survives a slug change.
+            illustrationKey: true,
             isActive: true,
             offerCreditCost: true,
           },

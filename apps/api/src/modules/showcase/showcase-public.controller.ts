@@ -1,4 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { SeoNotFoundRouteFamily } from '@prisma/client';
+import { SeoNotFoundRecorder } from '../seo/seo-not-found.recorder';
 import { CurrentUser } from '../auth/auth.decorators';
 import { OptionalAuthGuard } from '../auth/auth.guard';
 import { AuthUser } from '../auth/auth.types';
@@ -48,6 +50,7 @@ export class ShowcasePublicController {
     @Inject(ShowcaseLeadService) private readonly leads: ShowcaseLeadService,
     @Inject(PhoneVerificationService)
     private readonly phoneVerification: PhoneVerificationService,
+    @Inject(SeoNotFoundRecorder) private readonly notFound: SeoNotFoundRecorder,
   ) {}
 
   /** The shelf for one place. Refuses without a location — see the service. */
@@ -69,6 +72,9 @@ export class ShowcasePublicController {
     const card = await this.feed.getPublicCard(cardId);
 
     if (!card) {
+      // SEO-004: the card's public address answered 404 — a suggestion, the
+      // address only.
+      this.notFound.record(SeoNotFoundRouteFamily.SHOWCASE_CARD, `/vitrin/${encodeURIComponent(cardId)}`);
       throw showcaseCardNotFound();
     }
 

@@ -1,6 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { CategoriesService } from '../categories/categories.service';
-import { isCategoryIndexable } from '../seo/seo-index-eligibility';
+import { isShowcaseShelfIndexable } from '../seo/seo-index-eligibility';
 import { SeoIndexEligibilityService } from '../seo/seo-index-eligibility.service';
 
 /**
@@ -12,18 +11,23 @@ import { SeoIndexEligibilityService } from '../seo/seo-index-eligibility.service
  *
  * A record is listed when it is public *and* index-eligible (SEO-003):
  *
- *   categories     the public catalogue as `GET /categories` serves it —
- *                  ACTIVE leaves, through the same service method — then the
- *                  category rule of seo-index-eligibility.ts, which no
- *                  category passes until the editorial blocks exist (B4)
+ *   categories     the public catalogue's ACTIVE leaves, then the category
+ *                  rule of seo-index-eligibility.ts, read with the editorial
+ *                  blocks SEO-004 gave a home to
  *   providers      the public status allow-list and the business rule, in
  *                  one query (SeoIndexEligibilityService)
  *   showcaseCards  the shelf's own "on the air" predicate and the card rule,
  *                  in one query (the same service)
+ *   showcaseShelf  SEO-004: whether `/vitrin` itself is indexable — the shelf
+ *                  rule over the same card answers. The web used to list
+ *                  `/vitrin` unconditionally, beside a page whose own `<head>`
+ *                  said `noindex`.
  *
  * The page behind each id reads its own `seoIndexable` from the same
  * functions, so a listed id is a page whose `<head>` says `index`, and a page
- * that says `noindex` is never listed.
+ * that says `noindex` is never listed. A category is listed under the slug it
+ * has now; an address it had before is a redirect source, which is never a
+ * page and never listed.
  *
  * ## Deliberately not a directory
  *
@@ -31,33 +35,25 @@ import { SeoIndexEligibilityService } from '../seo/seo-index-eligibility.service
  * made of — and no third field. Not the business name, not its city, not a
  * card's title or price: those are on the page behind the id, under that
  * page's public projection, and a second copy here would be a second place to
- * keep private. Three queries, no per-row work, whatever the counts.
+ * keep private.
  */
 @Injectable()
 export class SitemapService {
-  constructor(
-    @Inject(CategoriesService) private readonly categories: CategoriesService,
-    @Inject(SeoIndexEligibilityService) private readonly eligibility: SeoIndexEligibilityService,
-  ) {}
+  constructor(@Inject(SeoIndexEligibilityService) private readonly eligibility: SeoIndexEligibilityService) {}
 
   async listEntries() {
     const now = new Date();
     const [categories, providers, showcaseCardIds] = await Promise.all([
-      this.listCategories(),
+      this.eligibility.listIndexableCategories(),
       this.eligibility.listIndexableProviders(),
       this.eligibility.listIndexableLiveShowcaseCardIds(now),
     ]);
 
-    return { categories, providers, showcaseCards: showcaseCardIds.map((cardId) => ({ cardId })) };
-  }
-
-  private async listCategories() {
-    const listed = await this.categories.listCategories({ isSuperAdmin: false });
-    return listed
-      // No editorial blocks are stored yet, so this filters every category out
-      // today; it is written anyway, so the sitemap and the page agree by
-      // construction rather than by two separate "not yet"s.
-      .filter((category) => isCategoryIndexable(category))
-      .map((category) => ({ slug: category.slug, updatedAt: category.updatedAt }));
+    return {
+      categories,
+      providers,
+      showcaseCards: showcaseCardIds.map((cardId) => ({ cardId })),
+      showcaseShelf: { indexable: isShowcaseShelfIndexable(showcaseCardIds.length) },
+    };
   }
 }
