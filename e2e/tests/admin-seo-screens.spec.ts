@@ -360,6 +360,9 @@ test.describe('SEO-004 PR B: SEO ve adresler', () => {
       const made = await prisma().seoRedirect.findUniqueOrThrow({ where: { id: approved.redirectId! } });
       expect([made.sourcePath, made.targetPath, made.origin]).toEqual([approve!.path, `/categories/${target.slug}`, 'NOT_FOUND_SUGGESTION']);
 
+      // A fresh page for the second decision: the approve's redirect may still
+      // be settling, and a confirmation pressed on the outgoing tree is lost.
+      await admin.gotoAdmin('/seo/redirects?sekme=oneriler');
       await confirmThrough(
         page.locator(`[data-suggestion-id="${reject!.id}"]`).getByTestId('seo-suggestion-reject'),
         'Evet, reddet',
@@ -367,9 +370,13 @@ test.describe('SEO-004 PR B: SEO ve adresler', () => {
           await confirm.getByTestId('seo-suggestion-reject-reason').fill('E2E: bilinçli 404');
         },
       );
+      await expect
+        .poll(async () => {
+          const rejected = await prisma().seoNotFoundPath.findUniqueOrThrow({ where: { id: reject!.id } });
+          return [rejected.status, rejected.redirectId];
+        })
+        .toEqual(['REJECTED', null]);
       await expect(page.getByTestId('seo-redirects-ok')).toContainText('reddedildi');
-      const rejected = await prisma().seoNotFoundPath.findUniqueOrThrow({ where: { id: reject!.id } });
-      expect([rejected.status, rejected.redirectId]).toEqual(['REJECTED', null]);
     } finally {
       await admin.close();
     }
