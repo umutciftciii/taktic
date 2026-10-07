@@ -116,25 +116,29 @@ export function createRedirectResolver(options: RedirectResolverOptions): Redire
 }
 
 /**
- * The `Location` value: the configured public origin joined with the target,
- * when the deployment names one, and verified to still be that origin; the
- * bare path otherwise (a relative `Location` resolves against the very URL the
- * visitor asked for). Never the request's own `Host`, which the caller chose.
- * Null when the result is not a same-origin URL ending in exactly the target.
+ * The `Location` value: an absolute URL on `origin`, ending in exactly the
+ * target, or null when that cannot be built. Absolute because Next refuses a
+ * relative `Location` from middleware (`TypeError: Invalid URL`, a 500).
+ *
+ * `origin` is the deployment's configured public origin when it names one
+ * ({@link configuredWebOrigin}); the middleware falls back to the origin of
+ * the request itself only when none is configured (a local stack), and then
+ * forbids caching the answer — see middleware.ts.
  */
-export function redirectLocation(target: string, configuredOrigin: string | null): string | null {
+export function redirectLocation(target: string, origin: string): string | null {
+  if (!/^https?:\/\/[^/?#]+$/.test(origin)) return null;
   const encoded = target
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/');
-  if (!configuredOrigin) return encoded.startsWith('/') && !encoded.startsWith('//') ? encoded : null;
+  if (!encoded.startsWith('/') || encoded.startsWith('//')) return null;
   let url: URL;
   try {
-    url = new URL(encoded, configuredOrigin);
+    url = new URL(encoded, origin);
   } catch {
     return null;
   }
-  if (url.origin !== configuredOrigin || url.pathname !== encoded || url.search || url.hash) return null;
+  if (url.origin !== origin || url.pathname !== encoded || url.search || url.hash) return null;
   return url.toString();
 }
 

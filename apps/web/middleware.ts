@@ -50,7 +50,12 @@ export async function middleware(request: NextRequest) {
   const hit = await resolver.resolve(normalized.path);
   if (!hit) return NextResponse.next();
 
-  const location = redirectLocation(hit.target, configuredWebOrigin());
+  // The configured public origin when the deployment names one. Without one
+  // (a local stack) the request's own origin is the only absolute base there
+  // is — Next refuses a relative Location — and an answer built from a Host
+  // the caller sent is never cacheable.
+  const configured = configuredWebOrigin();
+  const location = redirectLocation(hit.target, configured ?? request.nextUrl.origin);
   if (!location) return NextResponse.next();
 
   return new NextResponse(null, {
@@ -59,7 +64,7 @@ export async function middleware(request: NextRequest) {
       Location: location,
       // A permanent answer may be cached for a while, a temporary one not at
       // all: an operator who removes a 302 expects it gone.
-      'Cache-Control': hit.status === 301 ? 'public, max-age=3600' : 'no-store',
+      'Cache-Control': hit.status === 301 && configured ? 'public, max-age=3600' : 'no-store',
     },
   });
 }

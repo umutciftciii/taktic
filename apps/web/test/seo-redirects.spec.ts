@@ -160,13 +160,15 @@ describe('redirectLocation', () => {
     );
   });
 
-  it('falls back to a relative Location without a configured origin — never the request Host', () => {
-    expect(redirectLocation('/categories/yeni', null)).toBe('/categories/yeni');
+  it('always answers an absolute URL — Next refuses a relative Location', () => {
+    expect(redirectLocation('/categories/yeni', 'http://localhost:3000')).toBe('http://localhost:3000/categories/yeni');
+    expect(redirectLocation('/categories/yeni', '/')).toBeNull();
+    expect(redirectLocation('/categories/yeni', 'https://taktick.example/app')).toBeNull();
   });
 
   it('refuses anything that would leave the origin', () => {
     expect(redirectLocation('//evil.com/x', 'https://taktick.example')).toBeNull();
-    expect(redirectLocation('//evil.com/x', null)).toBeNull();
+    expect(redirectLocation('https://evil.com/x', 'https://taktick.example')).toBeNull();
   });
 
   it('reads the deployment origin the way the rest of the web does, http allowed for a local stack', () => {

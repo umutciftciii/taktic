@@ -46,6 +46,7 @@ describe('middleware', () => {
     const response = await middleware(get('/categories/eski?utm_source=x#frag'));
     expect(response.status).toBe(301);
     expect(response.headers.get('location')).toBe('https://taktick.example/categories/yeni');
+    expect(() => new URL(response.headers.get('location')!)).not.toThrow();
     expect(response.headers.get('cache-control')).toBe('public, max-age=3600');
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]![0])).toMatch(/\/seo\/redirects\/active$/);
@@ -63,9 +64,17 @@ describe('middleware', () => {
     const middleware = await loadMiddleware();
     const response = await middleware(get('/categories/eski'));
     expect(response.headers.get('location')).not.toContain('evil-host');
+  });
+
+  it('without a configured origin, answers an absolute URL on the request origin and forbids caching it', async () => {
     delete process.env.WEB_APP_URL;
-    const relative = await middleware(get('/categories/eski'));
-    expect(relative.headers.get('location')).toBe('/categories/yeni');
+    const middleware = await loadMiddleware();
+    const response = await middleware(new NextRequest(new URL('/categories/eski', 'http://localhost:3000')));
+    expect(response.status).toBe(301);
+    expect(response.headers.get('location')).toBe('http://localhost:3000/categories/yeni');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    // What Next itself does with the header: it must parse without a base.
+    expect(() => new URL(response.headers.get('location')!)).not.toThrow();
   });
 
   it('passes through a path it does not list, a write, the root and a malformed path', async () => {
