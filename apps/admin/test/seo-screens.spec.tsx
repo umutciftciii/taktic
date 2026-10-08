@@ -64,7 +64,7 @@ vi.mock('../lib/api', async (importOriginal) => ({
   },
 }));
 
-const { default: SeoOverviewPage } = await import('../app/seo/page');
+const { default: SeoOverviewPage } = await import('../app/seo/(overview)/page');
 const { default: SeoIndexingPage } = await import('../app/seo/indexing/page');
 const { default: SeoSlugsPage } = await import('../app/seo/slugs/page');
 const { default: SeoRedirectsPage } = await import('../app/seo/redirects/page');

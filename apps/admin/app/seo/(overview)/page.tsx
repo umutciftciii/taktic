@@ -1,10 +1,10 @@
 import Link from 'next/link';
-import { apiFetch, formatDateTime, requireAdmin } from '../../lib/api';
-import { formatCount } from '../../lib/pagination';
-import { seoReasonCodeLabel, seoSiteClosedReason, type SeoOverview, type SeoPageType } from '../../lib/seo';
-import { PageHeader } from '../../components/page-header';
-import { SectionCard } from '../../components/section-card';
-import { StatCard } from '../../components/stat-card';
+import { apiFetch, formatDateTime, requireAdmin } from '../../../lib/api';
+import { formatCount } from '../../../lib/pagination';
+import { seoReasonCodeLabel, seoSiteClosedReason, type SeoOverview, type SeoPageType } from '../../../lib/seo';
+import { PageHeader } from '../../../components/page-header';
+import { SectionCard } from '../../../components/section-card';
+import { StatCard } from '../../../components/stat-card';
 
 /**
  * Arama motoru durumu (SEO-004 PR B), design `seoOverview` (paket 4

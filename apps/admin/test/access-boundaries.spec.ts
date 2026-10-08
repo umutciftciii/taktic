@@ -79,6 +79,33 @@ describe('Next control flow in a catch', () => {
   });
 });
 
+/**
+ * Every page.tsx under app/, by the route it serves. A route group's folder —
+ * `(overview)` — is not part of the URL (`app/seo/(overview)/page.tsx` is
+ * `/seo`), as Next.js reads it.
+ */
+const PAGE_FILES = (() => {
+  const found = new Map<string, string>();
+  function walk(dir: string, prefix: string) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        const group = /^\(.+\)$/.test(entry.name);
+        walk(resolve(dir, entry.name), group ? prefix : `${prefix}/${entry.name}`);
+      } else if (entry.name === 'page.tsx') {
+        found.set(prefix === '' ? '/' : prefix, resolve(dir, entry.name));
+      }
+    }
+  }
+  walk(resolve(__dirname, '../app'), '');
+  return found;
+})();
+
+function pageFile(route: string): string {
+  const file = PAGE_FILES.get(route);
+  if (!file) throw new Error(`no page.tsx serves ${route}`);
+  return file;
+}
+
 describe('sidebar row ↔ page gate', () => {
   /**
    * The sidebar hides a row the session cannot open, so the row must ask for
@@ -88,8 +115,7 @@ describe('sidebar row ↔ page gate', () => {
   const rows = allNavItems();
 
   it.each(rows.map((row) => [row.href, row] as const))('%s', (href, row) => {
-    const file = resolve(__dirname, '../app', `.${href === '/' ? '' : href}`, 'page.tsx');
-    const source = readFileSync(file, 'utf8');
+    const source = readFileSync(pageFile(href), 'utf8');
     if (row.superAdminOnly) {
       expect(source).toContain('requireSuperAdmin()');
       return;
@@ -203,18 +229,8 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
   /** Reached without a session, or the refusal itself: no shell row, no gate. */
   const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/yetkisiz'];
 
-  const appDir = resolve(__dirname, '../app');
-
-  function pageRoutes(dir: string, prefix = ''): string[] {
-    const found: string[] = [];
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        found.push(...pageRoutes(resolve(dir, entry.name), `${prefix}/${entry.name}`));
-      } else if (entry.name === 'page.tsx') {
-        found.push(prefix === '' ? '/' : prefix);
-      }
-    }
-    return found;
+  function pageRoutes(): string[] {
+    return [...PAGE_FILES.keys()];
   }
 
   function samplePath(route: string): string {
@@ -222,7 +238,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
   }
 
   it('lists every signed-in page.tsx, and nothing else', () => {
-    const onDisk = pageRoutes(appDir)
+    const onDisk = pageRoutes()
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
@@ -230,7 +246,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {
-    const source = readFileSync(resolve(appDir, `.${route === '/' ? '' : route}`, 'page.tsx'), 'utf8');
+    const source = readFileSync(pageFile(route), 'utf8');
     if (screen.gate === 'superAdmin') {
       expect(source).toContain('requireSuperAdmin()');
       expect(source).not.toMatch(/requireAdmin\(/);

@@ -52,17 +52,16 @@ async function eventuallyStatus(request: APIRequestContext, path: string, status
 }
 
 /**
- * Opens a URL-driven window from its link and waits until the address says it
- * is open. A soft navigation started in the instant the page is still settling
- * can be dropped by the router; pressing again until the URL moves is what an
- * operator would do, and the assertion is still on the window that opens.
+ * Opens a URL-driven window with one press of its link, as an operator does —
+ * no second press. A window that does not open on the first click is the bug
+ * this asserts against (BUG-SEO-ADMIN-MODAL-NAV-001: a `loading.tsx` above
+ * these screens let a query-only navigation hang with its 200 in hand), so a
+ * retry here would only hide it again.
  */
 async function openWindow(page: Page, link: ReturnType<Page['getByTestId']>, url: RegExp) {
   await waitForHydration(link);
-  await expect(async () => {
-    if (!url.test(page.url())) await link.click();
-    await expect(page).toHaveURL(url, { timeout: 3_000 });
-  }).toPass({ timeout: 30_000 });
+  await link.click();
+  await expect(page).toHaveURL(url);
 }
 
 async function sidebarGroups(page: Page): Promise<string[]> {
@@ -377,6 +376,123 @@ test.describe('SEO-004 PR B: SEO ve adresler', () => {
         })
         .toEqual(['REJECTED', null]);
       await expect(page.getByTestId('seo-redirects-ok')).toContainText('reddedildi');
+    } finally {
+      await admin.close();
+    }
+  });
+
+  test('query windows: one click opens, Esc / × / Back close, a reload keeps it — 25 times running', async ({ browser }) => {
+    test.setTimeout(240_000);
+    const category = await createCategory(3, { namePrefix: 'E2E SEO Pencere' });
+    const owner = await createAdmin();
+    const suffix = uniqueSuffix();
+    const now = new Date();
+    const suggestion = await prisma().seoNotFoundPath.create({
+      data: {
+        path: `/categories/e2e-404-pencere-${suffix}`,
+        routeFamily: 'CATEGORY',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        // Above anything else in the queue, so the row is on its first page.
+        occurrenceCount: 9_000_001,
+        seenDays: 2,
+        candidateTargetPath: `/categories/${category.slug}`,
+      },
+    });
+    // A row with its own "Kaldır" confirmation behind the windows, as in use.
+    const redirect = await prisma().seoRedirect.create({
+      data: {
+        sourcePath: `/e2e-seo-pencere-${suffix}`,
+        targetPath: `/categories/${category.slug}`,
+        type: 'TEMPORARY',
+        origin: 'MANUAL',
+        reason: 'E2E pencere',
+        createdById: owner.id,
+      },
+    });
+    const admin = await openAs(browser, 'super');
+    const page = admin.page;
+    const list = '/seo/redirects?sekme=oneriler';
+    const listUrl = /\/seo\/redirects\?sekme=oneriler$/;
+    const openUrl = new RegExp(`\\?sekme=oneriler&oneri=${suggestion.id}$`);
+    const row = page.locator(`[data-suggestion-id="${suggestion.id}"]`);
+    const approve = row.getByTestId('seo-suggestion-approve');
+    const dialog = page.getByTestId('seo-suggestion-dialog');
+    try {
+      await admin.gotoAdmin(list);
+
+      // The flake budget: the same window, opened by a single click and closed
+      // with Esc, 25 times on one page — every press must land.
+      for (let round = 1; round <= 25; round++) {
+        await openWindow(page, approve, openUrl);
+        await expect(dialog, `round ${round}`).toBeVisible();
+        await expect(dialog.getByTestId('seo-redirect-target')).toHaveValue(`/categories/${category.slug}`);
+        await page.keyboard.press('Escape');
+        await expect(page, `round ${round}`).toHaveURL(listUrl);
+        await expect(dialog).toHaveCount(0);
+      }
+
+      // ×, then Back and Forward, then a reload with the window in the address.
+      await openWindow(page, approve, openUrl);
+      await dialog.getByRole('button', { name: 'Kapat' }).click();
+      await expect(page).toHaveURL(listUrl);
+      await expect(dialog).toHaveCount(0);
+      await openWindow(page, approve, openUrl);
+      await page.goBack();
+      await expect(page).toHaveURL(listUrl);
+      await expect(dialog).toHaveCount(0);
+      await page.goForward();
+      await expect(page).toHaveURL(openUrl);
+      await expect(dialog).toBeVisible();
+      await page.reload();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId('seo-redirect-target')).toHaveValue(`/categories/${category.slug}`);
+      await waitForHydration(dialog.getByTestId('seo-redirect-target'));
+      await page.keyboard.press('Escape');
+      await expect(page).toHaveURL(listUrl);
+
+      // Reject: a confirmation on the page, not a URL window — Esc leaves all as it was.
+      const reject = row.getByTestId('seo-suggestion-reject');
+      await waitForHydration(reject);
+      await reject.click();
+      const rejectDialog = page.locator('dialog[data-testid="seo-suggestion-reject-dialog"][open]');
+      await expect(rejectDialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(rejectDialog).toHaveCount(0);
+      await expect(page).toHaveURL(listUrl);
+      expect((await prisma().seoNotFoundPath.findUniqueOrThrow({ where: { id: suggestion.id } })).status).toBe('OPEN');
+
+      // New and Edit on the redirects tab; Back closes each.
+      await admin.gotoAdmin(`/seo/redirects?q=${encodeURIComponent(redirect.sourcePath)}`);
+      const windows = [
+        [page.getByTestId('seo-redirect-new'), /yonlendirme=yeni/],
+        [page.locator(`[data-redirect-id="${redirect.id}"]`).getByTestId('seo-redirect-edit'), new RegExp(`yonlendirme=${redirect.id}`)],
+      ] as const;
+      for (const [link, url] of windows) {
+        await openWindow(page, link, url);
+        await expect(page.getByTestId('seo-redirect-dialog')).toBeVisible();
+        await page.goBack();
+        await expect(page).not.toHaveURL(/yonlendirme=/);
+        await expect(page.getByTestId('seo-redirect-dialog')).toHaveCount(0);
+      }
+
+      // The slug window on the address list; Esc closes it.
+      await admin.gotoAdmin(`/seo/slugs?q=${encodeURIComponent(category.slug)}`);
+      await openWindow(page, page.getByTestId('seo-slug-change'), new RegExp(`kategori=${category.id}`));
+      await expect(page.getByTestId('seo-slug-dialog')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page).not.toHaveURL(/kategori=/);
+      await expect(page.getByTestId('seo-slug-dialog')).toHaveCount(0);
+
+      // A phone's width: the same single press.
+      await page.setViewportSize({ width: 375, height: 812 });
+      await admin.gotoAdmin(list);
+      for (let round = 1; round <= 3; round++) {
+        await openWindow(page, approve, openUrl);
+        await expect(dialog).toBeVisible();
+        await page.keyboard.press('Escape');
+        await expect(page).toHaveURL(listUrl);
+      }
     } finally {
       await admin.close();
     }
