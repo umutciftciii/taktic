@@ -78,12 +78,16 @@ function contentCeiling(route: string, width: number): number | null {
 /** Reached without a session, or the refusal itself: outside the shell. */
 const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/yetkisiz'];
 
-/** Every page.tsx under apps/admin/app, as a route pattern. */
+/**
+ * Every page.tsx under apps/admin/app, as a route pattern. A route group's
+ * folder — `(overview)` — is not part of the URL, as Next.js reads it.
+ */
 function routesOnDisk(dir = resolve(repoRoot, 'apps/admin/app'), prefix = ''): string[] {
   const found: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     if (entry.isDirectory()) {
-      found.push(...routesOnDisk(resolve(dir, entry.name), `${prefix}/${entry.name}`));
+      const group = /^\(.+\)$/.test(entry.name);
+      found.push(...routesOnDisk(resolve(dir, entry.name), group ? prefix : `${prefix}/${entry.name}`));
     } else if (entry.name === 'page.tsx') {
       found.push(prefix === '' ? '/' : prefix);
     }
