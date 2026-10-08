@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { clickBeforeHydration, confirmThrough, waitForHydration } from '../src/confirm-dialog';
 import {
@@ -215,11 +216,15 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket B', () => {
       await expect(form.locator('input[name="slug"]')).toHaveCount(0);
       await form.locator('select[name="parentId"]').selectOption(group.id);
       await form.locator('input[name="offerCreditCost"]').fill('5');
-      await confirmThrough(form.getByTestId('category-save'), 'Evet, kaydet', async (dialog) => {
-        await expect(dialog.getByTestId('category-structure-change')).toContainText(group.name);
-        await expect(dialog.getByTestId('category-structure-change')).toContainText('Kategori ağacı değişir');
-        await expect(dialog.getByTestId('category-offer-credit-change')).toContainText('1 kredi → 5 kredi');
-      });
+      // The save redirects to the URL the page is already on: only the landed
+      // redirect, not the address bar or the row, says the next goto is safe.
+      await settleActionRedirect(page, () =>
+        confirmThrough(form.getByTestId('category-save'), 'Evet, kaydet', async (dialog) => {
+          await expect(dialog.getByTestId('category-structure-change')).toContainText(group.name);
+          await expect(dialog.getByTestId('category-structure-change')).toContainText('Kategori ağacı değişir');
+          await expect(dialog.getByTestId('category-offer-credit-change')).toContainText('1 kredi → 5 kredi');
+        }),
+      );
       await expect
         .poll(async () => {
           const saved = await prisma().serviceCategory.findUnique({ where: { slug } });
