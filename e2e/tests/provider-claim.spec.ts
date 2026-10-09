@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, prisma, uniqueLocation, uniqueSuffix } from '../src/fixtures';
 import { claimInvitationCount, waitForLatestClaimUrl } from '../src/outbox';
@@ -298,7 +299,8 @@ test.describe('provider claim', () => {
       await expect(operator.page.getByRole('heading', { name: 'Sahiplik' })).toBeVisible();
       await expect(operator.page.getByText('Sahipsiz')).toBeVisible();
 
-      await operator.page.getByRole('button', { name: 'Claim daveti gönder' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(operator.page, () => operator.page.getByRole('button', { name: 'Claim daveti gönder' }).click());
       await expect(operator.page).toHaveURL(/claimInvite=/);
       await assertNoErrorScreen(operator.page);
       await expect(operator.page.getByText('Davet gönderildi')).toBeVisible();

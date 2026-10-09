@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -311,7 +312,8 @@ test.describe('vitrin kartı: yazım, onay ve daraltma', () => {
         (await prisma().showcaseCardVersion.findUniqueOrThrow({ where: { id: reviewedVersionId } })).reviewStatus,
       ).toBe('PENDING');
 
-      await confirmThrough(approve, 'Evet, onayla ve yayına al');
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(admin.page, () => confirmThrough(approve, 'Evet, onayla ve yayına al'));
       await assertNoErrorScreen(admin.page);
       await expect(
         admin.page.getByText('Sürüm onaylandı', { exact: false }),

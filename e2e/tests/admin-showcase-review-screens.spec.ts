@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
@@ -655,9 +656,12 @@ test.describe('ADMIN-DESIGN-001 Faz 3C — vitrin ve değerlendirmeler', () => {
       await expect(page).toHaveURL(/activated=1/);
       const reopened = await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } });
       expect(reopened).toMatchObject({ isActive: true, name: 'E2E Faz3C Paket (yeni ad)', durationDays: 14 });
-      await confirmThrough(page.getByTestId('showcase-package-status-toggle'), 'Evet, satıştan kaldır', async (closeDialog) => {
-        await expect(closeDialog).toContainText('değişmez');
-      });
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () =>
+        confirmThrough(page.getByTestId('showcase-package-status-toggle'), 'Evet, satıştan kaldır', async (closeDialog) => {
+          await expect(closeDialog).toContainText('değişmez');
+        }),
+      );
       await expect(page).toHaveURL(/deactivated=1/);
       await expect.poll(async () => (await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(false);
 

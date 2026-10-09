@@ -1,4 +1,5 @@
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
@@ -281,7 +282,8 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
         'APPROVED',
       );
       await cancel.click();
-      await cancelDialog.getByRole('button', { name: 'Evet, iptal et' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => cancelDialog.getByRole('button', { name: 'Evet, iptal et' }).click());
       await expect(page.getByTestId('request-status')).toHaveText('İptal Edildi');
       expect((await prisma().offer.findFirstOrThrow({ where: { requestId: second.request.id } })).status).toBe('CANCELLED');
       expect(await countRefundTransactions(second.provider.id)).toBe(1);
@@ -1018,7 +1020,8 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         where: { id: moderated.request.id },
         data: { status: 'CANCELLED', cancelledAt: new Date() },
       });
-      await confirmThrough(page.getByTestId('request-approve'), 'Evet, onayla ve yayınla');
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () => confirmThrough(page.getByTestId('request-approve'), 'Evet, onayla ve yayınla'));
       await expect(statusError).toContainText('Talep artık inceleme kuyruğunda değil');
       await expect(page).toHaveURL(/statusError=transitionNotAllowed/);
       await assertNoErrorScreen(page);
@@ -1036,10 +1039,10 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         data: { status: 'COMPLETED', completedAt: new Date() },
       });
       await page.getByTestId('request-cancel').click();
-      await page
-        .getByRole('dialog', { name: 'Talep iptal edilsin mi?' })
-        .getByRole('button', { name: 'Evet, iptal et' })
-        .click();
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        page.getByRole('dialog', { name: 'Talep iptal edilsin mi?' }).getByRole('button', { name: 'Evet, iptal et' }).click(),
+      );
       await expect(statusError).toContainText('Talep iptal edilmedi');
       await expect(page).toHaveURL(/statusError=notCancellable/);
       await assertNoErrorScreen(page);
@@ -1090,10 +1093,10 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         data: { status: 'MATCHED', matchedOfferId: scene.offer.id, matchedAt: new Date() },
       });
       await page.getByTestId('status-reject').click();
-      await page
-        .getByRole('dialog', { name: 'Talep reddedilsin mi?' })
-        .getByRole('button', { name: 'Evet, reddet' })
-        .click();
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        page.getByRole('dialog', { name: 'Talep reddedilsin mi?' }).getByRole('button', { name: 'Evet, reddet' }).click(),
+      );
 
       const statusError = page.getByTestId('status-error');
       await expect(page).toHaveURL(/statusError=notRemovable/);

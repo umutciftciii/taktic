@@ -133,18 +133,21 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket B', () => {
       ).toBe('PENDING');
 
       // ---- through the dialog: the real count, no way back, the mail ------
-      await confirmThrough(
-        page.getByTestId('showcase-revision-approve'),
-        'Evet, onayla ve yayındakini değiştir',
-        async (dialog) => {
-          const impact = dialog.getByTestId('showcase-revision-approve-impact');
-          await expect(impact).toContainText('2. sürüm, yayındaki 1. sürümün yerini alır');
-          await expect(dialog.getByTestId('showcase-revision-approve-placements')).toContainText(
-            'bitmemiş 1 yerleşimi var (1 tanesi şu anda yayında)',
-          );
-          await expect(impact).toContainText('Eski sürüme dönüş yok');
-          await expect(impact).toContainText('e-posta gider');
-        },
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () =>
+        confirmThrough(
+          page.getByTestId('showcase-revision-approve'),
+          'Evet, onayla ve yayındakini değiştir',
+          async (dialog) => {
+            const impact = dialog.getByTestId('showcase-revision-approve-impact');
+            await expect(impact).toContainText('2. sürüm, yayındaki 1. sürümün yerini alır');
+            await expect(dialog.getByTestId('showcase-revision-approve-placements')).toContainText(
+              'bitmemiş 1 yerleşimi var (1 tanesi şu anda yayında)',
+            );
+            await expect(impact).toContainText('Eski sürüme dönüş yok');
+            await expect(impact).toContainText('e-posta gider');
+          },
+        ),
       );
       await expect
         .poll(async () => (await prisma().showcaseCardVersion.findUniqueOrThrow({ where: { id: pending.id } })).reviewStatus)

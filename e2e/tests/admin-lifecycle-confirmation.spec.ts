@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { clickBeforeHydration, confirmThrough, waitForHydration } from '../src/confirm-dialog';
 import {
@@ -100,7 +101,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
     try {
       // Before hydration: React replays the queued submission with no proof.
       const trigger = page.getByTestId('customer-activate');
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/customers/${customer.id}`, trigger);
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/customers/${customer.id}`, trigger),
+      );
       await expect(page.getByTestId('customer-status-error')).toContainText('onay penceresinden onay alınamadı');
       await expect(page.getByTestId('customer-activate-dialog')).toBeHidden();
       expect(await customerActive(customer.id)).toBe(false);
@@ -190,7 +194,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
 
     try {
       const trigger = page.getByTestId('provider-approve');
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/providers/${provider.id}`, trigger);
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/providers/${provider.id}`, trigger),
+      );
       await expect(page.getByTestId('provider-status-error')).toContainText('onay penceresinden onay alınamadı');
       expect((await providerRow(provider.id)).status).toBe('PENDING_REVIEW');
       expect(mails()).toBe(0);
@@ -290,7 +297,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       await expect(page.getByTestId('request-status')).toHaveText('İncelemede');
 
       // IN_REVIEW → APPROVED clicked before hydration: refused, nothing published.
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/requests/${request.id}`, page.getByTestId('request-approve'));
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/requests/${request.id}`, page.getByTestId('request-approve')),
+      );
       await expect(page.getByTestId('status-error')).toContainText('onay penceresinden onay alınamadı');
       const refused = await requestRow(request.id);
       expect(refused.status).toBe('IN_REVIEW');

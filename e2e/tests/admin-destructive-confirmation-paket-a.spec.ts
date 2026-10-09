@@ -81,7 +81,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
 
       // ---- the header switch: before hydration it writes nothing; then it asks --
       const toggle = page.getByTestId('package-status-toggle');
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/credit-packages/${pkg.id}`, toggle);
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/credit-packages/${pkg.id}`, toggle),
+      );
       await expect(page).toHaveURL(/error=/);
       await expect(page.locator('.notice-error')).toContainText('onay penceresinden onay alınamadı');
       expect((await creditPackage(pkg.id)).isActive).toBe(false);
@@ -141,7 +144,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
 
     try {
       const toggle = page.getByTestId('showcase-package-status-toggle');
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/showcase/packages/${pkg.id}`, toggle);
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/showcase/packages/${pkg.id}`, toggle),
+      );
       await expect(page).toHaveURL(/error=CONFIRMATION_REQUIRED/);
       await expect(page.locator('.notice-error')).toContainText('onay penceresinden onay alınamadı');
       expect((await prisma().showcasePackage.findUniqueOrThrow({ where: { id: pkg.id } })).isActive).toBe(true);
@@ -166,7 +172,10 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Paket A', () => {
     const page = actor.page;
 
     try {
-      await clickBeforeHydration(page, `${primaryRuntime.adminUrl}/operations-settings`, page.getByTestId('auto-publish-toggle'));
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(page, () =>
+        clickBeforeHydration(page, `${primaryRuntime.adminUrl}/operations-settings`, page.getByTestId('auto-publish-toggle')),
+      );
       await expect(page.getByTestId('operations-settings-error')).toContainText('onay penceresinden onay alınamadı');
       expect(await stored()).toBe(false);
 

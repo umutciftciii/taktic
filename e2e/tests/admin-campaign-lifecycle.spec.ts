@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { clickBeforeHydration, confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
@@ -202,7 +203,8 @@ test.describe('admin campaign lifecycle', () => {
       await expect(endDialog).toBeHidden();
       expect((await prisma().campaign.findUniqueOrThrow({ where: { id: campaign.id } })).status).toBe('ACTIVE');
       await page.getByTestId('campaign-end').click();
-      await endDialog.getByRole('button', { name: 'Evet, sonlandır' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => endDialog.getByRole('button', { name: 'Evet, sonlandır' }).click());
       await expect(page).toHaveURL(/ok=end/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ENDED');

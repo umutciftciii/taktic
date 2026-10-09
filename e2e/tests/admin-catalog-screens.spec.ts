@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
@@ -236,13 +237,14 @@ test.describe('ADMIN-DESIGN-001 Faz 3F — catalogue screens', () => {
       // The form still writes, and still leaves the status alone.
       await editor.gotoAdmin(servicePath);
       await form.locator('input[name="name"]').fill(`${service.name} yeni`);
-      await form.getByRole('button', { name: 'Kategoriyi kaydet' }).click();
+      // The save redirects back to this screen. The new name in the header is
+      // already the action's own render, not the redirect landing; only that
+      // landing says the next goto cannot be interrupted (settleActionRedirect).
+      await settleActionRedirect(page, () => form.getByRole('button', { name: 'Kategoriyi kaydet' }).click());
       await expect
         .poll(async () => (await prisma().serviceCategory.findUniqueOrThrow({ where: { id: service.id } })).name)
         .toBe(`${service.name} yeni`);
       expect((await prisma().serviceCategory.findUniqueOrThrow({ where: { id: service.id } })).status).toBe('DRAFT');
-      // The save redirects back to this screen; let it land before leaving,
-      // or the next goto is interrupted by it (WebKit on CI).
       await expect(page.getByTestId('category-header')).toContainText(`${service.name} yeni`);
 
       await editor.gotoAdmin(`/categories/${router.slug}?tab=sorular`);

@@ -1,4 +1,5 @@
 import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { recordRouterTraffic } from './action-redirect';
 import type { Runtime } from './runtime';
 
 /**
@@ -35,6 +36,8 @@ export class Actor {
     options: Parameters<Browser['newContext']>[0] = {},
   ): Promise<Actor> {
     const context = await browser.newContext(options);
+    // What settleActionRedirect reads; it only observes (see action-redirect.ts).
+    await recordRouterTraffic(context);
     const page = await context.newPage();
     return new Actor(name, context, page, runtime);
   }

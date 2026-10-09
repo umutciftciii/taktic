@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
@@ -149,7 +150,8 @@ test.describe('admin campaign drafts', () => {
       const reviseForm = page.getByTestId('campaign-form');
       await expect(reviseForm.getByTestId('campaign-credits')).toHaveValue('10');
       await reviseForm.getByTestId('campaign-credits').fill('15');
-      await reviseForm.getByTestId('campaign-save').click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => reviseForm.getByTestId('campaign-save').click());
       await expect(page).toHaveURL(/ok=revised&v=2/);
       await assertNoErrorScreen(page);
       await expectEngineOff(page);
