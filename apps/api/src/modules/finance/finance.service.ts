@@ -5,7 +5,7 @@ import {
   PackagePurchaseStatus,
   Prisma,
 } from '@prisma/client';
-import { parseAdminSearch, phoneColumnMatchers } from '../../common/admin-search';
+import { type AdminTextSearch, parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
@@ -367,7 +367,7 @@ export class FinanceService {
     const pageSize = clampPageSize(filters.pageSize);
     const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
 
-    const where = buildCreditLedgerWhere(filters, providerContact);
+    const where = buildCreditLedgerWhere(filters, await parseAdminTextSearch(this.prisma, filters.q), providerContact);
 
     const [total, rows] = await Promise.all([
       this.prisma.providerCreditTransaction.count({ where }),
@@ -450,7 +450,7 @@ export class FinanceService {
       throw new ForbiddenException({ code: INSUFFICIENT_PERMISSION, message: 'Insufficient permission' });
     }
 
-    const providerWhere = buildProviderFinanceWhere(filters, providerContact);
+    const providerWhere = buildProviderFinanceWhere(await parseAdminTextSearch(this.prisma, filters.q), providerContact);
 
     const providers = await this.prisma.providerProfile.findMany({
       where: providerWhere,
@@ -691,14 +691,14 @@ function clampProviderFinancePageSize(value: number | undefined): number {
 }
 
 function buildProviderFinanceWhere(
-  filters: ListProviderFinanceDto,
+  search: AdminTextSearch | null,
   providerContact: boolean,
 ): Prisma.ProviderProfileWhereInput {
-  const search = parseAdminSearch(filters.q);
   if (!search) return {};
   return {
     OR: [
       { businessName: { contains: search.text, mode: 'insensitive' } },
+      { businessNameSearch: { contains: search.folded } },
       ...(providerContact
         ? ([
             ...phoneColumnMatchers(search).map((phone) => ({ phone })),
@@ -876,6 +876,7 @@ function normalizeLedgerTypeFilter(
 
 function buildCreditLedgerWhere(
   filters: ListCreditLedgerDto,
+  search: AdminTextSearch | null,
   providerContact: boolean,
 ): Prisma.ProviderCreditTransactionWhereInput {
   const where: Prisma.ProviderCreditTransactionWhereInput = {};
@@ -898,15 +899,16 @@ function buildCreditLedgerWhere(
     where.createdAt = createdAt;
   }
 
-  const search = parseAdminSearch(filters.q);
   if (search) {
     where.OR = [
       { reason: { contains: search.text, mode: 'insensitive' } },
+      { reasonSearch: { contains: search.folded } },
       {
         provider: {
           is: {
             OR: [
               { businessName: { contains: search.text, mode: 'insensitive' } },
+              { businessNameSearch: { contains: search.folded } },
               ...(providerContact
                 ? ([
                     ...phoneColumnMatchers(search).map((phone) => ({ phone })),
