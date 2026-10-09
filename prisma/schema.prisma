@@ -1509,6 +1509,13 @@ model ProviderProfile {
   @@index([district])
   @@index([phone])
   @@index([email])
+  // ADMIN-SEARCH-INDEX-001: pg_trgm GIN indexes for the admin search box
+  // (finance providers, and the credit ledger's provider arm). Every arm of
+  // that OR needs one, or the planner scans the table.
+  @@index([businessName(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_businessName_trgm_idx")
+  @@index([businessNameSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_businessNameSearch_trgm_idx")
+  @@index([phone(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_phone_trgm_idx")
+  @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_email_trgm_idx")
 }
 
 model ProviderServiceCategory {
@@ -2454,6 +2461,9 @@ model ProviderCreditTransaction {
   @@index([type])
   @@index([referenceType, referenceId])
   @@index([createdAt])
+  // ADMIN-SEARCH-INDEX-001: pg_trgm GIN indexes for the credit ledger search box.
+  @@index([reason(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderCreditTransaction_reason_trgm_idx")
+  @@index([reasonSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderCreditTransaction_reasonSearch_trgm_idx")
 }
 
 /// The record of an administrator giving a credit back by hand.
