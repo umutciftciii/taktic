@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
@@ -147,9 +148,12 @@ test.describe('admin campaign channel', () => {
       expect(versions.map((v) => [v.versionNumber, v.channel])).toEqual([[1, 'MOBILE'], [2, 'WEB']]);
 
       await expect(page.getByTestId('campaign-activate')).toBeEnabled();
-      await confirmThrough(page.getByTestId('campaign-activate'), 'Evet, etkinleştir', async (activateDialog) => {
-        await expect(activateDialog).toContainText('Web');
-      });
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () =>
+        confirmThrough(page.getByTestId('campaign-activate'), 'Evet, etkinleştir', async (activateDialog) => {
+          await expect(activateDialog).toContainText('Web');
+        }),
+      );
       await expect(page).toHaveURL(/ok=activate/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-status')).toHaveAttribute('data-status', 'ACTIVE');
@@ -230,7 +234,8 @@ test.describe('admin campaign channel', () => {
       const closeDialog = page.getByTestId('campaign-close-draft-dialog');
       await expect(closeDialog).toBeVisible();
       await expect(closeDialog).toContainText('Sona erdi');
-      await closeDialog.getByRole('button', { name: 'Evet, taslağı kapat' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => closeDialog.getByRole('button', { name: 'Evet, taslağı kapat' }).click());
       await expect(page).toHaveURL(/ok=close/);
       await assertNoErrorScreen(page);
 

@@ -1,4 +1,5 @@
 import { expect, test, type Browser } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { clickBeforeHydration, confirmThrough } from '../src/confirm-dialog';
 import { createCategory, createProvider, createStaffAdmin, prisma, uniqueLocation } from '../src/fixtures';
@@ -166,7 +167,10 @@ test.describe('package refund request', () => {
       // carries no proof and changes nothing; the dialog says a mail goes out
       // and no money moves.
       const detailUrl = admin.page.url();
-      await clickBeforeHydration(admin.page, detailUrl, admin.page.getByTestId('package-refund-take'));
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(admin.page, () =>
+        clickBeforeHydration(admin.page, detailUrl, admin.page.getByTestId('package-refund-take')),
+      );
       await expect(admin.page).toHaveURL(/error=/);
       expect((await prisma().packageRefundRequest.findUniqueOrThrow({ where: { id: refund.id } })).status).toBe('SUBMITTED');
       await admin.gotoAdmin(`/package-refunds/${refund.id}`);
@@ -439,7 +443,8 @@ test.describe('package refund request', () => {
       );
 
       await operatorActor.page.getByTestId('package-refund-reject').click();
-      await dialog.getByRole('button', { name: 'Evet, isteği reddet' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(operatorActor.page, () => dialog.getByRole('button', { name: 'Evet, isteği reddet' }).click());
       await expect(operatorActor.page.getByTestId('package-refund-status')).toHaveAttribute('data-status', 'REJECTED');
       await expect(operatorActor.page.getByTestId('package-refund-done')).toHaveText('İstek reddedildi.');
       await expect(operatorActor.page.getByTestId('package-refund-no-actions')).toBeVisible();

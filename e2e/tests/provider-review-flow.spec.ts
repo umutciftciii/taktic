@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen, expectNotFoundScreen } from '../src/actors';
@@ -156,7 +157,8 @@ test.describe('provider review flow', () => {
       await customer.page.getByTestId('rating-4').check();
       await customer.page.getByTestId('review-comment').fill('Ustayı arayın: 0532 111 22 33');
       await expect(customer.page.getByTestId('review-contact-hint')).not.toBeEmpty();
-      await customer.page.getByTestId('review-submit').click();
+      // The refusal redirects to this same screen: landed before the next goto.
+      await settleActionRedirect(customer.page, () => customer.page.getByTestId('review-submit').click());
       await expect(customer.page.getByTestId('review-contact-error')).toBeVisible();
       await expect(customer.page.getByTestId('review-notice')).toContainText('iletişim bilgisi');
       expect(await prisma().providerReview.count({ where: { requestId } })).toBe(0);

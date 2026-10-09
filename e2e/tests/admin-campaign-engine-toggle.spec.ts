@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { expectNoHorizontalOverflow } from '../src/campaign-fixtures';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
@@ -64,7 +65,8 @@ test.describe('campaign engine switch', () => {
 
       // Confirmed: on, with the operator on the trail.
       await card.getByTestId('campaign-engine-submit').click();
-      await dialog.getByRole('button', { name: 'Evet, motoru aç' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => dialog.getByRole('button', { name: 'Evet, motoru aç' }).click());
       await expect(page).toHaveURL(/ok=campaign-engine-on/);
       await assertNoErrorScreen(page);
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Açık');
@@ -84,7 +86,8 @@ test.describe('campaign engine switch', () => {
       await admin.gotoAdmin('/operations-settings');
       await card.getByTestId('campaign-engine-submit').click();
       await expect(dialog).toContainText('geri alınması aynen sürer');
-      await dialog.getByRole('button', { name: 'Evet, motoru kapat' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => dialog.getByRole('button', { name: 'Evet, motoru kapat' }).click());
       await expect(page).toHaveURL(/ok=campaign-engine-off/);
       await assertNoErrorScreen(page);
       await expect(card.getByTestId('campaign-engine-state')).toHaveText('Kapalı');

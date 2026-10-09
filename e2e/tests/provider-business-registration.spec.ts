@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { seedActiveCampaign } from '../src/campaign-fixtures';
 import {
@@ -230,7 +231,8 @@ test.describe('promotion eligibility queue', () => {
       await expect(decisionDialog).toBeHidden();
       expect(await prisma().promotionEligibilityReview.count({ where: { triggerEventId: event.id } })).toBe(0);
       await reviewer.page.getByTestId('eligibility-submit').click();
-      await decisionDialog.getByRole('button', { name: 'Evet, uygun değil olarak kaydet' }).click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(reviewer.page, () => decisionDialog.getByRole('button', { name: 'Evet, uygun değil olarak kaydet' }).click());
       await expect(reviewer.page.getByTestId('eligibility-done')).toBeVisible();
       await expect(reviewer.page.getByTestId('eligibility-decision')).toContainText('Uygun değil');
       await expect(reviewer.page.getByTestId('eligibility-form')).toHaveCount(0);

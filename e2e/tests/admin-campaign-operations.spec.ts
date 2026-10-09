@@ -1,6 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { expectNoHorizontalOverflow, seedActiveCampaign, seedGrantedLot, setEngine } from '../src/campaign-fixtures';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
@@ -145,7 +146,8 @@ test.describe('admin campaign operations desk', () => {
 
       // ---- re-queue the parked event: nothing evaluated here, the audit says who asked ----
       const eventRow = page.locator(`[data-testid="campaign-event-row"][data-event="${parked.id}"]`);
-      await eventRow.getByTestId('campaign-retry').click();
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(page, () => eventRow.getByTestId('campaign-retry').click());
       await expect(page).toHaveURL(/ok=retry/);
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('campaign-ok')).toContainText('kuyruğa alındı');

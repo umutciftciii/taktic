@@ -1,4 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
+import { settleActionRedirect } from './action-redirect';
 import { Actor, assertNoErrorScreen } from './actors';
 import { confirmThrough } from './confirm-dialog';
 import type { SeededCategory, UrgencyCode } from './fixtures';
@@ -484,7 +485,9 @@ export async function enableAutoPublish(admin: Actor): Promise<void> {
 
   if ((await toggle.getAttribute('aria-checked')) !== 'true') {
     // Switching it on asks first (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
-    await confirmThrough(toggle, 'Evet, otomatik yayını aç');
+    // The switch redirects to this same screen; callers navigate next, so the
+    // redirect lands here first (settleActionRedirect).
+    await settleActionRedirect(admin.page, () => confirmThrough(toggle, 'Evet, otomatik yayını aç'));
     await expect(admin.page.getByTestId('auto-publish-toggle')).toHaveAttribute(
       'aria-checked',
       'true',
@@ -527,7 +530,8 @@ export async function reportRequest(
   if (note) {
     await provider.page.getByTestId('report-note').fill(note);
   }
-  await provider.page.getByTestId('report-submit').click();
+  // `?reported=1` on this same screen: landed before the caller moves on.
+  await settleActionRedirect(provider.page, () => provider.page.getByTestId('report-submit').click());
 
   // The action round-trips to the API and comes back with `?reported=1`;
   // the notice is the page's report of that answer, and it is present
@@ -640,7 +644,8 @@ export async function submitReview(
   if (comment) {
     await customer.page.getByTestId('review-comment').fill(comment);
   }
-  await customer.page.getByTestId('review-submit').click();
+  // `?review=ok` on this same screen: landed before the caller moves on.
+  await settleActionRedirect(customer.page, () => customer.page.getByTestId('review-submit').click());
 
   await expect(customer.page.getByTestId('review-done')).toBeVisible();
   await expect(customer.page.getByTestId('review-stars')).toHaveAttribute('data-value', String(rating));
@@ -681,7 +686,7 @@ export async function reportReview(
   if (note) {
     await dialog.getByTestId('review-report-note').fill(note);
   }
-  await dialog.getByTestId('review-report-submit').click();
+  await settleActionRedirect(provider.page, () => dialog.getByTestId('review-report-submit').click());
 
   await expect(provider.page.getByTestId('review-report-received')).toHaveCount(1);
   await expect(provider.page.getByTestId('review-row-report-open')).toHaveCount(1);
@@ -704,18 +709,22 @@ export async function moderateReview(
   if (action !== 'RESTORE') {
     await admin.page.getByTestId('moderation-reason').selectOption(reason);
   }
-  await admin.page.getByTestId('moderation-submit').click();
-  // Both removals mail the customer and ask first (ADMIN-DESIGN-001 Faz 3C);
-  // a restore does neither.
-  if (action !== 'RESTORE') {
-    const dialog = admin.page.getByTestId('moderation-submit-dialog');
-    await expect(dialog).toBeVisible();
-    await dialog
-      .getByRole('button', {
-        name: action === 'REMOVE_REVIEW' ? 'Evet, değerlendirmeyi kaldır' : 'Evet, yorumu kaldır',
-      })
-      .click();
-  }
+  // The decision redirects to this same screen (`?ok=`): landed before the
+  // caller moves on.
+  await settleActionRedirect(admin.page, async () => {
+    await admin.page.getByTestId('moderation-submit').click();
+    // Both removals mail the customer and ask first (ADMIN-DESIGN-001 Faz 3C);
+    // a restore does neither.
+    if (action !== 'RESTORE') {
+      const dialog = admin.page.getByTestId('moderation-submit-dialog');
+      await expect(dialog).toBeVisible();
+      await dialog
+        .getByRole('button', {
+          name: action === 'REMOVE_REVIEW' ? 'Evet, değerlendirmeyi kaldır' : 'Evet, yorumu kaldır',
+        })
+        .click();
+    }
+  });
 
   const expected =
     action === 'RESTORE' ? 'Yayında' : action === 'REMOVE_COMMENT' ? 'Yorum kaldırıldı' : 'Kaldırıldı';
@@ -736,7 +745,7 @@ export async function enableProviderReviews(admin: Actor): Promise<void> {
 
   if ((await toggle.getAttribute('aria-checked')) !== 'true') {
     // Both directions ask first (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket A).
-    await confirmThrough(toggle, 'Evet, değerlendirmeleri aç');
+    await settleActionRedirect(admin.page, () => confirmThrough(toggle, 'Evet, değerlendirmeleri aç'));
     await expect(admin.page.getByTestId('provider-reviews-toggle')).toHaveAttribute(
       'aria-checked',
       'true',

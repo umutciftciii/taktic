@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { confirmThrough } from '../src/confirm-dialog';
 import { createAdmin, prisma } from '../src/fixtures';
@@ -96,9 +97,12 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
 
       // ── 1.250,75 through the edit form ─────────────────────────────────
       await editForm.getByTestId('showcase-package-price').fill('1.250,75');
-      await confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (repriceDialog) => {
-        await expect(repriceDialog.getByTestId('showcase-package-commercial-changes')).toContainText('₺10,50 → ₺1.250,75');
-      });
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(admin.page, () =>
+        confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (repriceDialog) => {
+          await expect(repriceDialog.getByTestId('showcase-package-commercial-changes')).toContainText('₺10,50 → ₺1.250,75');
+        }),
+      );
       await expect(admin.page).toHaveURL(/saved=1/);
       await assertNoErrorScreen(admin.page);
 
@@ -116,7 +120,8 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       // is a new URL this time and the wait for it is a real wait.
       await admin.gotoAdmin(screen);
       await editForm.getByTestId('showcase-package-price').fill('10');
-      await confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet');
+      // Redirects to this same screen: landed before the next goto (settleActionRedirect).
+      await settleActionRedirect(admin.page, () => confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet'));
       await expect(admin.page).toHaveURL(/saved=1/);
       await assertNoErrorScreen(admin.page);
       expect(
