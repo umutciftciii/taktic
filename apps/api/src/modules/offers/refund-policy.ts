@@ -1,4 +1,4 @@
-import { OfferEntitlementSource, OfferRefundBlockReason } from '@prisma/client';
+import { OfferEntitlementSource, OfferRefundBlockReason, Prisma } from '@prisma/client';
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 
@@ -474,3 +474,70 @@ const REFUND_DETAILS: Record<string, string> = {
     'Talep platform tarafından yayından kaldırıldı; harcanan teklif krediniz iade edildi.',
   [REQUEST_CANCELLED_REFUND_REASON]: 'Talep iptal edildi; harcanan teklif krediniz iade edildi.',
 };
+
+/** In the policy, and no refund on file (`ALREADY_REFUNDED` does not apply). */
+export const inPolicyUnrefundedWhere = {
+  unviewedRefundPolicy: true,
+  creditRefundedTransactionId: null,
+  creditRefundedAt: null,
+} satisfies Prisma.OfferWhereInput;
+
+/**
+ * The offers whose own eligibility moment has arrived.
+ *
+ * There is no window parameter here and there never was one: a caller-supplied
+ * window could only ever be used to refund sooner than the promise allows.
+ * There is no live setting here either — each row carries the moment it was
+ * created with, and `lte` never matches NULL, so an in-policy offer that
+ * somehow has no schedule is skipped rather than paid.
+ */
+/**
+ * The offers the worker refunds now: the refund policy's eligibility
+ * (`calculateRefundEligibility`) restated as one query. The single source for
+ * the scan's preview and total, the run's batch and the dashboard's count
+ * (API-REFUND-SCAN-PAGINATION-001) — a number on one screen and a list on
+ * another cannot drift apart while all three read this.
+ */
+export function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
+  return {
+    // A period package is never refunded (PERIOD_PACKAGE_NOT_REFUNDABLE). Such
+    // an offer spends no one-time credit, so the clause below already leaves
+    // it out; stated here as well so the query is the policy without relying
+    // on that, and the total cannot count an offer the policy refuses.
+    OR: [{ entitlementSource: null }, { entitlementSource: OfferEntitlementSource.ONE_TIME_CREDIT }],
+    ...inPolicyUnrefundedWhere,
+    creditSpentTransactionId: { not: null },
+    creditCost: { gt: 0 },
+    viewedAt: null,
+    // Beside `viewedAt`, never instead of it: an administrator's accept or
+    // reject on the customer's behalf settles the credit without any customer
+    // opening the offer, and the worker has to see that.
+    refundBlockedAt: null,
+    unviewedRefundEligibleAt: { lte: now },
+  };
+}
+
+/**
+ * ADMIN-SEARCH-PAGINATION-001: the operator list's "İade önerisi" filter as a
+ * query — `calculateRefundEligibility(offer, now).recommendedAction`, which
+ * the admin screen used to apply to the whole list in memory.
+ *
+ * FULL_REFUND is exactly the worker's candidate set. NO_REFUND is everything
+ * else, and is written so a NULL cannot fall out of both: `lte` on a NULL
+ * schedule is NULL, `NOT` of NULL is NULL, and the offer would be in neither
+ * list. Asking for the schedule to be present inside the negation makes that
+ * arm false instead, so an in-policy offer without one reads NO_REFUND here as
+ * it does in the policy (`NO_REFUND_SCHEDULE`).
+ */
+export function refundRecommendationWhere(action: RefundRecommendedAction, now: Date): Prisma.OfferWhereInput {
+  if (action === 'FULL_REFUND') {
+    return refundCandidateWhere(now);
+  }
+  return { NOT: { AND: [refundCandidateWhere(now), { unviewedRefundEligibleAt: { not: null } }] } };
+}
+
+/** `policyStatus === 'VIEWED'`: in the policy, not refunded, opened by the customer. */
+export const viewedInPolicyWhere = {
+  ...inPolicyUnrefundedWhere,
+  viewedAt: { not: null },
+} satisfies Prisma.OfferWhereInput;

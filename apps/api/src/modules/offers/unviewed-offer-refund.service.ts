@@ -1,10 +1,15 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
-import { OfferEntitlementSource, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
-import { UNVIEWED_OFFER_REFUND_REASON, calculateRefundEligibility } from './refund-policy';
+import {
+  UNVIEWED_OFFER_REFUND_REASON,
+  calculateRefundEligibility,
+  inPolicyUnrefundedWhere,
+  refundCandidateWhere,
+} from './refund-policy';
 import { CREDIT_BALANCE_LIMIT_EXCEEDED, isCreditBalanceLimitExceeded } from '../../common/credit-limits';
 import { refundOfferCreditInTransaction } from './offers.service';
 
@@ -494,47 +499,6 @@ function normalizeLimit(value: number | string | undefined) {
 
   return parsed;
 }
-
-/**
- * The offers whose own eligibility moment has arrived.
- *
- * There is no window parameter here and there never was one: a caller-supplied
- * window could only ever be used to refund sooner than the promise allows.
- * There is no live setting here either — each row carries the moment it was
- * created with, and `lte` never matches NULL, so an in-policy offer that
- * somehow has no schedule is skipped rather than paid.
- */
-/**
- * The offers the worker refunds now: the refund policy's eligibility
- * (`calculateRefundEligibility`) restated as one query. The single source for
- * the scan's preview and total, the run's batch and the dashboard's count
- * (API-REFUND-SCAN-PAGINATION-001) — a number on one screen and a list on
- * another cannot drift apart while all three read this.
- */
-export function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
-  return {
-    // A period package is never refunded (PERIOD_PACKAGE_NOT_REFUNDABLE). Such
-    // an offer spends no one-time credit, so the clause below already leaves
-    // it out; stated here as well so the query is the policy without relying
-    // on that, and the total cannot count an offer the policy refuses.
-    OR: [{ entitlementSource: null }, { entitlementSource: OfferEntitlementSource.ONE_TIME_CREDIT }],
-    ...inPolicyUnrefundedWhere,
-    creditSpentTransactionId: { not: null },
-    creditCost: { gt: 0 },
-    viewedAt: null,
-    // Beside `viewedAt`, never instead of it: an administrator's accept or
-    // reject on the customer's behalf settles the credit without any customer
-    // opening the offer, and the worker has to see that.
-    refundBlockedAt: null,
-    unviewedRefundEligibleAt: { lte: now },
-  };
-}
-
-const inPolicyUnrefundedWhere = {
-  unviewedRefundPolicy: true,
-  creditRefundedTransactionId: null,
-  creditRefundedAt: null,
-} satisfies Prisma.OfferWhereInput;
 
 function normalizeScanPaging(options: RefundScanPageOptions) {
   const page = readPositiveInt(options.page, 1, 'page');

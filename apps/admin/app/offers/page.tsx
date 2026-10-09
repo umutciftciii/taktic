@@ -5,6 +5,7 @@ import {
   formatPrice,
   listCatalogueForFilter,
   Offer,
+  OfferListResponse,
   OfferStatus,
   refundActionBadgeClass,
   refundActionLabel,
@@ -22,25 +23,27 @@ import { Pagination } from '../../components/pagination';
 import { SummaryStrip } from '../../components/summary-strip';
 import { SavedViewTabs, type TabItem } from '../../components/tabs';
 import { buildHref, parsePage, type QueryParams } from '../../lib/list-query';
-import { formatCount, pageWindow } from '../../lib/pagination';
+import { formatCount } from '../../lib/pagination';
 
 /**
  * Teklifler (#5), design `offers` (ADMIN-DESIGN-001 Faz 3A).
  *
- * The API filters by everything but the refund signal, which is applied here
- * as before, and returns the whole match (no paging); the table is cut into
- * pages of 50 on this server. The saved views are the status filter's values.
+ * The API filters, counts and pages the list itself, the refund signal
+ * included (ADMIN-SEARCH-PAGINATION-001): the screen asks for one page of 50
+ * and draws what it is given. The saved views are the status filter's values.
  * Only the open view's total is known without another request, so only it
  * carries a counter — the design's per-view figures would each be a request
  * of their own.
  *
  * The design's month-level subtitle ("ortalama 1.860 ₺ · eşleşme oranı %38")
  * is not drawn: no endpoint computes it. The four figures this screen always
- * had stay, computed from the rows it already holds.
+ * had stay, counted by the API over the same match (`summary`).
  */
 
 const PATH = '/offers';
 const PAGE_SIZE = 50;
+/** The API's last page (`OFFER_LIST_MAX_PAGE`): further is a 400, so the address is held there. */
+const MAX_PAGE = 1_000_000;
 
 /** The design's ⓘ, as written. */
 const SCREEN_INFO =
@@ -139,7 +142,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   const toValue = (params.to ?? '').trim();
   const providerId = (params.providerId ?? '').trim();
   const requestId = (params.requestId ?? '').trim();
-  const page = parsePage(params.page);
+  const page = Math.min(parsePage(params.page), MAX_PAGE);
 
   const apiQuery = new URLSearchParams();
   if (query) apiQuery.set('q', query);
@@ -157,34 +160,31 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
     apiQuery.set('submittedTo', toDate.toISOString());
   }
 
-  const offersPath = apiQuery.toString() ? `/offers?${apiQuery.toString()}` : '/offers';
+  if (refundAction !== 'all') apiQuery.set('refundAction', refundAction);
+  apiQuery.set('page', String(page));
+  apiQuery.set('pageSize', String(PAGE_SIZE));
 
-  const [offers, categories] = await Promise.all([
-    apiFetch<Offer[]>(offersPath),
+  const [list, categories] = await Promise.all([
+    apiFetch<OfferListResponse>(`/offers?${apiQuery.toString()}`),
     listCatalogueForFilter(),
   ]);
-
-  const filtered =
-    refundAction === 'all'
-      ? offers
-      : offers.filter((offer) => offer.refundEligibility.recommendedAction === refundAction);
-
-  const range = pageWindow({ page, pageSize: PAGE_SIZE, total: filtered.length });
-  const pageRows = filtered.slice(range.start > 0 ? range.start - 1 : 0, range.end);
+  const pageRows = list.items;
+  // Every match of the other filters; the refund filter's share is `list.total`.
+  const matchingCount = list.summary.matching;
 
   const sortedCategories = [...categories].sort((a, b) => a.name.localeCompare(b.name, 'tr-TR'));
 
-  const fullRefundCount = offers.filter(
-    (o) => o.refundEligibility.recommendedAction === 'FULL_REFUND',
-  ).length;
+  const fullRefundCount = list.summary.fullRefund;
   // Offers the customer opened, which the 48-hour rule settles for good. Kept
   // as a figure an operator can read at a glance; there is no action attached to
   // it, because a viewed offer is never refunded.
-  const viewedCount = offers.filter((o) => o.refundEligibility.policyStatus === 'VIEWED').length;
-  const newUnviewedCount = offers.filter((o) => o.status === 'SUBMITTED' && !o.viewedAt).length;
+  const viewedCount = list.summary.viewed;
+  const newUnviewedCount = list.summary.newUnviewed;
 
-  const pinnedProvider = providerId ? offers.find((o) => o.provider.id === providerId) : null;
-  const pinnedRequest = requestId ? offers.find((o) => o.request.id === requestId) : null;
+  // Every row on a pinned list carries the pin, so any row names it; with no
+  // row on this page the pin shows its id.
+  const pinnedProvider = providerId ? pageRows.find((o) => o.provider.id === providerId) : null;
+  const pinnedRequest = requestId ? pageRows.find((o) => o.request.id === requestId) : null;
 
   const hasPinned = Boolean(providerId || requestId);
   const hasFilters =
@@ -220,14 +220,14 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
       label: statusLabel(value),
       testId: `offer-view-${value.toLowerCase()}`,
     })),
-  ].map((view) => (view.key === (status === 'all' ? '' : status) ? { ...view, count: filtered.length } : view));
+  ].map((view) => (view.key === (status === 'all' ? '' : status) ? { ...view, count: list.total } : view));
 
   const summary =
-    offers.length === 0
+    matchingCount === 0
       ? hasFilters || hasPinned
         ? 'Filtreye uyan teklif yok'
         : 'Henüz teklif yok'
-      : `${hasFilters || hasPinned ? 'Filtreye uyan ' : ''}${formatCount(filtered.length)} teklif · en yeni önce`;
+      : `${hasFilters || hasPinned ? 'Filtreye uyan ' : ''}${formatCount(list.total)} teklif · en yeni önce`;
 
   return (
     <main className="offers-page">
@@ -236,7 +236,7 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
       <SummaryStrip
         label="Teklif özeti"
         items={[
-          { label: 'Toplam teklif', value: formatCount(offers.length), testId: 'offer-stat-total' },
+          { label: 'Toplam teklif', value: formatCount(matchingCount), testId: 'offer-stat-total' },
           {
             label: 'İade adayı',
             value: formatCount(fullRefundCount),
@@ -361,8 +361,8 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
       </FilterBar>
 
       <div className="data-list-card">
-        {filtered.length === 0 ? (
-          offers.length === 0 && !hasFilters && !hasPinned ? (
+        {list.total === 0 ? (
+          matchingCount === 0 && !hasFilters && !hasPinned ? (
             <EmptyState
               title="Henüz teklif yok."
               description="Hizmet verenler onaylı taleplere teklif verdikçe burada listelenecek."
@@ -378,6 +378,17 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
               }
             />
           )
+        ) : pageRows.length === 0 ? (
+          // A page past the last one, reached by editing the address.
+          <EmptyState
+            title="Bu sayfada teklif yok."
+            description="Liste daha kısa; ilk sayfaya dönebilirsiniz."
+            action={
+              <Link className="btn btn-secondary btn-sm" href={buildHref(PATH, filterParams)}>
+                İlk sayfaya dön
+              </Link>
+            }
+          />
         ) : (
           <DataTable caption="Teklifler" columns={gateColumns(COLUMNS, { customer: canReadRequests })} minWidth={1280} testId="offer-table">
             {pageRows.map((offer) => (
@@ -390,13 +401,14 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
             ))}
           </DataTable>
         )}
-        {filtered.length > 0 ? (
+        {list.total > 0 ? (
           <Pagination
             path={PATH}
             params={filterParams}
-            page={range.page}
-            pageSize={PAGE_SIZE}
-            total={filtered.length}
+            page={list.page}
+            pageSize={list.pageSize}
+            total={list.total}
+            hasNextPage={list.hasNextPage}
             noun="teklif"
             summaryTestId="offer-count"
           />

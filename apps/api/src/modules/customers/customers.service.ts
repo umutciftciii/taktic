@@ -10,9 +10,10 @@ import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { AuditPageQueryDto } from '../../common/admin-audit';
-import { parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
+import { parseAdminTextSearch } from '../../common/admin-search';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
+import { customerCountSql, customerListWhere, customerPageSql } from './customer-list-query';
 import { CreateCustomerNoteDto } from './dto/create-customer-note.dto';
 import {
   CustomerSortDirection,
@@ -102,61 +103,52 @@ export class CustomersService {
       'lastRequestTo',
     );
 
-    const userWhere: Prisma.UserWhereInput = {
-      role: UserRole.CUSTOMER,
-    };
-
-    const search = await parseAdminTextSearch(this.prisma, filters.q);
-    if (search) {
-      userWhere.OR = [
-        { name: { contains: search.text, mode: 'insensitive' } },
-        { nameSearch: { contains: search.folded } },
-        { email: { contains: search.text, mode: 'insensitive' } },
-        ...phoneColumnMatchers(search).map((phone) => ({ phone })),
-      ];
-    }
-
-    if (filters.customerOrigin) {
-      userWhere.customerOrigin = filters.customerOrigin as CustomerOrigin;
-    }
-
-    // city ve lastRequest* filtreleri müşterinin taleplerine bakar.
-    const serviceRequestFilters: Prisma.ServiceRequestWhereInput[] = [];
-    if (filters.city) {
-      serviceRequestFilters.push({ city: { equals: filters.city, mode: 'insensitive' } });
-    }
-    if (lastRequestRange) {
-      serviceRequestFilters.push({ submittedAt: lastRequestRange });
-    }
-    if (serviceRequestFilters.length > 0) {
-      userWhere.serviceRequests = {
-        some:
-          serviceRequestFilters.length === 1
-            ? serviceRequestFilters[0]
-            : { AND: serviceRequestFilters },
-      };
-    }
-
-    const customers = await this.prisma.user.findMany({
-      where: userWhere,
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        phone: true,
-        isActive: true,
-        createdAt: true,
-        lastLoginAt: true,
-        customerOrigin: true,
-        // Two more columns on the same row — no lookup per customer.
-        emailVerifiedAt: true,
-        phoneVerifiedAt: true,
-      },
+    const where = customerListWhere({
+      search: await parseAdminTextSearch(this.prisma, filters.q),
+      customerOrigin: filters.customerOrigin as CustomerOrigin | undefined,
+      city: filters.city,
+      lastRequestRange,
     });
 
-    const total = customers.length;
-    const customerIds = customers.map((customer) => customer.id);
+    // ADMIN-SEARCH-PAGINATION-001: the database counts the match and returns
+    // the page's ids in list order; nothing past this page is read. One
+    // snapshot, so the total and the page cannot disagree.
+    const [[{ total }], pageIds] = await this.prisma.$transaction(
+      [
+        this.prisma.$queryRaw<[{ total: number }]>(customerCountSql(where)),
+        this.prisma.$queryRaw<Array<{ id: string }>>(customerPageSql(where, sortBy, sortDir, page, pageSize)),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+    const customerIds = pageIds.map((row) => row.id);
 
+    const customerRows = customerIds.length === 0
+      ? []
+      : await this.prisma.user.findMany({
+          where: { id: { in: customerIds } },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            isActive: true,
+            createdAt: true,
+            lastLoginAt: true,
+            customerOrigin: true,
+            // Two more columns on the same row — no lookup per customer.
+            emailVerifiedAt: true,
+            phoneVerifiedAt: true,
+          },
+        });
+    const rowById = new Map(customerRows.map((row) => [row.id, row]));
+    // In the page's order. A customer removed between the two reads is left
+    // out rather than shown half-read.
+    const customers = customerIds.flatMap((id) => {
+      const row = rowById.get(id);
+      return row ? [row] : [];
+    });
+
+    // The page's figures, for the page's customers only.
     const [requestStats, offerStats, lastRequests, anonymousRequestCount] = await Promise.all([
       customerIds.length === 0 || !scope.requests
         ? Promise.resolve(
@@ -257,21 +249,13 @@ export class CustomersService {
       };
     });
 
-    // Aggregate alanlara göre sort gerektiğinden tüm listeyi belleğe alıp sort ediyoruz.
-    // Müşteri sayısı büyürse SQL/raw aggregate'e geçilmeli (rapora bkz).
-    items.sort(buildCustomerComparator(sortBy, sortDir));
-
-    const start = (page - 1) * pageSize;
-    const end = start + pageSize;
-    const pagedItems = items.slice(start, end);
-    const hasNextPage = end < total;
-
     return {
-      items: pagedItems.map((item) => toCustomerListRow(item, scope)),
+      items: items.map((item) => toCustomerListRow(item, scope)),
       total,
       page,
       pageSize,
-      hasNextPage,
+      totalPages: Math.ceil(total / pageSize),
+      hasNextPage: page * pageSize < total,
       meta: anonymousRequestCount !== null ? { anonymousRequestCount } : {},
     };
   }
@@ -541,8 +525,8 @@ function parseDateRange(
   toInput: string | undefined,
   fromKey: string,
   toKey: string,
-): Prisma.DateTimeFilter | undefined {
-  const range: Prisma.DateTimeFilter = {};
+): { gte?: Date; lte?: Date } | undefined {
+  const range: { gte?: Date; lte?: Date } = {};
   if (fromInput) {
     const fromDate = new Date(fromInput);
     if (Number.isNaN(fromDate.getTime())) {
@@ -558,7 +542,7 @@ function parseDateRange(
     range.lte = toDate;
   }
   if (range.gte === undefined && range.lte === undefined) return undefined;
-  if (range.gte && range.lte && (range.gte as Date) > (range.lte as Date)) {
+  if (range.gte && range.lte && range.gte > range.lte) {
     throw new BadRequestException(`"${fromKey}" must be on or before "${toKey}"`);
   }
   return range;
@@ -582,8 +566,8 @@ const OFFER_SORT_FIELDS: ReadonlySet<CustomerSortField> = new Set(['offerCount',
 
 /**
  * One row on the way out: the account columns always, each domain's figures
- * only for a caller that may read that domain. The internal item is sorted
- * first, and a sort on a figure the caller may not read never gets this far.
+ * only for a caller that may read that domain. A sort on a figure the caller
+ * may not read is refused before the page is read.
  */
 function toCustomerListRow(item: CustomerListItem, scope: CustomerEmbedScope) {
   const {
@@ -599,44 +583,4 @@ function toCustomerListRow(item: CustomerListItem, scope: CustomerEmbedScope) {
     ...(scope.requests ? { requestCount, lastRequestAt, lastRequestCity } : {}),
     ...(scope.offers ? { offerCount, acceptedOfferCount } : {}),
   };
-}
-
-function buildCustomerComparator(sortBy: CustomerSortField, sortDir: CustomerSortDirection) {
-  const direction = sortDir === 'desc' ? -1 : 1;
-  return (a: CustomerListItem, b: CustomerListItem): number => {
-    const cmp = compareCustomers(a, b, sortBy);
-    if (cmp !== 0) return cmp * direction;
-    // Deterministik tiebreaker
-    return a.id.localeCompare(b.id);
-  };
-}
-
-function compareCustomers(
-  a: CustomerListItem,
-  b: CustomerListItem,
-  sortBy: CustomerSortField,
-): number {
-  switch (sortBy) {
-    case 'name':
-      return (a.name ?? '').localeCompare(b.name ?? '', 'tr');
-    case 'createdAt':
-      return a.createdAt.getTime() - b.createdAt.getTime();
-    case 'lastRequestAt':
-      return compareNullableDates(a.lastRequestAt, b.lastRequestAt);
-    case 'requestCount':
-      return a.requestCount - b.requestCount;
-    case 'offerCount':
-      return a.offerCount - b.offerCount;
-    case 'acceptedOfferCount':
-      return a.acceptedOfferCount - b.acceptedOfferCount;
-    default:
-      return 0;
-  }
-}
-
-function compareNullableDates(a: Date | null, b: Date | null): number {
-  if (a && b) return a.getTime() - b.getTime();
-  if (a) return 1;
-  if (b) return -1;
-  return 0;
 }

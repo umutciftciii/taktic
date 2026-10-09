@@ -89,6 +89,9 @@ export class ListCustomersDto {
   @Transform(({ value }) => toIntOrPass(value))
   @IsInt()
   @Min(1)
+  // ADMIN-SEARCH-PAGINATION-001: the page is an OFFSET in SQL now; past this
+  // it is a 400, not a number the database cannot take.
+  @Max(1_000_000)
   page?: number;
 
   @IsOptional()

@@ -2,6 +2,7 @@ import Link from 'next/link';
 import {
   ApiError,
   apiFetch,
+  listRequestOffers,
   ContactRevealDetail,
   type CustomerReviewState,
   fetchOrNotFound,
@@ -184,7 +185,7 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
   const canReadReview = isSuperAdmin;
 
   const [offers, reportsResult, reviewState, contactReveal] = await Promise.all([
-    canReadOffers ? apiFetch<Offer[]>(`/offers?requestId=${id}`) : Promise.resolve(null),
+    canReadOffers ? listRequestOffers(id) : Promise.resolve(null),
     // Operator-only: a reporter's note is shown here and nowhere the customer
     // or another provider can see. A failed load is kept apart from an empty
     // list: "no reports" must not be said about a request whose reports could

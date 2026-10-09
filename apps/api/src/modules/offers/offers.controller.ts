@@ -48,6 +48,9 @@ export class OffersController {
       city: query.city,
       submittedFrom: query.submittedFrom,
       submittedTo: query.submittedTo,
+      refundAction: query.refundAction,
+      page: query.page,
+      pageSize: query.pageSize,
     }, user);
   }
 

@@ -66,6 +66,11 @@ const TRIGRAM_INDEXES = [
   ['ProviderProfile', 'ProviderProfile_businessName_trgm_idx', '"businessName"'],
   ['ProviderProfile', 'ProviderProfile_email_trgm_idx', 'email'],
   ['ProviderProfile', 'ProviderProfile_phone_trgm_idx', 'phone'],
+  // ADMIN-SEARCH-PAGINATION-001: the customer list's search box.
+  ['User', 'User_email_trgm_idx', 'email'],
+  ['User', 'User_nameSearch_trgm_idx', '"nameSearch"'],
+  ['User', 'User_name_trgm_idx', 'name'],
+  ['User', 'User_phone_trgm_idx', 'phone'],
 ] as const;
 
 describe('the migration', () => {

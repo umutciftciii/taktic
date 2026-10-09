@@ -352,7 +352,7 @@ describe('GET /offers and /offers/:id (OFFERS_READ)', () => {
     const { offer, provider, serviceRequest, customer } = await world();
     const cookie = await sessionWith([AdminPermission.OFFERS_READ]);
 
-    for (const body of [(await get(`/offers/${offer.id}`, cookie)).body, (await get('/offers', cookie)).body[0]]) {
+    for (const body of [(await get(`/offers/${offer.id}`, cookie)).body, (await get('/offers', cookie)).body.items[0]]) {
       expect(body.id).toBe(offer.id);
       expect(Object.keys(body.provider).sort()).toEqual(['businessName', 'city', 'district', 'id', 'status']);
       expect(Object.keys(body.request).sort()).toEqual([
@@ -402,8 +402,8 @@ describe('GET /offers and /offers/:id (OFFERS_READ)', () => {
 
     for (const term of [serviceRequest.customerPhone, provider.phone]) {
       const query = `/offers?q=${encodeURIComponent(term)}`;
-      expect((await get(query, offersOnly)).body).toHaveLength(0);
-      expect((await get(query, withContact)).body).toHaveLength(1);
+      expect((await get(query, offersOnly)).body.items).toHaveLength(0);
+      expect((await get(query, withContact)).body.items).toHaveLength(1);
     }
   });
 

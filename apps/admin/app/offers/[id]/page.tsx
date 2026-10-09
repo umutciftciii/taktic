@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
   apiFetch,
+  listRequestOffers,
   fetchOrNotFound,
   formatDate,
   formatDateTime,
@@ -149,7 +150,7 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
   // screen's own permission (OFFERS_READ) already opens, made only when the
   // tab that shows it is open.
   const requestOffers =
-    activeTab === 'talep' ? await apiFetch<Offer[]>(`/offers?requestId=${offer.request.id}`) : null;
+    activeTab === 'talep' ? await listRequestOffers(offer.request.id) : null;
   // "Diğer": every offer on the request except this one.
   const siblingOffers = requestOffers ? requestOffers.filter((other) => other.id !== offer.id) : null;
 
