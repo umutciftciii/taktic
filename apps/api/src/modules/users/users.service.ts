@@ -15,7 +15,7 @@ import {
   uniqueViolationField,
 } from '../../common/account-identity';
 import { AuditPageQueryDto } from '../../common/admin-audit';
-import { parseAdminSearch, phoneColumnMatchers } from '../../common/admin-search';
+import { parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isSuperAdmin, STAFF_ROLES } from '../auth/admin-permissions';
@@ -212,10 +212,11 @@ export class UsersService {
       role: { in: [...STAFF_ROLES] },
     };
 
-    const search = parseAdminSearch(filters.q);
+    const search = await parseAdminTextSearch(this.prisma, filters.q);
     if (search) {
       where.OR = [
         { name: { contains: search.text, mode: 'insensitive' } },
+        { nameSearch: { contains: search.folded } },
         { email: { contains: search.text, mode: 'insensitive' } },
         ...phoneColumnMatchers(search).map((phone) => ({ phone })),
       ];

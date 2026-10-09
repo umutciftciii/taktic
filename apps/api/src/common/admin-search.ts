@@ -1,3 +1,5 @@
+import { Prisma, type PrismaClient } from '@prisma/client';
+
 import { equivalentPhoneSpellings, normalizePhoneNumber } from '../modules/phone-verification/phone.util';
 
 /**
@@ -17,8 +19,9 @@ import { equivalentPhoneSpellings, normalizePhoneNumber } from '../modules/phone
  * canonicaliser (`normalizePhoneNumber`) whether the box holds a whole phone
  * number and, when it does, the one list of stored spellings
  * (`equivalentPhoneSpellings`) every other lookup already uses. Everything
- * else about the search — substring, case folding, which columns — stays what
- * each endpoint already did.
+ * else about the search — substring, which columns — stays what each endpoint
+ * already did. Turkish case folding of text columns is the database's, through
+ * {@link parseAdminTextSearch} (ADMIN-SEARCH-TURKISH-HARDENING-001).
  */
 export type AdminSearchTerm = {
   /** The trimmed box, searched as a substring exactly as before. */
@@ -60,7 +63,40 @@ export function parseAdminSearch(raw: string | null | undefined): AdminSearchTer
   return { text, phoneSpellings: phoneSpellingsFor(text) };
 }
 
-export type PhoneColumnMatcher = { contains: string; mode: 'insensitive' } | { in: string[] };
+/**
+ * ADMIN-SEARCH-TURKISH-HARDENING-001: the box as the database search reads it.
+ *
+ * `folded` is the box passed through `taktic_search_fold` — the same SQL
+ * function PostgreSQL stores in every `*Search` generated column — so the
+ * operator's text and the stored names are folded by one implementation:
+ * NFC, whitespace collapsed, Turkish lower-case (`I`→`ı`, `İ`→`i`). It is
+ * matched with a plain, case-sensitive `contains` against those columns.
+ *
+ * The column's own `contains … mode: 'insensitive'` stays beside it, untouched.
+ * That is the locale-free arm: "ivan" still finds "Ivan Petrov" and an
+ * all-caps ASCII "ISIK" still finds "isik", which the Turkish fold alone would
+ * not (`I`→`ı`). Either arm matching is a match — the rule
+ * `matchesAdminSearch` applies in memory, and a strict superset of what the
+ * database search did before.
+ */
+export type AdminTextSearch = AdminSearchTerm & { folded: string };
+
+/** {@link parseAdminSearch}, plus the database's fold of the box. One round trip. */
+export async function parseAdminTextSearch(
+  db: Pick<PrismaClient, '$queryRaw'>,
+  raw: string | null | undefined,
+): Promise<AdminTextSearch | null> {
+  const term = parseAdminSearch(raw);
+  if (!term) return null;
+  // A SELECT without FROM always yields exactly one row; the fold of a
+  // non-blank string is never NULL (the function is STRICT, the box is not).
+  const [{ folded }] = (await db.$queryRaw<Array<{ folded: string }>>(
+    Prisma.sql`SELECT taktic_search_fold(${term.text}) AS "folded"`,
+  )) as [{ folded: string }];
+  return { ...term, folded };
+}
+
+export type PhoneColumnMatcher ={ contains: string; mode: 'insensitive' } | { in: string[] };
 
 /**
  * The conditions a phone column joins the search's `OR` with: the substring

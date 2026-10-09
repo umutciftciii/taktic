@@ -21,7 +21,7 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
-import { parseAdminSearch, phoneColumnMatchers } from '../../common/admin-search';
+import { parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -97,7 +97,7 @@ export class OffersService {
     const city = normalizeNullableString(filters.city);
     const submittedFrom = normalizeOptionalDate(filters.submittedFrom, 'submittedFrom');
     const submittedTo = normalizeOptionalDate(filters.submittedTo, 'submittedTo');
-    const search = parseAdminSearch(filters.q);
+    const search = await parseAdminTextSearch(this.prisma, filters.q);
 
     if (submittedFrom && submittedTo && submittedFrom > submittedTo) {
       throw new BadRequestException('submittedFrom cannot be after submittedTo');
@@ -134,21 +134,26 @@ export class OffersService {
               { requestId: { contains: search.text, mode: 'insensitive' } },
               { providerId: { contains: search.text, mode: 'insensitive' } },
               { provider: { is: { businessName: { contains: search.text, mode: 'insensitive' } } } },
+              { provider: { is: { businessNameSearch: { contains: search.folded } } } },
               ...(scope.providerContact
                 ? ([
                     { provider: { is: { contactName: { contains: search.text, mode: 'insensitive' } } } },
+                    { provider: { is: { contactNameSearch: { contains: search.folded } } } },
                     ...phoneColumnMatchers(search).map((phone) => ({ provider: { is: { phone } } })),
                   ] satisfies Prisma.OfferWhereInput[])
                 : []),
               ...(scope.requestDetail
                 ? ([
                     { request: { is: { customerName: { contains: search.text, mode: 'insensitive' } } } },
+                    { request: { is: { customerNameSearch: { contains: search.folded } } } },
                     ...phoneColumnMatchers(search).map((customerPhone) => ({ request: { is: { customerPhone } } })),
                     { request: { is: { customerEmail: { contains: search.text, mode: 'insensitive' } } } },
                   ] satisfies Prisma.OfferWhereInput[])
                 : []),
               { request: { is: { city: { contains: search.text, mode: 'insensitive' } } } },
+              { request: { is: { citySearch: { contains: search.folded } } } },
               { request: { is: { district: { contains: search.text, mode: 'insensitive' } } } },
+              { request: { is: { districtSearch: { contains: search.folded } } } },
             ] satisfies Prisma.OfferWhereInput[],
           }
         : {}),

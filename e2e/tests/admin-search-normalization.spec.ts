@@ -5,9 +5,11 @@ import {
   createCategory,
   createCustomer,
   createProvider,
+  prisma,
   storedPhone,
   uniqueLocation,
   uniquePhone,
+  uniqueSuffix,
 } from '../src/fixtures';
 import { seedCustomerRequest } from '../src/request-fixtures';
 import { primaryRuntime } from '../src/runtime';
@@ -66,6 +68,46 @@ test.describe('admin search: phone spellings', () => {
       await assertNoErrorScreen(page);
       await expect(page.getByTestId('request-row')).toHaveCount(1);
       await expect(page.getByTestId('request-row')).toHaveAttribute('data-request-id', seeded.id);
+    } finally {
+      await admin.close();
+    }
+  });
+});
+
+/**
+ * ADMIN-SEARCH-TURKISH-HARDENING-001: the customers and users lists search in
+ * the database, whose collation folds `I` to `i`; a lower-case "ışık" never
+ * found "IŞIK". The API spec proves every list and casing against the folded
+ * generated columns; this proves the two screens reach them through the box.
+ */
+test.describe('admin search: Turkish casing', () => {
+  test('customers and users lists find an upper-case Turkish name typed in lower case', async ({ browser }) => {
+    const customer = await createCustomer('IŞIK Müşteri');
+    const account = await createAdmin();
+    const staffName = `İLKER IŞIKÇI ${uniqueSuffix()}`;
+    await prisma().user.update({ where: { id: account.id }, data: { name: staffName } });
+    const admin = await Actor.open(browser, 'staff', primaryRuntime);
+    const page = admin.page;
+
+    try {
+      await admin.loginToAdmin(account.email, account.password);
+
+      await admin.gotoAdmin('/customers');
+      // `createCustomer` appends a lower-case hex suffix, which has no I in it.
+      await page.locator('#customer-search').fill(customer.name.replace('IŞIK Müşteri', 'ışık müşteri'));
+      await page.getByRole('button', { name: 'Filtrele' }).click();
+      await expect(page).toHaveURL(/q=/);
+      await assertNoErrorScreen(page);
+      await expect(page.getByTestId('customer-row')).toHaveCount(1);
+      await expect(page.getByTestId('customer-row')).toHaveAttribute('data-customer-id', customer.id);
+
+      await admin.gotoAdmin('/users');
+      await page.locator('#user-search').fill(staffName.replace('İLKER IŞIKÇI', 'ilker ışıkçı'));
+      await page.getByRole('button', { name: 'Filtrele' }).click();
+      await expect(page).toHaveURL(/q=/);
+      await assertNoErrorScreen(page);
+      await expect(page.getByTestId('user-row')).toHaveCount(1);
+      await expect(page.getByTestId('user-row')).toHaveAttribute('data-user-id', account.id);
     } finally {
       await admin.close();
     }
