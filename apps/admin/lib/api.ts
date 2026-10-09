@@ -637,6 +637,49 @@ export type Offer = {
   };
 };
 
+/**
+ * `GET /offers` (ADMIN-SEARCH-PAGINATION-001): one page of the match, newest
+ * first. `total` counts every match the refund filter leaves; `summary`
+ * counts the match before it — the list screen's figures.
+ */
+export type OfferListResponse = {
+  items: Offer[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  summary: {
+    /** Every offer the other filters match, the refund filter aside. */
+    matching: number;
+    /** Of those, the ones the automatic rule would refund now. */
+    fullRefund: number;
+    /** Of those, the ones the rule settled because the customer opened them. */
+    viewed: number;
+    /** Of those, SUBMITTED and never opened. */
+    newUnviewed: number;
+  };
+};
+
+/** The largest page `GET /offers` serves. */
+export const OFFER_LIST_MAX_PAGE_SIZE = 100;
+
+/**
+ * Every offer made on one request, for the request's and an offer's own
+ * screens (the matched offer, the cheapest, the cancel counts). One request's
+ * offers are few; read page by page so none is left behind the first page,
+ * which is what the list stops at now.
+ */
+export async function listRequestOffers(requestId: string): Promise<Offer[]> {
+  const offers: Offer[] = [];
+  for (let page = 1; ; page += 1) {
+    const query = new URLSearchParams({ requestId, page: String(page), pageSize: String(OFFER_LIST_MAX_PAGE_SIZE) });
+    const response = await apiFetch<OfferListResponse>(`/offers?${query.toString()}`);
+    offers.push(...response.items);
+    if (!response.hasNextPage) return offers;
+  }
+}
+
 export type RefundScanItem = {
   offerId: string;
   providerId: string;
@@ -1107,6 +1150,7 @@ export type CustomerListResponse = {
   total: number;
   page: number;
   pageSize: number;
+  totalPages: number;
   hasNextPage: boolean;
   meta: CustomerListMeta;
 };

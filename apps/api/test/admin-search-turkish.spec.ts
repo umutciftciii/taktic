@@ -267,11 +267,11 @@ describe('GET /offers — provider and request text', () => {
     const { providerOffer, requestOffer } = await offerWorld();
     const cookie = await superAdmin();
 
-    expect(ids(await get(`/offers?${q('ışık tesisat')}`, cookie))).toEqual([providerOffer.id]);
-    expect(ids(await get(`/offers?${q('ilker ışıkçı')}`, cookie))).toEqual([providerOffer.id]);
-    expect(ids(await get(`/offers?${q('ırmak ışın')}`, cookie))).toEqual([requestOffer.id]);
-    expect(ids(await get(`/offers?${q('ığdır')}`, cookie))).toEqual([requestOffer.id]);
-    expect(ids(await get(`/offers?${q('ARALIK')}`, cookie))).toEqual([requestOffer.id]);
+    expect(ids((await get(`/offers?${q('ışık tesisat')}`, cookie)).items)).toEqual([providerOffer.id]);
+    expect(ids((await get(`/offers?${q('ilker ışıkçı')}`, cookie)).items)).toEqual([providerOffer.id]);
+    expect(ids((await get(`/offers?${q('ırmak ışın')}`, cookie)).items)).toEqual([requestOffer.id]);
+    expect(ids((await get(`/offers?${q('ığdır')}`, cookie)).items)).toEqual([requestOffer.id]);
+    expect(ids((await get(`/offers?${q('ARALIK')}`, cookie)).items)).toEqual([requestOffer.id]);
   });
 
   it('never matches a contact field the caller may not read', async () => {
@@ -280,9 +280,9 @@ describe('GET /offers — provider and request text', () => {
 
     // The business name is on the offer row for every reader; the contact
     // person, the customer's name and both e-mails are not.
-    expect(ids(await get(`/offers?${q('ışık tesisat')}`, cookie))).toEqual([providerOffer.id]);
+    expect(ids((await get(`/offers?${q('ışık tesisat')}`, cookie)).items)).toEqual([providerOffer.id]);
     for (const box of ['ilker', 'ilker ışıkçı', 'ırmak ışın', 'ivan.usta', 'ivan.musteri@example.test']) {
-      expect(await get(`/offers?${q(box)}`, cookie), box).toEqual([]);
+      expect((await get(`/offers?${q(box)}`, cookie)).items, box).toEqual([]);
     }
   });
 });

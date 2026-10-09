@@ -116,10 +116,13 @@ function normalizeCustomerOrigin(value: string | undefined): CustomerOrigin | ''
   return '';
 }
 
+/** The API's last page: further is a 400, so the address is held there. */
+const MAX_PAGE = 1_000_000;
+
 function normalizePage(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? '', 10);
   if (!Number.isFinite(parsed) || parsed < 1) return 1;
-  return parsed;
+  return Math.min(parsed, MAX_PAGE);
 }
 
 function normalizePageSize(value: string | undefined): number {

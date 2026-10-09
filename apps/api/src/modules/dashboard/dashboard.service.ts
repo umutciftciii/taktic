@@ -3,7 +3,7 @@ import { AdminPermission, ProviderStatus, ServiceRequestStatus, SupportTicketSta
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed } from '../auth/embedded-permissions';
-import { refundCandidateWhere } from '../offers/unviewed-offer-refund.service';
+import { refundCandidateWhere } from '../offers/refund-policy';
 import { reportedRequestWhere } from '../request-reports/request-report-queue';
 import { showcaseReviewQueueWhere } from '../showcase/showcase-review-queue';
 

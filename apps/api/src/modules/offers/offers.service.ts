@@ -54,10 +54,14 @@ import {
 } from './offer-transitions';
 import {
   ManualRefundReasonCode,
+  RefundRecommendedAction,
   calculateRefundEligibility,
   isManualRefundReasonCode,
   manualRefundStoredReason,
+  refundRecommendationWhere,
+  viewedInPolicyWhere,
 } from './refund-policy';
+import { OFFER_LIST_DEFAULT_PAGE_SIZE } from './dto/list-offers-query.dto';
 
 type OfferListFilters = {
   q?: string;
@@ -69,6 +73,9 @@ type OfferListFilters = {
   city?: string;
   submittedFrom?: string;
   submittedTo?: string;
+  refundAction?: RefundRecommendedAction;
+  page?: number;
+  pageSize?: number;
 };
 
 @Injectable()
@@ -86,6 +93,10 @@ export class OffersService {
    * {@link toAdminOffer}; the free-text search reaches only the columns the
    * caller may read, so a phone number it may not see cannot be confirmed by
    * whether a search for it returns a row.
+   *
+   * Paged by the database (ADMIN-SEARCH-PAGINATION-001): `items` is one page,
+   * newest first, and `total` counts every match. `summary` carries the
+   * screen's figures over the match before the refund filter.
    */
   async listOffers(filters: OfferListFilters, viewer: AuthUser | null = null) {
     const scope = offerEmbedScope(viewer);
@@ -159,13 +170,56 @@ export class OffersService {
         : {}),
     };
 
-    const offers = await this.prisma.offer.findMany({
-      where,
-      orderBy: { submittedAt: 'desc' },
-      include: offerInclude,
-    });
+    // ADMIN-SEARCH-PAGINATION-001: one page of the match, counted and read by
+    // the database. The refund filter is part of the query (it was applied by
+    // the screen to the whole list), and the screen's figures — every offer
+    // the other filters match, how many of them the rule would refund, how
+    // many the customer opened, how many are new and unopened — are counted
+    // over the same WHERE. One `now` for the filter and every row's verdict,
+    // and one snapshot, so the counts, the page and the badges agree.
+    const now = new Date();
+    const page = filters.page ?? 1;
+    const pageSize = filters.pageSize ?? OFFER_LIST_DEFAULT_PAGE_SIZE;
+    const listWhere: Prisma.OfferWhereInput = filters.refundAction
+      ? { AND: [where, refundRecommendationWhere(filters.refundAction, now)] }
+      : where;
 
-    return offers.map((offer) => toAdminOffer(withRefundEligibility(offer), scope));
+    const [matching, fullRefund, viewed, newUnviewed, rows] = await this.prisma.$transaction(
+      [
+        this.prisma.offer.count({ where }),
+        this.prisma.offer.count({ where: { AND: [where, refundRecommendationWhere('FULL_REFUND', now)] } }),
+        this.prisma.offer.count({ where: { AND: [where, viewedInPolicyWhere] } }),
+        this.prisma.offer.count({ where: { AND: [where, { status: OfferStatus.SUBMITTED, viewedAt: null }] } }),
+        this.prisma.offer.findMany({
+          where: listWhere,
+          // The id breaks ties, so a page boundary never falls between two
+          // offers submitted in the same millisecond.
+          orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          include: offerInclude,
+        }),
+      ],
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+
+    // Every match is either recommended for a refund or not.
+    const total =
+      filters.refundAction === 'FULL_REFUND'
+        ? fullRefund
+        : filters.refundAction === 'NO_REFUND'
+          ? matching - fullRefund
+          : matching;
+
+    return {
+      items: rows.map((offer) => toAdminOffer(withRefundEligibility(offer, now), scope)),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+      hasNextPage: page * pageSize < total,
+      summary: { matching, fullRefund, viewed, newUnviewed },
+    };
   }
 
   /** The operator's offer page (OFFERS_READ), projected by {@link toAdminOffer}. */
@@ -941,10 +995,10 @@ function isCustomerViewer(customerId: string | null, user: AuthUser | null): boo
   return user === null || user.role === UserRole.CUSTOMER;
 }
 
-function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T) {
+function withRefundEligibility<T extends RefundPolicyOfferShape>(offer: T, now = new Date()) {
   return {
     ...offer,
-    refundEligibility: calculateRefundEligibility(offer),
+    refundEligibility: calculateRefundEligibility(offer, now),
   };
 }
 

@@ -228,19 +228,19 @@ describe('GET /offers — provider phone and request snapshot', () => {
     const { historicalOffer, unrelatedOffer } = await offerWorld();
     const cookie = await superAdmin();
 
-    expect(ids(await get(`/offers?${q('05551234567')}`, cookie)).sort()).toEqual(
+    expect(ids((await get(`/offers?${q('05551234567')}`, cookie)).items).sort()).toEqual(
       [historicalOffer.id, unrelatedOffer.id].sort(),
     );
-    expect(ids(await get(`/offers?${q('+905557654321')}`, cookie))).toEqual([historicalOffer.id]);
-    expect(await get(`/offers?${q('+905550000000')}`, cookie)).toEqual([]);
+    expect(ids((await get(`/offers?${q('+905557654321')}`, cookie)).items)).toEqual([historicalOffer.id]);
+    expect((await get(`/offers?${q('+905550000000')}`, cookie)).items).toEqual([]);
   });
 
   it('never matches a phone the caller may not read, in any spelling', async () => {
     await offerWorld();
     const cookie = await sessionWith([AdminPermission.OFFERS_READ]);
 
-    expect(await get(`/offers?${q('05551234567')}`, cookie)).toEqual([]);
-    expect(await get(`/offers?${q('+905557654321')}`, cookie)).toEqual([]);
+    expect((await get(`/offers?${q('05551234567')}`, cookie)).items).toEqual([]);
+    expect((await get(`/offers?${q('+905557654321')}`, cookie)).items).toEqual([]);
   });
 });
 
