@@ -27,6 +27,12 @@ const DEFAULT_LEDGER_PAGE_SIZE = 50;
 const MAX_LEDGER_PAGE_SIZE = 200;
 const DEFAULT_PROVIDER_FINANCE_PAGE_SIZE = 25;
 const MAX_PROVIDER_FINANCE_PAGE_SIZE = 100;
+/**
+ * ADMIN-SEARCH-INDEX-001: the most matching providers the ledger search binds
+ * into the ledger query as an id list. Above it the search keeps the provider
+ * join (same rows, no index); see {@link FinanceService.ledgerProviderSearchArm}.
+ */
+export const LEDGER_PROVIDER_ID_LIST_LIMIT = 5000;
 
 /**
  * What the admin finance screen shows for a recent purchase, and nothing else.
@@ -367,7 +373,11 @@ export class FinanceService {
     const pageSize = clampPageSize(filters.pageSize);
     const providerContact = mayEmbed(viewer, AdminPermission.PROVIDERS_READ);
 
-    const where = buildCreditLedgerWhere(filters, await parseAdminTextSearch(this.prisma, filters.q), providerContact);
+    const term = await parseAdminTextSearch(this.prisma, filters.q);
+    const where = buildCreditLedgerWhere(
+      filters,
+      term && { term, providerArm: await this.ledgerProviderSearchArm(term, providerContact) },
+    );
 
     const [total, rows] = await Promise.all([
       this.prisma.providerCreditTransaction.count({ where }),
@@ -423,6 +433,40 @@ export class FinanceService {
       pageSize,
       hasNextPage,
     };
+  }
+
+  /**
+   * ADMIN-SEARCH-INDEX-001: the ledger search's provider arm, as the ledger
+   * query can use an index for it.
+   *
+   * Written as `provider: { is: … }`, Prisma joins the provider into the
+   * ledger query and ORs its columns with `reason`'s; no index can serve an OR
+   * across two tables, so every search read the whole ledger. The matching
+   * providers are found first instead — the same conditions, on their own
+   * table, where the trigram indexes serve them — and the ledger is asked for
+   * `providerId IN (…)`, which its `providerId` index serves beside the
+   * `reason` indexes. Same rows: `providerId` is required, so a row's provider
+   * always exists. Contact columns stay gated exactly as before
+   * (`buildProviderFinanceWhere`).
+   *
+   * A box that matches more than {@link LEDGER_PROVIDER_ID_LIST_LIMIT}
+   * providers ("a", "ltd") keeps the join, so the statement's bound list stays
+   * bounded; it then reads the ledger whole, as every search did before.
+   */
+  private async ledgerProviderSearchArm(
+    search: AdminTextSearch,
+    providerContact: boolean,
+  ): Promise<Prisma.ProviderCreditTransactionWhereInput> {
+    const providerWhere = buildProviderFinanceWhere(search, providerContact);
+    const matches = await this.prisma.providerProfile.findMany({
+      where: providerWhere,
+      select: { id: true },
+      take: LEDGER_PROVIDER_ID_LIST_LIMIT + 1,
+    });
+    if (matches.length > LEDGER_PROVIDER_ID_LIST_LIMIT) {
+      return { provider: { is: providerWhere } };
+    }
+    return { providerId: { in: matches.map((match) => match.id) } };
   }
 
   /**
@@ -876,8 +920,7 @@ function normalizeLedgerTypeFilter(
 
 function buildCreditLedgerWhere(
   filters: ListCreditLedgerDto,
-  search: AdminTextSearch | null,
-  providerContact: boolean,
+  search: { term: AdminTextSearch; providerArm: Prisma.ProviderCreditTransactionWhereInput } | null,
 ): Prisma.ProviderCreditTransactionWhereInput {
   const where: Prisma.ProviderCreditTransactionWhereInput = {};
 
@@ -901,24 +944,11 @@ function buildCreditLedgerWhere(
 
   if (search) {
     where.OR = [
-      { reason: { contains: search.text, mode: 'insensitive' } },
-      { reasonSearch: { contains: search.folded } },
-      {
-        provider: {
-          is: {
-            OR: [
-              { businessName: { contains: search.text, mode: 'insensitive' } },
-              { businessNameSearch: { contains: search.folded } },
-              ...(providerContact
-                ? ([
-                    ...phoneColumnMatchers(search).map((phone) => ({ phone })),
-                    { email: { contains: search.text, mode: 'insensitive' } },
-                  ] satisfies Prisma.ProviderProfileWhereInput[])
-                : []),
-            ],
-          },
-        },
-      },
+      { reason: { contains: search.term.text, mode: 'insensitive' } },
+      { reasonSearch: { contains: search.term.folded } },
+      // The provider's own search (business name; phone and e-mail only for
+      // PROVIDERS_READ), resolved by FinanceService.ledgerProviderSearchArm.
+      search.providerArm,
     ];
   }
 
