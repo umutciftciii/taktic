@@ -44,8 +44,8 @@ jobs:
   # Pull requests only: records which merge commit this run tests, for the
   # gate above to find once the PR is merged. The run's API record carries the
   # PR head, not the merge commit, so the SHA goes into an artifact's name.
-  # It also runs the gate's own tests, so a change to the gate is proven by the
-  # same pull request that makes it.
+  # It also runs the gate's own tests and the CI result rule's, so a change to
+  # either is proven by the same pull request that makes it.
   pr-evidence:
     name: record tested merge commit
     if: github.event_name == 'pull_request'
@@ -56,8 +56,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           sparse-checkout: .github
-      - name: Test the post-merge gate
-        run: node --test .github/scripts/post-merge-gate.test.mjs
+      - name: Test the post-merge gate and the CI result rule
+        run: node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
       - name: Record the merge commit under test
         run: git rev-parse HEAD | tee tested-commit.txt
       - uses: actions/upload-artifact@v4
@@ -531,3 +531,37 @@ jobs:
       - name: Stack logs on failure
         if: failure()
         run: docker compose -f docker-compose.prod.yml logs --no-color --tail 200 || true
+
+  # The one check branch protection requires on main (CI-PROTECT-001), under a
+  # name that does not change when a job above is renamed or added.
+  #
+  # Not the jobs above themselves: GitHub counts a skipped required check as
+  # passed, and every job here is skipped somewhere by design — the gate on
+  # every pull request, the full jobs on a push whose PR run is reused. This
+  # job runs whatever happened above (`always()`: a cancelled or failed run
+  # still reports, and reports a failure) and decides in
+  # .github/scripts/ci-result.mjs what passing means for each event:
+  #
+  #   pull_request  pr-evidence, verify, e2e, e2e-webkit and ops all succeeded
+  #                 on this exact head; skipped, cancelled or failed is a fail
+  #   push (main)   the gate succeeded, and either it proved reuse and the full
+  #                 jobs skipped for that reason, or every full job succeeded
+  #
+  # Branch protection's "up to date" rule keeps the PR run's tested merge
+  # commit on the current main, which is also what lets the gate prove reuse.
+  ci-result:
+    name: CI result
+    if: always()
+    needs: [post-merge-gate, pr-evidence, verify, e2e, e2e-webkit, ops]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/scripts
+      - name: Every job this event requires succeeded
+        env:
+          EVENT: ${{ github.event_name }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: node .github/scripts/ci-result.mjs
