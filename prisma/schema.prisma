@@ -1208,6 +1208,18 @@ model ServiceRequest {
   /// The direct-lead gate, as the discovery query reads it: "requests reserved
   /// for this provider, in this state".
   @@index([directShowcaseProviderId, status])
+  /// OFFERS-SEARCH-OPT-001: every arm of the offer search's request resolver
+  /// (see offers/offer-search.ts). The planner combines them (BitmapOr) only
+  /// when each arm has one; without any one of them it reads the table.
+  @@index([id(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_id_trgm_idx")
+  @@index([customerName(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_customerName_trgm_idx")
+  @@index([customerNameSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_customerNameSearch_trgm_idx")
+  @@index([customerEmail(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_customerEmail_trgm_idx")
+  @@index([customerPhone(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_customerPhone_trgm_idx")
+  @@index([city(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_city_trgm_idx")
+  @@index([citySearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_citySearch_trgm_idx")
+  @@index([district(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_district_trgm_idx")
+  @@index([districtSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceRequest_districtSearch_trgm_idx")
 }
 
 /// The moment a matched request opened both sides' contact details to each
@@ -1524,6 +1536,11 @@ model ProviderProfile {
   @@index([businessNameSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_businessNameSearch_trgm_idx")
   @@index([phone(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_phone_trgm_idx")
   @@index([email(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_email_trgm_idx")
+  // OFFERS-SEARCH-OPT-001: the offer search's provider resolver ORs these with
+  // businessName/businessNameSearch/phone above (see offers/offer-search.ts).
+  @@index([id(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_id_trgm_idx")
+  @@index([contactName(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_contactName_trgm_idx")
+  @@index([contactNameSearch(ops: raw("gin_trgm_ops"))], type: Gin, map: "ProviderProfile_contactNameSearch_trgm_idx")
 }
 
 model ProviderServiceCategory {
@@ -1720,6 +1737,9 @@ model Offer {
   // reader would have to assume.
   @@index([unviewedRefundPolicy, viewedAt, unviewedRefundEligibleAt], map: "Offer_refund_schedule_idx")
   @@index([refundBlockedAt])
+  // OFFERS-SEARCH-OPT-001: the offer search's own arm (`id ILIKE`), resolved
+  // to an id list before the list is read (see offers/offer-search.ts).
+  @@index([id(ops: raw("gin_trgm_ops"))], type: Gin, map: "Offer_id_trgm_idx")
 }
 
 /// What a purchasable offer package sells.
