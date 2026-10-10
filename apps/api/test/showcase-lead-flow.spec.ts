@@ -1,7 +1,9 @@
-import { OfferEntitlementSource, ServiceCategoryKind, UserRole } from '@prisma/client';
+import { OfferEntitlementSource, ProviderStatus, ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { addIsoDays, todayIsoDay } from '../src/common/date-only';
 import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
+import { PREFERRED_DATE_RANGE_MESSAGES } from '../src/modules/service-requests/preferred-date-range';
 import {
   createApprovedShowcaseCard,
   createCategory,
@@ -15,7 +17,9 @@ import {
   loginAs,
   offerPayload,
   proveShowcaseLeadPhone,
+  resetAuthThrottle,
   resetDatabase,
+  serviceRequestPayload,
   showcaseLeadPayload,
   type TestContext,
 } from './harness';
@@ -878,5 +882,187 @@ describe('the browser’s request draft', () => {
     const row = await ctx.prisma.requestDraft.findFirstOrThrow();
     expect(row.consumedAt).not.toBeNull();
     expect(await ctx.prisma.showcaseLead.count()).toBe(1);
+  });
+});
+
+describe('VIT-003: the lead is the marketplace request, bound to its card', () => {
+  /*
+   * The vitrin form posts the marketplace body plus `urgencyBucket`. These pin
+   * the contract end to end: a canonical triple and a canonical timing open
+   * the lead; every refusal is a 4xx carrying the API's own sentence (never a
+   * 500, which is the one thing the form can only word as the generic
+   * failure); the card decides the category; and the stored location and
+   * timing are exactly what an ordinary request with the same input stores.
+   */
+  const inTenDays = () => addIsoDays(todayIsoDay(new Date()), 10);
+  const inTwelveDays = () => addIsoDays(todayIsoDay(new Date()), 12);
+
+  async function expectNothingWritten() {
+    expect(await ctx.prisma.serviceRequest.count()).toBe(0);
+    expect(await ctx.prisma.showcaseLead.count()).toBe(0);
+    expect(ctx.notifications.sent).toHaveLength(0);
+  }
+
+  it('opens a lead from a canonical triple and a canonical timing, reserved for the card owner', async () => {
+    const { card, category, owner } = await published();
+
+    const response = await openLead(card.id, category.slug, {
+      city: 'İstanbul',
+      district: 'Kadıköy',
+      neighborhood: 'Caferağa Mah',
+      urgency: 'FLEXIBLE',
+      preferredDate: inTenDays(),
+      preferredDateEnd: inTwelveDays(),
+      urgencyBucket: 'URGENT',
+    });
+
+    expect(response.status).toBe(201);
+    expect(response.body.code).toBeUndefined();
+
+    const stored = await ctx.prisma.serviceRequest.findFirstOrThrow({
+      include: { showcaseLead: true },
+    });
+    expect(stored.categoryId).toBe(category.id);
+    expect(stored.directShowcaseProviderId).toBe(owner.id);
+    expect(stored.showcaseLead?.providerId).toBe(owner.id);
+    expect(stored.showcaseLead?.cardId).toBe(card.id);
+    expect(stored.showcaseLead?.urgencyBucket).toBe('URGENT');
+    expect(stored.status).toBe('SUBMITTED');
+    expect(stored.phoneVerifiedAt).not.toBeNull();
+    expect(stored).toMatchObject({
+      city: 'İstanbul',
+      district: 'Kadıköy',
+      neighborhood: 'Caferağa Mah',
+      urgency: 'FLEXIBLE',
+      preferredDate: new Date(`${inTenDays()}T00:00:00.000Z`),
+      preferredDateEnd: new Date(`${inTwelveDays()}T00:00:00.000Z`),
+    });
+  });
+
+  it('stores the same location and timing an ordinary request stores for the same input', async () => {
+    const { card, category, owner } = await published();
+    const shared = {
+      // Lower case and padded on purpose: both paths normalise through the
+      // same resolver, so both store the canonical spelling.
+      city: ' istanbul ',
+      district: 'kadıköy',
+      neighborhood: 'Caferağa Mah',
+      urgency: 'FLEXIBLE',
+      preferredDate: inTenDays(),
+      preferredDateEnd: inTwelveDays(),
+    };
+
+    const ordinary = await request(ctx.server)
+      .post('/service-requests')
+      .send(serviceRequestPayload(category.slug, shared));
+    expect(ordinary.status).toBe(201);
+    resetAuthThrottle(ctx.app);
+
+    const lead = await openLead(card.id, category.slug, shared);
+    expect(lead.status).toBe(201);
+
+    const fields = {
+      categoryId: true,
+      city: true,
+      district: true,
+      neighborhood: true,
+      urgency: true,
+      preferredDate: true,
+      preferredDateEnd: true,
+      directShowcaseProviderId: true,
+      showcaseLeadId: true,
+    } as const;
+    const marketplaceRow = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: ordinary.body.id },
+      select: fields,
+    });
+    const leadRow = await ctx.prisma.serviceRequest.findFirstOrThrow({
+      where: { showcaseLeadId: { not: null } },
+      select: fields,
+    });
+
+    const { directShowcaseProviderId: d1, showcaseLeadId: l1, ...marketplaceShape } = marketplaceRow;
+    const { directShowcaseProviderId: d2, showcaseLeadId: l2, ...leadShape } = leadRow;
+    expect(leadShape).toEqual(marketplaceShape);
+    expect(marketplaceShape).toMatchObject({ city: 'İstanbul', district: 'Kadıköy' });
+
+    // The only difference is the linkage to one business.
+    expect(d1).toBeNull();
+    expect(l1).toBeNull();
+    expect(d2).toBe(owner.id);
+    expect(l2).not.toBeNull();
+  });
+
+  it('refuses a request in a category other than the card’s, and writes nothing', async () => {
+    const { card } = await published();
+    const other = await createCategory(ctx.prisma, 'Boya Badana', { kind: ServiceCategoryKind.LEAF });
+
+    const response = await openLead(card.id, other.slug);
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe('Bu talep yalnız kartın hizmet kategorisinde gönderilebilir.');
+    await expectNothingWritten();
+  });
+
+  it.each([
+    ['a canonical district of another province', { district: 'Çankaya' }],
+    ['a canonical neighbourhood of another district', { neighborhood: 'Kızılay Mah' }],
+  ])('refuses %s with the location sentence, and writes nothing', async (_name, overrides) => {
+    const { card, category } = await published();
+
+    const response = await openLead(card.id, category.slug, overrides);
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toEqual([
+      'Seçilen il, ilçe ve mahalle birlikte geçerli bir adres oluşturmuyor.',
+    ]);
+    await expectNothingWritten();
+  });
+
+  it('refuses a body without the answer-time choice, and writes nothing', async () => {
+    const { card, category } = await published();
+    const payload = showcaseLeadPayload(category.slug) as Record<string, unknown>;
+    delete payload.urgencyBucket;
+    await proveShowcaseLeadPhone(ctx.prisma, payload.customerPhone as string);
+
+    const response = await request(ctx.server).post(`/showcase/cards/${card.id}/leads`).send(payload);
+
+    expect(response.status).toBe(400);
+    await expectNothingWritten();
+  });
+
+  it.each([
+    ['a malformed day', { preferredDate: '2026-13-45', preferredDateEnd: '2026-13-46' }, PREFERRED_DATE_RANGE_MESSAGES.invalid],
+    ['half a range', { preferredDate: 'TEN_DAYS', preferredDateEnd: null }, PREFERRED_DATE_RANGE_MESSAGES.incomplete],
+    ['a day in the past', { preferredDate: '2020-01-01', preferredDateEnd: '2020-01-02' }, PREFERRED_DATE_RANGE_MESSAGES.past],
+    ['a reversed range', { preferredDate: 'TWELVE_DAYS', preferredDateEnd: 'TEN_DAYS' }, PREFERRED_DATE_RANGE_MESSAGES.reversed],
+  ])('refuses %s with the marketplace sentence, and writes nothing', async (_name, range, message) => {
+    const { card, category } = await published();
+    const day = (value: string | null) =>
+      value === 'TEN_DAYS' ? inTenDays() : value === 'TWELVE_DAYS' ? inTwelveDays() : value;
+
+    const response = await openLead(card.id, category.slug, {
+      urgency: 'FLEXIBLE',
+      preferredDate: day(range.preferredDate),
+      preferredDateEnd: day(range.preferredDateEnd),
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.message).toBe(message);
+    await expectNothingWritten();
+  });
+
+  it('refuses a card whose business is no longer approved, with the card code', async () => {
+    const { card, category, owner } = await published();
+    await ctx.prisma.providerProfile.update({
+      where: { id: owner.id },
+      data: { status: ProviderStatus.SUSPENDED },
+    });
+
+    const response = await openLead(card.id, category.slug);
+
+    expect(response.status).toBe(404);
+    expect(response.body.code).toBe('SHOWCASE_CARD_NOT_FOUND');
+    await expectNothingWritten();
   });
 });
