@@ -24,6 +24,7 @@ import { SummaryStrip } from '../../components/summary-strip';
 import { SavedViewTabs, type TabItem } from '../../components/tabs';
 import { buildHref, parsePage, type QueryParams } from '../../lib/list-query';
 import { formatCount } from '../../lib/pagination';
+import { OfferPins } from './offer-pins';
 
 /**
  * Teklifler (#5), design `offers` (ADMIN-DESIGN-001 Faz 3A).
@@ -181,11 +182,6 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   const viewedCount = list.summary.viewed;
   const newUnviewedCount = list.summary.newUnviewed;
 
-  // Every row on a pinned list carries the pin, so any row names it; with no
-  // row on this page the pin shows its id.
-  const pinnedProvider = providerId ? pageRows.find((o) => o.provider.id === providerId) : null;
-  const pinnedRequest = requestId ? pageRows.find((o) => o.request.id === requestId) : null;
-
   const hasPinned = Boolean(providerId || requestId);
   const hasFilters =
     query.length > 0 ||
@@ -248,43 +244,13 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
         ]}
       />
 
-      {hasPinned ? (
-        <div className="admin-filter-pins" data-testid="offer-pins">
-          {providerId ? (
-            <span className="badge badge-muted">
-              HV:{' '}
-              {pinnedProvider ? (
-                pinnedProvider.provider.businessName
-              ) : (
-                <code className="cell-break">{providerId}</code>
-              )}{' '}
-              <Link
-                className="cell-link"
-                href={unpinHref('providerId')}
-                aria-label="Hizmet veren sabitlemesini kaldır"
-              >
-                ×
-              </Link>
-            </span>
-          ) : null}
-          {requestId ? (
-            <span className="badge badge-muted">
-              Talep:{' '}
-              {pinnedRequest ? (
-                <>
-                  {pinnedRequest.request.category.name} · {pinnedRequest.request.city}/
-                  {pinnedRequest.request.district}
-                </>
-              ) : (
-                <code className="cell-break">{requestId}</code>
-              )}{' '}
-              <Link className="cell-link" href={unpinHref('requestId')} aria-label="Talep sabitlemesini kaldır">
-                ×
-              </Link>
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+      <OfferPins
+        providerId={providerId}
+        requestId={requestId}
+        context={list.context}
+        unpinProviderHref={unpinHref('providerId')}
+        unpinRequestHref={unpinHref('requestId')}
+      />
 
       <SavedViewTabs
         label="Teklif görünümleri"

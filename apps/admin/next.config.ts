@@ -1,8 +1,27 @@
 import type { NextConfig } from 'next';
+import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from 'next/constants';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const workspaceRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
+
+/**
+ * The release version, read from the root package.json — the one place it is
+ * written (RELEASE-BASELINE-001, docs/release.md).
+ *
+ * Read while code is compiled (`next build`, `next dev`) and inlined through
+ * `env` as `process.env.TAKTIC_RELEASE_VERSION`, so the footer carries the
+ * version the bundle was built from. `next start` compiles nothing and does
+ * not read it: the runtime image has no root package.json, and needs none.
+ */
+export function readReleaseVersion(root: string = workspaceRoot): string {
+  const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`root package.json version must be MAJOR.MINOR.PATCH, got ${JSON.stringify(version)}`);
+  }
+  return version;
+}
 
 /**
  * The response headers every page and asset this application serves carries.
@@ -55,4 +74,7 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default function config(phase: string): NextConfig {
+  const compiles = phase === PHASE_PRODUCTION_BUILD || phase === PHASE_DEVELOPMENT_SERVER;
+  return compiles ? { ...nextConfig, env: { TAKTIC_RELEASE_VERSION: readReleaseVersion() } } : nextConfig;
+}

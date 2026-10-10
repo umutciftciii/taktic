@@ -1,6 +1,6 @@
 {
   "name": "taktic",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.4",
   "scripts": {
@@ -23,7 +23,8 @@
     "db:import:categories": "tsx prisma/import-draft-categories.ts",
     "db:import:categories:wave-2": "tsx prisma/import-draft-categories-wave-2.ts",
     "db:open-provider-enrollment:wave-1-2": "tsx prisma/open-provider-enrollment-wave-1-2.ts",
-    "db:studio": "prisma studio"
+    "db:studio": "prisma studio",
+    "version:check": "node scripts/release/version-check.mjs"
   },
   "devDependencies": {
     "@prisma/client": "^6.0.0",

@@ -105,7 +105,9 @@ export class OffersService {
    *
    * Paged by the database (ADMIN-SEARCH-PAGINATION-001): `items` is one page,
    * newest first, and `total` counts every match. `summary` carries the
-   * screen's figures over the match before the refund filter.
+   * screen's figures over the match before the refund filter. `context` names
+   * the pinned provider and request (ADMIN-PINNED-LABEL-001), see
+   * {@link readPinnedOfferContext}.
    */
   async listOffers(filters: OfferListFilters, viewer: AuthUser | null = null) {
     const scope = offerEmbedScope(viewer);
@@ -159,7 +161,7 @@ export class OffersService {
     const now = new Date();
     const page = filters.page ?? 1;
     const pageSize = filters.pageSize ?? OFFER_LIST_DEFAULT_PAGE_SIZE;
-    const [matching, fullRefund, viewed, newUnviewed, rows] = await this.prisma.$transaction(
+    const [matching, fullRefund, viewed, newUnviewed, rows, context] = await this.prisma.$transaction(
       async (tx) => {
         // OFFERS-SEARCH-OPT-001: the search's provider and request matches are
         // resolved to ids on this transaction, so they come from the same
@@ -191,6 +193,7 @@ export class OffersService {
             take: pageSize,
             include: offerInclude,
           }),
+          await readPinnedOfferContext(tx, providerId, requestId),
         ] as const;
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: OFFER_LIST_TRANSACTION_TIMEOUT_MS },
@@ -212,6 +215,7 @@ export class OffersService {
       totalPages: Math.ceil(total / pageSize),
       hasNextPage: page * pageSize < total,
       summary: { matching, fullRefund, viewed, newUnviewed },
+      context,
     };
   }
 
@@ -1550,6 +1554,47 @@ const offerInclude = {
     },
   },
 } satisfies Prisma.OfferInclude;
+
+/**
+ * The pinned provider's and request's names for the list's header
+ * (ADMIN-PINNED-LABEL-001).
+ *
+ * The screen used to take them from a row of the page, so a page with no row —
+ * a refund filter that matched nothing, a page past the last — showed the raw
+ * id. They are read here from any one offer of the pinned provider or request,
+ * whatever the other filters and the page: one indexed `LIMIT 1` each, never
+ * the list. Read through an offer, the fields are the identity every row of
+ * that pin already carries to an OFFERS_READ reader (see {@link toAdminOffer}),
+ * and a provider or request without an offer — or an unknown id — answers
+ * null, so a pin reveals no name the list itself would not.
+ */
+async function readPinnedOfferContext(
+  tx: Prisma.TransactionClient,
+  providerId: string | null,
+  requestId: string | null,
+) {
+  const provider = providerId
+    ? ((
+        await tx.offer.findFirst({
+          where: { providerId },
+          select: { provider: { select: { id: true, businessName: true } } },
+        })
+      )?.provider ?? null)
+    : null;
+  const request = requestId
+    ? ((
+        await tx.offer.findFirst({
+          where: { requestId },
+          select: {
+            request: {
+              select: { id: true, requestNumber: true, city: true, district: true, category: { select: { name: true } } },
+            },
+          },
+        })
+      )?.request ?? null)
+    : null;
+  return { provider, request };
+}
 
 /**
  * Which other domains an operator's offer response may carry

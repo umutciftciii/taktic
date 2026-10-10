@@ -593,6 +593,14 @@ section {
   min-width: 0;
 }
 
+/* RELEASE-BASELINE-001: the build's version, secondary to everything above it. */
+.admin-footer {
+  padding: 12px 16px 16px;
+  color: var(--color-neutral-700);
+  font-size: 11px;
+  text-align: right;
+}
+
 /*
  * A few screens render their header and cards straight into the shell,
  * without the <main> every other screen wraps itself in, and so sat flush
