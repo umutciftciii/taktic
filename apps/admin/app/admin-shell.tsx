@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { usePathname } from 'next/navigation';
 import { NavIcon } from '../components/nav-icon';
+import { AdminFooter } from '../components/release-version';
 import { Sidebar } from '../components/sidebar';
 import type { AdminAccountSummary } from '../lib/admin-account';
 import type { NavMenu } from '../lib/nav';
@@ -274,6 +275,7 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
         <div className="admin-content" id="admin-content">
           {children}
         </div>
+        <AdminFooter />
       </div>
 
       {/*

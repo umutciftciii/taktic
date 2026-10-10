@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ReleaseVersion } from './release-version';
 
 const cols: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
   {
@@ -82,7 +83,9 @@ export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
         </div>
 
         <div className="lp-footer-bottom">
-          <div>© {new Date().getFullYear()} TakTic. Tüm hakları saklıdır.</div>
+          <div>
+            © {new Date().getFullYear()} TakTic. Tüm hakları saklıdır. <ReleaseVersion />
+          </div>
           <div className="lp-footer-legal">
             <Link href="#">Kullanım Şartları</Link>
             <Link href="#">Gizlilik</Link>

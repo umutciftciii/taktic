@@ -659,6 +659,21 @@ export type OfferListResponse = {
     /** Of those, SUBMITTED and never opened. */
     newUnviewed: number;
   };
+  /**
+   * The pinned provider's and request's names, whatever the page holds
+   * (ADMIN-PINNED-LABEL-001). Null when nothing is pinned, or the pinned one
+   * has no offer to be read through.
+   */
+  context: {
+    provider: { id: string; businessName: string } | null;
+    request: {
+      id: string;
+      requestNumber: string | null;
+      city: string;
+      district: string;
+      category: { name: string };
+    } | null;
+  };
 };
 
 /** The largest page `GET /offers` serves. */

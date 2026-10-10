@@ -164,6 +164,12 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      - name: Release version
+        run: |
+          node --test scripts/release/version-check.test.mjs
+          pnpm version:check
+          echo "release version: $(pnpm --silent version:check --print)"
+
       - name: Typecheck
         run: pnpm typecheck
 

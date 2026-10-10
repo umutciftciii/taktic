@@ -1,8 +1,26 @@
 import type { NextConfig } from 'next';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const workspaceRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
+
+/**
+ * The release version, read from the root package.json — the one place it is
+ * written (RELEASE-BASELINE-001, docs/release.md).
+ *
+ * Read while code is compiled (`next build`, `next dev`) and inlined through
+ * `env` as `process.env.TAKTIC_RELEASE_VERSION`, so the footer carries the
+ * version the bundle was built from. `next start` compiles nothing and does
+ * not read it: the runtime image has no root package.json, and needs none.
+ */
+export function readReleaseVersion(root: string = workspaceRoot): string {
+  const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version?: unknown };
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version)) {
+    throw new Error(`root package.json version must be MAJOR.MINOR.PATCH, got ${JSON.stringify(version)}`);
+  }
+  return version;
+}
 
 /**
  * The response headers every page and asset this application serves carries.
@@ -55,4 +73,15 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+/**
+ * The phases that compile code: `next/constants`' PHASE_PRODUCTION_BUILD and
+ * PHASE_DEVELOPMENT_SERVER, written as values because the runtime image loads
+ * this file as plain ESM, where an extensionless `next/constants` import does
+ * not resolve (the unit test pins them to Next's own constants).
+ */
+export const COMPILE_PHASES: readonly string[] = ['phase-production-build', 'phase-development-server'];
+
+export default function config(phase: string): NextConfig {
+  const compiles = COMPILE_PHASES.includes(phase);
+  return compiles ? { ...nextConfig, env: { TAKTIC_RELEASE_VERSION: readReleaseVersion() } } : nextConfig;
+}

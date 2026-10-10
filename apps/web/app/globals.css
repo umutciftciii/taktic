@@ -1641,6 +1641,8 @@ input[readonly] {
 }
 
 .lp-footer-legal a { font-size: 12px; color: var(--color-neutral-700); }
+/* RELEASE-BASELINE-001: the build's version, quieter than the copyright beside it. */
+.lp-footer-version { margin-left: var(--space-2); font-size: 11px; color: var(--color-neutral-700); white-space: nowrap; }
 
 @media (max-width: 900px) {
   .lp-footer-grid { grid-template-columns: 1fr 1fr; }
