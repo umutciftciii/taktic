@@ -21,7 +21,7 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
-import { parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
+import { parseAdminTextSearch } from '../../common/admin-search';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -62,6 +62,15 @@ import {
   viewedInPolicyWhere,
 } from './refund-policy';
 import { OFFER_LIST_DEFAULT_PAGE_SIZE } from './dto/list-offers-query.dto';
+import { joinedOfferSearchWhere, resolveOfferSearchWhere } from './offer-search';
+
+/**
+ * How long the offer list's read may hold its transaction. The list was one
+ * batch transaction, which Prisma does not time out; resolving the search
+ * first makes it an interactive one, whose default (5 s) a search broad enough
+ * to fall back to its joins could reach on a large table. It only reads.
+ */
+const OFFER_LIST_TRANSACTION_TIMEOUT_MS = 30_000;
 
 type OfferListFilters = {
   q?: string;
@@ -125,7 +134,7 @@ export class OffersService {
       requestFilter.city = { contains: city, mode: 'insensitive' };
     }
 
-    const where: Prisma.OfferWhereInput = {
+    const filterWhere: Prisma.OfferWhereInput = {
       ...(status ? { status } : {}),
       ...(providerId ? { providerId } : {}),
       ...(requestId ? { requestId } : {}),
@@ -138,36 +147,6 @@ export class OffersService {
           }
         : {}),
       ...(Object.keys(requestFilter).length > 0 ? { request: { is: requestFilter } } : {}),
-      ...(search
-        ? {
-            OR: [
-              { id: { contains: search.text, mode: 'insensitive' } },
-              { requestId: { contains: search.text, mode: 'insensitive' } },
-              { providerId: { contains: search.text, mode: 'insensitive' } },
-              { provider: { is: { businessName: { contains: search.text, mode: 'insensitive' } } } },
-              { provider: { is: { businessNameSearch: { contains: search.folded } } } },
-              ...(scope.providerContact
-                ? ([
-                    { provider: { is: { contactName: { contains: search.text, mode: 'insensitive' } } } },
-                    { provider: { is: { contactNameSearch: { contains: search.folded } } } },
-                    ...phoneColumnMatchers(search).map((phone) => ({ provider: { is: { phone } } })),
-                  ] satisfies Prisma.OfferWhereInput[])
-                : []),
-              ...(scope.requestDetail
-                ? ([
-                    { request: { is: { customerName: { contains: search.text, mode: 'insensitive' } } } },
-                    { request: { is: { customerNameSearch: { contains: search.folded } } } },
-                    ...phoneColumnMatchers(search).map((customerPhone) => ({ request: { is: { customerPhone } } })),
-                    { request: { is: { customerEmail: { contains: search.text, mode: 'insensitive' } } } },
-                  ] satisfies Prisma.OfferWhereInput[])
-                : []),
-              { request: { is: { city: { contains: search.text, mode: 'insensitive' } } } },
-              { request: { is: { citySearch: { contains: search.folded } } } },
-              { request: { is: { district: { contains: search.text, mode: 'insensitive' } } } },
-              { request: { is: { districtSearch: { contains: search.folded } } } },
-            ] satisfies Prisma.OfferWhereInput[],
-          }
-        : {}),
     };
 
     // ADMIN-SEARCH-PAGINATION-001: one page of the match, counted and read by
@@ -180,27 +159,41 @@ export class OffersService {
     const now = new Date();
     const page = filters.page ?? 1;
     const pageSize = filters.pageSize ?? OFFER_LIST_DEFAULT_PAGE_SIZE;
-    const listWhere: Prisma.OfferWhereInput = filters.refundAction
-      ? { AND: [where, refundRecommendationWhere(filters.refundAction, now)] }
-      : where;
-
     const [matching, fullRefund, viewed, newUnviewed, rows] = await this.prisma.$transaction(
-      [
-        this.prisma.offer.count({ where }),
-        this.prisma.offer.count({ where: { AND: [where, refundRecommendationWhere('FULL_REFUND', now)] } }),
-        this.prisma.offer.count({ where: { AND: [where, viewedInPolicyWhere] } }),
-        this.prisma.offer.count({ where: { AND: [where, { status: OfferStatus.SUBMITTED, viewedAt: null }] } }),
-        this.prisma.offer.findMany({
-          where: listWhere,
-          // The id breaks ties, so a page boundary never falls between two
-          // offers submitted in the same millisecond.
-          orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-          include: offerInclude,
-        }),
-      ],
-      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+      async (tx) => {
+        // OFFERS-SEARCH-OPT-001: the search's provider and request matches are
+        // resolved to ids on this transaction, so they come from the same
+        // snapshot as every count and the page below. A provider or request
+        // filter has already narrowed the list to that one's offers, read by
+        // its index; the search is then cheapest as a join over those few
+        // rows, and resolving it would read the other tables for nothing.
+        const where: Prisma.OfferWhereInput = !search
+          ? filterWhere
+          : providerId || requestId
+            ? { AND: [filterWhere, joinedOfferSearchWhere(search, scope)] }
+            : { AND: [filterWhere, await resolveOfferSearchWhere(tx, search, scope)] };
+        const listWhere: Prisma.OfferWhereInput = filters.refundAction
+          ? { AND: [where, refundRecommendationWhere(filters.refundAction, now)] }
+          : where;
+
+        // One statement at a time: a transaction holds one connection.
+        return [
+          await tx.offer.count({ where }),
+          await tx.offer.count({ where: { AND: [where, refundRecommendationWhere('FULL_REFUND', now)] } }),
+          await tx.offer.count({ where: { AND: [where, viewedInPolicyWhere] } }),
+          await tx.offer.count({ where: { AND: [where, { status: OfferStatus.SUBMITTED, viewedAt: null }] } }),
+          await tx.offer.findMany({
+            where: listWhere,
+            // The id breaks ties, so a page boundary never falls between two
+            // offers submitted in the same millisecond.
+            orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
+            skip: (page - 1) * pageSize,
+            take: pageSize,
+            include: offerInclude,
+          }),
+        ] as const;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead, timeout: OFFER_LIST_TRANSACTION_TIMEOUT_MS },
     );
 
     // Every match is either recommended for a refund or not.

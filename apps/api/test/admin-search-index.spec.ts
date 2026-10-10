@@ -59,13 +59,29 @@ beforeEach(async () => {
   statements = [];
 });
 
+// In index-name order (the `name` type sorts bytewise). OFFERS-SEARCH-OPT-001
+// adds the offer search resolvers' indexes: Offer, ProviderProfile id/contact
+// and every ServiceRequest one.
 const TRIGRAM_INDEXES = [
+  ['Offer', 'Offer_id_trgm_idx', 'id'],
   ['ProviderCreditTransaction', 'ProviderCreditTransaction_reasonSearch_trgm_idx', '"reasonSearch"'],
   ['ProviderCreditTransaction', 'ProviderCreditTransaction_reason_trgm_idx', 'reason'],
   ['ProviderProfile', 'ProviderProfile_businessNameSearch_trgm_idx', '"businessNameSearch"'],
   ['ProviderProfile', 'ProviderProfile_businessName_trgm_idx', '"businessName"'],
+  ['ProviderProfile', 'ProviderProfile_contactNameSearch_trgm_idx', '"contactNameSearch"'],
+  ['ProviderProfile', 'ProviderProfile_contactName_trgm_idx', '"contactName"'],
   ['ProviderProfile', 'ProviderProfile_email_trgm_idx', 'email'],
+  ['ProviderProfile', 'ProviderProfile_id_trgm_idx', 'id'],
   ['ProviderProfile', 'ProviderProfile_phone_trgm_idx', 'phone'],
+  ['ServiceRequest', 'ServiceRequest_citySearch_trgm_idx', '"citySearch"'],
+  ['ServiceRequest', 'ServiceRequest_city_trgm_idx', 'city'],
+  ['ServiceRequest', 'ServiceRequest_customerEmail_trgm_idx', '"customerEmail"'],
+  ['ServiceRequest', 'ServiceRequest_customerNameSearch_trgm_idx', '"customerNameSearch"'],
+  ['ServiceRequest', 'ServiceRequest_customerName_trgm_idx', '"customerName"'],
+  ['ServiceRequest', 'ServiceRequest_customerPhone_trgm_idx', '"customerPhone"'],
+  ['ServiceRequest', 'ServiceRequest_districtSearch_trgm_idx', '"districtSearch"'],
+  ['ServiceRequest', 'ServiceRequest_district_trgm_idx', 'district'],
+  ['ServiceRequest', 'ServiceRequest_id_trgm_idx', 'id'],
   // ADMIN-SEARCH-PAGINATION-001: the customer list's search box.
   ['User', 'User_email_trgm_idx', 'email'],
   ['User', 'User_nameSearch_trgm_idx', '"nameSearch"'],
