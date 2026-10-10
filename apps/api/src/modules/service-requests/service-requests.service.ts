@@ -139,6 +139,15 @@ export type ServiceRequestCreationContext = {
   /** The one provider allowed to see this request. */
   directShowcaseProviderId?: string;
   /**
+   * The category the request has to land in, when the caller already knows
+   * it. A vitrin lead is written to one card, and the card is for one service:
+   * the body still names the category (it is the marketplace body), but the
+   * category the routing walk arrives at has to be the card's own — otherwise a
+   * klima card would take a request the business is shown as boya badana.
+   * Absent on the public form, where the body's category is the whole answer.
+   */
+  requiredCategoryId?: string;
+  /**
    * When the customer proved control of the number, established *before* the
    * request existed. See `PhoneVerificationService.sendStandaloneCode`.
    */
@@ -434,6 +443,10 @@ export class ServiceRequestsService {
       throw new BadRequestException(
         `Yönlendirme tamamlanmadı: ${routing.pendingRouterQuestionKey} sorusu yanıtlanmalı.`,
       );
+    }
+
+    if (context.requiredCategoryId && routing.category.id !== context.requiredCategoryId) {
+      throw new BadRequestException('Bu talep yalnız kartın hizmet kategorisinde gönderilebilir.');
     }
 
     const category = await this.prisma.serviceCategory.findUniqueOrThrow({

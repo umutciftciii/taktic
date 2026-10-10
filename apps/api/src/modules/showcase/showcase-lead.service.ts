@@ -205,6 +205,8 @@ export class ShowcaseLeadService {
       user,
       {
         directShowcaseProviderId: live.providerId,
+        // The card is for one service; the body's category has to route to it.
+        requiredCategoryId: live.categoryId,
         // Filled by the hook below once the verification has actually been
         // redeemed inside the transaction. Set here as the value the request
         // row carries.
@@ -593,6 +595,7 @@ export class ShowcaseLeadService {
         cardId: true,
         providerId: true,
         kindSnapshot: true,
+        card: { select: { categoryId: true } },
         pinnedVersion: {
           select: {
             id: true,
@@ -612,6 +615,7 @@ export class ShowcaseLeadService {
       placementId: placement.id,
       cardId: placement.cardId,
       providerId: placement.providerId,
+      categoryId: placement.card.categoryId,
       kind: placement.kindSnapshot,
       versionId: placement.pinnedVersion.id,
       responseSlaUrgentHours: placement.pinnedVersion.responseSlaUrgentHours,

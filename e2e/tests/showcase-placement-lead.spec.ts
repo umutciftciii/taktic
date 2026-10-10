@@ -422,7 +422,19 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await expect(visitor.page.getByTestId('request-district')).toHaveValue(location.district);
       await visitor.page.getByTestId('request-city').selectOption('Ankara');
       await expect(visitor.page.getByTestId('request-district')).toHaveValue('');
+
+      // …and changing the district clears the neighbourhood that hung off it.
+      // A fixed, known pair for this step only: the card's own district is
+      // allocated per run and need not have a neighbourhood list.
+      const neighborhoodSelect = visitor.page.getByTestId('request-neighborhood');
+      await chooseLeadLocation(visitor.page, { city: 'İstanbul', district: 'Kadıköy' });
+      await neighborhoodSelect.selectOption('Caferağa Mah');
+      await expect(neighborhoodSelect).toHaveValue('Caferağa Mah');
+      await visitor.page.getByTestId('request-district').selectOption('Beşiktaş');
+      await expect(neighborhoodSelect).toHaveValue('');
+
       await chooseLeadLocation(visitor.page, location);
+      await expect(neighborhoodSelect).toHaveValue('');
 
       // The two options are rendered from this card's own approved promises,
       // beside — not instead of — the request's own timing select.
@@ -459,6 +471,15 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await expect(visitor.page.getByTestId('showcase-urgency-urgent')).toBeChecked();
       await expect(visitor.page.getByLabel('Telefon *')).toHaveValue(customerPhone);
 
+      // "Bu hafta" fills the two days in, exactly as on the category page;
+      // what the inputs hold is what the request has to store.
+      const preferredDate = await visitor.page.getByTestId('request-preferred-date').inputValue();
+      const preferredDateEnd = await visitor.page
+        .getByTestId('request-preferred-date-end')
+        .inputValue();
+      expect(preferredDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(preferredDateEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
       const requestsBefore = await prisma().serviceRequest.count();
       const leadsBefore = await prisma().showcaseLead.count();
 
@@ -479,6 +500,9 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       expect(lead.request.city).toBe(location.city);
       expect(lead.request.district).toBe(location.district);
       expect(lead.request.urgency).toBe('THIS_WEEK');
+      expect(lead.request.preferredDate?.toISOString().slice(0, 10)).toBe(preferredDate);
+      expect(lead.request.preferredDateEnd?.toISOString().slice(0, 10)).toBe(preferredDateEnd);
+      expect(lead.request.categoryId).toBe(category.id);
       expect(lead.request.phoneVerifiedAt).not.toBeNull();
       expect(lead.request.directShowcaseProviderId).toBe(owner.id);
 
