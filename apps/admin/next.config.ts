@@ -1,5 +1,4 @@
 import type { NextConfig } from 'next';
-import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD } from 'next/constants';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,7 +73,15 @@ const nextConfig: NextConfig = {
   },
 };
 
+/**
+ * The phases that compile code: `next/constants`' PHASE_PRODUCTION_BUILD and
+ * PHASE_DEVELOPMENT_SERVER, written as values because the runtime image loads
+ * this file as plain ESM, where an extensionless `next/constants` import does
+ * not resolve (the unit test pins them to Next's own constants).
+ */
+export const COMPILE_PHASES: readonly string[] = ['phase-production-build', 'phase-development-server'];
+
 export default function config(phase: string): NextConfig {
-  const compiles = phase === PHASE_PRODUCTION_BUILD || phase === PHASE_DEVELOPMENT_SERVER;
+  const compiles = COMPILE_PHASES.includes(phase);
   return compiles ? { ...nextConfig, env: { TAKTIC_RELEASE_VERSION: readReleaseVersion() } } : nextConfig;
 }

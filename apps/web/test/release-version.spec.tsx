@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { PHASE_DEVELOPMENT_SERVER, PHASE_PRODUCTION_BUILD, PHASE_PRODUCTION_SERVER } from 'next/constants';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import config, { readReleaseVersion } from '../next.config';
+import config, { COMPILE_PHASES, readReleaseVersion } from '../next.config';
 import { ReleaseVersion as Footer } from '../app/release-version';
 
 /**
@@ -31,6 +31,10 @@ describe('the release version', () => {
     for (const bad of [undefined, '', 'v1.2.3', '1.2', '1.2.3-rc.1', 1]) {
       expect(() => readReleaseVersion(rootWith(bad)), String(bad)).toThrow(/MAJOR\.MINOR\.PATCH/);
     }
+  });
+
+  it('names the compile phases exactly as Next does', () => {
+    expect(COMPILE_PHASES).toEqual([PHASE_PRODUCTION_BUILD, PHASE_DEVELOPMENT_SERVER]);
   });
 
   it('is inlined when code is compiled, and not read by next start', async () => {
