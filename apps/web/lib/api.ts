@@ -265,6 +265,63 @@ export type CustomerRequestAnswer = {
 /** The single-request read: the list row plus the answers. Owner only. */
 export type CustomerServiceRequestDetail = CustomerServiceRequest & {
   answers: CustomerRequestAnswer[];
+  /** REL-002 Faz 3; optional so an older API answer still reads. */
+  currentRound?: CustomerMatchRound;
+  rounds?: CustomerMatchRoundHistory[];
+  serviceIssue?: CustomerServiceIssueView;
+};
+
+export type MatchRoundStatus = 'OPEN' | 'MATCHED' | 'COMPLETED' | 'CANCELLED' | 'EXPIRED' | 'FAILED';
+
+export type ServiceIssueReason =
+  | 'PROVIDER_NO_SHOW'
+  | 'WORK_NOT_STARTED'
+  | 'WORK_NOT_COMPLETED'
+  | 'PROVIDER_STOPPED_WORK'
+  | 'PROVIDER_CANCELLED_BEFORE_START'
+  | 'OTHER';
+
+/** Where the request's matching stands right now (REL-002). */
+export type CustomerMatchRound = {
+  id: string;
+  roundNumber: number;
+  status: MatchRoundStatus;
+  openedAt: string;
+  publishedAt: string | null;
+  expiresAt: string | null;
+  matchedAt: string | null;
+  failedAt: string | null;
+};
+
+/** One round of the request's history, as its owner may see it. */
+export type CustomerMatchRoundHistory = CustomerMatchRound & {
+  isCurrent: boolean;
+  completedAt: string | null;
+  cancelledAt: string | null;
+  expiredAt: string | null;
+  provider: { businessName: string } | null;
+  offerId: string | null;
+  /** The owner's own report on a FAILED round; never the provider's side. */
+  issue: { incidentNumber: string; reason: ServiceIssueReason; reportedAt: string; status: 'RECORDED' } | null;
+  /** That round's conversation, read-only once the round ended. */
+  messageThreadId: string | null;
+};
+
+/**
+ * Whether the owner may report a service issue now — computed on the server
+ * from the accepted offer's promised days and the server's clock. The screen
+ * renders it and never judges a date itself.
+ */
+export type CustomerServiceIssueView = {
+  canReport: boolean;
+  roundId: string | null;
+  availableReasons: ServiceIssueReason[];
+  reasons: { reason: ServiceIssueReason; available: boolean; opensOn: string | null }[];
+  nextOpensOn: string | null;
+  unavailableReason: 'FEATURE_DISABLED' | 'NOT_MATCHED' | 'SCHEDULE_MISSING' | 'NOT_YET_AVAILABLE' | null;
+  supportOnly: boolean;
+  maxAutoRoundsReached: boolean;
+  consequence: 'REOPEN' | 'ADMIN_REVIEW' | null;
 };
 
 /** The customer's own view of their vitrin lead. Nothing about the placement. */
@@ -578,6 +635,13 @@ export type ProviderOffer = {
    * customer is and how to reach them stays with the contact-sharing flow.
    */
   acceptedWorkScope?: ProviderAcceptedWorkScope | null;
+  /**
+   * REL-002 Faz 3: what became of the match this offer won (detail route
+   * only). FAILED: the customer reported a service issue; the offer stays
+   * ACCEPTED and paid, the request is closed to this business.
+   */
+  matchOutcome?: 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | null;
+  matchFailure?: { failedAt: string; incidentNumber: string; reason: ServiceIssueReason } | null;
 };
 
 export type ProviderAcceptedWorkScope = {
@@ -1263,6 +1327,13 @@ export type MessageThreadSummary = {
   /** Whether the other party has seen everything in the thread. */
   counterpartHasRead: boolean;
   createdAt: string;
+  /**
+   * REL-002 Faz 3: ACTIVE while the match is live; READ_ONLY once its round
+   * ended (FAILED, COMPLETED, CANCELLED) — readable by the two of you, no new
+   * message and no read mark. Optional so an older API answer reads as active.
+   */
+  mode?: 'ACTIVE' | 'READ_ONLY';
+  closedReason?: 'FAILED' | 'COMPLETED' | 'CANCELLED' | null;
 };
 
 export type MessageThreadListEntry = MessageThreadSummary & {
@@ -1730,7 +1801,8 @@ export type ServiceRequestLifecycleStatus =
   | 'MATCHED'
   | 'COMPLETED'
   | 'CANCELLED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'MATCH_REVIEW';
 
 export type ShowcasePlacementStatus =
   | 'PENDING_ACTIVATION'
@@ -1996,7 +2068,10 @@ export type ShowcaseProviderLead = {
   request: {
     id: string;
     requestNumber: string | null;
-    status: ServiceRequestLifecycleStatus;
+    /** MATCH_ENDED once this business's match on the request failed (REL-002 Faz 3). */
+    status: ServiceRequestLifecycleStatus | 'MATCH_ENDED';
+    /** The lead is history: the request is no longer this business's to act on. */
+    matchEnded?: boolean;
     categoryId: string;
     category: { id: string; name: string; slug: string; offerCreditCost: number | null };
     city: string;

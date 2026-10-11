@@ -6,6 +6,7 @@ const PREFIX_BY_ENTITY: Record<NumberedEntityType, string> = {
   SERVICE_REQUEST: 'REQ',
   OFFER: 'OFF',
   PACKAGE_PURCHASE: 'PKG',
+  SERVICE_INCIDENT: 'INC',
 };
 
 const SEQUENCE_PADDING = 6;

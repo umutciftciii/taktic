@@ -12,6 +12,7 @@ import {
 import {
   AdminPermission,
   CreditTransactionType,
+  MatchRoundStatus,
   OfferEntitlementSource,
   OfferRefundBlockReason,
   OfferRejectionReason,
@@ -22,6 +23,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { parseAdminTextSearch } from '../../common/admin-search';
+import { isProviderExcluded } from '../../common/provider-request-matching';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -67,6 +69,7 @@ import {
   assertOfferRoundCurrentAndOpen,
   getCurrentRound,
   getCurrentRoundOrThrow,
+  providerExcludedException,
   transitionRoundToMatched,
 } from '../match-rounds/match-round-transitions';
 
@@ -341,6 +344,13 @@ export class OffersService {
 
         if (!offer) {
           throw new NotFoundException('Offer not found');
+        }
+
+        // REL-002 Faz 3: a failed match's winner is not refunded by offer,
+        // whatever else is true of it (checked first so the operator is told
+        // why, not that "the credit was already refunded").
+        if (await isFailedMatchWinner(tx, offer.id)) {
+          throw failedMatchNotRefundableException();
         }
 
         // The two things a manual refund still cannot do: invent a credit that
@@ -819,6 +829,12 @@ export class OffersService {
         if (!target || target.requestId !== requestId) {
           throw new NotFoundException('Offer not found');
         }
+        // REL-002 Faz 3, defense in depth: an excluded provider cannot offer
+        // in a later round (offer transaction + trigger), so this never
+        // matches in practice — but an acceptance of theirs must not either.
+        if (await isProviderExcluded(tx, requestId, target.providerId)) {
+          throw providerExcludedException();
+        }
         if (current.status === ServiceRequestStatus.APPROVED && current.matchedOfferId === null) {
           // Only an open request can reach the round check; a matched or
           // closed request keeps its long-standing answer below.
@@ -1138,6 +1154,41 @@ type RefundPolicyOfferShape = {
  * the automatic rule for permission is not a remedy. Both keep the clauses that
  * protect the money — there is a spend, and it has not already come back.
  */
+export const FAILED_MATCH_NOT_REFUNDABLE_CODE = 'FAILED_MATCH_NOT_REFUNDABLE';
+
+/**
+ * 409 for any refund of an offer whose match failed on a customer service
+ * issue (REL-002 Faz 3 §10). The acceptance was real and stays paid; an
+ * exceptional compensation is a separate, audited ManualCreditOperation
+ * (ADMIN_GRANT) so reports can tell it from the refund policy.
+ */
+export function failedMatchNotRefundableException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: FAILED_MATCH_NOT_REFUNDABLE_CODE,
+    message:
+      'Bu eşleşme hizmet aksaklığı bildirimiyle kapandı; teklif bazlı iade yapılamaz. Gerekiyorsa manuel kredi telafisi (kredi yükleme) kullanın.',
+  });
+}
+
+/** Whether the offer won a round that FAILED. One probe of the round's matchedOfferId unique. */
+export async function isFailedMatchWinner(
+  client: Pick<Prisma.TransactionClient, 'serviceRequestMatchRound'>,
+  offerId: string,
+): Promise<boolean> {
+  const failed = await client.serviceRequestMatchRound.count({
+    where: { matchedOfferId: offerId, status: MatchRoundStatus.FAILED },
+  });
+  return failed > 0;
+}
+
+async function assertNotFailedMatchWinner(tx: Prisma.TransactionClient, offerId: string): Promise<void> {
+  if (await isFailedMatchWinner(tx, offerId)) {
+    throw failedMatchNotRefundableException();
+  }
+}
+
 export async function refundOfferCreditInTransaction(
   tx: Prisma.TransactionClient,
   offer: {
@@ -1156,6 +1207,9 @@ export async function refundOfferCreditInTransaction(
   options: { enforceUnviewedPolicy?: boolean; createdById?: string | null } = {},
 ) {
   const enforceUnviewedPolicy = options.enforceUnviewedPolicy ?? true;
+  // REL-002 Faz 3: the accepted offer of a FAILED round is never refunded —
+  // by the worker, by a cancel or by hand. One bar for every refund path.
+  await assertNotFailedMatchWinner(tx, offer.id);
   const now = new Date();
   const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
   // API-HARDENING-001: the refund row is the highest balance this function
@@ -1471,6 +1525,7 @@ export async function refundOfferRechargeInTransaction(
   if (offer.creditRechargeTransactionId === null) {
     throw new ConflictException('Offer has no acceptance charge to refund');
   }
+  await assertNotFailedMatchWinner(tx, offer.id);
   const now = new Date();
   const currentBalance = await getProviderCreditBalanceInTransaction(tx, offer.providerId);
   if (!fitsCreditLedger(currentBalance, offer.creditCost)) {

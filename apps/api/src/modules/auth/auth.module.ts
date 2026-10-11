@@ -16,6 +16,8 @@ import {
   REQUEST_DRAFT_THROTTLE_TTL_MS,
 } from '../request-drafts/request-drafts.constants';
 import {
+  SERVICE_ISSUE_THROTTLE_LIMIT,
+  SERVICE_ISSUE_THROTTLE_TTL_MS,
   SERVICE_REQUEST_THROTTLE_LIMIT,
   SERVICE_REQUEST_THROTTLE_TTL_MS,
 } from '../service-requests/service-requests.constants';
@@ -57,6 +59,8 @@ import { RolesGuard } from './roles.guard';
       { name: 'auth', ttl: AUTH_THROTTLE_TTL_MS, limit: AUTH_THROTTLE_LIMIT },
       { name: 'request-drafts', ttl: REQUEST_DRAFT_THROTTLE_TTL_MS, limit: REQUEST_DRAFT_THROTTLE_LIMIT },
       { name: 'service-requests', ttl: SERVICE_REQUEST_THROTTLE_TTL_MS, limit: SERVICE_REQUEST_THROTTLE_LIMIT },
+      // REL-002 Faz 3: report attempts per customer (ServiceIssueThrottlerGuard).
+      { name: 'service-issues', ttl: SERVICE_ISSUE_THROTTLE_TTL_MS, limit: SERVICE_ISSUE_THROTTLE_LIMIT },
     ]),
   ],
   controllers: [AuthController, EmailVerificationController, RequestIdentityController],

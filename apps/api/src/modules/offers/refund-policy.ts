@@ -1,4 +1,4 @@
-import { OfferEntitlementSource, OfferRefundBlockReason, Prisma } from '@prisma/client';
+import { MatchRoundStatus, OfferEntitlementSource, OfferRefundBlockReason, Prisma } from '@prisma/client';
 
 export type RefundRecommendedAction = 'FULL_REFUND' | 'NO_REFUND';
 
@@ -514,6 +514,12 @@ export function refundCandidateWhere(now: Date): Prisma.OfferWhereInput {
     // opening the offer, and the worker has to see that.
     refundBlockedAt: null,
     unviewedRefundEligibleAt: { lte: now },
+    // REL-002 Faz 3: never the accepted offer of a FAILED round. Normally
+    // already out (an accepted offer was viewed, or an admin's decision
+    // blocked its refund); stated so the worker, the scan and the dashboard
+    // count cannot even list it. The round's other offers keep their own
+    // promise: a competitor's unviewed credit is refunded as before.
+    matchedForRound: { none: { status: MatchRoundStatus.FAILED } },
   };
 }
 

@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { SERVICE_ISSUE_REASON_LABELS } from '../../../../../lib/service-issue';
 import {
   apiFetch,
   fetchOrNotFound,
@@ -117,6 +118,17 @@ export default async function ProviderOfferDetailPage({
         Only for an offer the platform closed. The sentence is the API's own —
         it knows whether the credit came back; this screen does not decide that.
       */}
+      {offer.matchOutcome === 'FAILED' ? (
+        <div className="pdash-notice" role="status" data-testid="offer-match-failed">
+          Müşteri hizmet aksaklığı bildirdi — eşleşme sona erdi
+          {offer.matchFailure
+            ? ` (${SERVICE_ISSUE_REASON_LABELS[offer.matchFailure.reason]} · bildirim ${offer.matchFailure.incidentNumber}).`
+            : '.'}{' '}
+          Bu talebe artık erişemez ve teklif veremezsiniz; müşteri iletişim bilgileri ve mesajlaşma kapandı. Bildirim tek
+          başına hesabınıza bir yaptırım uygulamaz.
+        </div>
+      ) : null}
+
       {offer.closureNotice ? (
         <div className="pdash-notice" role="status" data-testid="offer-closure-notice">
           {offer.closureNotice}

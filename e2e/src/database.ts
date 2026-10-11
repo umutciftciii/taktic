@@ -50,6 +50,9 @@ const TRUNCATED_TABLES = [
   'PackagePurchase',
   // REL-002: a round references its request; the request, its offers, the
   // contact reveal and the thread reference rounds (CASCADE handles the cycle).
+  // REL-002 Faz 3: children of the round, the offer and the request.
+  'ServiceRequestProviderExclusion',
+  'ProviderServiceIncident',
   'ServiceRequestMatchRound',
   'Offer',
   'ServiceRequestAnswer',

@@ -32,3 +32,14 @@ export const SERVICE_REQUEST_THROTTLE_LIMIT = positiveInt(
  */
 export const SERVICE_REQUEST_MAX_PER_PHONE_PER_DAY = 5;
 export const SERVICE_REQUEST_MAX_OPEN_PER_PHONE = 10;
+
+/**
+ * REL-002 Faz 3: report attempts per customer on
+ * `POST /service-requests/:id/service-issue` (ServiceIssueThrottlerGuard).
+ * A deployment tuning value like the creation budget above, overridable for
+ * the end-to-end suite; the persistent per-customer budget on *successful*
+ * reports lives in ServiceIssueService and does not move.
+ */
+export const SERVICE_ISSUE_THROTTLE_TTL_MS =
+  positiveInt(process.env.SERVICE_ISSUE_RATE_LIMIT_WINDOW_SECONDS, 600) * 1000;
+export const SERVICE_ISSUE_THROTTLE_LIMIT = positiveInt(process.env.SERVICE_ISSUE_RATE_LIMIT_MAX, 10);

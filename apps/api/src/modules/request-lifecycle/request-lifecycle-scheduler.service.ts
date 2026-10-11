@@ -5,6 +5,7 @@ import { readSchedulerCron } from '../../common/scheduler-cron';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
 import { PackageRefundNotificationOutbox } from '../notifications/package-refund-notification-outbox.service';
 import { RequestCancellationOutbox } from '../notifications/request-cancellation-outbox.service';
+import { ServiceIssueOutbox } from '../notifications/service-issue-outbox.service';
 import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
 import { SchedulerRunRegistry } from '../operations-settings/scheduler-run-registry.service';
 import { SchedulerSettingsService } from '../operations-settings/scheduler-settings.service';
@@ -52,6 +53,8 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     private readonly packageRefundNotices: PackageRefundNotificationOutbox,
     @Inject(RequestCancellationOutbox)
     private readonly cancellationNotices: RequestCancellationOutbox,
+    @Inject(ServiceIssueOutbox)
+    private readonly serviceIssueNotices: ServiceIssueOutbox,
   ) {}
 
   onModuleInit() {
@@ -102,12 +105,15 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
       const refundNotices = await this.packageRefundNotices.deliverPending({ limit });
       // And the request cancellation notices (PR #118), on the same terms.
       const cancellationNotices = await this.cancellationNotices.deliverPending({ limit });
+      // And the service-issue notices (REL-002 Faz 3), on the same terms.
+      const serviceIssueNotices = await this.serviceIssueNotices.deliverPending({ limit });
       const summary =
         `processed=${result.processed} expired=${result.expired} ` +
         `skipped=${result.skipped} failed=${result.failed} ` +
         `enqueued=${result.enqueued} notified=${result.notified} ` +
         `publishSent=${publish.sent} reviewInvitationsSent=${invitations.sent} ` +
-        `packageRefundNoticesSent=${refundNotices.sent} cancellationNoticesSent=${cancellationNotices.sent}`;
+        `packageRefundNoticesSent=${refundNotices.sent} cancellationNoticesSent=${cancellationNotices.sent} ` +
+        `serviceIssueNoticesSent=${serviceIssueNotices.sent}`;
       this.logger.log(`Request expiry summary ${summary}`);
       await run.succeed(summary);
     } catch (error) {

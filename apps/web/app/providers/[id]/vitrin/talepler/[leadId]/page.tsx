@@ -97,6 +97,12 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
         </span>
       </header>
 
+      {lead.request.matchEnded ? (
+        <div className="pdash-notice" role="status" data-testid="lead-match-ended">
+          Eşleşme sonlandı: müşteri bu talepteki eşleşme için hizmet aksaklığı bildirdi. Bu talep sizin için kapandı.
+        </div>
+      ) : null}
+
       {error && isOfferScheduleErrorCode(error) ? (
         <OfferScheduleNotice code={error} />
       ) : error ? (

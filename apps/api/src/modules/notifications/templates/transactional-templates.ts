@@ -219,6 +219,18 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'request-cancelled-customer',
   'request-cancelled-winner',
   'request-cancelled-offer',
+  // REL-002 Faz 3: a customer reported a service issue on a match. Five
+  // messages, each to one audience. The customer is told the report is on
+  // record and what happens next (open for offers again, or our team takes
+  // over after the third round); the provider whose match ended is told why
+  // in the customer's own words with any contact detail masked, and nothing
+  // about the customer; the support inbox is told an incident exists. Nothing
+  // about credit in any of them: a failed match refunds nothing.
+  'service-issue-recorded',
+  'request-reopened',
+  'request-match-review',
+  'provider-incident-opened',
+  'provider-incident-new',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -310,6 +322,16 @@ export function transactionalSubject(
       return withSuffix('Kabul edilen teklifinizin talebi iptal edildi', text(data.requestNumber));
     case 'request-cancelled-offer':
       return withSuffix('Teklif verdiğiniz talep iptal edildi', text(data.requestNumber));
+    case 'service-issue-recorded':
+      return withSuffix('Hizmet aksaklığı bildiriminiz alındı', text(data.requestNumber));
+    case 'request-reopened':
+      return withSuffix('Talebiniz yeniden teklif almaya açıldı', text(data.requestNumber));
+    case 'request-match-review':
+      return withSuffix('Talebiniz ekibimiz tarafından inceleniyor', text(data.requestNumber));
+    case 'provider-incident-opened':
+      return withSuffix('Müşteri hizmet aksaklığı bildirdi', text(data.requestNumber));
+    case 'provider-incident-new':
+      return withSuffix('Yeni hizmet aksaklığı bildirimi', text(data.incidentNumber));
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
     case 'showcase-placement-activated':
@@ -462,6 +484,16 @@ export function buildDocument(
       return requestCancelledWinner(subject, fullName, data);
     case 'request-cancelled-offer':
       return requestCancelledOffer(subject, fullName, data);
+    case 'service-issue-recorded':
+      return serviceIssueRecorded(subject, fullName, data);
+    case 'request-reopened':
+      return requestReopened(subject, fullName, data);
+    case 'request-match-review':
+      return requestMatchReview(subject, fullName, data);
+    case 'provider-incident-opened':
+      return providerIncidentOpened(subject, fullName, data);
+    case 'provider-incident-new':
+      return providerIncidentNew(subject, fullName, data);
     case 'match-customer':
       return matchCustomer(subject, fullName, data);
     case 'request-available':
@@ -3097,6 +3129,162 @@ function requestCancelledOffer(subject: string, fullName: string, data: Data): E
       ]),
       spacer(24),
       cta('Uygun talepleri gör', text(data.requestsUrl), 'primary'),
+    ]),
+  };
+}
+
+// ──────────── REL-002 Faz 3 · service issue → customer, provider, support ────────────
+
+/**
+ * The customer's receipt: the report is on record. Which match it closed,
+ * why, and when — and that no other step is needed from them for it.
+ */
+function serviceIssueRecorded(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  return {
+    subject,
+    preheader: 'Hizmet aksaklığı bildiriminiz kayda geçti.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Bildirim alındı',
+    heading: 'Hizmet aksaklığı bildiriminiz alındı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talebinizdeki` : 'Talebinizdeki'} eşleşme, bildiriminiz üzerine kapatıldı. ` +
+          'Bu hizmet veren talebinize bir daha teklif veremez.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Bildirim no', text(data.incidentNumber)),
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Sebep', text(data.reasonLabel)),
+        row('Bildirim zamanı', formatDateTime(data.reportedAt)),
+      ]),
+      spacer(24),
+      cta('Talebinizi görüntüleyin', text(data.requestUrl), 'primary'),
+    ]),
+  };
+}
+
+/** The request is open for offers again (Round 2 or 3), or will be once reviewed. */
+function requestReopened(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const awaitingReview = text(data.awaitingReview) === '1';
+  return {
+    subject,
+    preheader: awaitingReview
+      ? 'Talebiniz kısa bir incelemeden sonra yeniden yayınlanacak.'
+      : 'Talebiniz yeniden hizmet verenlere açıldı.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Yeniden açıldı',
+    heading: 'Talebiniz yeniden teklif almaya açıldı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talebiniz` : 'Talebiniz'} ` +
+          (awaitingReview
+            ? 'kısa bir incelemeden sonra bölgenizdeki hizmet verenlere yeniden açılacak.'
+            : 'bölgenizdeki hizmet verenlere yeniden açıldı; yeni teklifler bu talebe gelecek.') +
+          ' Eşleşmesi kapatılan hizmet veren bu talebi göremez.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Eşleşme turu', text(data.roundNumber)),
+      ]),
+      spacer(24),
+      cta('Talebinizi görüntüleyin', text(data.requestUrl), 'primary'),
+    ]),
+  };
+}
+
+/** Round 3 failed: no automatic round; the team takes over. */
+function requestMatchReview(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  return {
+    subject,
+    preheader: 'Talebiniz ekibimiz tarafından inceleniyor.',
+    audience: 'HİZMET ALAN',
+    kicker: 'İnceleniyor',
+    heading: 'Talebiniz ekibimiz tarafından inceleniyor',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talebinizde` : 'Talebinizde'} üst üste eşleşme sorunu yaşandığı için ` +
+          'talebiniz otomatik olarak yeniden yayınlanmadı. Ekibimiz talebinizi inceleyip size dönüş yapacak.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Bildirim no', text(data.incidentNumber)),
+      ]),
+      spacer(24),
+      cta('Talebinizi görüntüleyin', text(data.requestUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * The provider whose match ended. The reason and the customer's note with any
+ * contact detail masked; never the customer's name, phone, e-mail or address.
+ * Nothing about credit: the acceptance stays paid.
+ */
+function providerIncidentOpened(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  return {
+    subject,
+    preheader: 'Müşteri hizmet aksaklığı bildirdi; eşleşme sona erdi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Eşleşme sona erdi',
+    heading: 'Müşteri hizmet aksaklığı bildirdi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `${requestNumber ? `${requestNumber} numaralı talepteki` : 'Talepteki'} eşleşmeniz, müşterinin hizmet aksaklığı bildirimiyle sona erdi. ` +
+          'Bu talebe artık erişemez ve teklif veremezsiniz; müşteri iletişim bilgileri ve mesajlaşma kapandı.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Konum', joinNonEmpty([text(data.district), text(data.city)], ', ')),
+        row('Sebep', text(data.reasonLabel)),
+        row('Müşterinin açıklaması', text(data.maskedNote)),
+        row('Bildirim no', text(data.incidentNumber)),
+      ]),
+      spacer(24),
+      cta('Teklifi görüntüle', text(data.offerUrl), 'primary'),
+      spacer(20),
+      note('Bu bildirim tek başına hesabınıza bir yaptırım uygulamaz; kayıt ekibimiz tarafından değerlendirilir.'),
+    ]),
+  };
+}
+
+/** The support inbox: an incident exists, and where to open it. No free text. */
+function providerIncidentNew(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir müşteri hizmet aksaklığı bildirdi.',
+    audience: 'DESTEK',
+    kicker: 'Yeni bildirim',
+    heading: 'Yeni hizmet aksaklığı bildirimi',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Bir müşteri, eşleştiği hizmet veren için hizmet aksaklığı bildirdi. Talep sistem tarafından yeniden açıldı ya da incelemeye alındı.'),
+      spacer(4),
+      dataTable([
+        row('Bildirim no', text(data.incidentNumber)),
+        row('Talep', joinNonEmpty([text(data.requestNumber), text(data.categoryName)], ' · ')),
+        row('Hizmet veren', text(data.businessName)),
+        row('Sebep', text(data.reasonLabel)),
+        row('Sonuç', text(data.outcomeLabel)),
+      ]),
+      spacer(24),
+      cta('Talebi panelde aç', text(data.adminRequestUrl), 'primary'),
     ]),
   };
 }

@@ -84,6 +84,12 @@ export function requestSummaryBody(
     return 'Bu talep tamamlandı olarak işaretlendi.';
   }
 
+  // REL-002 Faz 3: the third automatic round failed; no new round opens on
+  // its own.
+  if (summary.status === 'MATCH_REVIEW') {
+    return 'Talebiniz ekibimiz tarafından inceleniyor. Size dönüş yapacağız.';
+  }
+
   // Neutral and factual: the window closed, and that is all it means.
   if (summary.status === 'EXPIRED') {
     return summary.expiredAt

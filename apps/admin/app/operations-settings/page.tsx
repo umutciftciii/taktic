@@ -7,6 +7,7 @@ import {
   OPERATIONS_SETTING_LABELS,
   OperationsSettings,
   ProviderReviewSettings,
+  ServiceIssueSettings,
   requireAdmin,
   SCHEDULER_JOB_COPY,
   SchedulerSettings,
@@ -18,6 +19,7 @@ import { saveOperationsSettingsAction } from './actions';
 import { AutoPublishToggle } from './auto-publish-toggle';
 import { CampaignEngineToggle } from './campaign-engine-toggle';
 import { ProviderReviewsToggle } from './provider-reviews-toggle';
+import { ServiceIssuesToggle } from './service-issues-toggle';
 import { SchedulerToggle } from './scheduler-toggle';
 import { AuditTable, SettingRow, SettingsGroup, switchStateLabel } from './setting-row';
 import { RefundWindowSubmit } from './refund-window-submit';
@@ -76,6 +78,10 @@ const OK_MESSAGES: Record<string, string> = {
     'Hizmet veren değerlendirmeleri açıldı. Bundan sonra tamamlanan işlerde müşteriye değerlendirme daveti gider; mevcut değerlendirmeler public profil ve teklif kartlarında görünür.',
   'provider-reviews-off':
     'Hizmet veren değerlendirmeleri kapatıldı. Müşteri değerlendirme yazamaz, davet gönderilmez; mevcut değerlendirmeler silinmez, yalnız gizlenir.',
+  'service-issues-on':
+    'Hizmet aksaklığı bildirimi açıldı. Müşteriler eşleşmiş taleplerinde, hizmet verenin taahhüt ettiği tarihe göre sorun bildirebilir.',
+  'service-issues-off':
+    'Hizmet aksaklığı bildirimi kapatıldı. Müşteriler artık sorun bildiremez; önceden açılmış turlar ve dışlamalar olduğu gibi kalır.',
   'campaign-engine-on':
     'Kampanya motoru açıldı. Bundan sonraki gerçek olaylar (onay, kanıt, ödeme) kaydedilir ve aktif kampanyalar promosyon kredisi verebilir; geçmiş olaylar için hak ediş üretilmez.',
   'campaign-engine-off':
@@ -91,12 +97,13 @@ export default async function OperationsSettingsPage({
   const errorMessage = (params.error ?? '').trim();
   const okMessage = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
 
-  const [settings, schedulers, publish, reviews, engine] = await Promise.all([
+  const [settings, schedulers, publish, reviews, engine, serviceIssues] = await Promise.all([
     apiFetch<OperationsSettings>('/operations-settings'),
     apiFetch<SchedulerSettings>('/operations-settings/schedulers'),
     apiFetch<MarketplacePublishSettings>('/operations-settings/marketplace-publish'),
     apiFetch<ProviderReviewSettings>('/operations-settings/provider-reviews'),
     apiFetch<CampaignEngineSettings>('/operations-settings/campaign-engine'),
+    apiFetch<ServiceIssueSettings>('/operations-settings/service-issues'),
   ]);
 
   /*
@@ -116,6 +123,7 @@ export default async function OperationsSettingsPage({
   const canToggleSchedulers = can('SCHEDULERS_WRITE');
   const canToggleAutoPublish = can('MARKETPLACE_PUBLISH_WRITE');
   const canToggleProviderReviews = can('PROVIDER_REVIEWS_SETTING_WRITE');
+  const canToggleServiceIssues = can('SERVICE_ISSUE_SETTING_WRITE');
 
   // A rejected save carries the operator's own value back in the query, so the
   // form re-hydrates with what they typed rather than with what is stored.
@@ -310,6 +318,28 @@ export default async function OperationsSettingsPage({
             control={canToggleProviderReviews ? <ProviderReviewsToggle enabled={reviews.enabled} /> : null}
           />
 
+          {/* REL-002 Faz 3: the customer service-issue report. Ships off. */}
+          <SettingRow
+            id="hizmet-aksakligi"
+            testId="service-issues"
+            name="Hizmet aksaklığı bildirimi"
+            badge={stateBadge(serviceIssues.enabled, 'service-issues-state')}
+            description="Açıkken müşteri, eşleşmiş talebinde hizmet veren gelmez ya da işi yapmazsa eşleşmeyi kapatabilir; talep yeniden teklife açılır."
+            whatHappens={{
+              question: serviceIssues.enabled ? 'Kapatırsam ne olur?' : 'Açarsam ne olur?',
+              answer: (
+                <p>
+                  Müşteri, hizmet verenin teklifte verdiği başlangıç/bitiş gününe göre (İstanbul saatiyle gün bittikten
+                  sonra) sorun bildirir. Eşleşme kapanır, hizmet veren o talepten kalıcı olarak dışlanır ve talep yeni bir
+                  turla yeniden teklife açılır; üçüncü turdan sonra otomatik tur açılmaz, talep ekip incelemesine düşer.
+                  Başarısız eşleşmenin kredisi iade edilmez. Kapalıyken müşteri sorun bildiremez; daha önce açılmış
+                  turlar ve dışlamalar geri alınmaz.
+                </p>
+              ),
+            }}
+            control={canToggleServiceIssues ? <ServiceIssuesToggle enabled={serviceIssues.enabled} /> : null}
+          />
+
           {/*
             The campaign engine (CMP-004 S4). Off by default and read
             fail-closed by every engine path; this is its only writer. Unlike
@@ -470,6 +500,16 @@ export default async function OperationsSettingsPage({
               testId="provider-reviews-audit"
               emptyText="Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda."
               emptyTestId="provider-reviews-audit-empty"
+              formatValue={switchStateLabel}
+              formatPrevious={defaultOff}
+            />
+            <AuditTable
+              title="Hizmet aksaklığı bildirimi"
+              caption="Hizmet aksaklığı bildirimi ayarı değişiklikleri"
+              changes={serviceIssues.recentChanges}
+              testId="service-issues-audit"
+              emptyText="Henüz bir değişiklik kaydı yok; ayar varsayılan (kapalı) durumda."
+              emptyTestId="service-issues-audit-empty"
               formatValue={switchStateLabel}
               formatPrevious={defaultOff}
             />

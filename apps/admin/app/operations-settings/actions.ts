@@ -8,6 +8,7 @@ import {
   MarketplacePublishSettings,
   OperationsSettings,
   ProviderReviewSettings,
+  ServiceIssueSettings,
   SCHEDULER_JOB_COPY,
   SCHEDULER_JOB_KEYS,
   type SchedulerJobKey,
@@ -224,6 +225,50 @@ export async function toggleProviderReviewsAction(formData: FormData) {
   revalidatePath('/operations-settings');
   revalidatePath('/provider-reviews/reports');
   redirect(providerReviewsUrl({ ok: enabled === 'true' ? 'provider-reviews-on' : 'provider-reviews-off' }));
+}
+
+/**
+ * REL-002 Faz 3: switches the customer service-issue report on or off. Both
+ * directions are confirmed in the switch's dialog, each with its own proof.
+ * The API accepts it from SERVICE_ISSUE_SETTING_WRITE; the identity comes from
+ * the session, never the form.
+ */
+export async function toggleServiceIssuesAction(formData: FormData) {
+  const enabled = readString(formData, 'enabled').trim();
+
+  if (enabled !== 'true' && enabled !== 'false') {
+    redirect(serviceIssuesUrl({ error: 'Durum yalnızca açık veya kapalı olabilir.' }));
+  }
+  if (
+    !(await hasConfirmationProof(
+      formData,
+      enabled === 'true' ? 'operations.service-issues-enable' : 'operations.service-issues-disable',
+    ))
+  ) {
+    redirect(serviceIssuesUrl({ error: CONFIRMATION_PROOF_REFUSAL_MESSAGE }));
+  }
+
+  let errorMessage: string | null = null;
+  try {
+    await apiFetch<ServiceIssueSettings>('/operations-settings/service-issues', {
+      method: 'PUT',
+      body: JSON.stringify({ enabled: enabled === 'true' }),
+    });
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    errorMessage = extractApiMessage(error);
+  }
+
+  if (errorMessage) {
+    redirect(serviceIssuesUrl({ error: errorMessage }));
+  }
+
+  revalidatePath('/operations-settings');
+  redirect(serviceIssuesUrl({ ok: enabled === 'true' ? 'service-issues-on' : 'service-issues-off' }));
+}
+
+function serviceIssuesUrl(params: Record<string, string>): string {
+  return `/operations-settings?${new URLSearchParams(params).toString()}#hizmet-aksakligi`;
 }
 
 /** Back to the reviews card, so the operator lands on what they changed. */

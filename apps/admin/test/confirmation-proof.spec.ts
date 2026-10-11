@@ -636,6 +636,24 @@ const CASES: Case[] = [
     refused: refusedRedirect('#degerlendirmeler'),
   },
   {
+    name: 'operations: hizmet aksaklığı bildirimini aç',
+    key: 'operations.service-issues-enable',
+    run: async (proof) => {
+      const { toggleServiceIssuesAction } = await import('../app/operations-settings/actions');
+      return toggleServiceIssuesAction(form({ enabled: 'true' }, proof));
+    },
+    refused: refusedRedirect('#hizmet-aksakligi'),
+  },
+  {
+    name: 'operations: hizmet aksaklığı bildirimini kapat',
+    key: 'operations.service-issues-disable',
+    run: async (proof) => {
+      const { toggleServiceIssuesAction } = await import('../app/operations-settings/actions');
+      return toggleServiceIssuesAction(form({ enabled: 'false' }, proof));
+    },
+    refused: refusedRedirect('#hizmet-aksakligi'),
+  },
+  {
     name: 'operations: paket yenilemeyi kapat',
     key: 'scheduler.disable',
     run: async (proof) => {

@@ -11,6 +11,7 @@ import { RequestExpiryOutbox } from './request-expiry-outbox.service';
 import { RequestPublishOutbox } from './request-publish-outbox.service';
 import { PackageRefundNotificationOutbox } from './package-refund-notification-outbox.service';
 import { RequestCancellationOutbox } from './request-cancellation-outbox.service';
+import { ServiceIssueOutbox } from './service-issue-outbox.service';
 import { ReviewInvitationOutbox } from './review-invitation-outbox.service';
 import { ShowcaseLifecycleOutbox } from './showcase-lifecycle-outbox.service';
 import { resolveEmailTransportKind } from './email-transport';
@@ -77,6 +78,9 @@ const smsAdapter = resolveSmsTransportKind() === 'file-outbox' ? FileOutboxSmsAd
     // refund transition, swept by the same lifecycle tick.
     PackageRefundNotificationOutbox,
     RequestCancellationOutbox,
+    // REL-002 Faz 3: the service-issue notices, enqueued inside the report's
+    // transaction, swept by the same lifecycle tick.
+    ServiceIssueOutbox,
   ],
   exports: [
     NotificationPort,
@@ -90,6 +94,7 @@ const smsAdapter = resolveSmsTransportKind() === 'file-outbox' ? FileOutboxSmsAd
     ReviewInvitationOutbox,
     PackageRefundNotificationOutbox,
     RequestCancellationOutbox,
+    ServiceIssueOutbox,
   ],
 })
 export class NotificationsModule {}

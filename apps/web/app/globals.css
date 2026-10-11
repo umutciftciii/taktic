@@ -6564,6 +6564,31 @@ body.has-drawer-open {
 .customer-cancel-form { display: grid; gap: var(--space-4); }
 .report-dialog-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
 
+/* REL-002 Faz 3 — the customer's service-issue report: the same frame. */
+.service-issue-form { display: grid; gap: var(--space-4); }
+.service-issue-reasons { display: grid; gap: var(--space-2); margin: 0; padding: 0; border: 0; }
+.service-issue-reasons legend { font-weight: 600; margin-bottom: var(--space-2); }
+.service-issue-reason { display: grid; grid-template-columns: auto 1fr; gap: 2px var(--space-2); align-items: center; font-size: 14px; }
+.service-issue-reason .cdash-offer-sub { grid-column: 2; }
+.service-issue-reason.is-disabled { color: var(--color-text-muted, #6b6560); }
+.service-issue-form textarea { width: 100%; box-sizing: border-box; font: inherit; }
+.service-issue-consequence { display: grid; gap: var(--space-1); }
+.cdash-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* A message thread whose match ended: readable, no composer. */
+.thread-closed-tag { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 400px) {
+  .service-issue-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; box-sizing: border-box; }
+}
+
 /* The return screen after payment: one statement, one action. */
 .vitrin-return {
   display: flex;

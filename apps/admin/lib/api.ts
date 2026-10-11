@@ -229,7 +229,9 @@ export type ServiceRequestStatus =
   | 'COMPLETED'
   | 'REJECTED'
   | 'CANCELLED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  /** REL-002 Faz 3: Round 3 failed; no automatic round, waiting for staff (Faz 5 acts on it). */
+  | 'MATCH_REVIEW';
 
 export type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
@@ -2024,6 +2026,7 @@ export function requestStatusLabel(status: string) {
     REJECTED: 'Reddedildi',
     CANCELLED: 'İptal Edildi',
     EXPIRED: 'Süresi Doldu',
+    MATCH_REVIEW: 'Eşleşme İncelemesi',
   };
 
   return labels[status] ?? statusLabel(status);
@@ -2711,6 +2714,8 @@ export type CampaignEngineSettings = {
  * writes it, which is every operator this app admits.
  */
 export type ProviderReviewSettings = MarketplacePublishSettings;
+/** REL-002 Faz 3: the customer service-issue switch, same shape. */
+export type ServiceIssueSettings = MarketplacePublishSettings;
 
 /* ---- provider reviews ---------------------------------------------------- */
 
@@ -4213,6 +4218,12 @@ export function adminPermissionLabel(permission: AdminPermission): {
   }
   if (permission === 'SEO_REDIRECTS_WRITE') {
     return { area: 'SEO ve adresler', action: 'yönlendirmeler ve 404 önerisi kararları' };
+  }
+
+  // REL-002 Faz 3: the customer service-issue switch, with the other
+  // operations switches.
+  if (permission === 'SERVICE_ISSUE_SETTING_WRITE') {
+    return { area: 'Operasyon ayarları', action: 'hizmet aksaklığı bildirimini açma/kapama' };
   }
 
   // PR #118: the operations cancel and its one audited exception.

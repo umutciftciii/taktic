@@ -48,6 +48,9 @@ export const CONFIRMATION_PROOF_KEYS = [
   'operations.auto-publish-enable',
   'operations.reviews-enable',
   'operations.reviews-disable',
+  // REL-002 Faz 3: the customer service-issue switch, each direction.
+  'operations.service-issues-enable',
+  'operations.service-issues-disable',
   'operations.refund-window-update',
   'package-purchase.status',
   'package-refund.open',

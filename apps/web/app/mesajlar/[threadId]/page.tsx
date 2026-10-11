@@ -59,7 +59,11 @@ async function Conversation({ user, threadId }: { user: AuthUser; threadId: stri
   // Awaited before the frame renders, so the sidebar badge the shell is about
   // to load already reflects this visit. The history above was read first, so
   // what is on screen is what was unread a moment ago — and is now read.
-  await markThreadRead(thread.id);
+  const readOnly = thread.mode === 'READ_ONLY';
+  if (!readOnly) {
+    // A read-only (ended) conversation keeps its read mark; the API refuses it.
+    await markThreadRead(thread.id);
+  }
 
   return (
     <MessagingFrame user={user}>
@@ -73,6 +77,11 @@ async function Conversation({ user, threadId }: { user: AuthUser; threadId: stri
         <h1 className="cdash-page-title" data-testid="thread-title">
           {thread.counterpart.name}
         </h1>
+        {readOnly ? (
+          <span className="tag tag-neutral thread-closed-tag" data-testid="thread-closed-tag">
+            Kapandı · salt okunur
+          </span>
+        ) : null}
         <p className="cdash-page-sub">
           {thread.request.category.name} ·{' '}
           {thread.request.requestNumber ?? `#${thread.request.id.slice(-6).toUpperCase()}`} ·{' '}
@@ -93,6 +102,7 @@ async function Conversation({ user, threadId }: { user: AuthUser; threadId: stri
         initialMessages={thread.messages}
         initialCursor={thread.latestCursor}
         counterpartHasRead={thread.counterpartHasRead}
+        readOnly={readOnly}
       />
 
       {thread.hasMoreBefore ? (

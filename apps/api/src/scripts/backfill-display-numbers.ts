@@ -285,6 +285,10 @@ function entityKeyFor(entityType: NumberedEntityType): EntityKey {
       return 'offer';
     case NumberedEntityType.PACKAGE_PURCHASE:
       return 'packagePurchase';
+    case NumberedEntityType.SERVICE_INCIDENT:
+      // Born numbered (REL-002 Faz 3): the incident is written with its
+      // number in the same transaction, so there is never anything to backfill.
+      throw new Error('SERVICE_INCIDENT numbers are never backfilled');
   }
 }
 

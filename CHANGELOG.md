@@ -24,6 +24,28 @@ are in [docs/release.md](docs/release.md).
   `request-expired-*` keys gain `:r<N>` from Round 2 on (Round 1 keys
   unchanged). With one round per request the product behaves as before.
   Internal read surface: `GET /service-requests/:id/rounds` (REQUESTS_READ).
+- REL-002 Faz 3: customer service issue (behind
+  `OperationsSettings.serviceIssueReportingEnabled`, **off by default**;
+  migration `20261012090000_add_service_issue_reopen_core`). A customer whose
+  matched provider did not deliver can close the match with
+  `POST /service-requests/:id/service-issue` (reason, optional note,
+  idempotency key; eligibility from the accepted offer's promised days in
+  Europe/Istanbul, server clock only). The match round becomes `FAILED`
+  (terminal), a `ProviderServiceIncident` is recorded (`REPORTED`, no
+  penalty), the provider is permanently excluded from the request on every
+  surface and by an Offer INSERT trigger, and the request reopens into Round 2
+  or 3 (a direct vitrin lead goes through the ordinary marketplace publish
+  gate). After a third failure the request goes to `MATCH_REVIEW` (no
+  automatic Round 4). The failed match is never refunded (offer refunds of it
+  answer `409 FAILED_MATCH_NOT_REFUNDABLE`). New notices:
+  `service-issue-recorded`, `request-reopened`, `request-match-review`,
+  `provider-incident-opened`, `provider-incident-new`. Customer detail
+  (`GET /service-requests/my/:id`) gains `currentRound`, `rounds[]` and
+  `serviceIssue`; the request page offers the report and lists earlier
+  matches. Admin: the switch (permission `SERVICE_ISSUE_SETTING_WRITE`), the
+  `MATCH_REVIEW` status and filter, incident and exclusion data on
+  `GET /service-requests/:id/rounds`. Ops: `scripts/ops/rel-002-m3-rollback.sql`
+  (only before the flow is used; afterwards forward-fix only).
 
 ### Changed
 
@@ -39,6 +61,11 @@ are in [docs/release.md](docs/release.md).
 - Shortlisting or rejecting an offer of an expired request now answers
   `409 OFFER_ROUND_CLOSED` (its round is closed); the inbox's unread badge
   counts only threads of a live match.
+- A conversation whose match ended (completed, cancelled or failed) is now
+  readable by its two participants, read-only, instead of answering `403`:
+  `GET` thread/messages return `mode: READ_ONLY` and a `closedReason`; sending
+  and marking read answer `403 THREAD_READ_ONLY`. The screens label it
+  "Kapandı · salt okunur" and show no composer.
 
 ## 0.1.0 - 2026-10-10
 

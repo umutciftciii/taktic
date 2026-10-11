@@ -1,4 +1,4 @@
--- REL-002 preflight (M1 and M2) — read-only.
+-- REL-002 preflight (M1, M2 and M3) — read-only.
 --
 -- Run before applying the match-round migration (M1) to any database:
 --
@@ -115,5 +115,21 @@ SELECT
                     AND mr."matchedAt" IS NULL AND mr."completedAt" IS NULL AND mr."cancelledAt" IS NULL AND mr."failedAt" IS NULL
        ELSE false END)
         OR (mr."publishedAt" IS NULL) <> (mr."expiresAt" IS NULL))                   AS round_shape_violations;
+
+\echo '== M3 (Faz 3) — before 20261012090000_add_service_issue_reopen_core =='
+\echo '   integrity: must be 0 (M3 adds no backfill; its CHECKs hold on any M2 data)'
+SELECT
+  (SELECT count(*) FROM "ServiceRequest" r
+     WHERE (SELECT count(*) FROM "ServiceRequestMatchRound" mr WHERE mr."requestId" = r.id) > 1) AS request_with_several_rounds,
+  (SELECT count(*) FROM "ServiceRequestMatchRound" WHERE "failedAt" IS NOT NULL)      AS round_with_failed_at;
+\echo '   information: matched requests whose accepted offer has no promised days —'
+\echo '   once the feature is on, these customers are sent to support (no fallback date)'
+SELECT
+  (SELECT count(*) FROM "ServiceRequest" r JOIN "Offer" o ON o.id = r."matchedOfferId"
+     WHERE r.status = 'MATCHED'
+       AND (o."estimatedStartDate" IS NULL OR o."estimatedCompletionDate" IS NULL))   AS matched_without_schedule,
+  (SELECT count(*) FROM "ServiceRequest" WHERE status = 'MATCHED')                    AS matched_total,
+  (SELECT count(*) FROM "ServiceRequest" WHERE status = 'APPROVED')                   AS approved_total,
+  (SELECT count(*) FROM "Offer")                                                      AS offers_total;
 
 ROLLBACK;
