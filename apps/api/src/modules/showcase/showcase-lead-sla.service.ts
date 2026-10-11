@@ -10,6 +10,7 @@ import {
   DEFAULT_SHOWCASE_SCAN_LIMIT,
   showcaseFallbackTimeoutCutoff,
 } from './showcase.constants';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 export type ShowcaseLeadSlaResult = {
   /** Leads whose deadline passed and which this run claimed. */
@@ -194,10 +195,14 @@ export class ShowcaseLeadSlaService {
         // `fallbackDecision` is deliberately left NULL. The customer made no
         // decision, and writing KEEP_CLOSED here would put words in their mouth
         // — the close reason already says what actually happened.
-        await tx.serviceRequest.updateMany({
+        const cancelled = await tx.serviceRequest.updateMany({
           where: { id: candidate.requestId, status: ServiceRequestStatus.SUBMITTED },
           data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
         });
+        // REL-002 Faz 1: the round is cancelled with the request.
+        if (cancelled.count === 1) {
+          await syncCurrentMatchRound(tx, candidate.requestId);
+        }
 
         return true;
       });

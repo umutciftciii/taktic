@@ -63,6 +63,7 @@ import {
 } from './refund-policy';
 import { OFFER_LIST_DEFAULT_PAGE_SIZE } from './dto/list-offers-query.dto';
 import { joinedOfferSearchWhere, resolveOfferSearchWhere } from './offer-search';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 /**
  * How long the offer list's read may hold its transaction. The list was one
@@ -781,6 +782,11 @@ export class OffersService {
           throw new ConflictException('This request already has an accepted offer');
         }
 
+        // REL-002 Faz 1: the round matches in the same transaction, with the
+        // same offer and the same matchedAt. A refusal further down rolls it
+        // back with the request transition.
+        const roundId = await syncCurrentMatchRound(tx, requestId);
+
         // Conditional for the same reason the request transition above is: a
         // provider may be withdrawing this very offer in a parallel Serializable
         // transaction, or the customer or an admin may be rejecting it. Only
@@ -863,7 +869,15 @@ export class OffersService {
         });
 
         if (contactSharing.enabled) {
+          // The reveal belongs to the accepted offer's round; an offer written
+          // before the round existed (none after M1's backfill) falls back to
+          // the round this acceptance just matched.
+          const acceptedRound = await tx.offer.findUniqueOrThrow({
+            where: { id: offerId },
+            select: { matchRoundId: true },
+          });
           await createContactRevealEvent(tx, {
+            roundId: acceptedRound.matchRoundId ?? roundId,
             requestId,
             offerId,
             providerId: accepted.providerId,
@@ -925,6 +939,7 @@ export class OffersService {
 async function createContactRevealEvent(
   tx: Prisma.TransactionClient,
   event: {
+    roundId: string;
     requestId: string;
     offerId: string;
     providerId: string;

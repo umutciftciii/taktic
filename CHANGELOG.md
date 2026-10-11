@@ -6,6 +6,14 @@ are in [docs/release.md](docs/release.md).
 
 ## Unreleased
 
+### Added
+
+- REL-002 Faz 1: service request match rounds. Every request now has a
+  Round 1 (`ServiceRequestMatchRound`, migration
+  `20261011120000_add_service_request_match_rounds`), backfilled for existing
+  rows and kept in step by every lifecycle writer. No behaviour change:
+  nothing reads rounds yet and no API response carries them.
+
 ## 0.1.0 - 2026-10-10
 
 First versioned baseline. The product runs end to end; staging/production

@@ -11,7 +11,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CustomersService } from '../src/modules/customers/customers.service';
 import { OffersService } from '../src/modules/offers/offers.service';
-import { SEARCH_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
+import { DEFAULT_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
 import {
   createAdminWithPermissions,
   createApprovedRequest,
@@ -43,14 +43,14 @@ import { resolveTestDatabaseUrl } from './test-database';
 
 let ctx: TestContext;
 /** A second client on the same database that records the SQL it sends. */
-let logged: PrismaClient<{ omit: typeof SEARCH_PROJECTION_OMIT; log: [{ emit: 'event'; level: 'query' }] }>;
+let logged: PrismaClient<{ omit: typeof DEFAULT_PROJECTION_OMIT; log: [{ emit: 'event'; level: 'query' }] }>;
 let statements: Array<{ query: string; params: string }> = [];
 
 beforeAll(async () => {
   ctx = await createTestApp();
   logged = new PrismaClient({
     datasources: { db: { url: resolveTestDatabaseUrl() } },
-    omit: SEARCH_PROJECTION_OMIT,
+    omit: DEFAULT_PROJECTION_OMIT,
     log: [{ emit: 'event', level: 'query' }],
   });
   logged.$on('query', (event) => statements.push({ query: event.query, params: event.params }));

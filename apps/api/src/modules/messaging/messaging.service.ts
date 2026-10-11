@@ -378,6 +378,7 @@ export class MessagingService {
         data: {
           requestId: chain.requestId,
           offerId: chain.offerId,
+          roundId: chain.roundId,
           customerUserId: chain.customerUserId,
           providerId: chain.providerId,
           providerUserId: chain.providerUserId,
@@ -449,6 +450,7 @@ export class MessagingService {
         status: true,
         customerId: true,
         matchedOfferId: true,
+        currentRoundId: true,
       },
     });
 
@@ -462,6 +464,7 @@ export class MessagingService {
         id: true,
         status: true,
         providerId: true,
+        matchRoundId: true,
         provider: { select: { id: true, userId: true } },
       },
     });
@@ -511,6 +514,9 @@ export class MessagingService {
     return {
       requestId: request.id,
       offerId: offer.id,
+      // REL-002 Faz 1: the conversation belongs to the matched offer's round.
+      // Written, never read in Faz 1 (the chain above is still the gate).
+      roundId: offer.matchRoundId ?? request.currentRoundId,
       providerId: offer.providerId,
       customerUserId: request.customerId,
       providerUserId: offer.provider.userId,

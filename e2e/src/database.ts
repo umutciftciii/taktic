@@ -48,6 +48,9 @@ const TRUNCATED_TABLES = [
   // CMP-006 PR-A: the acceptance points at its purchase (deferred FK).
   'PurchaseTermsAcceptance',
   'PackagePurchase',
+  // REL-002: a round references its request; the request, its offers, the
+  // contact reveal and the thread reference rounds (CASCADE handles the cycle).
+  'ServiceRequestMatchRound',
   'Offer',
   'ServiceRequestAnswer',
   'ServiceRequest',

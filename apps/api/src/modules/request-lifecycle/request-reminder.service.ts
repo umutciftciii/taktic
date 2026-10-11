@@ -8,6 +8,7 @@ import {
   REQUEST_REMINDER_AFTER_DAYS,
   requestReminderCutoff,
 } from './request-lifecycle.constants';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 export type RequestReminderResult = {
   processed: number;
@@ -84,9 +85,18 @@ export class RequestReminderService {
         continue;
       }
 
-      const claim = await this.prisma.serviceRequest.updateMany({
-        where: { id: candidate.id, ...reminderClaimWhere(cutoff) },
-        data: { reminderSentAt: new Date() },
+      // The claim and its REL-002 Faz 1 round copy commit together. The
+      // request's reminderSentAt stays the claim the scan reads; the round
+      // only records it (Faz 2 moves the scan onto the round).
+      const claim = await this.prisma.$transaction(async (tx) => {
+        const claimed = await tx.serviceRequest.updateMany({
+          where: { id: candidate.id, ...reminderClaimWhere(cutoff) },
+          data: { reminderSentAt: new Date() },
+        });
+        if (claimed.count === 1) {
+          await syncCurrentMatchRound(tx, candidate.id);
+        }
+        return claimed;
       });
 
       if (claim.count !== 1) {

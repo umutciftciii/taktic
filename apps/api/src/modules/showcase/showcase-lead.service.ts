@@ -45,6 +45,7 @@ import {
   showcaseLeadPhoneVerificationRequired,
   showcaseLeadRateLimited,
 } from './showcase.errors';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 /** How long a consumed verification stays redeemable. */
 const VERIFICATION_REDEMPTION_WINDOW_MINUTES = 30;
@@ -472,6 +473,9 @@ export class ShowcaseLeadService {
             where: { id: requestId },
             data: { directShowcaseProviderId: null },
           });
+          // REL-002 Faz 1: the round becomes a MARKETPLACE round with the gate
+          // (the publish below, when it happens, syncs it again).
+          await syncCurrentMatchRound(tx, requestId);
 
           // The market's reason to wait — "unread text must pass an operator
           // first" — no longer exists when auto-publish is on: the release is
@@ -504,10 +508,14 @@ export class ShowcaseLeadService {
         // Cancelled through the ordinary terminal transition rather than a
         // vitrin-specific one, so every screen that already understands a
         // cancelled request understands this.
-        await tx.serviceRequest.updateMany({
+        const cancelled = await tx.serviceRequest.updateMany({
           where: { id: requestId, status: { in: [ServiceRequestStatus.SUBMITTED] } },
           data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
         });
+        // REL-002 Faz 1: the round is cancelled with the request.
+        if (cancelled.count === 1) {
+          await syncCurrentMatchRound(tx, requestId);
+        }
 
         return { decision: 'KEEP_CLOSED' as const, leadId: lead.id };
       },

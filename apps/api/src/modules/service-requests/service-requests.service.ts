@@ -46,6 +46,7 @@ import {
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { RequestDraftsService } from '../request-drafts/request-drafts.service';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 import {
   hasSystemFieldValue,
   SystemFieldRequestValues,
@@ -705,6 +706,11 @@ export class ServiceRequestsService {
         await this.publishOutbox.enqueue(tx, created.id, now);
       }
 
+      // REL-002 Faz 1: Round 1 is born with the request, in this transaction,
+      // after every hook above has written its part of the request (the vitrin
+      // lead's id included) so the round reflects the request as committed.
+      await syncCurrentMatchRound(tx, created.id);
+
       return created;
       },
       { label: 'serviceRequests.create' },
@@ -780,6 +786,7 @@ export class ServiceRequestsService {
       return false;
     }
 
+    await syncCurrentMatchRound(tx, requestId);
     await this.publishOutbox.enqueue(tx, requestId, now);
     return true;
   }
@@ -1131,6 +1138,10 @@ export class ServiceRequestsService {
             },
             include,
           });
+          // REL-002 Faz 1: publishedAt/expiresAt follow approvedAt — a
+          // (re-)approval or a reopen after removal refreshes them exactly as
+          // it refreshes approvedAt.
+          await syncCurrentMatchRound(tx, id);
         }
 
         /*
@@ -1237,6 +1248,10 @@ export class ServiceRequestsService {
           'Bu talep mevcut durumundan kaldırılamaz: eşleşmiş talep reddedilmez, kapanmış talep zaten yayında değil.',
       });
     }
+
+    // REL-002 Faz 1: the round stays OPEN (a report's removal can be reopened
+    // into it); the request's REJECTED is what keeps it off the market.
+    await syncCurrentMatchRound(tx, requestId);
 
     // Otherwise an SLA clock would keep running against a business over a
     // request that no longer exists to answer. Quiet for the many requests
@@ -1393,6 +1408,10 @@ export class ServiceRequestsService {
           throw new ConflictException('Only a matched request can be completed');
         }
 
+        // REL-002 Faz 1: the round completes in the same transaction, with the
+        // same completedAt.
+        await syncCurrentMatchRound(tx, id);
+
         // The invitation is owed by the same transaction that finished the job:
         // a crash between the two can no longer lose it, and a retry of this
         // request collides on (template, dedupeKey) and adds nothing.
@@ -1491,6 +1510,10 @@ export class ServiceRequestsService {
         if (moved.count !== 1) {
           throw cancelStateChangedException();
         }
+
+        // REL-002 Faz 1: the round is cancelled with the request, keeping the
+        // match record exactly as the request keeps matchedOfferId.
+        await syncCurrentMatchRound(tx, id);
 
         await this.showcaseLeads.closeForRequest(tx, id, ShowcaseLeadCloseReason.CUSTOMER_CANCELLED, now);
 
