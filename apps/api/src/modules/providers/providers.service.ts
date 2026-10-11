@@ -113,6 +113,7 @@ import {
 } from '../../common/provider-service-area-scope';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
+import { currentMatchRoundId, syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 type ProviderOwnershipFilter = 'claimed' | 'unclaimed';
 
@@ -1550,10 +1551,17 @@ export class ProvidersService implements OnModuleInit {
             submittedAt.getTime() + refundWindowHours * 60 * 60 * 1000,
           );
 
+          // REL-002 Faz 1: the offer belongs to the request's current round.
+          // Read, not written, so concurrent offers on one request do not
+          // contend on the round row. No new eligibility rule here — the
+          // in-transaction round/status check is Faz 2.
+          const matchRoundId = await currentMatchRoundId(tx, requestId);
+
           const offer = await tx.offer.create({
             data: {
               providerId,
               requestId,
+              matchRoundId,
               offerNumber,
               priceAmount: payload.priceAmount,
               currency: payload.currency,
@@ -1639,10 +1647,15 @@ export class ProvidersService implements OnModuleInit {
           if (isDirectLeadOffer && request.status === ServiceRequestStatus.SUBMITTED) {
             // Conditional, so two offers racing here cannot both claim the
             // transition and write two `approvedAt` values.
-            await tx.serviceRequest.updateMany({
+            const approved = await tx.serviceRequest.updateMany({
               where: { id: requestId, status: ServiceRequestStatus.SUBMITTED },
               data: { status: ServiceRequestStatus.APPROVED, approvedAt: submittedAt },
             });
+            // REL-002 Faz 1: the round's offer period starts with the same
+            // approvedAt; it stays a DIRECT_SHOWCASE round (the gate is kept).
+            if (approved.count === 1) {
+              await syncCurrentMatchRound(tx, requestId);
+            }
           }
 
           if (isDirectLeadOffer && request.showcaseLeadId) {

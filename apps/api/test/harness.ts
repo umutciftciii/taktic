@@ -28,6 +28,7 @@ import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-ent
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { syncCurrentMatchRound } from '../src/modules/match-rounds/match-round-sync';
 import { type BackgroundWorkOwner, isBackgroundWorkOwner } from '../src/common/background-work';
 
 /**
@@ -359,6 +360,9 @@ const TRUNCATED_TABLES = [
   // CMP-006 PR-A: the acceptance points at its purchase (deferred FK).
   'PurchaseTermsAcceptance',
   'PackagePurchase',
+  // REL-002: a round references its request; the request, its offers, the
+  // contact reveal and the thread reference rounds (CASCADE handles the cycle).
+  'ServiceRequestMatchRound',
   'Offer',
   'ServiceRequestAnswer',
   'ServiceRequest',
@@ -678,25 +682,31 @@ export async function createApprovedRequest(
   },
 ) {
   const suffix = uniqueSuffix();
-  return prisma.serviceRequest.create({
-    data: {
-      categoryId: options.categoryId,
-      customerId: options.customerId ?? null,
-      requestNumber: `TR-TEST-${suffix}`,
-      customerName: `Müşteri ${suffix}`,
-      customerPhone: options.customerPhone ?? `0555444${suffix.padStart(4, '0')}`,
-      customerEmail:
-        options.customerEmail === undefined
-          ? `req-${suffix}@example.test`
-          : options.customerEmail,
-      city: options.city ?? 'İstanbul',
-      district: options.district ?? 'Kadıköy',
-      neighborhood: options.neighborhood ?? null,
-      status: ServiceRequestStatus.APPROVED,
-      approvedAt: options.approvedAt ?? null,
-      qualityScore: 80,
-      ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
-    },
+  // With its Round 1 (REL-002 Faz 1), the shape every request has had since
+  // M1: the creation path writes it in the same transaction as the request.
+  return prisma.$transaction(async (tx) => {
+    const created = await tx.serviceRequest.create({
+      data: {
+        categoryId: options.categoryId,
+        customerId: options.customerId ?? null,
+        requestNumber: `TR-TEST-${suffix}`,
+        customerName: `Müşteri ${suffix}`,
+        customerPhone: options.customerPhone ?? `0555444${suffix.padStart(4, '0')}`,
+        customerEmail:
+          options.customerEmail === undefined
+            ? `req-${suffix}@example.test`
+            : options.customerEmail,
+        city: options.city ?? 'İstanbul',
+        district: options.district ?? 'Kadıköy',
+        neighborhood: options.neighborhood ?? null,
+        status: ServiceRequestStatus.APPROVED,
+        approvedAt: options.approvedAt ?? null,
+        qualityScore: 80,
+        ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
+      },
+    });
+    await syncCurrentMatchRound(tx, created.id);
+    return created;
   });
 }
 

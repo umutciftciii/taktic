@@ -1163,11 +1163,21 @@ model ServiceRequest {
   completedAt                 DateTime?
   cancelledAt                 DateTime?
   expiredAt                   DateTime?
+  /// REL-002 Faz 1: the request's current match round (Round 1 today).
+  ///
+  /// Written by the creation path and the M1 backfill, and kept in step by
+  /// every lifecycle writer through `syncCurrentMatchRound`. **No reader uses
+  /// it in Faz 1**: the request's own columns stay authoritative, and the
+  /// column is left out of every default read (PrismaService omit), so no API
+  /// response carries it. Nullable until Faz 2 (M2) proves every row has one.
+  currentRoundId              String?              @unique
   submittedAt                 DateTime             @default(now())
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
   category               ServiceCategory             @relation(fields: [categoryId], references: [id])
+  currentRound           ServiceRequestMatchRound?   @relation("ServiceRequestCurrentRound", fields: [currentRoundId], references: [id], onDelete: Restrict)
+  matchRounds            ServiceRequestMatchRound[]  @relation("ServiceRequestMatchRounds")
   entryCategory          ServiceCategory?            @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
   customer               User?                       @relation(fields: [customerId], references: [id])
   answers                ServiceRequestAnswer[]
@@ -1250,16 +1260,106 @@ model ContactRevealEvent {
   /// the request's own acceptance, so a later version bump cannot rewrite what
   /// this customer actually agreed to.
   disclosureVersion String
+  /// REL-002 Faz 1: the match round this reveal belongs to — the accepted
+  /// offer's round. Written, not read; nullable until Faz 2 (M2).
+  roundId           String?  @unique
   createdAt         DateTime @default(now())
 
-  request  ServiceRequest  @relation(fields: [requestId], references: [id])
-  offer    Offer           @relation(fields: [offerId], references: [id])
-  customer User?           @relation(fields: [customerUserId], references: [id])
-  provider ProviderProfile @relation(fields: [providerId], references: [id])
+  request  ServiceRequest            @relation(fields: [requestId], references: [id])
+  offer    Offer                     @relation(fields: [offerId], references: [id])
+  customer User?                     @relation(fields: [customerUserId], references: [id])
+  provider ProviderProfile           @relation(fields: [providerId], references: [id])
+  round    ServiceRequestMatchRound? @relation(fields: [roundId], references: [id], onDelete: Restrict)
 
   @@index([providerId])
   @@index([customerUserId])
   @@index([revealedAt])
+}
+
+/// REL-002: where a match round stands. Faz 1 carries only the states the
+/// single-round lifecycle can reach; FAILED (a customer-reported service issue)
+/// arrives with the issue flow in Faz 3 (M3).
+///
+/// OPEN covers the whole offer period, moderation included: a request waiting
+/// in moderation has an OPEN round with no `publishedAt`. A REJECTED request's
+/// round also stays OPEN, because a report's removal can be reopened into the
+/// same round; the request's status remains the visibility authority.
+enum MatchRoundStatus {
+  OPEN
+  MATCHED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+/// REL-002: who the round is open to. DIRECT_SHOWCASE while a vitrin lead's
+/// gate (`ServiceRequest.directShowcaseProviderId`) holds it for one business;
+/// MARKETPLACE otherwise, a released lead included.
+enum MatchRoundSource {
+  MARKETPLACE
+  DIRECT_SHOWCASE
+}
+
+/// REL-002: what opened the round. Faz 1 only ever opens Round 1, with the
+/// request itself; SERVICE_ISSUE and ADMIN arrive with Faz 3 and Faz 5.
+enum MatchRoundOpenedBy {
+  REQUEST_CREATED
+}
+
+/// REL-002 — one matching cycle of a service request.
+///
+/// **Faz 1: a shadow.** Every request has exactly one round (Round 1, id
+/// `mr1_<requestId>`), backfilled by M1 for existing rows and written by every
+/// lifecycle writer for new ones through `syncCurrentMatchRound`, which derives
+/// the round from the request in the writer's own transaction. Nothing reads a
+/// round yet; the request's columns stay authoritative. Faz 2 moves readers
+/// (and the per-request uniques) onto it.
+///
+/// Raw-SQL invariants (migration `20261011120000_add_service_request_match_rounds`):
+/// `MatchRound_number_positive` (roundNumber >= 1),
+/// `MatchRound_matched_has_offer` (MATCHED/COMPLETED carry the winner),
+/// `MatchRound_one_active_per_request` (partial unique: at most one OPEN or
+/// MATCHED round per request) and the `MatchRound_terminal_status_immutable`
+/// trigger (COMPLETED/CANCELLED/EXPIRED never change status again).
+model ServiceRequestMatchRound {
+  id                String             @id @default(cuid())
+  requestId         String
+  roundNumber       Int
+  status            MatchRoundStatus   @default(OPEN)
+  source            MatchRoundSource
+  openedBy          MatchRoundOpenedBy
+  /// When the round began. Round 1: the request's `submittedAt`.
+  openedAt          DateTime
+  /// When the round's offer period started — the clock expiry and reminders
+  /// will run on in Faz 2. Round 1 mirrors `ServiceRequest.approvedAt` once the
+  /// request has left moderation; NULL while it is still in moderation, and
+  /// NULL for a legacy approval with no trustworthy time (never guessed).
+  publishedAt       DateTime?
+  /// `publishedAt` + REQUEST_EXPIRY_DAYS, snapshotted; NULL with it.
+  expiresAt         DateTime?
+  reminderSentAt    DateTime?
+  matchedAt         DateTime?
+  matchedOfferId    String?            @unique
+  matchedProviderId String?
+  /// When a customer-reported service issue ended the round. Reserved: always
+  /// NULL in Faz 1 (the FAILED status and its writer arrive with Faz 3, M3).
+  failedAt          DateTime?
+  completedAt       DateTime?
+  cancelledAt       DateTime?
+  expiredAt         DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  request           ServiceRequest      @relation("ServiceRequestMatchRounds", fields: [requestId], references: [id], onDelete: Restrict)
+  currentForRequest ServiceRequest?     @relation("ServiceRequestCurrentRound")
+  matchedOffer      Offer?              @relation("MatchRoundMatchedOffer", fields: [matchedOfferId], references: [id], onDelete: Restrict)
+  matchedProvider   ProviderProfile?    @relation("MatchRoundMatchedProvider", fields: [matchedProviderId], references: [id], onDelete: Restrict)
+  offers            Offer[]             @relation("OfferMatchRound")
+  contactReveal     ContactRevealEvent?
+  messageThread     MessageThread?
+
+  @@unique([requestId, roundNumber])
+  @@index([matchedProviderId])
 }
 
 /// A one-time code proving control of a phone number.
@@ -1520,6 +1620,8 @@ model ProviderProfile {
   campaignRegistrationCounters    CampaignRegistrationCounter[]
   promotionEligibilityHolds       PromotionEligibilityHold[]
   promotionEligibilityReviews     PromotionEligibilityReview[]
+  /// REL-002: the match rounds this provider won (Faz 1: written, not read).
+  matchedRounds                   ServiceRequestMatchRound[]           @relation("MatchRoundMatchedProvider")
 
   /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
   statusChanges ProviderStatusChange[]
@@ -1697,11 +1799,19 @@ model Offer {
   /// accepted offer closed by a cancel keeps its `acceptedAt` as the record of
   /// the acceptance. NULL on every offer never closed that way.
   cancelledAt                         DateTime?
+  /// REL-002 Faz 1: the match round this offer was made in — the request's
+  /// current round at the moment the offer was written. Written, not read;
+  /// nullable until Faz 2 (M2), which also swaps the per-request uniques for
+  /// per-round ones.
+  matchRoundId                        String?
   createdAt                           DateTime                @default(now())
   updatedAt                           DateTime                @updatedAt
 
   request            ServiceRequest              @relation(fields: [requestId], references: [id])
   provider           ProviderProfile             @relation(fields: [providerId], references: [id])
+  matchRound         ServiceRequestMatchRound?   @relation("OfferMatchRound", fields: [matchRoundId], references: [id], onDelete: Restrict)
+  /// The round this offer won, when it won one.
+  matchedForRound    ServiceRequestMatchRound?   @relation("MatchRoundMatchedOffer")
   entitlement        ProviderPackageEntitlement? @relation(fields: [entitlementId], references: [id])
   matchedForRequest  ServiceRequest?             @relation("ServiceRequestMatchedOffer")
   contactRevealEvent ContactRevealEvent?
@@ -1737,6 +1847,8 @@ model Offer {
   // reader would have to assume.
   @@index([unviewedRefundPolicy, viewedAt, unviewedRefundEligibleAt], map: "Offer_refund_schedule_idx")
   @@index([refundBlockedAt])
+  /// REL-002: "the offers of this round" (Faz 2 readers; FK lookup today).
+  @@index([matchRoundId, status])
   // OFFERS-SEARCH-OPT-001: the offer search's own arm (`id ILIKE`), resolved
   // to an id list before the list is read (see offers/offer-search.ts).
   @@index([id(ops: raw("gin_trgm_ops"))], type: Gin, map: "Offer_id_trgm_idx")
@@ -2828,14 +2940,18 @@ model MessageThread {
   /// last message has been read — never when, from where, or on what device.
   customerLastReadAt DateTime?
   providerLastReadAt DateTime?
+  /// REL-002 Faz 1: the match round this conversation belongs to — the
+  /// matched offer's round. Written, not read; nullable until Faz 2 (M2).
+  roundId            String?   @unique
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
-  request      ServiceRequest  @relation(fields: [requestId], references: [id])
-  offer        Offer           @relation(fields: [offerId], references: [id])
-  customer     User            @relation("MessageThreadCustomer", fields: [customerUserId], references: [id])
-  provider     ProviderProfile @relation(fields: [providerId], references: [id])
-  providerUser User            @relation("MessageThreadProviderUser", fields: [providerUserId], references: [id])
+  request      ServiceRequest            @relation(fields: [requestId], references: [id])
+  offer        Offer                     @relation(fields: [offerId], references: [id])
+  round        ServiceRequestMatchRound? @relation(fields: [roundId], references: [id], onDelete: Restrict)
+  customer     User                      @relation("MessageThreadCustomer", fields: [customerUserId], references: [id])
+  provider     ProviderProfile           @relation(fields: [providerId], references: [id])
+  providerUser User                      @relation("MessageThreadProviderUser", fields: [providerUserId], references: [id])
   messages     Message[]
 
   /// Both inbox queries: "my threads, most recent first".

@@ -6,6 +6,7 @@ import {
   DEFAULT_REQUEST_LIFECYCLE_SCAN_LIMIT,
   requestExpiryCutoff,
 } from './request-lifecycle.constants';
+import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
 
 export type RequestExpiryResult = {
   processed: number;
@@ -128,6 +129,11 @@ export class RequestExpiryService {
             // result of two runners agreeing, not a failure.
             return { expired: false, enqueued: 0 };
           }
+
+          // REL-002 Faz 1: the round expires in the same transaction, with the
+          // same expiredAt. The scan itself still reads the request (Faz 2
+          // moves it onto the round).
+          await syncCurrentMatchRound(tx, candidate.id);
 
           return { expired: true, enqueued: await this.outbox.enqueue(tx, candidate.id) };
         });

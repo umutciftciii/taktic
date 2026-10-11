@@ -9,7 +9,7 @@ import {
 } from '../src/modules/offers/offer-search';
 import { OffersService } from '../src/modules/offers/offers.service';
 import { viewedInPolicyWhere } from '../src/modules/offers/refund-policy';
-import { SEARCH_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
+import { DEFAULT_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
 import { createApprovedRequest, createCategory, createTestApp, resetDatabase, type TestContext } from './harness';
 import { resolveTestDatabaseUrl } from './test-database';
 
@@ -30,14 +30,14 @@ import { resolveTestDatabaseUrl } from './test-database';
 
 let ctx: TestContext;
 /** A second client on the same database that records the SQL it sends. */
-let logged: PrismaClient<{ omit: typeof SEARCH_PROJECTION_OMIT; log: [{ emit: 'event'; level: 'query' }] }>;
+let logged: PrismaClient<{ omit: typeof DEFAULT_PROJECTION_OMIT; log: [{ emit: 'event'; level: 'query' }] }>;
 let statements: Array<{ query: string; params: string }> = [];
 
 beforeAll(async () => {
   ctx = await createTestApp();
   logged = new PrismaClient({
     datasources: { db: { url: resolveTestDatabaseUrl() } },
-    omit: SEARCH_PROJECTION_OMIT,
+    omit: DEFAULT_PROJECTION_OMIT,
     log: [{ emit: 'event', level: 'query' }],
   });
   logged.$on('query', (event) => statements.push({ query: event.query, params: event.params }));
