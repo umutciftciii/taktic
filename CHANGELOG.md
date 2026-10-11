@@ -46,6 +46,38 @@ are in [docs/release.md](docs/release.md).
   `MATCH_REVIEW` status and filter, incident and exclusion data on
   `GET /service-requests/:id/rounds`. Ops: `scripts/ops/rel-002-m3-rollback.sql`
   (only before the flow is used; afterwards forward-fix only).
+- REL-002 Faz 4: incident adjudication and provider reliability (migration
+  `20261012120000_add_incident_adjudication_reliability`; the Faz 3 switch
+  stays **off**). The failed provider reads its incidents (masked note, no
+  customer detail) and answers once:
+  `POST /providers/:providerId/incidents/:incidentId/response` (10–2000
+  characters; the 72-hour window is a signal, never a lock; closed once
+  decided). Staff decide with a mandatory rationale —
+  `POST /admin/service-incidents/:id/adjudications` (`CONFIRMED` /
+  `DISMISSED`) — recorded in the append-only `ProviderIncidentAdjudication`
+  chain; only a SUPER_ADMIN corrects a decision, by appending a `CORRECTION`
+  against the head they saw (`POST /admin/service-incidents/:id/corrections`,
+  `409 INCIDENT_ADJUDICATION_CHANGED` on a stale head). The effective decision
+  is the chain head (`ProviderServiceIncident.effectiveAdjudicationId`).
+  Provider reliability is computed, never stored: effective `CONFIRMED`
+  incidents reported in the last 90 days — 0–1 `NORMAL`, 2 `WARNING`, 3+
+  `ADMIN_REVIEW_REQUIRED`, which opens one `ProviderReliabilityReview`
+  (acknowledge / resolve with a note). No decision refunds credit, removes the
+  exclusion, touches the failed round or the reopened request, or suspends
+  anybody; nothing is shown to customers or on public profiles. A customer's
+  dismissed-report ratio is an admin-only signal (`HIGH_DISMISSAL_RATIO`, no
+  restriction). New permissions `SERVICE_INCIDENTS_READ`,
+  `SERVICE_INCIDENTS_ADJUDICATE`, `SERVICE_INCIDENTS_CORRECT` (reserved for
+  SUPER_ADMIN: no role may carry it, `GET /admin/permissions` lists it under
+  `reservedForSuperAdmin`), `PROVIDER_RELIABILITY_READ`,
+  `PROVIDER_RELIABILITY_MANAGE`. New notices: `service-incident-confirmed`,
+  `service-incident-dismissed` (provider; outcome only, never the rationale),
+  `service-incident-provider-responded`, `provider-reliability-review-opened`
+  (support inbox). Screens: provider panel „Hizmet aksaklıkları"; admin
+  „Hizmet aksaklıkları" queue/detail, „Güvenilirlik" queue and the provider
+  page's reliability card. Ops: `scripts/ops/rel-002-m4-rollback.sql` (only
+  before any Faz 4 data exists), preflight M4 section, consistency checks
+  11–12.
 
 ### Changed
 
