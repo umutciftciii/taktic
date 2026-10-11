@@ -101,7 +101,7 @@ describe('the five rows the design had no place for (K1)', () => {
 describe('the report queue rows', () => {
   it('the request queue sits in Talepler right after the list, and is the only row lit on it', () => {
     const hrefs = navGroups.find((group) => group.key === 'talepler')?.items.map((entry) => entry.href);
-    expect(hrefs).toEqual(['/requests', '/requests/reports']);
+    expect(hrefs).toEqual(['/requests', '/requests/reports', '/service-incidents']);
     expect(activeHrefs('/requests/reports')).toEqual(['/requests/reports']);
   });
 

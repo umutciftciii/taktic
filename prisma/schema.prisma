@@ -561,6 +561,11 @@ model User {
   reportedServiceIncidents        ProviderServiceIncident[]            @relation("IncidentCustomer")
   reviewedServiceIncidents        ProviderServiceIncident[]            @relation("IncidentReviewedBy")
   respondedServiceIncidents       ProviderServiceIncident[]            @relation("IncidentRespondedBy")
+  /// REL-002 Faz 4: adjudications and reliability reviews this staff member wrote.
+  serviceIncidentAdjudications    ProviderIncidentAdjudication[]       @relation("IncidentAdjudicationDecidedBy")
+  reliabilityReviewsAssigned      ProviderReliabilityReview[]          @relation("ReliabilityReviewAssignedAdmin")
+  reliabilityReviewsAcknowledged  ProviderReliabilityReview[]          @relation("ReliabilityReviewAcknowledgedBy")
+  reliabilityReviewsResolved      ProviderReliabilityReview[]          @relation("ReliabilityReviewResolvedBy")
 
   @@index([role])
   @@index([isActive])
@@ -1492,50 +1497,68 @@ enum ServiceIssueEligibilityBasis {
 /// Faz 4 fills the provider response and the staff decision columns; Faz 3
 /// leaves them NULL (status REPORTED).
 model ProviderServiceIncident {
-  id                    String                       @id @default(cuid())
-  incidentNumber        String                       @unique
-  providerId            String
-  requestId             String
-  roundId               String                       @unique
-  offerId               String                       @unique
-  customerUserId        String
-  reason                ServiceIssueReason
+  id                      String                       @id @default(cuid())
+  incidentNumber          String                       @unique
+  providerId              String
+  requestId               String
+  roundId                 String                       @unique
+  offerId                 String                       @unique
+  customerUserId          String
+  reason                  ServiceIssueReason
   /// Trimmed and whitespace-collapsed; required (>= 20) for OTHER and
   /// PROVIDER_CANCELLED_BEFORE_START. Raw for staff; masked for the provider.
-  customerNote          String?
-  idempotencyKey        String                       @unique
-  reportedAt            DateTime                     @default(now())
+  customerNote            String?
+  idempotencyKey          String                       @unique
+  reportedAt              DateTime                     @default(now())
   /// The accepted offer's promised days at the moment of the report.
-  promisedStartDate     DateTime?
-  promisedEndDate       DateTime?
-  eligibilityBasis      ServiceIssueEligibilityBasis
-  status                ProviderIncidentStatus       @default(REPORTED)
-  providerResponse      String?
-  providerRespondedAt   DateTime?
-  providerRespondedById String?
-  reviewedById          String?
-  reviewedAt            DateTime?
-  reviewNote            String?
-  createdAt             DateTime                     @default(now())
-  updatedAt             DateTime                     @updatedAt
+  promisedStartDate       DateTime?
+  promisedEndDate         DateTime?
+  eligibilityBasis        ServiceIssueEligibilityBasis
+  status                  ProviderIncidentStatus       @default(REPORTED)
+  providerResponse        String?
+  providerRespondedAt     DateTime?
+  providerRespondedById   String?
+  /// Faz 4 compatibility projection of the effective adjudication's author,
+  /// time and rationale (`ProviderServiceIncident_decision_projection`
+  /// trigger keeps them equal to it). The authority is the adjudication.
+  reviewedById            String?
+  reviewedAt              DateTime?
+  reviewNote              String?
+  /// REL-002 Faz 4 — the head of this incident's adjudication chain: NULL
+  /// while undecided, then the INITIAL decision, then each CORRECTION in
+  /// turn. Moved only by a compare-and-swap on the previous head; the
+  /// composite FK pins it to an adjudication of this very incident, and the
+  /// trigger holds `status` equal to its decision.
+  effectiveAdjudicationId String?                      @unique
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
 
-  provider     ProviderProfile                   @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  request      ServiceRequest                    @relation(fields: [requestId], references: [id], onDelete: Restrict)
-  round        ServiceRequestMatchRound          @relation("IncidentRound", fields: [roundId, requestId], references: [id, requestId], onDelete: Restrict)
-  offer        Offer                             @relation(fields: [offerId, roundId], references: [id, matchRoundId], onDelete: Restrict)
-  customer     User                              @relation("IncidentCustomer", fields: [customerUserId], references: [id], onDelete: Restrict)
-  respondedBy  User?                             @relation("IncidentRespondedBy", fields: [providerRespondedById], references: [id], onDelete: Restrict)
-  reviewedBy   User?                             @relation("IncidentReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  provider              ProviderProfile                   @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  request               ServiceRequest                    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  round                 ServiceRequestMatchRound          @relation("IncidentRound", fields: [roundId, requestId], references: [id, requestId], onDelete: Restrict)
+  offer                 Offer                             @relation(fields: [offerId, roundId], references: [id, matchRoundId], onDelete: Restrict)
+  customer              User                              @relation("IncidentCustomer", fields: [customerUserId], references: [id], onDelete: Restrict)
+  respondedBy           User?                             @relation("IncidentRespondedBy", fields: [providerRespondedById], references: [id], onDelete: Restrict)
+  reviewedBy            User?                             @relation("IncidentReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   /// Lists only because the relations are composite FKs; both are at most
   /// one (`failureIncidentId @unique`, `exclusion.incidentId @unique`).
-  failedRounds ServiceRequestMatchRound[]        @relation("MatchRoundFailureIncident")
-  exclusions   ServiceRequestProviderExclusion[]
+  failedRounds          ServiceRequestMatchRound[]        @relation("MatchRoundFailureIncident")
+  exclusions            ServiceRequestProviderExclusion[]
+  /// Faz 4: every decision ever taken on this incident (append-only), and the
+  /// one in force. A list because the head relation is composite.
+  adjudications         ProviderIncidentAdjudication[]    @relation("IncidentAdjudications")
+  effectiveAdjudication ProviderIncidentAdjudication?     @relation("IncidentEffectiveAdjudication", fields: [effectiveAdjudicationId, id], references: [id, incidentId], onDelete: Restrict)
+  reliabilityReviews    ProviderReliabilityReview[]
 
   /// Composite FK targets: the round's failure incident is the round's own,
-  /// and an exclusion names the incident's own request and provider.
+  /// and an exclusion names the incident's own request and provider; a
+  /// reliability review's trigger incident is the reviewed provider's own.
   @@unique([id, roundId])
   @@unique([id, requestId, providerId])
+  @@unique([id, providerId])
   @@index([providerId, status])
+  /// Faz 4: one provider's 90-day reliability window.
+  @@index([providerId, reportedAt])
   @@index([status, reportedAt])
   @@index([customerUserId, reportedAt])
   @@index([requestId])
@@ -1570,6 +1593,105 @@ model ServiceRequestProviderExclusion {
   /// The discovery list's anti-join reads "this provider's exclusions" once
   /// per query, and the provider FK's restrict check needs it too.
   @@index([providerId])
+}
+
+/// REL-002 Faz 4: what staff decided an incident was. CONFIRMED is a
+/// verified service failure (it counts towards the provider's reliability);
+/// DISMISSED is not. Neither touches the round, the exclusion or credit.
+enum ProviderIncidentDecision {
+  CONFIRMED
+  DISMISSED
+}
+
+/// INITIAL — the first decision (sequence 1, SERVICE_INCIDENTS_ADJUDICATE);
+/// CORRECTION — a SUPER_ADMIN's later decision superseding the head.
+enum ProviderIncidentAdjudicationKind {
+  INITIAL
+  CORRECTION
+}
+
+/// OPEN — the system opened it (3+ verified failures in 90 days);
+/// ACKNOWLEDGED — a staff member took it; RESOLVED — closed with a note.
+enum ProviderReliabilityReviewStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+/// REL-002 Faz 4 — one staff decision on a provider service incident.
+///
+/// **Append-only** (`ProviderIncidentAdjudication_append_only` trigger: no
+/// UPDATE, no DELETE). A decision is never edited: a SUPER_ADMIN corrects it
+/// by appending a CORRECTION that supersedes the current head. The chain is
+/// linear and explicit — `sequence` 1, 2, 3 … per incident (unique), each
+/// CORRECTION superseding exactly the row before it (`supersedesAdjudicationId`
+/// unique, composite FK to the same incident, sequence checked by the insert
+/// trigger) — so "the latest" is never a timestamp tie-break. The incident's
+/// `effectiveAdjudicationId` names the head.
+model ProviderIncidentAdjudication {
+  id                       String                           @id @default(cuid())
+  incidentId               String
+  /// 1 for INITIAL; previous + 1 for each CORRECTION.
+  sequence                 Int
+  kind                     ProviderIncidentAdjudicationKind
+  decision                 ProviderIncidentDecision
+  /// Trimmed, whitespace-collapsed, 10..2000 (CHECK). Staff-only: never shown
+  /// to the provider or the customer.
+  rationale                String
+  decidedByAdminId         String
+  /// The head this CORRECTION replaced; NULL exactly for INITIAL.
+  supersedesAdjudicationId String?                          @unique
+  createdAt                DateTime                         @default(now())
+
+  incident     ProviderServiceIncident        @relation("IncidentAdjudications", fields: [incidentId], references: [id], onDelete: Restrict)
+  decidedBy    User                           @relation("IncidentAdjudicationDecidedBy", fields: [decidedByAdminId], references: [id], onDelete: Restrict)
+  supersedes   ProviderIncidentAdjudication?  @relation("AdjudicationSupersedes", fields: [supersedesAdjudicationId, incidentId], references: [id, incidentId], onDelete: Restrict)
+  supersededBy ProviderIncidentAdjudication[] @relation("AdjudicationSupersedes")
+  /// A list only because the relation is composite; at most one.
+  effectiveFor ProviderServiceIncident[]      @relation("IncidentEffectiveAdjudication")
+
+  /// One INITIAL per incident (sequence 1) and a single head at each step.
+  @@unique([incidentId, sequence])
+  /// Composite FK target: a chain and a head never leave their incident.
+  @@unique([id, incidentId])
+  @@index([decidedByAdminId])
+}
+
+/// REL-002 Faz 4 — staff follow-up on a provider whose effective CONFIRMED
+/// incidents in the last 90 days reached 3 (ADMIN_REVIEW_REQUIRED).
+///
+/// Opened idempotently by the adjudication transaction (at most one
+/// unresolved — OPEN or ACKNOWLEDGED — per provider, partial unique). It
+/// stores no count: the reliability level is always computed from the
+/// incidents. It never suspends anybody; a correction that lowers the count
+/// leaves it (and its history) in place. Never deleted; RESOLVED is final.
+model ProviderReliabilityReview {
+  id                String                          @id @default(cuid())
+  providerId        String
+  status            ProviderReliabilityReviewStatus @default(OPEN)
+  /// The confirmation that crossed the threshold.
+  triggerIncidentId String?
+  openedAt          DateTime                        @default(now())
+  /// True for every review in Faz 4 (only the system opens one).
+  openedBySystem    Boolean                         @default(true)
+  assignedAdminId   String?
+  acknowledgedAt    DateTime?
+  acknowledgedById  String?
+  resolvedAt        DateTime?
+  resolvedById      String?
+  /// The resolution note: required (10..2000, trimmed) once RESOLVED.
+  note              String?
+  createdAt         DateTime                        @default(now())
+  updatedAt         DateTime                        @updatedAt
+
+  provider        ProviderProfile          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  triggerIncident ProviderServiceIncident? @relation(fields: [triggerIncidentId, providerId], references: [id, providerId], onDelete: Restrict)
+  assignedAdmin   User?                    @relation("ReliabilityReviewAssignedAdmin", fields: [assignedAdminId], references: [id], onDelete: Restrict)
+  acknowledgedBy  User?                    @relation("ReliabilityReviewAcknowledgedBy", fields: [acknowledgedById], references: [id], onDelete: Restrict)
+  resolvedBy      User?                    @relation("ReliabilityReviewResolvedBy", fields: [resolvedById], references: [id], onDelete: Restrict)
+
+  @@index([providerId, createdAt])
+  @@index([status, openedAt])
 }
 
 /// A one-time code proving control of a phone number.
@@ -1836,6 +1958,8 @@ model ProviderProfile {
   /// issues reported against it.
   requestExclusions               ServiceRequestProviderExclusion[]
   serviceIncidents                ProviderServiceIncident[]
+  /// REL-002 Faz 4: staff reliability follow-ups on this provider.
+  reliabilityReviews              ProviderReliabilityReview[]
 
   /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
   statusChanges ProviderStatusChange[]
@@ -5517,6 +5641,19 @@ enum AdminPermission {
 
   PROVIDER_REVIEWS_READ
   PROVIDER_REVIEWS_MODERATE
+
+  /// REL-002 Faz 4: provider service incidents — the queue and the detail.
+  SERVICE_INCIDENTS_READ
+  /// The initial CONFIRMED / DISMISSED decision (mandatory rationale).
+  SERVICE_INCIDENTS_ADJUDICATE
+  /// Appending a CORRECTION to a decided incident. Reserved for SUPER_ADMIN:
+  /// no role may carry it (`SUPER_ADMIN_RESERVED_PERMISSIONS`), so an ADMIN
+  /// never holds it, whatever its roles say.
+  SERVICE_INCIDENTS_CORRECT
+  /// The derived reliability level, the queue and the review history.
+  PROVIDER_RELIABILITY_READ
+  /// Acknowledging and resolving a reliability review. Never a suspension.
+  PROVIDER_RELIABILITY_MANAGE
 
   SHOWCASE_PACKAGES_READ
   SHOWCASE_PACKAGES_WRITE

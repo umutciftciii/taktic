@@ -71,6 +71,22 @@ export function mayReachAdminPanel(user: PermissionPrincipal | null | undefined)
  * route in PR-0 names more than one, but the guard accepts a list and the
  * meaning has to be fixed before one does.
  */
+/**
+ * REL-002 Faz 4 — capabilities in the catalogue that only a SUPER_ADMIN ever
+ * holds. Unlike the three root capabilities (which are not values at all),
+ * these are values — so a route can name them and a SUPER_ADMIN's reported
+ * set lists them — but no role may carry one: the role editor refuses them,
+ * and `hasPermission` ignores them on an ADMIN even if a row somehow did.
+ *
+ * SERVICE_INCIDENTS_CORRECT: rewriting a staff decision about a provider is a
+ * correction of the record, by product decision a SUPER_ADMIN act.
+ */
+export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [AdminPermission.SERVICE_INCIDENTS_CORRECT];
+
+export function isReservedPermission(permission: AdminPermission): boolean {
+  return SUPER_ADMIN_RESERVED_PERMISSIONS.includes(permission);
+}
+
 export function hasPermission(
   user: PermissionPrincipal | null | undefined,
   required: readonly AdminPermission[],
@@ -84,7 +100,7 @@ export function hasPermission(
   if (required.length === 0) {
     return mayReachAdminPanel(user);
   }
-  const held = new Set(user.permissions);
+  const held = new Set(user.permissions.filter((permission) => !isReservedPermission(permission)));
   return required.every((permission) => held.has(permission));
 }
 
@@ -116,3 +132,8 @@ export function describePermissions(user: PermissionPrincipal): {
 export const ALL_ADMIN_PERMISSIONS: readonly AdminPermission[] = Object.values(
   AdminPermission,
 ).sort() as AdminPermission[];
+
+/** What a role may carry: the catalogue without the SUPER_ADMIN-reserved values. */
+export const GRANTABLE_ADMIN_PERMISSIONS: readonly AdminPermission[] = ALL_ADMIN_PERMISSIONS.filter(
+  (permission) => !isReservedPermission(permission),
+);

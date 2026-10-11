@@ -47,6 +47,9 @@ const PANEL_ROUTES = [
   '/providers/:id/offers/:offerId',
   // The reviews customers left on the jobs those offers won.
   '/providers/:id/degerlendirmeler',
+  // REL-002 Faz 4: service incidents reported about this business.
+  '/providers/:id/aksakliklar',
+  '/providers/:id/aksakliklar/:incidentId',
   '/providers/:id/requests',
   '/providers/:id/requests/:requestId',
   '/providers/:id/package-purchases',

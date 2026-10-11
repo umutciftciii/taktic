@@ -21,6 +21,11 @@
 -- FAILED round keeps its winner while the request's projection is NULL, so the
 -- match columns are not compared for it; checks 7–10 cover the failure record
 -- itself (incident, exclusion, terminal history, no excluded provider back).
+--
+-- Faz 4 (M4): checks 11–12 read the adjudication and reliability-review
+-- tables, so this file needs M4. On a database before M4 run the M3 version
+-- (main@acaf9902). A decision never removes the exclusion: check 7 keeps
+-- holding for CONFIRMED and DISMISSED incidents alike.
 WITH expected AS (
   SELECT
     r."id"                                               AS "requestId",
@@ -189,5 +194,30 @@ JOIN "ServiceRequestMatchRound" src ON src."id" = x."sourceRoundId"
 JOIN "Offer" o ON o."requestId" = x."requestId" AND o."providerId" = x."providerId"
 JOIN "ServiceRequestMatchRound" orr ON orr."id" = o."matchRoundId"
 WHERE orr."roundNumber" > src."roundNumber"
+
+UNION ALL
+-- 11. (M4) An incident's decision is its chain's head: decided exactly when it
+--     has one, its status is the head's decision, and the head is the last
+--     link (sequence n of n, sequences 1..n without a gap).
+SELECT i."requestId", 'incident_decision_head',
+       i."id" || ' ' || i."status" || ' head ' || coalesce(i."effectiveAdjudicationId", '<null>')
+FROM "ProviderServiceIncident" i
+LEFT JOIN "ProviderIncidentAdjudication" h ON h."id" = i."effectiveAdjudicationId"
+LEFT JOIN (
+  SELECT a."incidentId", count(*) AS n, max(a."sequence") AS top
+  FROM "ProviderIncidentAdjudication" a GROUP BY a."incidentId"
+) c ON c."incidentId" = i."id"
+WHERE (i."status"::text IN ('CONFIRMED', 'DISMISSED')) <> (i."effectiveAdjudicationId" IS NOT NULL)
+   OR (h."id" IS NOT NULL AND (h."incidentId" <> i."id" OR h."decision"::text <> i."status"::text
+                               OR h."sequence" <> c.top OR c.n <> c.top))
+   OR (h."id" IS NULL AND c.n IS NOT NULL)
+
+UNION ALL
+-- 12. (M4) At most one unresolved reliability review per provider.
+SELECT NULL::text, 'reliability_review_unresolved_twice', rr."providerId"
+FROM "ProviderReliabilityReview" rr
+WHERE rr."status"::text IN ('OPEN', 'ACKNOWLEDGED')
+GROUP BY rr."providerId"
+HAVING count(*) > 1
 
 ORDER BY 1, 2;

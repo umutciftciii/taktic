@@ -1,4 +1,4 @@
--- REL-002 preflight (M1, M2 and M3) — read-only.
+-- REL-002 preflight (M1, M2, M3 and M4) — read-only.
 --
 -- Run before applying the match-round migration (M1) to any database:
 --
@@ -131,5 +131,17 @@ SELECT
   (SELECT count(*) FROM "ServiceRequest" WHERE status = 'MATCHED')                    AS matched_total,
   (SELECT count(*) FROM "ServiceRequest" WHERE status = 'APPROVED')                   AS approved_total,
   (SELECT count(*) FROM "Offer")                                                      AS offers_total;
+
+\echo '== M4 (Faz 4) — before 20261012120000_add_incident_adjudication_reliability =='
+\echo '   integrity: must be 0 (the new CHECKs: decided ⇔ head, response rules)'
+SELECT
+  (SELECT count(*) FROM "ProviderServiceIncident" WHERE "status"::text IN ('CONFIRMED', 'DISMISSED')) AS decided_without_adjudication,
+  (SELECT count(*) FROM "ProviderServiceIncident"
+     WHERE "providerResponse" IS NOT NULL
+       AND ("providerResponse" <> btrim("providerResponse")
+            OR char_length("providerResponse") NOT BETWEEN 10 AND 2000
+            OR "status"::text = 'REPORTED'))                                          AS response_breaking_rules;
+\echo '   information: incidents by status (all REPORTED before Faz 4)'
+SELECT "status", count(*) FROM "ProviderServiceIncident" GROUP BY "status" ORDER BY "status";
 
 ROLLBACK;

@@ -53,6 +53,12 @@ import { TransactionsPanel } from './credits/transactions-panel';
 import { providerApproveConsequence, providerStatusConsequence } from './provider-status-consequence';
 import { ProviderStatusForm } from './provider-status-form';
 import { RawRegistrationReveal } from './raw-registration-reveal';
+import { ProviderReliabilityCard } from './provider-reliability-card';
+import type { ProviderReliabilityView } from '../../../lib/service-incidents';
+import {
+  acknowledgeReliabilityReviewAction,
+  resolveReliabilityReviewAction,
+} from '../../provider-reliability/actions';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 
 /**
@@ -93,6 +99,8 @@ type ProviderDetailPageProps = {
     categoryNotice?: string;
     statusSaved?: string;
     statusError?: string;
+    /** REL-002 Faz 4: what a reliability review action left behind. */
+    reliability?: string;
   }>;
 };
 
@@ -243,6 +251,10 @@ export default async function ProviderDetailPage({
   const canReadBindings = can('PROVIDERS_READ');
   const canReadReviews = can('PROVIDER_REVIEWS_READ');
   const canReadEligibility = can('PROMOTION_ELIGIBILITY_REVIEW');
+  // REL-002 Faz 4: the "Güvenilirlik" card, its review actions and its links.
+  const canReadReliability = can('PROVIDER_RELIABILITY_READ');
+  const canManageReliability = can('PROVIDER_RELIABILITY_MANAGE');
+  const canReadIncidents = can('SERVICE_INCIDENTS_READ');
   // Write surfaces and cross-links, each gated by the exact permission of the
   // route (or target page) behind it. The API refuses regardless; this only
   // keeps a control the account cannot use off the screen.
@@ -280,7 +292,7 @@ export default async function ProviderDetailPage({
   const statusHistory = activeTab === 'gecmis' ? await getProviderStatusHistory(id, historyPage) : null;
   const path = `/providers/${provider.id}`;
 
-  const [serviceCategories, categories, reviews, eligibility, credits] = await Promise.all([
+  const [serviceCategories, categories, reviews, eligibility, credits, reliability] = await Promise.all([
     canReadBindings && activeTab === ''
       ? apiFetch<AdminProviderServiceCategories>(`/providers/${id}/service-categories`)
       : Promise.resolve(null),
@@ -306,6 +318,15 @@ export default async function ProviderDetailPage({
     // F4: the staff read, on the ledger's own permission.
     canReadCredits && activeTab === 'kredi'
       ? apiFetch<AdminProviderCredits>(`/admin/providers/${id}/credits`)
+      : Promise.resolve(null),
+    // REL-002 Faz 4: context, like the reviews — a failure hides the card, not the screen.
+    canReadReliability && activeTab === ''
+      ? apiFetch<ProviderReliabilityView>(`/admin/providers/${encodeURIComponent(id)}/reliability`).catch(
+          (error: unknown) => {
+            if (error instanceof ApiError) return null;
+            throw error;
+          },
+        )
       : Promise.resolve(null),
   ]);
 
@@ -888,6 +909,19 @@ export default async function ProviderDetailPage({
                   </p>
                 ) : null}
               </SectionCard>
+            ) : null}
+
+            {reliability ? (
+              <ProviderReliabilityCard
+                view={reliability}
+                canManage={canManageReliability}
+                canOpenIncidents={canReadIncidents}
+                noticeCode={search.reliability}
+                formActions={{
+                  acknowledge: acknowledgeReliabilityReviewAction,
+                  resolve: resolveReliabilityReviewAction,
+                }}
+              />
             ) : null}
 
             {webUrl ? (

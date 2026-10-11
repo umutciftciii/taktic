@@ -251,7 +251,10 @@ describe('PR-0 route/permission map', () => {
      * moving it meant naming the capability in a commit message.
      * REL-002 Faz 3 moved it to 88: SERVICE_ISSUE_SETTING_WRITE, the customer
      * service-issue switch (one write permission per operations switch).
+     * REL-002 Faz 4 moved it to 93: SERVICE_INCIDENTS_READ / _ADJUDICATE /
+     * _CORRECT (the last reserved for SUPER_ADMIN) and PROVIDER_RELIABILITY_READ
+     * / _MANAGE.
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(88);
+    expect(Object.keys(AdminPermission)).toHaveLength(93);
   });
 });

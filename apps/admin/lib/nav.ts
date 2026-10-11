@@ -100,6 +100,9 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: '/requests', label: 'Tüm talepler', permission: 'REQUESTS_READ' },
       { href: '/requests/reports', label: 'Şikayet edilen talepler', permission: 'REQUEST_REPORTS_READ' },
+      // REL-002 Faz 4: customers' service-issue reports against a matched
+      // provider, waiting for a staff decision.
+      { href: '/service-incidents', label: 'Hizmet aksaklıkları', permission: 'SERVICE_INCIDENTS_READ' },
     ],
   },
   {
@@ -114,6 +117,8 @@ export const navGroups: NavGroup[] = [
     icon: 'users',
     items: [
       { href: '/providers', label: 'Hizmet verenler', permission: 'PROVIDERS_READ' },
+      // REL-002 Faz 4: providers at WARNING or above, and open reliability reviews.
+      { href: '/provider-reliability', label: 'Güvenilirlik', permission: 'PROVIDER_RELIABILITY_READ' },
       { href: '/customers', label: 'Hizmet alanlar', permission: 'CUSTOMERS_READ' },
       { href: '/support', label: 'Destek talepleri', permission: 'SUPPORT_READ' },
     ],

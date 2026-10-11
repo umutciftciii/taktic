@@ -36,6 +36,8 @@ type ConfirmDialogProps = {
    */
   switchChecked?: boolean;
   testId?: string;
+  /** A test hook on the dialog's own confirm button. */
+  confirmTestId?: string;
   /**
    * Which confirmation this is (`CONFIRMATION_PROOF_KEYS`). Required: on
    * confirm the dialog asks the server for a short-lived, single-use proof
@@ -87,6 +89,7 @@ export function ConfirmDialog({
   disabled = false,
   switchChecked,
   testId,
+  confirmTestId,
   proof,
 }: ConfirmDialogProps) {
   const id = useId();
@@ -235,6 +238,7 @@ export function ConfirmDialog({
             onClick={confirm}
             disabled={confirming}
             aria-busy={confirming || undefined}
+            data-testid={confirmTestId}
           >
             {confirmLabel}
           </button>

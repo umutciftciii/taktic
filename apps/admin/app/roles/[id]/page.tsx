@@ -11,6 +11,7 @@ import {
   formatDateTime,
   getAdminRole,
   getAdminRoleAudit,
+  grantablePermissions,
   listAdminPermissionCatalogue,
   requireSuperAdmin,
   userRoleBadgeClass,
@@ -25,6 +26,7 @@ import {
   updateAdminRoleAction,
 } from '../actions';
 import { RolePermissionsForm, RoleStatusForm } from '../role-forms';
+import { ReservedPermissionsNote } from '../reserved-permissions-note';
 
 type RoleDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -76,7 +78,8 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
     // ADMIN-ACTION-AUDIT-001: the role's own audit rows, root-only like the page.
     fetchOrNotFound(() => getAdminRoleAudit(id, historyPage)),
   ]);
-  const groups = groupPermissions(catalogue.permissions);
+  const grantable = grantablePermissions(catalogue);
+  const groups = groupPermissions(grantable);
   const reach = roleReach(role.assignments);
   const lines = permissionLines(groups);
   const areaCount = groups.filter((group) => group.items.some((item) => role.permissions.includes(item.permission))).length;
@@ -84,7 +87,7 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
   const facts: SummaryItem[] = [
     {
       label: 'İzin',
-      value: `${role.permissions.length} / ${catalogue.permissions.length}`,
+      value: `${role.permissions.length} / ${grantable.length}`,
       note: `${areaCount} alanda`,
       testId: 'role-fact-permissions',
     },
@@ -167,6 +170,7 @@ export default async function AdminRoleDetailPage({ params, searchParams }: Role
             roleActive={role.isActive}
             action={replaceAdminRolePermissionsAction}
           />
+          <ReservedPermissionsNote reserved={catalogue.reservedForSuperAdmin} />
         </SectionCard>
 
         <div className="detail-panel-grid">

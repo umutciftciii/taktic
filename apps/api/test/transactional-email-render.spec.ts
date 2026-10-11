@@ -285,6 +285,46 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     adminRequestUrl: `${ADMIN}/requests/r1`,
     accountUrl: null,
   },
+  'service-incident-confirmed': {
+    fullName: 'Murat Şahin',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'Hizmet veren gelmedi',
+    outcomeText: 'Bildirim incelendi ve doğrulandı; aksaklık hizmet kaydınıza işlendi.',
+    corrected: 'false',
+    incidentUrl: `${WEB}/providers/p1/aksakliklar/i1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'service-incident-dismissed': {
+    fullName: 'Murat Şahin',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'Hizmet veren gelmedi',
+    outcomeText: 'Bildirim incelendi ve reddedildi; hizmet kaydınıza işlenmedi.',
+    corrected: 'true',
+    incidentUrl: `${WEB}/providers/p1/aksakliklar/i1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'service-incident-provider-responded': {
+    fullName: 'Destek ekibi',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    businessName: 'Usta Klima',
+    reasonLabel: 'Hizmet veren gelmedi',
+    adminIncidentUrl: `${ADMIN}/service-incidents/i1`,
+    accountUrl: null,
+  },
+  'provider-reliability-review-opened': {
+    fullName: 'Destek ekibi',
+    businessName: 'Usta Klima',
+    confirmedCount: '3',
+    incidentNumber: 'INC-2026-000003',
+    adminProviderUrl: `${ADMIN}/providers/p1#guvenilirlik`,
+    accountUrl: null,
+  },
   'package-purchase-confirmation': {
     fullName: 'Murat Şahin',
     packageName: 'Başlangıç Paketi',
@@ -665,7 +705,8 @@ describe('transactional e-mail rendering', () => {
     // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001), then the
     // refused revision of a live card (API-HARDENING-001), then the five of a
     // customer service issue (REL-002 Faz 3).
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(56);
+    // REL-002 Faz 4 adds the four incident decision / staff follow-up notices.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(60);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -905,6 +946,10 @@ describe('transactional e-mail rendering', () => {
       'request-match-review': 'Talebiniz ekibimiz tarafından inceleniyor — #T-90412',
       'provider-incident-opened': 'Müşteri hizmet aksaklığı bildirdi — #T-90412',
       'provider-incident-new': 'Yeni hizmet aksaklığı bildirimi — INC-2026-000001',
+      'service-incident-confirmed': 'Hizmet aksaklığı bildirimi doğrulandı — INC-2026-000001',
+      'service-incident-dismissed': 'Hizmet aksaklığı bildirimi reddedildi — INC-2026-000001',
+      'service-incident-provider-responded': 'Hizmet veren aksaklık bildirimine yanıt verdi — INC-2026-000001',
+      'provider-reliability-review-opened': 'Güvenilirlik incelemesi gerekli — Usta Klima',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
       'request-removed': 'Talebiniz yayından kaldırıldı',
       'request-report-new-for-support': 'Yeni talep bildirimi — #T-90412',

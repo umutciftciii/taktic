@@ -80,7 +80,13 @@ export const CONFIRMATION_PROOF_KEYS = [
   'role.status',
   'role.assign',
   'role.revoke',
+  // REL-002 Faz 4: incident decisions, the super admin's correction, and the
+  // provider reliability review workflow.
+  'reliability-review.acknowledge',
+  'reliability-review.resolve',
   'scheduler.toggle',
+  'service-incident.adjudicate',
+  'service-incident.correct',
   'seo.slug-change',
   'seo.redirect-deactivate',
   'seo.suggestion-approve',

@@ -4,7 +4,14 @@ import { SectionCard } from '../../components/section-card';
 import { DataTable, type DataColumn } from '../../components/data-table';
 import { EmptyState } from '../../components/empty-state';
 import { WholeListFooter } from '../../components/pagination';
-import { formatDateTime, listAdminPermissionCatalogue, listAdminRoles, requireSuperAdmin } from '../../lib/api';
+import {
+  formatDateTime,
+  grantablePermissions,
+  listAdminPermissionCatalogue,
+  listAdminRoles,
+  requireSuperAdmin,
+} from '../../lib/api';
+import { ReservedPermissionsNote } from './reserved-permissions-note';
 import { formatCount } from '../../lib/pagination';
 import { groupPermissions } from '../../lib/permission-groups';
 import { createAdminRoleAction } from './actions';
@@ -56,7 +63,8 @@ export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
     listAdminRoles(),
     listAdminPermissionCatalogue(),
   ]);
-  const groups = groupPermissions(catalogue.permissions);
+  const grantable = grantablePermissions(catalogue);
+  const groups = groupPermissions(grantable);
   const activeCount = roles.filter((role) => role.isActive).length;
 
   return (
@@ -65,8 +73,8 @@ export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
         title="Roller ve izinler"
         subtitle={
           roles.length === 0
-            ? `Henüz rol yok · izin kataloğunda ${formatCount(catalogue.permissions.length)} izin`
-            : `${formatCount(roles.length)} rol · ${formatCount(activeCount)} aktif · izin kataloğunda ${formatCount(catalogue.permissions.length)} izin`
+            ? `Henüz rol yok · izin kataloğunda ${formatCount(grantable.length)} izin`
+            : `${formatCount(roles.length)} rol · ${formatCount(activeCount)} aktif · izin kataloğunda ${formatCount(grantable.length)} izin`
         }
         info={ROLES_SCREEN_INFO}
         infoLabel="Roller nasıl çalışır?"
@@ -115,7 +123,7 @@ export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
                 </td>
                 <td className="is-num">
                   {role.permissions.length}
-                  <span className="cell-muted"> / {catalogue.permissions.length}</span>
+                  <span className="cell-muted"> / {grantable.length}</span>
                 </td>
                 <td className="is-num">{role.activeAssignmentCount}</td>
                 <td>
@@ -174,6 +182,7 @@ export default async function AdminRolesPage({ searchParams }: RolesPageProps) {
 
           <h3 className="form-section-title">İzinler</h3>
           <PermissionMatrix groups={groups} selected={[]} testId="role-create-matrix" />
+          <ReservedPermissionsNote reserved={catalogue.reservedForSuperAdmin} />
 
           <div className="detail-form-footer">
             <p className="detail-form-footer-note">

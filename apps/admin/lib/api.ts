@@ -4093,8 +4093,23 @@ export function getAdminRole(id: string) {
   return apiFetch<AdminRoleDetail>(`/admin/roles/${id}`);
 }
 
+/**
+ * The grantable catalogue, and (REL-002 Faz 4) the permissions reserved for a
+ * super admin: those are never a role's to hold — the API refuses them with
+ * 400 PERMISSION_RESERVED_FOR_SUPER_ADMIN — so the role editor never offers
+ * them as a checkbox, only names them.
+ */
 export function listAdminPermissionCatalogue() {
-  return apiFetch<{ permissions: AdminPermission[] }>('/admin/permissions');
+  return apiFetch<{ permissions: AdminPermission[]; reservedForSuperAdmin?: AdminPermission[] }>('/admin/permissions');
+}
+
+/** The catalogue minus anything reserved for a super admin — what a role may be given. */
+export function grantablePermissions(catalogue: {
+  permissions: AdminPermission[];
+  reservedForSuperAdmin?: AdminPermission[];
+}): AdminPermission[] {
+  const reserved = new Set(catalogue.reservedForSuperAdmin ?? []);
+  return catalogue.permissions.filter((permission) => !reserved.has(permission));
 }
 
 export function listAdminUserRoles(userId: string) {
@@ -4224,6 +4239,24 @@ export function adminPermissionLabel(permission: AdminPermission): {
   // operations switches.
   if (permission === 'SERVICE_ISSUE_SETTING_WRITE') {
     return { area: 'Operasyon ayarları', action: 'hizmet aksaklığı bildirimini açma/kapama' };
+  }
+
+  // REL-002 Faz 4: incident decisions and provider reliability. The
+  // correction is reserved for a super admin; no role can be given it.
+  const SERVICE_INCIDENTS: Record<string, string> = {
+    SERVICE_INCIDENTS_READ: 'okuma',
+    SERVICE_INCIDENTS_ADJUDICATE: 'karar verme',
+    SERVICE_INCIDENTS_CORRECT: 'karar düzeltme (yalnız süper yönetici)',
+  };
+  if (SERVICE_INCIDENTS[permission]) {
+    return { area: 'Hizmet aksaklıkları', action: SERVICE_INCIDENTS[permission] };
+  }
+  const PROVIDER_RELIABILITY: Record<string, string> = {
+    PROVIDER_RELIABILITY_READ: 'okuma',
+    PROVIDER_RELIABILITY_MANAGE: 'inceleme yönetimi',
+  };
+  if (PROVIDER_RELIABILITY[permission]) {
+    return { area: 'Hizmet veren güvenilirliği', action: PROVIDER_RELIABILITY[permission] };
   }
 
   // PR #118: the operations cancel and its one audited exception.
