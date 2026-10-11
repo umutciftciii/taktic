@@ -5,5 +5,6 @@
   "providerReviewCommentMaxLength": 600,
   "providerReviewPublicMinCount": 3,
   "providerReviewWindowDays": 90,
-  "creditLedgerIntegerMax": 2147483647
+  "creditLedgerIntegerMax": 2147483647,
+  "offerScheduleMaxDays": 365
 }

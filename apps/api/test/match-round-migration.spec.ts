@@ -9,7 +9,7 @@ import { ensureTestDatabaseExists } from './provision-test-database';
 import { assertIsTestDatabase, resolveTestDatabaseUrl } from './test-database';
 
 /**
- * REL-002 Faz 1 — the M1 migration against a representative pre-M1 database.
+ * REL-002 — the M1 and M2 migrations against representative databases.
  *
  * A scratch database next to the suite's own (`…_m1_test`, the same `_test`
  * guard) is migrated to the state right before M1 with the real migration
@@ -18,9 +18,15 @@ import { assertIsTestDatabase, resolveTestDatabaseUrl } from './test-database';
  * runs. The round rows are compared field by field with what the mapping says,
  * and a second case proves the verification block refuses (and rolls back) a
  * database whose winner is not an accepted offer.
+ *
+ * M2 (Faz 2) is taken the same way from a post-M1 database: rows an older
+ * release wrote without a round between M1 and M2 are re-backfilled, then the
+ * columns are enforced and the uniques swapped; a database M2 cannot enforce is
+ * refused whole.
  */
 
 const M1 = '20261011120000_add_service_request_match_rounds';
+const M2 = '20261011180000_enforce_round_matching_core';
 const repoRoot = resolve(__dirname, '../../..');
 const migrationsRoot = join(repoRoot, 'prisma/migrations');
 
@@ -35,12 +41,17 @@ const databaseUrl = scratchUrl();
 let workDir: string;
 let prisma: PrismaClient;
 
-/** A throwaway prisma/ directory holding the chain up to (and optionally including) M1. */
-function stageMigrations(includeM1: boolean) {
+/**
+ * A throwaway prisma/ directory holding the chain up to and including `upTo`
+ * (by name; the lock file always), or only what comes before it when
+ * `inclusive` is false.
+ */
+function stageMigrations(upTo: string, inclusive = true) {
   const staged = join(workDir, 'migrations');
   rmSync(staged, { recursive: true, force: true });
   for (const entry of readdirSync(migrationsRoot)) {
-    if (entry === M1 && !includeM1) continue;
+    const isMigration = entry !== 'migration_lock.toml';
+    if (isMigration && (inclusive ? entry > upTo : entry >= upTo)) continue;
     cpSync(join(migrationsRoot, entry), join(staged, entry), { recursive: true });
   }
 }
@@ -56,7 +67,7 @@ function deploy() {
 async function freshPreM1Database() {
   await prisma.$executeRawUnsafe('DROP SCHEMA IF EXISTS public CASCADE');
   await prisma.$executeRawUnsafe('CREATE SCHEMA public');
-  stageMigrations(false);
+  stageMigrations(M1, false);
   deploy();
 }
 
@@ -186,7 +197,7 @@ describe('M1 backfill on a representative pre-M1 database', () => {
     await sql(`INSERT INTO "MessageThread" (id, "requestId", "offerId", "customerUserId", "providerId", "providerUserId", "updatedAt")
       VALUES ('t_matched', 'r_matched', 'o_matched', 'u_customer', 'p1', 'u_p1', now())`);
 
-    stageMigrations(true);
+    stageMigrations(M1);
     deploy();
 
     const rounds = await prisma.serviceRequestMatchRound.findMany({
@@ -311,7 +322,7 @@ describe('M1 backfill on a representative pre-M1 database', () => {
     await insertOffer('o_bad', 'r_bad', 'p1', 'SUBMITTED');
     await sql(`UPDATE "ServiceRequest" SET "matchedOfferId" = 'o_bad', "matchedAt" = now() WHERE id = 'r_bad'`);
 
-    stageMigrations(true);
+    stageMigrations(M1);
     let output = '';
     try {
       deploy();
@@ -329,5 +340,117 @@ describe('M1 backfill on a representative pre-M1 database', () => {
                WHERE table_name = 'ServiceRequest' AND column_name = 'currentRoundId') AS column`);
     expect(left?.table).toBeNull();
     expect(Number(left?.column)).toBe(0);
+  });
+});
+
+/** Deploys the staged chain and returns prisma's output when it fails. */
+function deployExpectingFailure(): string {
+  try {
+    deploy();
+  } catch (error) {
+    const failure = error as { stdout?: Buffer; stderr?: Buffer };
+    return `${failure.stdout?.toString() ?? ''}${failure.stderr?.toString() ?? ''}`;
+  }
+  return '';
+}
+
+async function indexNames(table: string): Promise<string[]> {
+  const rows = await prisma.$queryRawUnsafe<Array<{ indexname: string }>>(
+    `SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = $1 ORDER BY 1`,
+    table,
+  );
+  return rows.map((row) => row.indexname);
+}
+
+describe('M2 enforce on a post-M1 database', () => {
+  async function postM1WithLegacyRows() {
+    stageMigrations(M1);
+    deploy();
+    await seedParties();
+    // Written as the application wrote them since M1 (with rounds)…
+    await insertRequest({ id: 'r_live', status: 'APPROVED', approvedAt: '2026-09-02T09:00:00.000Z' });
+    await sql(`INSERT INTO "ServiceRequestMatchRound" (id, "requestId", "roundNumber", status, source, "openedBy",
+        "openedAt", "publishedAt", "expiresAt", "updatedAt")
+      VALUES ('mr1_r_live', 'r_live', 1, 'OPEN', 'MARKETPLACE', 'REQUEST_CREATED', ${at(SUBMITTED_AT)},
+        '2026-09-02 09:00:00', '2026-09-16 09:00:00', now())`);
+    await sql(`UPDATE "ServiceRequest" SET "currentRoundId" = 'mr1_r_live' WHERE id = 'r_live'`);
+    await insertOffer('o_live', 'r_live', 'p1', 'SUBMITTED');
+    await sql(`UPDATE "Offer" SET "matchRoundId" = 'mr1_r_live' WHERE id = 'o_live'`);
+    // …and as an older release wrote them between M1 and M2: no round at all.
+    await insertRequest({ id: 'r_window', status: 'APPROVED', approvedAt: '2026-09-03T09:00:00.000Z' });
+    await insertOffer('o_window', 'r_window', 'p2', 'SUBMITTED');
+    await insertOffer('o_window_late', 'r_live', 'p2', 'SUBMITTED');
+  }
+
+  it('re-backfills the deploy window, enforces NOT NULL, swaps the uniques and leaves a consistent database', async () => {
+    await postM1WithLegacyRows();
+    expect(await indexNames('Offer')).toContain('Offer_providerId_requestId_key');
+
+    stageMigrations(M2);
+    deploy();
+
+    const links = await prisma.$queryRawUnsafe<Array<{ kind: string; id: string; round: string }>>(`
+      SELECT 'request' AS kind, id, "currentRoundId" AS round FROM "ServiceRequest"
+      UNION ALL SELECT 'offer', id, "matchRoundId" FROM "Offer" ORDER BY 1, 2`);
+    expect(links).toEqual([
+      { kind: 'offer', id: 'o_live', round: 'mr1_r_live' },
+      { kind: 'offer', id: 'o_window', round: 'mr1_r_window' },
+      { kind: 'offer', id: 'o_window_late', round: 'mr1_r_live' },
+      { kind: 'request', id: 'r_live', round: 'mr1_r_live' },
+      { kind: 'request', id: 'r_window', round: 'mr1_r_window' },
+    ]);
+    expect(
+      await prisma.serviceRequestMatchRound.findUniqueOrThrow({
+        where: { id: 'mr1_r_window' },
+        select: { status: true, publishedAt: true },
+      }),
+    ).toEqual({ status: 'OPEN', publishedAt: date('2026-09-03T09:00:00.000Z') });
+
+    const offerIndexes = await indexNames('Offer');
+    expect(offerIndexes).toEqual(
+      expect.arrayContaining(['Offer_providerId_matchRoundId_key', 'Offer_one_accepted_per_round', 'Offer_id_matchRoundId_key']),
+    );
+    expect(offerIndexes).not.toContain('Offer_providerId_requestId_key');
+    expect(offerIndexes).not.toContain('Offer_one_accepted_per_request');
+    expect(await indexNames('ContactRevealEvent')).not.toContain('ContactRevealEvent_requestId_key');
+    expect(await indexNames('MessageThread')).not.toContain('MessageThread_requestId_key');
+
+    const nullable = await prisma.$queryRawUnsafe<Array<{ table_name: string; is_nullable: string }>>(`
+      SELECT table_name, is_nullable FROM information_schema.columns
+      WHERE table_schema = 'public' AND (
+        (table_name = 'ServiceRequest' AND column_name = 'currentRoundId') OR
+        (table_name = 'Offer' AND column_name = 'matchRoundId') OR
+        (table_name IN ('ContactRevealEvent', 'MessageThread') AND column_name = 'roundId'))
+      ORDER BY 1`);
+    expect(nullable.every((row) => row.is_nullable === 'NO')).toBe(true);
+
+    // A request inserted after M2 without a round is born with its Round 1.
+    await insertRequest({ id: 'r_after', status: 'SUBMITTED' });
+    expect(
+      await prisma.serviceRequestMatchRound.findUniqueOrThrow({
+        where: { id: 'mr1_r_after' },
+        select: { roundNumber: true, status: true, publishedAt: true },
+      }),
+    ).toEqual({ roundNumber: 1, status: 'OPEN', publishedAt: null });
+
+    expect(await roundInconsistencies(prisma)).toEqual([]);
+  });
+
+  it('refuses — and rolls back entirely — when an offer sits in another request’s round', async () => {
+    await postM1WithLegacyRows();
+    await sql(`UPDATE "Offer" SET "matchRoundId" = 'mr1_r_live' WHERE id = 'o_window'`);
+
+    stageMigrations(M2);
+    const output = deployExpectingFailure();
+    expect(output).toContain('REL-002 M2 verification failed');
+    expect(output).toMatch(/offers_bad_round=1/);
+
+    // Nothing of M2 is left behind: the window's rows are still round-less,
+    // the per-request uniques still stand, the columns are still nullable.
+    expect(await indexNames('Offer')).toContain('Offer_providerId_requestId_key');
+    const [row] = await prisma.$queryRawUnsafe<Array<{ round: string | null }>>(
+      `SELECT "currentRoundId" AS round FROM "ServiceRequest" WHERE id = 'r_window'`,
+    );
+    expect(row?.round).toBeNull();
   });
 });

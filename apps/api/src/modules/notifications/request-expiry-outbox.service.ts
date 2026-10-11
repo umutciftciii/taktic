@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { OfferStatus, Prisma, ServiceRequestStatus } from '@prisma/client';
+import { roundDedupeSuffix } from '../match-rounds/match-round-dedupe';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import {
@@ -107,7 +108,14 @@ export class RequestExpiryOutbox {
   async enqueue(tx: Prisma.TransactionClient, requestId: string): Promise<number> {
     const request = await tx.serviceRequest.findUnique({
       where: { id: requestId },
-      select: { id: true, status: true, customerId: true, customerEmail: true },
+      select: {
+        id: true,
+        status: true,
+        customerId: true,
+        customerEmail: true,
+        currentRoundId: true,
+        currentRound: { select: { roundNumber: true } },
+      },
     });
 
     // Inside the caller's transaction this is the post-update state, so it is
@@ -118,13 +126,16 @@ export class RequestExpiryOutbox {
 
     const intents: Prisma.NotificationLogCreateManyInput[] = [];
     const customerEmail = request.customerEmail?.trim();
+    // The round that just expired is the request's current one.
+    const roundSuffix = roundDedupeSuffix(request.currentRound.roundNumber);
 
     if (customerEmail) {
       intents.push(
         intentRow({
           template: 'request-expired-customer',
           to: customerEmail,
-          dedupeKey: `request-expired-customer:${request.id}`,
+          // Round 1: the key it always had; Round N ≥ 2: `:r<N>` (REL-002 §18).
+          dedupeKey: `request-expired-customer:${request.id}${roundSuffix}`,
           requestId: request.id,
           userId: request.customerId,
           providerId: null,
@@ -132,8 +143,14 @@ export class RequestExpiryOutbox {
       );
     }
 
+    // The bidders of the round that expired — not an earlier round's, whose
+    // outcome they already heard about.
     const offers = await tx.offer.findMany({
-      where: { requestId: request.id, status: { not: OfferStatus.WITHDRAWN } },
+      where: {
+        requestId: request.id,
+        matchRoundId: request.currentRoundId,
+        status: { not: OfferStatus.WITHDRAWN },
+      },
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
       select: {
         providerId: true,
@@ -151,7 +168,7 @@ export class RequestExpiryOutbox {
         intentRow({
           template: 'request-expired-provider',
           to: recipient,
-          dedupeKey: `request-expired-provider:${request.id}:${offer.providerId}`,
+          dedupeKey: `request-expired-provider:${request.id}:${offer.providerId}${roundSuffix}`,
           requestId: request.id,
           userId: offer.provider.userId,
           providerId: offer.providerId,

@@ -63,7 +63,12 @@ import {
 } from './refund-policy';
 import { OFFER_LIST_DEFAULT_PAGE_SIZE } from './dto/list-offers-query.dto';
 import { joinedOfferSearchWhere, resolveOfferSearchWhere } from './offer-search';
-import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
+import {
+  assertOfferRoundCurrentAndOpen,
+  getCurrentRound,
+  getCurrentRoundOrThrow,
+  transitionRoundToMatched,
+} from '../match-rounds/match-round-transitions';
 
 /**
  * How long the offer list's read may hold its transaction. The list was one
@@ -410,7 +415,7 @@ export class OffersService {
   async listRequestOffers(requestId: string, user: AuthUser | null = null) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
-      select: { id: true, customerId: true },
+      select: { id: true, customerId: true, currentRoundId: true },
     });
 
     if (!request) {
@@ -419,8 +424,11 @@ export class OffersService {
 
     ensureCustomerCanAccessRequest(request.customerId, user);
 
+    // The current round's offers (REL-002 §3.4). With one round per request
+    // this is every offer; an earlier round's offers are history and get
+    // their own read-only section when a second round exists (Faz 3).
     const offers = await this.prisma.offer.findMany({
-      where: { requestId },
+      where: { requestId, matchRoundId: request.currentRoundId },
       orderBy: { submittedAt: 'desc' },
       include: {
         provider: {
@@ -630,25 +638,51 @@ export class OffersService {
     // guard rather than trusting the read, so a withdrawal or an acceptance
     // and a shortlist/reject cannot both land — Postgres re-evaluates it
     // against the committed row once any competing writer lets go of it.
-    const updated = await this.prisma.offer.updateMany({
-      where: {
-        id: offerId,
-        status: { in: [...CUSTOMER_ACTIONABLE_OFFER_STATUSES] },
+    //
+    // REL-002 Faz 2: and only while the offer's round is the request's
+    // current, OPEN round — read in the same Serializable transaction as the
+    // write, so a round that closes (an acceptance, an expiry, a cancel)
+    // cannot slip between the check and the update. An offer of a closed or
+    // earlier round is history: 409 OFFER_ROUND_CLOSED.
+    const updated = await runSerializable(
+      this.prisma,
+      async (tx) => {
+        const offerRound = await tx.offer.findUniqueOrThrow({
+          where: { id: offerId },
+          select: { status: true, matchRoundId: true },
+        });
+        // An offer that is already decided keeps its own, more specific
+        // answer — classified below from the row as it is now.
+        if (!isCustomerActionable(offerRound.status)) {
+          return { count: 0 };
+        }
+        const current = await getCurrentRound(tx, requestId);
+        if (current) {
+          assertOfferRoundCurrentAndOpen(offerRound.matchRoundId, current);
+        }
+
+        return tx.offer.updateMany({
+          where: {
+            id: offerId,
+            status: { in: [...CUSTOMER_ACTIONABLE_OFFER_STATUSES] },
+          },
+          data: {
+            status,
+            ...(stampViewedAt ? { viewedAt: now } : {}),
+            // In the same conditional UPDATE as the status it belongs to, so
+            // the decision and the fact that it settled the credit either both
+            // land or neither does.
+            ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
+            // A hand-rejected offer deliberately gets no rejectionReason: the
+            // enum records why the platform closed an offer, and nothing closed
+            // this one. It no longer affects refunds either way — under the
+            // current rule only `viewedAt` and `refundBlockedAt` do.
+            ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
+          },
+        });
       },
-      data: {
-        status,
-        ...(stampViewedAt ? { viewedAt: now } : {}),
-        // In the same conditional UPDATE as the status it belongs to, so the
-        // decision and the fact that it settled the credit either both land or
-        // neither does.
-        ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
-        // A hand-rejected offer deliberately gets no rejectionReason: the enum
-        // records why the platform closed an offer, and nothing closed this
-        // one. It no longer affects refunds either way — under the current rule
-        // only `viewedAt` and `refundBlockedAt` do.
-        ...(status === OfferStatus.REJECTED ? { rejectedAt: now } : {}),
-      },
-    });
+      { label: 'offers.updateRequestOfferAction' },
+    );
 
     if (updated.count !== 1) {
       // Classify the refusal from the row as it is now. Nothing was written,
@@ -693,12 +727,22 @@ export class OffersService {
    * Accepting an offer matches the request to it and closes every competing
    * offer, in one Serializable transaction.
    *
+   * REL-002 Faz 2: the round is the unit being matched. Inside the
+   * transaction the offer must belong to the request's **current** round and
+   * that round must be OPEN — an offer of an earlier or already-decided round
+   * is refused with 409 OFFER_ROUND_CLOSED before anything is written. Then
+   * the round (OPEN → MATCHED, naming the winner and its provider) and the
+   * request projection (APPROVED → MATCHED) move together, each by a write
+   * conditional on its expected state; only the current round's competitors
+   * are closed, and the reveal is the current round's.
+   *
    * The request transition is the concurrency guard: only an APPROVED request
-   * with no match yet can become MATCHED, so of two simultaneous accepts exactly
-   * one updates a row and the other gets a 409. runSerializable retries the
-   * write conflict Postgres raises for the loser, so the replay reaches that
-   * business rule instead of leaking a 500. A partial unique index
-   * (Offer_one_accepted_per_request) is the database-level backstop.
+   * with no match yet, still on this round, can become MATCHED, so of two
+   * simultaneous accepts exactly one updates a row and the other gets a 409.
+   * runSerializable retries the write conflict Postgres raises for the loser,
+   * so the replay reaches that business rule instead of leaking a 500. The
+   * partial unique index Offer_one_accepted_per_round is the database-level
+   * backstop.
    *
    * When contact sharing is on, the same transaction also carries the reveal:
    * the customer's confirmation of the current disclosure version is required
@@ -765,11 +809,29 @@ export class OffersService {
           }
         }
 
+        // The round the offer belongs to must be the request's current, OPEN
+        // round. Read in this transaction, before anything is written.
+        const current = await getCurrentRoundOrThrow(tx, requestId);
+        const target = await tx.offer.findUnique({
+          where: { id: offerId },
+          select: { requestId: true, providerId: true, matchRoundId: true },
+        });
+        if (!target || target.requestId !== requestId) {
+          throw new NotFoundException('Offer not found');
+        }
+        if (current.status === ServiceRequestStatus.APPROVED && current.matchedOfferId === null) {
+          // Only an open request can reach the round check; a matched or
+          // closed request keeps its long-standing answer below.
+          assertOfferRoundCurrentAndOpen(target.matchRoundId, current);
+        }
+        const roundId = current.currentRoundId;
+
         const matched = await tx.serviceRequest.updateMany({
           where: {
             id: requestId,
             status: ServiceRequestStatus.APPROVED,
             matchedOfferId: null,
+            currentRoundId: roundId,
           },
           data: {
             status: ServiceRequestStatus.MATCHED,
@@ -782,10 +844,15 @@ export class OffersService {
           throw new ConflictException('This request already has an accepted offer');
         }
 
-        // REL-002 Faz 1: the round matches in the same transaction, with the
-        // same offer and the same matchedAt. A refusal further down rolls it
-        // back with the request transition.
-        const roundId = await syncCurrentMatchRound(tx, requestId);
+        // The round matches in the same transaction, with the same offer and
+        // the same matchedAt; conditional on OPEN with no winner. A refusal
+        // further down rolls it back with the request transition.
+        await transitionRoundToMatched(tx, {
+          roundId,
+          offerId,
+          providerId: target.providerId,
+          matchedAt: now,
+        });
 
         // Conditional for the same reason the request transition above is: a
         // provider may be withdrawing this very offer in a parallel Serializable
@@ -837,9 +904,12 @@ export class OffersService {
         // are then told they were not selected, and nobody else. A provider who
         // withdrew is not in it, which is the one mistake that message must not
         // make.
+        // The current round's competitors only — never an earlier round's
+        // offers, which that round's own outcome already settled.
         const closing = await tx.offer.findMany({
           where: {
             requestId,
+            matchRoundId: roundId,
             id: { not: offerId },
             status: {
               in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
@@ -851,6 +921,7 @@ export class OffersService {
         await tx.offer.updateMany({
           where: {
             requestId,
+            matchRoundId: roundId,
             id: { in: closing.map((entry) => entry.id) },
             status: {
               in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
@@ -869,15 +940,10 @@ export class OffersService {
         });
 
         if (contactSharing.enabled) {
-          // The reveal belongs to the accepted offer's round; an offer written
-          // before the round existed (none after M1's backfill) falls back to
-          // the round this acceptance just matched.
-          const acceptedRound = await tx.offer.findUniqueOrThrow({
-            where: { id: offerId },
-            select: { matchRoundId: true },
-          });
+          // The reveal belongs to the round this acceptance just matched — the
+          // accepted offer's own round (checked above).
           await createContactRevealEvent(tx, {
-            roundId: acceptedRound.matchRoundId ?? roundId,
+            roundId,
             requestId,
             offerId,
             providerId: accepted.providerId,
@@ -932,9 +998,11 @@ export class OffersService {
  *
  * Inside the caller's transaction, so a failure here rolls the whole accept
  * back: a matched request without its event would be exactly the state this
- * feature must never produce. The unique index on requestId is what makes that
+ * feature must never produce. The unique index on roundId is what makes that
  * true even against a concurrent writer — the loser's insert fails and takes its
- * own accept down with it, rather than adding a second reveal.
+ * own accept down with it, rather than adding a second reveal. Since REL-002
+ * M2 the uniques are `roundId` and `offerId`: one reveal per match round, so a
+ * later round's match gets its own row and an earlier one's stays as history.
  */
 async function createContactRevealEvent(
   tx: Prisma.TransactionClient,
@@ -951,7 +1019,7 @@ async function createContactRevealEvent(
   try {
     await tx.contactRevealEvent.create({ data: event });
   } catch (error) {
-    // A unique violation means somebody already revealed this request or this
+    // A unique violation means somebody already revealed this round or this
     // offer. Reported as the business rule it is, so the caller sees a 409
     // instead of a leaked Prisma error.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {

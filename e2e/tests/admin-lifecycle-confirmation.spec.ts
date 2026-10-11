@@ -3,6 +3,7 @@ import { settleActionRedirect } from '../src/action-redirect';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { clickBeforeHydration, confirmThrough, waitForHydration } from '../src/confirm-dialog';
 import {
+  alignRoundWithRequest,
   createAdmin,
   createCategory,
   createClaimableCustomer,
@@ -362,6 +363,7 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       where: { id: request.id },
       data: { status: 'MATCHED', matchedOfferId: offer.id, matchedAt: new Date() },
     });
+    await alignRoundWithRequest(request.id);
     const admin = await openSuper(browser);
     const page = admin.page;
 

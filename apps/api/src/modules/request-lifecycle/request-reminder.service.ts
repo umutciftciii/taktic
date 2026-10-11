@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { NotificationStatus, Prisma, ServiceRequestStatus } from '@prisma/client';
+import { MatchRoundStatus, NotificationStatus, Prisma, ServiceRequestStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from '../notifications/notification-dispatcher.service';
 import {
@@ -8,7 +8,7 @@ import {
   REQUEST_REMINDER_AFTER_DAYS,
   requestReminderCutoff,
 } from './request-lifecycle.constants';
-import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
+import { claimRoundReminder } from '../match-rounds/match-round-transitions';
 
 export type RequestReminderResult = {
   processed: number;
@@ -22,6 +22,13 @@ const REMINDER_SUBJECT = 'Talebiniz için süre dolmak üzere';
 /**
  * Sends the single day-7 reminder to customers whose approved request has not
  * received a single offer yet.
+ *
+ * REL-002 Faz 2: the clock and the claim are the current **round's** —
+ * `publishedAt` and `reminderSentAt` — so each round earns at most one
+ * reminder of its own. For Round 1 those are the request's `approvedAt` and
+ * `reminderSentAt` (carried by the backfill), so nothing is reminded twice or
+ * early across the switch. The request's `reminderSentAt` is still written in
+ * the same transaction as a compatibility mirror; nothing reads it to decide.
  *
  * Two properties are load-bearing:
  *
@@ -48,20 +55,30 @@ export class RequestReminderService {
   async execute(options: { limit?: number } = {}): Promise<RequestReminderResult> {
     const limit = options.limit ?? DEFAULT_REQUEST_LIFECYCLE_SCAN_LIMIT;
     const cutoff = requestReminderCutoff();
-    const candidates = await this.prisma.serviceRequest.findMany({
+    const rounds = await this.prisma.serviceRequestMatchRound.findMany({
       where: reminderCandidateWhere(cutoff),
-      orderBy: [{ approvedAt: 'asc' }, { id: 'asc' }],
+      orderBy: [{ publishedAt: 'asc' }, { id: 'asc' }],
       take: limit,
       select: {
         id: true,
-        requestNumber: true,
-        customerId: true,
-        customerName: true,
-        customerEmail: true,
-        approvedAt: true,
-        category: { select: { name: true } },
+        expiresAt: true,
+        request: {
+          select: {
+            id: true,
+            requestNumber: true,
+            customerId: true,
+            customerName: true,
+            customerEmail: true,
+            category: { select: { name: true } },
+          },
+        },
       },
     });
+    const candidates = rounds.map((round) => ({
+      ...round.request,
+      roundId: round.id,
+      expiresAt: round.expiresAt,
+    }));
 
     let reminded = 0;
     let skipped = 0;
@@ -79,27 +96,41 @@ export class RequestReminderService {
       // Re-checked immediately before the claim so a request that received its
       // first offer between the scan and now is not reminded anyway. This is a
       // narrowing, not the correctness guard — that is the claim below.
-      const offerCount = await this.prisma.offer.count({ where: { requestId: candidate.id } });
+      const offerCount = await this.prisma.offer.count({ where: { matchRoundId: candidate.roundId } });
       if (offerCount > 0) {
         skipped += 1;
         continue;
       }
 
-      // The claim and its REL-002 Faz 1 round copy commit together. The
-      // request's reminderSentAt stays the claim the scan reads; the round
-      // only records it (Faz 2 moves the scan onto the round).
-      const claim = await this.prisma.$transaction(async (tx) => {
-        const claimed = await tx.serviceRequest.updateMany({
-          where: { id: candidate.id, ...reminderClaimWhere(cutoff) },
-          data: { reminderSentAt: new Date() },
-        });
-        if (claimed.count === 1) {
-          await syncCurrentMatchRound(tx, candidate.id);
+      // The claim is the round's; the request's column is written beside it as
+      // a compatibility mirror, conditional on the request still being the
+      // APPROVED owner of this round — a request that moved on (matched,
+      // cancelled, expired) rolls the claim back and is skipped.
+      const claimed = await this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        if (!(await claimRoundReminder(tx, { roundId: candidate.roundId, cutoff, now }))) {
+          return false;
         }
-        return claimed;
+        const mirrored = await tx.serviceRequest.updateMany({
+          where: {
+            id: candidate.id,
+            status: ServiceRequestStatus.APPROVED,
+            currentRoundId: candidate.roundId,
+          },
+          data: { reminderSentAt: now },
+        });
+        if (mirrored.count !== 1) {
+          throw new ReminderClaimAbandoned();
+        }
+        return true;
+      }).catch((error: unknown) => {
+        if (error instanceof ReminderClaimAbandoned) {
+          return false;
+        }
+        throw error;
       });
 
-      if (claim.count !== 1) {
+      if (!claimed) {
         skipped += 1;
         continue;
       }
@@ -121,7 +152,7 @@ export class RequestReminderService {
             categoryName: candidate.category.name,
             openDays: String(REQUEST_EXPIRY_DAYS),
             remainingDays: String(REQUEST_EXPIRY_DAYS - REQUEST_REMINDER_AFTER_DAYS),
-            expiresAt: expiryMoment(candidate.approvedAt)?.toISOString() ?? null,
+            expiresAt: candidate.expiresAt?.toISOString() ?? null,
           },
         },
         { requestId: candidate.id, userId: candidate.customerId },
@@ -141,31 +172,23 @@ export class RequestReminderService {
   }
 }
 
-function expiryMoment(approvedAt: Date | null): Date | null {
-  if (!approvedAt) {
-    return null;
-  }
-
-  return new Date(approvedAt.getTime() + REQUEST_EXPIRY_DAYS * 24 * 60 * 60 * 1000);
-}
+/** The request moved on between the round claim and its mirror: roll back, skip. */
+class ReminderClaimAbandoned extends Error {}
 
 /**
- * A request earns the reminder when it has been approved for seven days, has
- * never been reminded, and has no offer at all — not "no recent offer" and not
- * "no open offer": a single withdrawn offer still means the customer heard from
- * somebody, so the reminder would be wrong.
+ * A round earns the reminder when it has been published for seven days, has
+ * never been reminded, is its APPROVED request's current round, and has no
+ * offer at all — not "no recent offer" and not "no open offer": a single
+ * withdrawn offer still means the customer heard from somebody, so the
+ * reminder would be wrong. Offers of an earlier round do not count: each
+ * round is its own offer period.
  */
-function reminderCandidateWhere(cutoff: Date): Prisma.ServiceRequestWhereInput {
+function reminderCandidateWhere(cutoff: Date): Prisma.ServiceRequestMatchRoundWhereInput {
   return {
-    ...reminderClaimWhere(cutoff),
-    offers: { none: {} },
-  };
-}
-
-function reminderClaimWhere(cutoff: Date): Prisma.ServiceRequestWhereInput {
-  return {
-    status: ServiceRequestStatus.APPROVED,
-    approvedAt: { not: null, lte: cutoff },
+    status: MatchRoundStatus.OPEN,
     reminderSentAt: null,
+    publishedAt: { not: null, lte: cutoff },
+    offers: { none: {} },
+    currentForRequest: { some: { status: ServiceRequestStatus.APPROVED } },
   };
 }

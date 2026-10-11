@@ -1,4 +1,4 @@
-import { prisma, uniquePhone, uniqueSuffix, type Location } from './fixtures';
+import { alignRoundWithRequest, prisma, uniquePhone, uniqueSuffix, type Location } from './fixtures';
 
 /**
  * Provider-review rows written straight to the database, for the parts of
@@ -110,6 +110,7 @@ export async function seedCompletedJob(options: {
       completedAt,
     },
   });
+  await alignRoundWithRequest(request.id);
 
   return { requestId: request.id, offerId: offer.id };
 }

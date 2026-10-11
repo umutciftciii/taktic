@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { ApiError, apiFetch } from '../../../../../../lib/api';
 import { parseLiraToMinor } from '../../../../../../lib/lira-input';
+import { validateOfferSchedule } from '@taktic/shared';
 
 /**
  * Offering on a direct vitrin lead.
@@ -28,6 +29,16 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
   const requestId = readString(formData, 'requestId');
   const target = `/providers/${providerId}/vitrin/talepler/${leadId}`;
 
+  // REL-002 §6.1: the same schedule rules as the marketplace offer, checked
+  // before anything is sent; the API checks again on its own clock and its
+  // refusal comes back through `errorCode` below with the same code.
+  const estimatedStartDate = readOptional(formData, 'estimatedStartDate');
+  const estimatedCompletionDate = readOptional(formData, 'estimatedCompletionDate');
+  const schedule = validateOfferSchedule(estimatedStartDate, estimatedCompletionDate);
+  if (!schedule.ok) {
+    redirect(`${target}?error=${schedule.code}`);
+  }
+
   try {
     await apiFetch(`/providers/${providerId}/requests/${requestId}/offers`, {
       method: 'POST',
@@ -36,8 +47,8 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
         // kuruş integer out, no floating point on the way.
         priceAmount: parseLiraToMinor(readString(formData, 'priceAmount')),
         currency: readOptional(formData, 'currency'),
-        estimatedStartDate: readOptional(formData, 'estimatedStartDate'),
-        estimatedCompletionDate: readOptional(formData, 'estimatedCompletionDate'),
+        estimatedStartDate,
+        estimatedCompletionDate,
         message: readString(formData, 'message'),
         warrantyNote: readOptional(formData, 'warrantyNote'),
         internalNote: readOptional(formData, 'internalNote'),

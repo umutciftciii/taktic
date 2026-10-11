@@ -1,7 +1,7 @@
 # REL-002 — Provider Reliability / Match Round — Teknik Tasarım ve Fazlandırma
 
 - Baseline: `main@ad96b1360b3602510d63cd7e3efe6ddc486a8a0f` (doğrulandı), yerel DB 94 migration (doğrulandı), release `v0.1.0`
-- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. Faz 2–5 hâlâ tasarım.
+- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. **Faz 2 uygulandı** (round matching core'un otoritesi, M2 enforce, teklif takvimi zorunlu) — gerçek şema, kısıtlar, hata kodları, ölçümler ve runbook §31'de; §2.2, §2.6, §5.1 (M2), §6.1 ve §19 Faz 2'nin gerçek hâline göre güncellendi. Faz 3–5 hâlâ tasarım.
 - Faz 1 öncesi yerel DB'ye yalnızca salt-okunur sorgu atıldı (`BEGIN READ ONLY`). Sonuçlar:
   - ServiceRequest: SUBMITTED 6 (3'ü direct lead), APPROVED 9 (2'sinde `approvedAt` NULL), REJECTED 1, MATCHED 2, COMPLETED 5.
   - Offer: 14 satır, 7 ACCEPTED. 14 tekliften yalnız 7'sinde `estimatedStartDate` / `estimatedCompletionDate` dolu.
@@ -239,8 +239,9 @@ model ServiceRequestMatchRound {
 }
 ```
 
-Sonraki migration'larda eklenecekler (Faz 1'de bilerek yok):
-- **M2:** `@@unique([id, requestId])` (Offer composite FK hedefi), composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)`, scheduler index'leri `@@index([status, publishedAt])` ve `@@index([status, reminderSentAt, publishedAt])` (okuyucular round'a geçtiği an).
+M2'de (Faz 2, `20261011180000_enforce_round_matching_core`) eklenenler: `@@unique([id, requestId])` (composite FK hedefi), `matchedOffer` ilişkisi composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)`, scheduler index'leri `@@index([status, expiresAt])` ve `@@index([status, reminderSentAt, publishedAt])`. `currentForRequest` ilişki listesi oldu (composite FK; `currentRoundId @unique` yine en fazla bir talep demek). Ayrıntı §31.1.
+
+Sonraki migration'larda eklenecekler:
 - **M3:** `failureIncidentId String? @unique` + `failureIncident` ilişkisi, `incidents` ilişkisi, `FAILED` değeri ve FAILED shape CHECK'i.
 
 Notlar:
@@ -267,13 +268,11 @@ ALTER TABLE "ServiceRequestMatchRound" ADD CONSTRAINT "MatchRound_matched_has_of
 
 Bu trigger Faz 1'de güvenlidir: uygulamada hiçbir yol talebi COMPLETED/CANCELLED/EXPIRED'dan çıkarmaz, round da talebin aynasıdır. M3, listeye `FAILED`'ı ekler.
 
-Bilerek **ertelenen** CHECK'ler (Faz 1'de aşırı zorlamamak için):
-- `MatchRound_open_has_no_match` (`status <> 'OPEN' OR matchedOfferId IS NULL`): projeksiyon bunu zaten sağlıyor ve tutarlılık kontrolü doğruluyor; DB CHECK'i M2'de, okuyucular round'a geçtiğinde eklenir.
-- `MatchRound_failed_shape`, `MatchRound_completed_shape`: M3 / M2.
+M2 (Faz 2) bu CHECK'i status başına tam şekille değiştirdi (`MatchRound_open_has_no_outcome`, `_matched_shape`, `_completed_shape`, `_cancelled_shape`, `_expired_shape`, `_publication_pair`; §31.1). `MatchRound_failed_shape` M3'e kaldı.
 
-Ek invariant'lar (M2 ve sonrası):
-- **Matched offer ↔ round uyumu**: composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)` (M2). Bunun için Offer'da `@@unique([id, matchRoundId])` gerekir.
-- **"Round başına en fazla bir kabul edilmiş teklif"**: `matchedOfferId @unique` (M1) ve `Offer_one_accepted_per_round` (M2, §5.1).
+Diğer invariant'lar (M2'de uygulandı):
+- **Matched offer ↔ round uyumu**: composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)`; Offer'da `@@unique([id, matchRoundId])`.
+- **"Round başına en fazla bir kabul edilmiş teklif"**: `matchedOfferId @unique` (M1) ve `Offer_one_accepted_per_round` (M2).
 
 ### 2.3 `ServiceRequestProviderExclusion` (§9)
 
@@ -416,28 +415,29 @@ model ProviderReliabilityReview {
 
 ### 2.6 Mevcut modellere ek alanlar
 
-M1'de (Faz 1) eklenen hâlleri:
+M1'de eklendi, M2'de (Faz 2) enforce edildi — `prisma/schema.prisma`'daki hâliyle:
 
 ```prisma
 model ServiceRequest {
-  currentRoundId String?                     @unique   // Faz 2 (M2) NOT NULL
-  currentRound   ServiceRequestMatchRound?   @relation("ServiceRequestCurrentRound", fields: [currentRoundId], references: [id], onDelete: Restrict)
-  matchRounds    ServiceRequestMatchRound[]  @relation("ServiceRequestMatchRounds")
+  currentRoundId  String                     @unique @default(dbgenerated())   // NOT NULL; doğum trigger'ı doldurur
+  currentRound    ServiceRequestMatchRound   @relation("ServiceRequestCurrentRound", fields: [currentRoundId, id], references: [id, requestId], onDelete: Restrict)
+  matchRounds     ServiceRequestMatchRound[] @relation("ServiceRequestMatchRounds")
+  contactRevealEvents ContactRevealEvent[]   // M2: requestId artık unique değil
+  messageThreads      MessageThread[]
   // + Faz 3: providerExclusions, serviceIncidents
 }
 
 model Offer {
-  matchRoundId    String?                    // Faz 2 (M2) NOT NULL
-  matchRound      ServiceRequestMatchRound?  @relation("OfferMatchRound", fields: [matchRoundId], references: [id], onDelete: Restrict)
-  matchedForRound ServiceRequestMatchRound?  @relation("MatchRoundMatchedOffer")
+  matchRoundId    String                     @default(dbgenerated())   // NOT NULL
+  matchRound      ServiceRequestMatchRound   @relation("OfferMatchRound", fields: [matchRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  matchedForRound ServiceRequestMatchRound[] @relation("MatchRoundMatchedOffer")
+  @@unique([providerId, matchRoundId])   // Offer_providerId_requestId_key'in yerine
+  @@unique([id, matchRoundId])           // composite FK hedefi
   @@index([matchRoundId, status])
-  // M2: @@unique([id, matchRoundId]), @@unique([providerId, matchRoundId]) (eski
-  // Offer_providerId_requestId_key'in yerine) ve ilişkinin composite FK'ye
-  // dönüşmesi: fields: [matchRoundId, requestId] → references: [id, requestId].
 }
 
-model ContactRevealEvent { roundId String? @unique }   // M2: NOT NULL; requestId unique → @@index
-model MessageThread      { roundId String? @unique }   // M2: aynı
+model ContactRevealEvent { requestId String  roundId String @unique @default(dbgenerated())  @@index([requestId]) }
+model MessageThread      { requestId String  roundId String @unique @default(dbgenerated())  @@index([requestId]) }
 model ProviderProfile    { matchedRounds ServiceRequestMatchRound[] @relation("MatchRoundMatchedProvider") }
 ```
 
@@ -567,17 +567,20 @@ Diğer kurallar:
 
 Doğrulama bloğunun kontrolleri: round sayısı = request sayısı; her request'in tam bir round'u var ve `currentRoundId` kendi Round 1'i; her offer/reveal/thread kendi request'inin round'unda; reveal/thread round'u teklifinin round'uyla aynı; MATCHED/COMPLETED round'da `status`, `matchedOfferId`, `matchedAt` request ile aynı; `matchedProviderId = offer.providerId`; MATCHED/COMPLETED kazananı ACCEPTED. Migration testi (`apps/api/test/match-round-migration.spec.ts`) her şekli içeren bir pre-M1 fixture'ı gerçek `prisma migrate deploy` ile geçirir, round satırlarını alan alan karşılaştırır ve bozuk bir veride migration'ın tamamen geri alındığını kanıtlar.
 
-**M2 — enforce (Faz 2, ayrı migration, kod tüm yazıcılarda round yazar hale geldikten sonra)**
+**M2 — enforce (Faz 2) — UYGULANDI**
 
-0. **Önce yeniden backfill** (M1 ile aynı SQL, `WHERE ... IS NULL`): M1 ile yeni kodun canlıya çıkışı arasındaki pencerede eski kodun yazdığı satırlar (round'suz request, `matchRoundId`'siz offer) olabilir. Uygulama bunların round'unu ilk lifecycle yazımında kendisi oluşturur (`syncCurrentMatchRound`), ama offer/reveal/thread bağları için M2 bu adımı tekrarlar ve `rel-002-round-consistency.sql` boş dönmeden ilerlemez.
-1. `Offer.matchRoundId`, `ContactRevealEvent.roundId`, `MessageThread.roundId`, `ServiceRequest.currentRoundId` → NOT NULL. Önce `CHECK (... IS NOT NULL) NOT VALID` + `VALIDATE CONSTRAINT`, sonra `SET NOT NULL`.
-2. Unique swap'ları:
-   - `DROP INDEX "Offer_providerId_requestId_key"` → `Offer_providerId_matchRoundId_key`.
-   - `DROP INDEX "Offer_one_accepted_per_request"` → `CREATE UNIQUE INDEX "Offer_one_accepted_per_round" ON "Offer"("matchRoundId") WHERE status='ACCEPTED'`.
-   - `ContactRevealEvent_requestId_key` → `@@index([requestId])` (`roundId @unique` M1'de zaten var).
-   - `MessageThread_requestId_key` → `@@index([requestId])` (`roundId @unique` M1'de zaten var).
-3. Composite FK'ler: `Offer(matchRoundId, requestId) → Round(id, requestId)` ve `Round(matchedOfferId, id) → Offer(id, matchRoundId)`.
-4. Swap güvenliği: M2 anında her request'in tek bir round'u var. Yeni unique'ler eskilerden **daha gevşek değil, eşdeğer** başlıyor; hiçbir satır ihlal edemez.
+Migration: `prisma/migrations/20261011180000_enforce_round_matching_core/migration.sql` (yerel 95 → 96). Tek transaction; adımlar:
+
+0. **Yeniden backfill** — M1'in kendi SQL'i, `WHERE ... IS NULL` / `ON CONFLICT DO NOTHING`: M1 ile yeni kodun canlıya çıkışı arasında eski kodun yazmış olabileceği round'suz request ve bağsız offer/reveal/thread satırları. Tam backfill'de no-op.
+1. **Doğrulama bloğu** (`DO $$ … RAISE EXCEPTION`): her request'te tam bir round ve `currentRoundId` kendi round'u; offer/reveal/thread kendi request'inin (ve teklifinin) round'unda; `(providerId, matchRoundId)` ve round başına ACCEPTED tekrarı yok; kazanan kendi round'unun teklifi; status başına round şekli. Biri kırılırsa migration bütünüyle geri alınır.
+2. **NOT NULL**: dört kolon için `CHECK … NOT VALID` → `VALIDATE` → `SET NOT NULL` → yardımcı CHECK'in düşürülmesi.
+3. **Unique swap**: `Offer_providerId_requestId_key` → `Offer_providerId_matchRoundId_key`; `Offer_one_accepted_per_request` → `Offer_one_accepted_per_round` (partial, `WHERE status='ACCEPTED'`); `ContactRevealEvent_requestId_key` / `MessageThread_requestId_key` → düz `…_requestId_idx` (`roundId @unique` M1'den).
+4. **Composite FK'ler**: `Offer(matchRoundId, requestId) → Round(id, requestId)`, `Round(matchedOfferId, id) → Offer(id, matchRoundId)`, `ServiceRequest(currentRoundId, id) → Round(id, requestId)`; hedef unique'ler `Offer_id_matchRoundId_key`, `ServiceRequestMatchRound_id_requestId_key`. Request ↔ round FK'leri döngüsel ve ikisi de NOT NULL olduğu için `ServiceRequestMatchRound_requestId_fkey` **DEFERRABLE INITIALLY DEFERRED** yapıldı (Prisma ifade edemez; drift görmez).
+5. **Round şekli CHECK'leri** (M1'in `MatchRound_matched_has_offer`'ının yerine): §31.1.
+6. **Scheduler index'leri**: `(status, expiresAt)`, `(status, reminderSentAt, publishedAt)`.
+7. **Doğum trigger'ı** `ServiceRequest_round_one_at_birth` (BEFORE INSERT, `currentRoundId` boşsa): Round 1'i (`mr1_<id>`) OPEN, `publishedAt` M1 kuralıyla, `source` MARKETPLACE olarak aynı statement'ta yazar. Uygulamanın create yolu da buna dayanır (id önceden bilinmediği için; vitrin lead'i bağlanınca uygulama round'u DIRECT_SHOWCASE yapar). **Bağ varsayılanı** `round_link_default_fn` (Offer/ContactRevealEvent/MessageThread, BEFORE INSERT): round kolonu boşsa talebin current round'unu yazar — yalnız raw INSERT'ler (seed, fixture, rolling deploy'daki eski sürüm) için; uygulama her zaman açıkça yazar ve composite FK yine başka talebin round'unu reddeder.
+
+Swap güvenliği: M2 anında her request'in tek round'u var; yeni unique'ler eskilerle **eşdeğer** başlar, hiçbir satır ihlal edemez. Doğrulama bloğu bunu yeniden kanıtlar.
 
 **M3 — REL-002 tabloları (Faz 3):** `ServiceRequestProviderExclusion`, `ProviderServiceIncident`, `ProviderIncidentAdjudication`, `ServiceIssueReason` (PROVIDER_CANCELLED_BEFORE_START dahil), `MatchRoundStatus += FAILED`, `MatchRoundOpenedBy += SERVICE_ISSUE`, round'a `failureIncidentId` + FAILED shape CHECK'i, terminal trigger listesine FAILED, `ServiceRequestStatus += MATCH_REVIEW`, `NumberedEntityType += SERVICE_INCIDENT`, OperationsSettings flag'i.
 - `ALTER TYPE ... ADD VALUE` aynı tx'te kullanılamaz. Değer bu migration'da eklenir, ilk kullanım kodda olur. Repo'daki önceki enum eklemeleriyle aynı desen.
@@ -591,13 +594,13 @@ Doğrulama bloğunun kontrolleri: round sayısı = request sayısı; her request
 - Yerel boyut 23 request / 14 offer. Staging ve prod ölçeği bu oturumda bilinmiyor (dokunulmadı).
 - M1'deki `UPDATE "Offer"` tüm satırlara row lock alır. Kolon nullable olduğu için tablo yeniden yazılmaz (PG ≥11, default'suz ADD COLUMN metadata-only), ama UPDATE her satır için yeni tuple üretir.
 - Kural: Faz 1 PR'ı bir **preflight sayım scripti** taşır (`scripts/ops/rel-002-preflight.sql`, salt-okunur, `BEGIN READ ONLY … ROLLBACK`). Offer > ~100k ise backfill migration dışına alınır ve batch'lenir (`WHERE "matchRoundId" IS NULL LIMIT 5000` döngüsü). Bugünkü ölçekte tek migration yeterli (yerel ölçüm §30.4).
-- M2'deki `CREATE UNIQUE INDEX`, Prisma migration tx'i içinde `CONCURRENTLY` olamaz. Bugünkü ölçekte kısa bir `SHARE` lock kabul edilebilir. Büyürse elle `CONCURRENTLY` + `prisma migrate resolve` deseni kullanılır.
+- M2'deki `CREATE UNIQUE INDEX`, Prisma migration tx'i içinde `CONCURRENTLY` olamaz. Ölçüm (§31.6): 200k request / 500k offer'da M2 **3,2 s** tek transaction (en ağır adım doğrulama bloğu ~1,1 s, sonra `Offer_providerId_matchRoundId_key` ~0,4 s). Bu süre boyunca Offer/ServiceRequest/round yazmaları bekler. Prod ölçeği bunun çok üstündeyse index'ler elle `CONCURRENTLY` + `prisma migrate resolve` ile önceden kurulur.
 - Yerel prosedür (memory'deki desen): migrate öncesi `pg_dump` ile geri dönüş dump'ı alınır. `_prisma_migrations` sayısı 94 → 95 (M1) → 96 → 97 → 98 (→ 99, M5) olur.
 
 ### 5.3 Geri dönüş
 
 - **M1:** Kod revert edilir. Tablo ve kolonlar nullable kalır, okuyucu yoktur; eski kod round yazmaz, yalnız yeni satırlar round'suz kalır (M2'nin 0. adımı bunları toplar). Down-migration gerekmez.
-- **M2:** Index swap'ı geri alınabilir, ama yalnız hiçbir request'te >1 round yokken. Faz 3 flag'i açılmadan önce M2 geri alınabilir. Açıldıktan sonra geri dönüş yalnız ileri-düzeltme ile yapılır.
+- **M2:** `scripts/ops/rel-002-m2-rollback.sql` (tek transaction; herhangi bir talepte >1 round varsa reddeder) şemayı M1 hâline döndürür ve `_prisma_migrations` kaydını siler; Faz 1 kodu (d55d92f1) bu şemayla çalışır. Prova edildi (§31.6). Faz 3 bir talepte ikinci turu açtıktan sonra geri dönüş yalnız ileri-düzeltme ile yapılır. Faz 1 kodu M2 şemasıyla da çalışır (round'ları kendisi yazar; doğum trigger'ı yalnız boş `currentRoundId`'yi doldurur), yani kodu geri alıp şemayı bırakmak da mümkündür.
 
 ---
 
@@ -613,8 +616,8 @@ Yeni teklifler (Faz 2):
   - `start >= today`. Bugün başlamak geçerli, dün değil.
   - `end >= start`. Aynı gün iş geçerli.
   - `end <= today + OFFER_SCHEDULE_MAX_DAYS`. Öneri 365. `packages/shared/limits.json`'a girer; memory'ye göre API `@taktic/shared`'i import edemez, `limits.json` yolu kullanılır.
-- Kodlar: `OFFER_SCHEDULE_REQUIRED`, `OFFER_START_IN_PAST`, `OFFER_END_BEFORE_START`, `OFFER_SCHEDULE_TOO_FAR` (400).
-- Web provider formu (`providers/[id]/requests/[requestId]/page.tsx:371-375`) `required` + `min` alır. Vitrin lead formu (`vitrin/talepler/[leadId]`) da aynı.
+- Kodlar (400, gövdede `field`): `OFFER_SCHEDULE_REQUIRED`, `OFFER_SCHEDULE_INVALID` (saatli ISO ya da takvimde olmayan gün), `OFFER_START_IN_PAST` (`today` ile), `OFFER_END_BEFORE_START`, `OFFER_SCHEDULE_TOO_FAR` (`latest` ile). Uygulandı (Faz 2): API `apps/api/src/common/offer-schedule.ts`, web `packages/shared/src/offer-schedule.ts` (aynı kurallar, aynı `limits.json` `offerScheduleMaxDays = 365`).
+- Web: iki teklif formu da (`providers/[id]/requests/[requestId]`, `vitrin/talepler/[leadId]`) ortak `OfferScheduleFields` bileşenini kullanır (`required`, `min`/`max` İstanbul günü); server action'lar API'den önce `validateOfferSchedule` çalıştırır ve API'nin aynı kodlu reddini aynı cümleyle forma döndürür.
 - Müşterinin `preferredDate` aralığı ile tutarlılık **zorlanmaz.** Teklif bir karşı-öneridir. UI'da "talep edilen aralığın dışında" uyarısı gösterilir.
 
 ### 6.2 Sınır tanımı
@@ -1018,10 +1021,11 @@ Yeni template'ler:
 - **Reminder** taraması: `status='OPEN' AND reminderSentAt IS NULL AND publishedAt <= now-7g AND offers none (matchRoundId = round.id)`. Claim `round.reminderSentAt` üzerinden.
 - **Tur 2:** `publishedAt=now`, `expiresAt=now+14g`, `reminderSentAt=NULL`. Pencere ve reminder sıfırdan başlar.
 - **Tarihsel tur 1:** `publishedAt`, `reminderSentAt`, `expiresAt` olduğu gibi kalır. `request.approvedAt` ve `request.reminderSentAt` legacy alan olarak dokunulmaz.
-- **Geçiş (Faz 2):**
-  - Scheduler okuyucuları round'a geçirilir.
-  - Backfill, tur 1'in `publishedAt=approvedAt` ve `reminderSentAt` değerlerini taşıdığı için çalışan talepler aynı anda expire veya remind edilir; davranış farkı yoktur.
-  - `approvedAt` NULL legacy satırlar (yerelde 2) yine taranmaz.
+- **Geçiş (Faz 2) — uygulandı:**
+  - Expiry adayları round'lardan seçilir (`status OPEN, publishedAt NOT NULL, expiresAt <= now`, current'ı olduğu talep APPROVED); tx'te önce request (`APPROVED, matchedOfferId NULL, currentRoundId = round`) sonra round (`transitionRoundToExpired`) — accept ile aynı yazma sırası.
+  - Reminder adayları round'lardan (`OPEN, reminderSentAt NULL, publishedAt <= now-7g`, round'da hiç teklif yok, talep APPROVED). Claim `round.reminderSentAt` (`claimRoundReminder`); `request.reminderSentAt` aynı tx'te uyumluluk aynası olarak yazılır (talep artık bu round'un APPROVED sahibi değilse claim geri alınır), hiçbir karar onu okumaz. E-postadaki `expiresAt` round snapshot'ıdır.
+  - Backfill, tur 1'in `publishedAt=approvedAt` ve `reminderSentAt` değerlerini taşıdığı için çalışan talepler aynı anda expire veya remind edilir; davranış farkı yoktur. `approvedAt` NULL legacy satırlar (yerelde 2) yine taranmaz.
+  - Ölçek notu (§31.7): aday taraması APPROVED talepler üzerinde hash join yapar (200k/80k APPROVED'da ~35 ms/tick); saatlik cron'da kabul edilebilir.
 - **Gotcha:** `reopenAfterRemoval` (SR:1330) bugün `approvedAt`'i tazeliyor. Round'da da `publishedAt`/`expiresAt` tazelenir ve `reminderSentAt` sıfırlanmaz. Bugünkü davranış: reminder bir kez; tutarlılık için korunur.
 
 ---
@@ -1236,7 +1240,10 @@ Ortak desen:
 - **Test gate'i:** hedefli API spec'leri, yeni integration + migration testi, yerel restore rehearsal + `migrate deploy`, exact-head CI.
 - **Rollback:** kod revert. Şema yerinde kalır.
 
-### Faz 2 — Round-aware iç yapı + enforce + teklif takvimi
+### Faz 2 — Round-aware iç yapı + enforce + teklif takvimi — UYGULANDI
+
+Gerçek sonuç, sapmalar ve runbook §31'de. Aşağıdaki kapsam metni planlandığı hâliyle duruyor; tek fark admin tarafında yalnız salt-okunur `GET /service-requests/:id/rounds` yapıldı (admin UI zaman çizelgesi Faz 3/5'e kaldı).
+
 
 - **Kapsam:**
   - M2 (NOT NULL, unique swap'ları, composite FK, terminal trigger).
@@ -1422,7 +1429,10 @@ Dokunulmayanlar (round alanı yazmayanlar): kalite skoru yeniden hesabı, telefo
 5. Yeni API'yi başlat. Web/admin değişmedi (recreate gerekmez).
 6. Geri dönüş: kod revert; şema kalır (nullable, okuyucusuz). Eski kodun ürettiği round'suz satırlar M2'nin 0. adımıyla toplanır.
 
-### 30.6 Faz 2 için kalan gerçek blocker'lar
+### 30.6 Faz 2 için kalan gerçek blocker'lar — Faz 2'de kapandı (§31)
+
+Aşağıdaki yedi maddenin hepsi Faz 2'de kapandı; Faz 3'ün ön koşulları §31.10'da.
+
 
 1. Okuyucular hâlâ request kolonlarında: discovery `offers: none` filtresi, accept'in `OFFER_ROUND_CLOSED` kontrolü, contact/messaging lookup, review, admin projeksiyonları (§24 "Değişen", Faz 2 satırları).
 2. Per-request unique'ler (`Offer_providerId_requestId_key`, `Offer_one_accepted_per_request`, reveal/thread `requestId` unique) — M2 swap'ı.
@@ -1431,3 +1441,142 @@ Dokunulmayanlar (round alanı yazmayanlar): kalite skoru yeniden hesabı, telefo
 5. Scheduler'lar (expiry/reminder) ve publish fan-out dedupe anahtarı round saatine/turuna geçmeli; retry parser `:r<N>`.
 6. Teklif start/end tarihlerinin zorunlu hale gelmesi (API + web formları aynı deploy'da).
 7. Dual-write'ın yerini açık round geçişleri almalı (`syncCurrentMatchRound` yalnız Round 1'i bilir); `MatchRound_open_has_no_match` CHECK'i ve scheduler index'leri M2'de.
+
+---
+
+## 31. Faz 2 uygulama sonucu ve runbook
+
+Baseline `main@d55d92f1`, yerel DB 95 migration, release `v0.1.0`. PR: „REL-002 Faz 2: make matching core round-aware and enforce per-round invariants".
+
+### 31.1 Gerçek M2 şeması ve kısıtlar
+
+Migration `20261011180000_enforce_round_matching_core` (§5.1). Kısıtların tamamı:
+
+| Nesne | Tür | Anlamı |
+|---|---|---|
+| `ServiceRequest.currentRoundId`, `Offer.matchRoundId`, `ContactRevealEvent.roundId`, `MessageThread.roundId` | NOT NULL | Her talep/teklif/reveal/thread bir round'a ait |
+| `Offer_providerId_matchRoundId_key` | UNIQUE | Sağlayıcı başına round başına bir teklif |
+| `Offer_one_accepted_per_round` | partial UNIQUE (`matchRoundId`) `WHERE status='ACCEPTED'` | Round başına bir kabul |
+| `ContactRevealEvent_roundId_key`, `MessageThread_roundId_key` (M1) + `offerId` unique'leri | UNIQUE | Round başına bir reveal / bir thread |
+| `ContactRevealEvent_requestId_idx`, `MessageThread_requestId_idx` | INDEX | Talep kapsamlı okuyucular |
+| `Offer_id_matchRoundId_key`, `ServiceRequestMatchRound_id_requestId_key` | UNIQUE | Composite FK hedefleri |
+| `Offer_matchRoundId_requestId_fkey` | FK | Teklifin round'u kendi talebinin round'u |
+| `ServiceRequestMatchRound_matchedOfferId_id_fkey` | FK | Round'un kazananı o round'un teklifi |
+| `ServiceRequest_currentRoundId_id_fkey` | FK | Current round talebin kendi round'u |
+| `ServiceRequestMatchRound_requestId_fkey` | FK, DEFERRABLE INITIALLY DEFERRED | Talep + Round 1 aynı tx'te yazılabilsin |
+| `MatchRound_open_has_no_outcome` | CHECK | OPEN: kazanan/tamam/iptal/expire/failed damgası yok |
+| `MatchRound_matched_shape` | CHECK | MATCHED: offer + provider + matchedAt; terminal damga yok |
+| `MatchRound_completed_shape` | CHECK | COMPLETED: kazanan + matchedAt + completedAt |
+| `MatchRound_cancelled_shape` | CHECK | CANCELLED: cancelledAt; eşleşme kaydı ya tam ya yok |
+| `MatchRound_expired_shape` | CHECK | EXPIRED: expiredAt; eşleşme yok |
+| `MatchRound_publication_pair` | CHECK | `publishedAt` ve `expiresAt` birlikte |
+| `ServiceRequestMatchRound_status_expiresAt_idx`, `…_status_reminderSentAt_publishedAt_idx` | INDEX | Scheduler |
+| `ServiceRequest_round_one_at_birth` | trigger | Talep Round 1 ile doğar |
+| `Offer_/ContactRevealEvent_/MessageThread_round_link_default` | trigger | Raw INSERT'te boş round bağını doldurur |
+| `MatchRound_terminal_status_immutable` (M1) | trigger | Değişmedi; FAILED M3'te eklenir |
+
+`FAILED` enum değeri eklenmedi (M3).
+
+### 31.2 Round geçiş mimarisi
+
+`apps/api/src/modules/match-rounds/`:
+- `match-round-transitions.ts` — tek iş kuralı kaynağı. `getCurrentRound(OrThrow)`, `isOfferRoundCurrentAndOpen` / `assertOfferRoundCurrentAndOpen`, `roundPublicationFor`, `publishRound`, `setRoundSource`, `transitionRoundToMatched/Completed/Cancelled/Expired`, `claimRoundReminder`. Her geçiş round'un kendi status'una koşullu `updateMany`; eşleşmezse 409 `MATCH_ROUND_STATE_CHANGED` ve tx geri alınır.
+- `match-round-chain.ts` — „current match" okuması (`MATCH_CHAIN_REQUEST_SELECT`, `currentMatchedOfferId`, `findCurrentRoundReveal`): contact, messaging ve match mail'inin iletişim satırları aynı tanımı kullanır.
+- `match-round-dedupe.ts` — §31.8.
+- Faz 1'in `syncCurrentMatchRound` ve `projectMatchRound`'u uygulamadan kaldırıldı; projeksiyon yalnız test fixture'larında yaşıyor (`apps/api/test/match-round-fixtures.ts` `alignRoundWithRequest`, e2e `alignRoundWithRequest`): uygulamayı atlayıp talebi doğrudan MATCHED/COMPLETED yazan fixture'lar round'u bununla hizalar.
+
+Yazıcı → geçiş (hepsi request projeksiyonuyla aynı tx'te):
+
+| Yazıcı | Round |
+|---|---|
+| Talep oluşturma | Doğum trigger'ı (Round 1 OPEN); vitrin lead hook'u `setRoundSource(DIRECT_SHOWCASE)` |
+| Yayın (`publishRequestInTransaction`), moderasyon APPROVED/IN_REVIEW, reopen | `publishRound(roundPublicationFor(status, approvedAt))` |
+| Direct lead'e sahibin teklifi (SUBMITTED→APPROVED) | `publishRound(submittedAt)` |
+| Vitrin RELEASE | `setRoundSource(MARKETPLACE)` |
+| Accept | `transitionRoundToMatched` |
+| Complete | `transitionRoundToCompleted` |
+| Cancel (müşteri/personel), KEEP_CLOSED, terk edilmiş lead | `transitionRoundToCancelled` |
+| Expiry | `transitionRoundToExpired` |
+| Reminder | `claimRoundReminder` (+ request aynası) |
+| Reddetme/rapor kaldırma | Round OPEN kalır; yalnız current round'un teklifleri kapanır |
+
+### 31.3 Teklif oluşturma (TOCTOU kapandı)
+
+`createOfferRecord`: dışarıdaki `ensureProviderCanSeeRequest` yalnız hızlı cevap. Serializable tx içinde tek predicate (`canProviderActOnRequest`: sağlayıcı APPROVED + kategori + bölge, doğrulama ve vitrin kapısı, APPROVED ya da kendi SUBMITTED direct lead'i) tx'te okunan satırlarla yeniden uygulanır; current round OPEN değilse 409 `OFFER_ROUND_CLOSED`; `(providerId, currentRoundId)` teklifi varsa 409; teklif `matchRoundId = currentRoundId` ile yazılır. Accept da Serializable olduğundan „offer vs accept" yarışında ya teklif önce commit olur ve accept onu rakip olarak REJECTED yapar ya da teklif yeniden denemede talebi göremez (404, kredi düşmez). DB backstop: `(providerId, matchRoundId)` unique + composite FK.
+
+### 31.4 Takvim, accept, stale-round, keşif, contact, messaging, review, cancel
+
+- **Takvim:** §6.1 (kodlar, `field`, 365 gün, saatli ISO reddi, NULL legacy okunur, backfill yok).
+- **Accept:** tx'te current round + teklif okunur; talep APPROVED ve eşleşmesizken teklif current OPEN round'da değilse 409 `OFFER_ROUND_CLOSED`. Request `updateMany` (`APPROVED, matchedOfferId NULL, currentRoundId`) → `transitionRoundToMatched` → teklif ACCEPTED → recharge (değişmedi) → yalnız **bu round'un** rakipleri `COMPETITOR_ACCEPTED` → reveal `roundId = current`.
+- **Shortlist/reject:** Serializable tx'te teklif zaten kararlıysa eski sınıflandırma (OFFER_ACTION_NOT_ALLOWED / idempotent reject); değilse round current OPEN değilse 409 `OFFER_ROUND_CLOSED`. **Withdraw:** talep APPROVED değilse eski 409, round kapalıysa `OFFER_ROUND_CLOSED`. Tek-round'daki tek görünür fark: EXPIRED talebin hâlâ SUBMITTED teklifine shortlist/reject artık 409.
+- **Müşteri teklif listesi:** current round'un teklifleri (tek round'da hepsi).
+- **Keşif:** `currentRoundOpenForProviderFilter` (liste) ve `isCurrentRoundOpen` (detay + teklif yolu): current round OPEN ve sağlayıcının **bu round'da** teklifi yok; detaydaki „teklifiniz" current round'unki. Önceki round teklifi görünürlüğü engellemez (exclusion Faz 3).
+- **Contact:** `currentMatchedOfferId` (talep ve current round aynı teklife MATCHED) + current round'un reveal'i; admin görünümü de current round reveal'i. Eski round reveal'i silinmez, current olmayan sağlayıcıya 404.
+- **Messaging:** thread current round için get-or-create (`roundId` unique); bir thread yalnız `roundId = currentRoundId` ve current match onun teklifiyken aktif — okuma/yazma/okundu dâhil her istek bunu yeniden türetir (değilse 403). Inbox yanıtına `active` eklendi; okunmamış sayısı ve rozet yalnız aktif thread'leri sayar (tek-round'da da: tamamlanmış/iptal edilmiş eşleşmenin thread'i artık rozeti büyütmez).
+- **Work scope:** ACCEPTED yetmez; teklif current round'un kazananı, round MATCHED/COMPLETED ve talep projeksiyonu uyumlu olmalı.
+- **Review:** current round COMPLETED, kazananı talebin matched teklifi, teklif ACCEPTED ve o round'un. `(requestId, providerId)` unique'i korundu.
+- **Cancel / reject (kaldırma):** teklif işlemleri `matchRoundId = currentRoundId` ile sınırlı; tek round'da birebir aynı, ikinci round'da önceki round'un kredilerine geriye dönük dokunulmaz.
+
+### 31.5 Hata kodları
+
+| Kod | HTTP | Nerede |
+|---|---|---|
+| `OFFER_ROUND_CLOSED` | 409 | accept / shortlist / reject / withdraw (kapalı ya da eski round teklifi); teklif oluşturma (APPROVED talep ama round OPEN değil) |
+| `MATCH_ROUND_STATE_CHANGED` | 409 | Bir round geçişi beklenen durumu bulamadı (yarış savunması; normalde talebin kendi guard'ı önce reddeder) |
+| `OFFER_SCHEDULE_REQUIRED` / `OFFER_SCHEDULE_INVALID` / `OFFER_START_IN_PAST` / `OFFER_END_BEFORE_START` / `OFFER_SCHEDULE_TOO_FAR` | 400 | Teklif oluşturma |
+
+### 31.6 Migration provası, uygulama ve ölçümler
+
+**Preflight** (aktif yerel DB, salt-okunur; `rel-002-preflight.sql` M2 bölümü + ek sayımlar): 95 migration; ServiceRequest 23, MatchRound 23, Offer 14, ContactRevealEvent 4, MessageThread 1, ACCEPTED 7, MATCHED/COMPLETED 7; null round alanı 0; round başına aday tekrarı 0 (provider×round, ACCEPTED×round, reveal, thread); her talepte tam 1 round; kazanan başka round'da 0; round şekli ihlali 0; tutarlılık 0 satır. Round dağılımı: OPEN/MARKETPLACE 13 (8 yayında), OPEN/DIRECT_SHOWCASE 3, MATCHED 2, COMPLETED 5.
+
+**Yedek** (API durdurulmuşken): `~/Backups/taktic/db/taktic-db-20261011T125945Z-pre-rel002-m2-d55d92f1.dump`, sha256 `61802b97592135edf40d11d164160c92dfd36e043f1e8f84bc8600958bba73da` (1124 TOC, 99 tablo, 95 migration). `restore-rehearsal.sh` geçti (izole network, tmpfs; 99 tablo / 1222 satır manifest ile birebir).
+
+**Deploy provası** (dump ayrı, atılabilir PostgreSQL 16.6'ya `pg_restore`): preflight 0 → `migrate deploy` M2 **34 ms** (wall 1,18 s) → ikinci deploy „No pending" → drift 0 → tutarlılık 0 → tablo veri hash'leri (round kolonları hariç) birebir aynı. **Rollback provası** aynı kopyada: `rel-002-m2-rollback.sql` → Faz 1 şemasına drift 0 ve index/constraint/trigger fingerprint'leri M2 öncesiyle **birebir** aynı → `migrate deploy` M2'yi yeniden uyguladı.
+
+**Aktif yerel DB 95 → 96**: M2 **77 ms**, ikinci deploy „No pending", `migrate status` güncel, drift 0, tutarlılık 0 satır, veri hash'leri değişmedi. Fingerprint: tablo 99 → 99, index 525 → 529 (+8 / −4), constraint 520 → 525 (+6 CHECK, 3 FK composite'e döndü, −1 CHECK), trigger 32 → 36; DB 22 655 459 → 22 786 531 bayt (+128 KB). Yerel API (main'deki Faz 1 kodu) M2 şemasıyla yeniden başlatıldı: `/health` 200, public uçlar 200, log'da hata yok — Faz 1 kodunun M2 ile çalıştığının (kod geri dönüşü) canlı kanıtı.
+
+**Ölçek provası** (atılabilir PostgreSQL 16.6, tmpfs; Faz 1'in sentetik verisi: 200k request, 500k offer, 50k reveal, 20k thread; M1 backfill'i uygulanmış hâlde): preflight 0 → `migrate deploy` M2 **3,18 s** (wall 5,4 s); adım adım (BEGIN…ROLLBACK provası) toplam 2,9 s: doğrulama bloğu 1,08 s, `Offer_providerId_matchRoundId_key` 0,41 s, `Offer_id_matchRoundId_key` 0,30 s, round `id_requestId` 0,23 s, composite FK doğrulamaları 0,08–0,17 s, NOT NULL VALIDATE'ler ≤ 0,04 s. Tüm adımlar tek tx'te; ALTER/CREATE INDEX kilitleri commit'e kadar tutulur (≈3 s yazma kesintisi bu ölçekte). İkinci deploy „No pending", drift 0, tutarlılık 0, tablo veri hash'leri (round kolonları hariç) önce/sonra **birebir aynı**. Fingerprint: index 525 → 529, constraint 520 → 525, trigger 32 → 36. DB +29,5 MB (688 → 716 MB). Yeni index boyutları: `Offer_providerId_matchRoundId_key` 19 MB, `Offer_id_matchRoundId_key` 19 MB, round `id_requestId` 7,7 MB, scheduler index'leri 5,1 / 6,5 MB, `Offer_one_accepted_per_round` 1,5 MB, reveal/thread `requestId_idx` 1,1 MB / 456 kB.
+
+**Rollback provası** (aynı ölçek DB'si): `rel-002-m2-rollback.sql` 1,2 s → `_prisma_migrations` 95, Faz 1 şemasına (`d55d92f1:prisma/schema.prisma`) drift **0** → `migrate deploy` M2'yi yeniden 4,0 s'de uyguladı, drift 0.
+
+### 31.7 Performans (EXPLAIN ANALYZE, BUFFERS — ölçek DB'si, Prisma'nın ürettiği gerçek SQL)
+
+| Sorgu | Plan | Süre |
+|---|---|---|
+| Keşif listesi, gerçekçi seçicilik (500 aday) | `ServiceRequest_categoryId_idx` → round'a `requestId_roundNumber` ile nested loop → `Offer_providerId_matchRoundId_key` anti-join; N+1 yok | 2,8 ms (eski `offers none` 0,8 ms) |
+| Keşif listesi, kötü durum (80k APPROVED tek kategoride) | iki hash join + anti-join | 94 ms (eski 53 ms) |
+| Sağlayıcı detayı (round + kendi teklifi) | PK + `ServiceRequestMatchRound_id_requestId_key` + `Offer_providerId_matchRoundId_key` | < 0,02 ms/sorgu |
+| Teklif oluşturma tx okumaları | aynı üç index | < 0,02 ms/sorgu |
+| Accept: current round + round rakipleri | PK / `id_requestId_key` / `Offer_matchRoundId_status_idx` ∧ `Offer_requestId_idx` | ≤ 0,02 ms |
+| Contact reveal (current round) | `ContactRevealEvent_roundId_key` | 0,01 ms |
+| Messaging: current thread / 50 thread'lik inbox zinciri | `MessageThread_roundId_key`; tek sorguda BitmapOr (50 × `requestId_roundNumber`) | 0,015 / 0,07 ms |
+| Expiry taraması (150 vadesi gelmiş round, kararlı durum) | round ↔ APPROVED talep hash join | 38 ms (eski request index'iyle 0,13 ms) |
+| Reminder taraması (kararlı durum) | aynı + `Offer_requestId_idx` anti-join | 34 ms |
+
+Not: scheduler taramalarında planner, terminal round'ların geçmiş `expiresAt`'leri yüzünden „OPEN ∧ vadesi gelmiş" kümesini olduğundan büyük tahmin ediyor (bağımsızlık varsayımı) ve APPROVED talepleri hash'liyor; `(status, expiresAt, id)` ve partial index denemeleri planı değiştirmedi. Saatlik cron'da tick başına ~35 ms kabul edildi; APPROVED talep sayısı milyonlara çıkarsa aday taraması raw SQL'e (round index'inden LIMIT'li nested loop) alınır — Faz 3 öncesi zorunlu değil.
+
+### 31.8 Bildirim dedupe
+
+`roundDedupeSuffix(n)`: Round 1 → `''` (anahtar birebir eskisi), Round N ≥ 2 → `:r<N>`. Uygulandığı anahtarlar: `request-available:<req>:<provider>`, `request-expired-customer:<req>`, `request-expired-provider:<req>:<provider>`. `request-published` zaten `publishedAt` taşıyor. Retry parser (`parseRetrySource`): round-kapsamlı şablonlarda id'lerden sonra ya hiçbir şey (Round 1) ya da tek bir `r<N>` (N ≥ 2) kabul eder; `r1`, `r0`, `r01`, fazla segment reddedilir. Yeniden kurulum anahtarın round'una göre yapılır (`keyedRound`): available yalnız o round current ve OPEN iken, expired yalnız o round current ve EXPIRED iken; expired-provider teklifi `(providerId, matchRoundId)` ile bulunur. Reminder dedupe'u round claim'idir.
+
+### 31.9 Direct showcase eşdeğerliği
+
+Akış değişmedi: lead bağlanınca round DIRECT_SHOWCASE; sahibin teklifi talebi APPROVED yapar ve round yayınlanır (kapı açık kalır); RELEASE round'u MARKETPLACE yapar; KEEP_CLOSED ve terk edilmiş lead taraması round'u iptal eder. Accept/contact/message round-aware. `directShowcaseProviderId` kapısı korunur; başarısız direct → marketplace release yok (Faz 3).
+
+### 31.10 Faz 3 ön koşulları ve kalan borçlar
+
+1. `MatchRoundStatus += FAILED` (+ shape CHECK, terminal trigger listesi), `MatchRoundOpenedBy += SERVICE_ISSUE`, `MATCH_REVIEW` (M3) ve Round N+1'i açan geçiş (`openNextRound`): `matchedOfferId/matchedAt` NULL, `publishedAt` kapısı (§20), birth trigger'ın yerine açık insert.
+2. Exclusion modeli ve `isProviderExcluded` — keşif filtresine, teklif tx'ine, accept'e ve fan-out'a aynı helper (bugün önceki round'un sağlayıcısı yeni round'u görür).
+3. Tutarlılık scripti: Round ≥ 2'de talep projeksiyonu kontrolleri (zaman alanları zaten yalnız Round 1'de) FAILED/`MATCH_REVIEW` için genişletilmeli.
+4. Unviewed-refund worker'ın FAILED round'a ait teklifleri iade etmemesi (§10 notu) — Faz 2'de değişmedi.
+5. Tarihsel thread'lerin salt-okunur modu (`mode: READ_ONLY`, karar 4): bugün eski round thread'i 403 alır (yazma reddi sağlandı); okunabilir hâli Faz 3/5 UI'sıyla.
+6. Müşteri teklif listesinde geçmiş round'lar bölümü ve admin round zaman çizelgesi UI'ı (API: `GET /service-requests/:id/rounds` hazır).
+7. Scheduler aday taraması ölçek borcu (§31.7).
+8. Staging/production: preflight (M2 bölümü 0) → backup → restore-rehearsal → `migrate deploy` (96) → drift → tutarlılık; API/web/admin **aynı deploy'da** (web formu tarihleri göndermeden API 400 verir).
+
+### 31.11 Test kapısı (yerel)
+
+- API tam suite (`vitest run`, 214 dosya): 4676/4683 geçti; kalan 7 hata Faz 2'nin bilinçli sonuçlarıydı (fixture'ların round'u hizalamaması, tarihsiz teklif gövdesi, yeni route'un RBAC haritası, index adı, retry sonrası hata kodu sınıflandırması) ve düzeltildi; düzeltilen + ilgili 17 dosya yeniden: 293/293.
+- Yeni: `match-round-faz2.spec.ts` 31 test (ikinci tur güvenliği, stale-round 409'ları, takvim kodları, eşzamanlılık: aynı sağlayıcı çift teklif, offer-vs-accept, accept-vs-cancel, accept-vs-reject, expiry-vs-accept, reminder claim, thread çift açılış, reveal çift kayıt; DB invariant'ları) — iki ayrı koşuda yeşil, sleep/retry hilesi yok. `match-round-core.spec.ts` 20 test (her case sonrası tutarlılık scripti). `match-round-migration.spec.ts` 4 test (M1 + M2 yeniden-backfill/enforce + ihlalde tam geri alma).
+- Web 462, shared (takvim 9 dahil), typecheck/lint/build, `version:check`, ops scriptleri 54.
+- E2E Chromium (hedefli, 14 spec dosyası): 77/77 — pazar yeri create→teklif→accept→mesaj→complete, iptal/iade, contact, mesajlaşma, vitrin direct lead, review, teklif geri çekme, admin talep/teklif ve lifecycle onayları, teklif formu takvim doğrulaması (yeni).

@@ -4,24 +4,24 @@ import {
   Prisma,
   ServiceRequestStatus,
 } from '@prisma/client';
-import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
+import { REQUEST_EXPIRY_DAYS } from '../src/modules/request-lifecycle/request-lifecycle.constants';
 
 /**
- * REL-002 Faz 1 — how a request's Round 1 follows from the request itself.
+ * REL-002 — test fixtures only: bring a request's Round 1 in step with request
+ * columns a fixture wrote directly.
  *
- * In Faz 1 a request has exactly one matching cycle, and its round is a
- * *derived* record: every field below is a pure function of the request's own
- * columns (plus the matched offer's provider). The request stays the authority
- * and nothing reads the round yet. The same mapping is written three times on
- * purpose, and the consistency check is what holds them together:
+ * Since Faz 2 the round is the authority and the application moves it through
+ * explicit transitions (src/modules/match-rounds/match-round-transitions.ts).
+ * A fixture that skips the application — `prisma.serviceRequest.update({
+ * status: 'COMPLETED', matchedOfferId, ... })` to stage a finished job — leaves
+ * the round where the birth trigger put it (OPEN). This helper applies the
+ * Faz 1 mapping (request → Round 1, the M1 backfill's own rules) to that
+ * round, so the staged request reads the same way through the round-aware
+ * readers as one the application produced. It is the Faz 1 dual-write, kept
+ * for the one place it is still the right tool: a fixture's shortcut.
  *
- *   - here, for every lifecycle write (`syncCurrentMatchRound`);
- *   - in SQL, for the M1 backfill
- *     (prisma/migrations/20261011120000_add_service_request_match_rounds);
- *   - in SQL again, as the read-only check
- *     (scripts/ops/rel-002-round-consistency.sql).
- *
- * No date is invented anywhere: a NULL on the request is a NULL on the round.
+ * Not for application code: an application writer that needed this would be
+ * a writer bypassing the round's own transitions.
  */
 
 /** Round 1's id: deterministic, so the backfill and the writers agree on it. */
@@ -129,4 +129,26 @@ export function projectMatchRound(request: MatchRoundRequestSource): MatchRoundP
     cancelledAt: status === MatchRoundStatus.CANCELLED ? request.cancelledAt : null,
     expiredAt: status === MatchRoundStatus.EXPIRED ? request.expiredAt : null,
   };
+}
+
+/**
+ * Writes the Faz 1 projection of the request onto its current round and
+ * returns the round's id. Use after a fixture changes a request's lifecycle
+ * columns directly.
+ */
+export async function alignRoundWithRequest(
+  client: Prisma.TransactionClient,
+  requestId: string,
+): Promise<string> {
+  const request = await client.serviceRequest.findUniqueOrThrow({
+    where: { id: requestId },
+    select: MATCH_ROUND_REQUEST_SELECT,
+  });
+
+  await client.serviceRequestMatchRound.update({
+    where: { id: request.currentRoundId },
+    data: projectMatchRound(request),
+  });
+
+  return request.currentRoundId;
 }

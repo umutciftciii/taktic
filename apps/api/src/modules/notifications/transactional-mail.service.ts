@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   CreditTransactionType,
+  MatchRoundStatus,
   NotificationStatus,
   OfferPackageType,
   OfferStatus,
@@ -52,6 +53,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
+import {
+  currentMatchedOfferId,
+  findCurrentRoundReveal,
+  MATCH_CHAIN_REQUEST_SELECT,
+} from '../match-rounds/match-round-chain';
+import { roundNumberFromDedupeSegment } from '../match-rounds/match-round-dedupe';
 import {
   DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
   refundReasonLabel,
@@ -1214,6 +1221,14 @@ export class TransactionalMailService {
           return null;
         }
 
+        // Only while the round the invitation was for is still the request's
+        // current, OPEN round: an invitation to a round that ended is not
+        // re-sent as if it were about the next one.
+        const round = await keyedRound(this.prisma, request.id, source.roundNumber);
+        if (!round?.isCurrent || round.status !== MatchRoundStatus.OPEN) {
+          return null;
+        }
+
         // Membership is re-derived from the same matcher the discovery screen
         // uses, not taken from the audit row. A provider who has since been
         // suspended, dropped the category or moved out of the area is no longer
@@ -1243,6 +1258,12 @@ export class TransactionalMailService {
           return null;
         }
 
+        // The round the notice is about must be the one that expired.
+        const round = await keyedRound(this.prisma, request.id, source.roundNumber);
+        if (!round?.isCurrent || round.status !== MatchRoundStatus.EXPIRED) {
+          return null;
+        }
+
         return { to: request.customerEmail, data: requestExpiredCustomerData(request) };
       }
 
@@ -1260,13 +1281,19 @@ export class TransactionalMailService {
           return null;
         }
 
+        const round = await keyedRound(this.prisma, request.id, source.roundNumber);
+        if (!round?.isCurrent || round.status !== MatchRoundStatus.EXPIRED) {
+          return null;
+        }
+
         // Eligibility is re-derived here, not taken from the audit row: the
-        // provider must still have an offer on this request and it must still
-        // not be withdrawn. A provider who took their offer back between the
-        // enqueue and the send is no longer in the audience and gets nothing.
+        // provider must still have an offer in the round that expired and it
+        // must still not be withdrawn. A provider who took their offer back
+        // between the enqueue and the send is no longer in the audience and
+        // gets nothing.
         const offerId = await this.prisma.offer
           .findUnique({
-            where: { providerId_requestId: { providerId, requestId: request.id } },
+            where: { providerId_matchRoundId: { providerId, matchRoundId: round.id } },
             select: { id: true, status: true },
           })
           .then((row) => (row && row.status !== OfferStatus.WITHDRAWN ? row.id : null));
@@ -1862,20 +1889,32 @@ async function contactDisclosureFor(
 
     const request = await prisma.serviceRequest.findUnique({
       where: { id: requestId },
-      select: { status: true, matchedOfferId: true },
+      select: MATCH_CHAIN_REQUEST_SELECT,
     });
 
-    if (request?.status !== ServiceRequestStatus.MATCHED || request.matchedOfferId !== offerId) {
+    if (!request || currentMatchedOfferId(request) !== offerId) {
       return false;
     }
 
-    const reveal = await prisma.contactRevealEvent.findUnique({
-      where: { requestId },
-      select: { offerId: true, providerId: true },
-    });
+    const reveal = await findCurrentRoundReveal(prisma, request, { offerId: true, providerId: true });
 
     return reveal?.offerId === offerId && reveal.providerId === providerId;
   }
+
+/**
+ * The round a round-scoped dedupe key names (REL-002 §18), and whether it is
+ * still the request's current one. `null` when the request has no such round.
+ */
+async function keyedRound(prisma: PrismaService, requestId: string, roundNumber: number) {
+  const round = await prisma.serviceRequestMatchRound.findUnique({
+    where: { requestId_roundNumber: { requestId, roundNumber } },
+    select: { id: true, status: true, currentForRequest: { select: { id: true }, take: 1 } },
+  });
+
+  return round
+    ? { id: round.id, status: round.status, isCurrent: round.currentForRequest.length === 1 }
+    : null;
+}
 
 async function creditBalance(prisma: PrismaService, providerId: string): Promise<number> {
     const latest = await prisma.providerCreditTransaction.findFirst({
@@ -3194,7 +3233,26 @@ type RetrySource = {
   template: RetryableTransactionalTemplate;
   /** At least one, and exactly RETRY_SOURCE_ID_COUNT[template] of them. */
   ids: readonly [string, ...string[]];
+  /**
+   * The match round the key names (REL-002 §18): 1 for a key without a round
+   * segment — every key written before rounds existed, and every Round 1 key
+   * since — or N from a trailing `:r<N>`. Always 1 for a template that is not
+   * round-scoped.
+   */
+  roundNumber: number;
 };
+
+/**
+ * Templates whose key names a match round: the same request, provider and
+ * template owe a new message in Round N ≥ 2 (`…:r<N>`, see
+ * match-rounds/match-round-dedupe.ts), and a retry must rebuild the message
+ * of the round the row was written for — never the current one by default.
+ */
+const ROUND_SCOPED_RETRY_TEMPLATES: ReadonlySet<RetryableTransactionalTemplate> = new Set([
+  'request-available',
+  'request-expired-customer',
+  'request-expired-provider',
+]);
 
 /** How many ids each key carries after its prefix. */
 const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
@@ -3270,13 +3328,26 @@ function parseRetrySource(template: string, dedupeKey: string | null): RetrySour
   }
 
   const expected = RETRY_SOURCE_ID_COUNT[template];
-  const ids = dedupeKey.slice(prefix.length).split(':').slice(0, expected);
+  const segments = dedupeKey.slice(prefix.length).split(':');
+  const ids = segments.slice(0, expected);
 
   if (ids.length !== expected || !ids.every((id) => /^[A-Za-z0-9_-]{1,64}$/.test(id))) {
     return null;
   }
 
-  return { template, ids: ids as [string, ...string[]] };
+  let roundNumber = 1;
+  if (ROUND_SCOPED_RETRY_TEMPLATES.has(template)) {
+    // Nothing after the ids (Round 1), or exactly one `r<N>` segment with
+    // N ≥ 2. Anything else is a key this code never wrote.
+    const rest = segments.slice(expected);
+    const parsed = rest.length <= 1 ? roundNumberFromDedupeSegment(rest[0]) : null;
+    if (parsed === null) {
+      return null;
+    }
+    roundNumber = parsed;
+  }
+
+  return { template, ids: ids as [string, ...string[]], roundNumber };
 }
 
 /**

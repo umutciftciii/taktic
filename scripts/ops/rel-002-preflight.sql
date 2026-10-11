@@ -1,4 +1,4 @@
--- REL-002 Faz 1 preflight — read-only.
+-- REL-002 preflight (M1 and M2) — read-only.
 --
 -- Run before applying the match-round migration (M1) to any database:
 --
@@ -81,5 +81,39 @@ SELECT
          OR (table_name = 'Offer'              AND column_name = 'matchRoundId')
          OR (table_name = 'ContactRevealEvent' AND column_name = 'roundId')
          OR (table_name = 'MessageThread'      AND column_name = 'roundId'))) AS round_columns;
+
+\echo '== M2 (Faz 2) integrity — every value must be 0 before 20261011180000_enforce_round_matching_core =='
+\echo '   (skip this section before M1: it reads the M1 columns and table)'
+SELECT
+  (SELECT count(*) FROM "ServiceRequest" WHERE "currentRoundId" IS NULL)              AS request_without_round,
+  (SELECT count(*) FROM "Offer" WHERE "matchRoundId" IS NULL)                         AS offer_without_round,
+  (SELECT count(*) FROM "ContactRevealEvent" WHERE "roundId" IS NULL)                 AS reveal_without_round,
+  (SELECT count(*) FROM "MessageThread" WHERE "roundId" IS NULL)                      AS thread_without_round,
+  (SELECT count(*) FROM "ServiceRequest" r
+     WHERE (SELECT count(*) FROM "ServiceRequestMatchRound" mr WHERE mr."requestId" = r.id) > 1) AS request_with_several_rounds,
+  (SELECT count(*) FROM (SELECT 1 FROM "Offer" GROUP BY "providerId", "matchRoundId" HAVING count(*) > 1) d)
+                                                                                      AS duplicate_offer_per_round,
+  (SELECT count(*) FROM (SELECT 1 FROM "Offer" WHERE status = 'ACCEPTED' GROUP BY "matchRoundId" HAVING count(*) > 1) d)
+                                                                                      AS duplicate_accepted_per_round,
+  (SELECT count(*) FROM "ServiceRequestMatchRound" mr JOIN "Offer" o ON o.id = mr."matchedOfferId"
+     WHERE o."matchRoundId" <> mr.id)                                                 AS winner_in_other_round,
+  -- The per-status round shape M2's CHECKs enforce (same predicate as the
+  -- migration's verification block). Non-zero here usually means a legacy
+  -- CANCELLED/EXPIRED request without its cancelledAt/expiredAt.
+  (SELECT count(*) FROM "ServiceRequestMatchRound" mr
+     WHERE NOT (CASE mr.status
+       WHEN 'OPEN' THEN mr."matchedOfferId" IS NULL AND mr."matchedProviderId" IS NULL AND mr."matchedAt" IS NULL
+                    AND mr."completedAt" IS NULL AND mr."cancelledAt" IS NULL AND mr."expiredAt" IS NULL AND mr."failedAt" IS NULL
+       WHEN 'MATCHED' THEN mr."matchedOfferId" IS NOT NULL AND mr."matchedProviderId" IS NOT NULL AND mr."matchedAt" IS NOT NULL
+                    AND mr."completedAt" IS NULL AND mr."cancelledAt" IS NULL AND mr."expiredAt" IS NULL AND mr."failedAt" IS NULL
+       WHEN 'COMPLETED' THEN mr."matchedOfferId" IS NOT NULL AND mr."matchedProviderId" IS NOT NULL AND mr."matchedAt" IS NOT NULL
+                    AND mr."completedAt" IS NOT NULL AND mr."cancelledAt" IS NULL AND mr."expiredAt" IS NULL AND mr."failedAt" IS NULL
+       WHEN 'CANCELLED' THEN mr."cancelledAt" IS NOT NULL AND mr."completedAt" IS NULL AND mr."expiredAt" IS NULL AND mr."failedAt" IS NULL
+                    AND (mr."matchedOfferId" IS NULL) = (mr."matchedProviderId" IS NULL)
+                    AND (mr."matchedOfferId" IS NOT NULL OR mr."matchedAt" IS NULL)
+       WHEN 'EXPIRED' THEN mr."expiredAt" IS NOT NULL AND mr."matchedOfferId" IS NULL AND mr."matchedProviderId" IS NULL
+                    AND mr."matchedAt" IS NULL AND mr."completedAt" IS NULL AND mr."cancelledAt" IS NULL AND mr."failedAt" IS NULL
+       ELSE false END)
+        OR (mr."publishedAt" IS NULL) <> (mr."expiresAt" IS NULL))                   AS round_shape_violations;
 
 ROLLBACK;

@@ -22,6 +22,7 @@ import {
   readProviderOfferId,
   reportReview,
   submitOffer,
+  fillOfferSchedule,
   submitReview,
 } from '../src/journeys';
 import { emailCountFor, waitForLatestSmsCode } from '../src/outbox';
@@ -731,6 +732,7 @@ test.describe('provider review flow', () => {
       await assertNoErrorScreen(owner.page);
       const offerForm = owner.page.locator('form.pdash-form');
       await offerForm.locator('input[name="priceAmount"]').fill('1500,00');
+      await fillOfferSchedule(offerForm);
       await offerForm.locator('textarea[name="message"]').fill('Kartta yazan kapsamda, yarın.');
       await owner.page.getByRole('button', { name: 'Teklifi gönder' }).click();
       // The action is an in-flight POST; the re-rendered "your offer" block

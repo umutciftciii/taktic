@@ -367,8 +367,9 @@ describe('the statements', () => {
     for (const statement of [sent.counts[0]!, sent.page[0]!]) {
       const plan = await bitmapOnlyPlan(statement);
       expect(plan).toContain('BitmapOr');
-      // The provider arm is served by either index that leads with providerId.
-      expect(plan.some((node) => node === 'Offer_providerId_idx' || node === 'Offer_providerId_requestId_key')).toBe(true);
+      // The provider arm is served by either index that leads with providerId
+      // (the per-round unique replaced the per-request one in REL-002 M2).
+      expect(plan.some((node) => node === 'Offer_providerId_idx' || node === 'Offer_providerId_matchRoundId_key')).toBe(true);
       expect(plan).toContain('Offer_requestId_idx');
       expect(plan).not.toContain('Seq Scan');
     }

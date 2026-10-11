@@ -24,6 +24,7 @@ import {
   uniqueSuffix,
   type TestContext,
 } from './harness';
+import { alignRoundWithRequest } from './match-round-fixtures';
 import { UnviewedOfferRefundService } from '../src/modules/offers/unviewed-offer-refund.service';
 
 let ctx: TestContext;
@@ -463,6 +464,7 @@ describe('provider reviews and the credit economy', () => {
         completedAt: new Date(),
       },
     });
+    await alignRoundWithRequest(ctx.prisma, serviceRequest.id);
 
     const snapshot = async () => ({
       ledger: await ctx.prisma.providerCreditTransaction.aggregate({

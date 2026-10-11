@@ -28,7 +28,7 @@ import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-ent
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
-import { syncCurrentMatchRound } from '../src/modules/match-rounds/match-round-sync';
+import { addIsoDays, todayIsoDay } from '../src/common/date-only';
 import { type BackgroundWorkOwner, isBackgroundWorkOwner } from '../src/common/background-work';
 
 /**
@@ -682,8 +682,7 @@ export async function createApprovedRequest(
   },
 ) {
   const suffix = uniqueSuffix();
-  // With its Round 1 (REL-002 Faz 1), the shape every request has had since
-  // M1: the creation path writes it in the same transaction as the request.
+  // Born with its Round 1 (REL-002 M2 birth trigger), like every request.
   return prisma.$transaction(async (tx) => {
     const created = await tx.serviceRequest.create({
       data: {
@@ -705,7 +704,6 @@ export async function createApprovedRequest(
         ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
       },
     });
-    await syncCurrentMatchRound(tx, created.id);
     return created;
   });
 }
@@ -797,10 +795,17 @@ export async function currentCreditBalance(prisma: PrismaClient, providerId: str
   return latest?.balanceAfter ?? 0;
 }
 
+/**
+ * A valid offer body. The schedule is required since REL-002 Faz 2: a start
+ * a few days out and a one-week job, both as Istanbul calendar days — far
+ * enough from "today" that no test straddles midnight into a refusal.
+ */
 export function offerPayload(overrides: Record<string, unknown> = {}) {
   return {
     priceAmount: 150000,
     message: 'Teklifimiz ektedir.',
+    estimatedStartDate: addIsoDays(todayIsoDay(), 3),
+    estimatedCompletionDate: addIsoDays(todayIsoDay(), 10),
     ...overrides,
   };
 }

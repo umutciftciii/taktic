@@ -194,6 +194,47 @@ export function prisma(): PrismaClient {
   return e2ePrisma();
 }
 
+/**
+ * REL-002: bring a request's Round 1 in step with lifecycle columns a fixture
+ * wrote directly (`status: 'MATCHED', matchedOfferId, matchedAt`, …).
+ *
+ * Since Faz 2 the round is the authority: completing, cancelling, opening the
+ * contact details or the thread all read (and move) the request's current
+ * round, which a fixture shortcut leaves OPEN where the birth trigger put it.
+ * This applies the M1 mapping (request → Round 1) in one statement — the same
+ * expression scripts/ops/rel-002-round-consistency.sql expects — so a staged
+ * match reads exactly like one the application made. Fixtures only.
+ */
+export async function alignRoundWithRequest(requestId: string): Promise<void> {
+  await prisma().$executeRaw`
+    UPDATE "ServiceRequestMatchRound" mr SET
+      "status" = (CASE r."status"
+                    WHEN 'MATCHED'   THEN 'MATCHED'
+                    WHEN 'COMPLETED' THEN 'COMPLETED'
+                    WHEN 'CANCELLED' THEN 'CANCELLED'
+                    WHEN 'EXPIRED'   THEN 'EXPIRED'
+                    ELSE 'OPEN' END)::"MatchRoundStatus",
+      "publishedAt"       = p."publishedAt",
+      "expiresAt"         = p."publishedAt" + INTERVAL '14 days',
+      "reminderSentAt"    = r."reminderSentAt",
+      "matchedAt"         = CASE WHEN m."carries" THEN r."matchedAt" END,
+      "matchedOfferId"    = CASE WHEN m."carries" THEN r."matchedOfferId" END,
+      "matchedProviderId" = CASE WHEN m."carries" THEN o."providerId" END,
+      "completedAt"       = CASE WHEN r."status" = 'COMPLETED' THEN r."completedAt" END,
+      "cancelledAt"       = CASE WHEN r."status" = 'CANCELLED' THEN r."cancelledAt" END,
+      "expiredAt"         = CASE WHEN r."status" = 'EXPIRED'   THEN r."expiredAt"   END,
+      "updatedAt"         = now()
+    FROM "ServiceRequest" r
+    CROSS JOIN LATERAL (
+      SELECT CASE WHEN r."status" IN ('DRAFT', 'SUBMITTED', 'IN_REVIEW') THEN NULL ELSE r."approvedAt" END AS "publishedAt"
+    ) p
+    CROSS JOIN LATERAL (
+      SELECT (r."status" IN ('MATCHED', 'COMPLETED', 'CANCELLED') AND r."matchedOfferId" IS NOT NULL) AS "carries"
+    ) m
+    LEFT JOIN "Offer" o ON o."id" = r."matchedOfferId"
+    WHERE r."id" = ${requestId} AND mr."id" = r."currentRoundId"`;
+}
+
 /** Every (province, district) pair, in one deterministic order. */
 export function allDistrictPairs(): Location[] {
   const districtsByCity = getDistrictsOfEachCity() as Record<string, string[]>;

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { expectNoHorizontalOverflow } from '../src/campaign-fixtures';
 import {
+  alignRoundWithRequest,
   countRefundTransactions,
   createAdmin,
   createCategory,
@@ -104,6 +105,7 @@ async function seedMatchedRequest() {
     where: { id: request.id },
     data: { status: 'MATCHED', matchedOfferId: offer.id, matchedAt: new Date() },
   });
+  await alignRoundWithRequest(request.id);
   await prisma().contactRevealEvent.create({
     data: {
       requestId: request.id,
@@ -784,6 +786,7 @@ test.describe('Faz 3A review: moves the screen no longer offers', () => {
       where: { id: scene.request.id },
       data: { status: 'MATCHED', matchedOfferId: scene.offer.id, matchedAt: new Date() },
     });
+    await alignRoundWithRequest(scene.request.id);
     return scene;
   }
 
@@ -979,6 +982,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         where: { id: request.id },
         data: { status: 'MATCHED', matchedOfferId: offer.id, matchedAt: new Date() },
       });
+      await alignRoundWithRequest(request.id);
       await admin.page.getByTestId('offer-reject').click();
       await admin.page
         .getByRole('dialog', { name: 'Teklif müşteri adına reddedilsin mi?' })
@@ -1092,6 +1096,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
         where: { id: scene.request.id },
         data: { status: 'MATCHED', matchedOfferId: scene.offer.id, matchedAt: new Date() },
       });
+      await alignRoundWithRequest(scene.request.id);
       await page.getByTestId('status-reject').click();
       // The refusal redirects to this same screen: landed before the next goto.
       await settleActionRedirect(page, () =>
@@ -1374,6 +1379,7 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
           where: { id: stale.request.id },
           data: { status: 'MATCHED', matchedOfferId: stale.offer.id, matchedAt: new Date() },
         });
+        await alignRoundWithRequest(stale.request.id);
         await staleCustomer.page.getByTestId('customer-cancel-request').click();
         await staleCustomer.page.getByTestId('customer-cancel-confirm').click();
         const outcome = staleCustomer.page.getByTestId('customer-cancel-outcome');

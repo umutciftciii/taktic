@@ -214,6 +214,8 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'POST', path: '/service-requests/:id/recalculate-quality', permission: AdminPermission.REQUESTS_QUALITY_RECALC },
   { method: 'POST', path: '/service-requests/:id/reopen', permission: AdminPermission.REQUESTS_REOPEN },
   { method: 'GET', path: '/service-requests/:id/reports', permission: AdminPermission.REQUEST_REPORTS_READ },
+  // REL-002 Faz 2: the request's match-round history, read-only.
+  { method: 'GET', path: '/service-requests/:id/rounds', permission: AdminPermission.REQUESTS_READ },
   { method: 'POST', path: '/service-requests/:id/reports/resolve', permission: AdminPermission.REQUEST_REPORTS_RESOLVE },
   { method: 'PATCH', path: '/service-requests/:id/status', permission: AdminPermission.REQUESTS_STATUS },
   { method: 'GET', path: '/service-requests/:requestId/contact-reveal', permission: AdminPermission.CONTACT_REVEAL_READ },
