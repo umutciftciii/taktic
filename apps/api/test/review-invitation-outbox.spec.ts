@@ -20,6 +20,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+import { alignRoundWithRequest } from './match-round-fixtures';
 
 let ctx: TestContext;
 let outbox: ReviewInvitationOutbox;
@@ -263,6 +264,7 @@ describe('ReviewInvitationOutbox', () => {
         matchedAt: new Date(),
       },
     });
+    await alignRoundWithRequest(ctx.prisma, serviceRequest.id);
 
     await request(ctx.server)
       .post(`/service-requests/${serviceRequest.id}/complete`)
@@ -308,6 +310,7 @@ describe('ReviewInvitationOutbox', () => {
       where: { id: serviceRequest.id },
       data: { status: ServiceRequestStatus.COMPLETED, completedAt: new Date() },
     });
+    await alignRoundWithRequest(ctx.prisma, serviceRequest.id);
     await ctx.prisma.notificationLog.create({
       data: intentRow({
         template: 'review-invitation',

@@ -9,13 +9,18 @@ import {
 import {
   MessageSenderRole,
   Prisma,
-  ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
 import { HttpException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { isContactSharingEnabled } from '../contact-sharing/contact-sharing.config';
+import {
+  currentMatchedOfferId,
+  findCurrentRoundReveal,
+  MATCH_CHAIN_REQUEST_SELECT,
+  type MatchChainRequest,
+} from '../match-rounds/match-round-chain';
 import {
   MESSAGE_BODY_MAX_LENGTH,
   MESSAGE_PAGE_DEFAULT_LIMIT,
@@ -120,7 +125,15 @@ const threadInclude = {
   customer: { select: { id: true, name: true } },
 } satisfies Prisma.MessageThreadInclude;
 
-type ThreadRow = Prisma.MessageThreadGetPayload<{ include: typeof threadInclude }>;
+/**
+ * PrismaService leaves `roundId` out of every default read (it never reaches
+ * a response); the thread's own round is what decides whether it is active,
+ * so thread reads here opt back in. `toThreadSummary` is the allowlist that
+ * keeps it out of the response.
+ */
+const threadOmit = { roundId: false } satisfies Prisma.MessageThreadOmit;
+
+type ThreadRow = Prisma.MessageThreadGetPayload<{ include: typeof threadInclude; omit: typeof threadOmit }>;
 
 const messageSelect = {
   id: true,
@@ -153,23 +166,29 @@ export class MessagingService {
     const threads = await this.prisma.messageThread.findMany({
       where: participantWhere(user),
       include: threadInclude,
+      omit: threadOmit,
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
+    const active = await this.activeThreadIds(threads);
 
     return Promise.all(
       threads.map(async (thread) => {
         const participant = requireParticipant(thread, user);
+        const isActive = active.has(thread.id);
         const [lastMessage, unreadCount] = await Promise.all([
           this.prisma.message.findFirst({
             where: { threadId: thread.id },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             select: messageSelect,
           }),
-          this.countUnread(thread, participant),
+          // Only a thread that can still be written to asks to be read: an
+          // ended match's thread never raises the badge again (REL-002).
+          isActive ? this.countUnread(thread, participant) : Promise.resolve(0),
         ]);
 
         return {
           ...toThreadSummary(thread, participant),
+          active: isActive,
           unreadCount,
           lastMessage: lastMessage ? toMessage(lastMessage) : null,
         };
@@ -179,16 +198,22 @@ export class MessagingService {
 
   /** The number the sidebar badge shows. One query per thread, and no bodies. */
   async unreadCount(user: AuthUser) {
-    const threads = await this.prisma.messageThread.findMany({
+    const all = await this.prisma.messageThread.findMany({
       where: participantWhere(user),
       select: {
         id: true,
+        requestId: true,
+        offerId: true,
+        roundId: true,
         customerUserId: true,
         providerUserId: true,
         customerLastReadAt: true,
         providerLastReadAt: true,
       },
     });
+    // The badge counts active, writable threads only (REL-002).
+    const active = await this.activeThreadIds(all);
+    const threads = all.filter((thread) => active.has(thread.id));
 
     const counts = await Promise.all(
       threads.map((thread) =>
@@ -357,15 +382,18 @@ export class MessagingService {
    * existed gets its conversation the moment either party asks for one, with no
    * backfill inventing threads nobody opened.
    *
-   * Get-or-create, and the unique indexes on `requestId` and `offerId` are what
-   * make two simultaneous first-opens produce one thread rather than two.
+   * Get-or-create **for the request's current round** (REL-002): the unique
+   * indexes on `roundId` and `offerId` are what make two simultaneous
+   * first-opens produce one thread rather than two, and a thread of an
+   * earlier round is never the one this returns.
    */
   async resolveThreadForRequest(requestId: string, user: AuthUser) {
     const chain = await this.loadMatchChain(requestId, user);
 
     const existing = await this.prisma.messageThread.findUnique({
-      where: { requestId },
+      where: { roundId: chain.roundId },
       include: threadInclude,
+      omit: threadOmit,
     });
 
     if (existing) {
@@ -384,6 +412,7 @@ export class MessagingService {
           providerUserId: chain.providerUserId,
         },
         include: threadInclude,
+        omit: threadOmit,
       });
 
       return { ...toThreadSummary(created, requireParticipant(created, user)), created: true };
@@ -392,8 +421,9 @@ export class MessagingService {
       // second tab. Their row is the thread.
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const raced = await this.prisma.messageThread.findUnique({
-          where: { requestId },
+          where: { roundId: chain.roundId },
           include: threadInclude,
+          omit: threadOmit,
         });
 
         if (raced) {
@@ -417,6 +447,7 @@ export class MessagingService {
     const thread = await this.prisma.messageThread.findFirst({
       where: { id: threadId, ...participantWhere(user) },
       include: threadInclude,
+      omit: threadOmit,
     });
 
     if (!thread) {
@@ -447,19 +478,19 @@ export class MessagingService {
       where: { id: requestId },
       select: {
         id: true,
-        status: true,
         customerId: true,
-        matchedOfferId: true,
-        currentRoundId: true,
+        ...MATCH_CHAIN_REQUEST_SELECT,
       },
     });
 
-    if (!request || request.status !== ServiceRequestStatus.MATCHED || !request.matchedOfferId) {
+    // The request and its current round both MATCHED to the same offer.
+    const matchedOfferId = request ? currentMatchedOfferId(request) : null;
+    if (!request || !matchedOfferId) {
       throw new NotFoundException('Message thread not found');
     }
 
     const offer = await this.prisma.offer.findUnique({
-      where: { id: request.matchedOfferId },
+      where: { id: matchedOfferId },
       select: {
         id: true,
         status: true,
@@ -469,7 +500,7 @@ export class MessagingService {
       },
     });
 
-    if (!offer || offer.status !== 'ACCEPTED') {
+    if (!offer || offer.status !== 'ACCEPTED' || offer.matchRoundId !== request.currentRoundId) {
       throw new NotFoundException('Message thread not found');
     }
 
@@ -494,9 +525,9 @@ export class MessagingService {
       throw new ThreadUnavailableException('sharing-off');
     }
 
-    const reveal = await this.prisma.contactRevealEvent.findUnique({
-      where: { requestId },
-      select: { requestId: true, offerId: true, providerId: true },
+    const reveal = await findCurrentRoundReveal(this.prisma, request, {
+      offerId: true,
+      providerId: true,
     });
 
     if (!reveal || reveal.offerId !== offer.id || reveal.providerId !== offer.providerId) {
@@ -514,31 +545,54 @@ export class MessagingService {
     return {
       requestId: request.id,
       offerId: offer.id,
-      // REL-002 Faz 1: the conversation belongs to the matched offer's round.
-      // Written, never read in Faz 1 (the chain above is still the gate).
-      roundId: offer.matchRoundId ?? request.currentRoundId,
+      // The conversation belongs to the current round — the matched offer's.
+      roundId: request.currentRoundId,
       providerId: offer.providerId,
       customerUserId: request.customerId,
       providerUserId: offer.provider.userId,
     };
   }
 
-  /** Re-derives the chain behind an existing thread and refuses a stale one. */
+  /**
+   * Re-derives the chain behind an existing thread and refuses a stale one:
+   * a thread is open only while it belongs to the request's current round and
+   * that round is still MATCHED to its offer (REL-002). Every read and write
+   * passes here, so a thread of an ended or earlier round can never be
+   * written to again.
+   */
   private async assertChainStillHolds(thread: ThreadRow) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: thread.requestId },
-      select: { status: true, matchedOfferId: true, customerId: true },
+      select: { customerId: true, ...MATCH_CHAIN_REQUEST_SELECT },
     });
 
-    const chainHolds =
-      request !== null &&
-      request.status === ServiceRequestStatus.MATCHED &&
-      request.matchedOfferId === thread.offerId &&
-      request.customerId === thread.customerUserId;
-
-    if (!chainHolds) {
+    if (!request || !isThreadActive(thread, request)) {
       throw new ForbiddenException('This conversation is no longer available');
     }
+  }
+
+  /** The ids of the given threads whose chain still holds (see {@link isThreadActive}). */
+  private async activeThreadIds(
+    threads: readonly { id: string; requestId: string; offerId: string; roundId: string; customerUserId: string }[],
+  ): Promise<Set<string>> {
+    if (threads.length === 0) {
+      return new Set();
+    }
+
+    const requests = await this.prisma.serviceRequest.findMany({
+      where: { id: { in: [...new Set(threads.map((thread) => thread.requestId))] } },
+      select: { id: true, customerId: true, ...MATCH_CHAIN_REQUEST_SELECT },
+    });
+    const byId = new Map(requests.map((request) => [request.id, request]));
+
+    return new Set(
+      threads
+        .filter((thread) => {
+          const request = byId.get(thread.requestId);
+          return request !== undefined && isThreadActive(thread, request);
+        })
+        .map((thread) => thread.id),
+    );
   }
 
   /** Messages the counterpart wrote after the caller last read the thread. */
@@ -672,6 +726,22 @@ function participantWhere(user: AuthUser): Prisma.MessageThreadWhereInput {
   // row is the correct answer rather than an exception: the caller simply has
   // no threads.
   return { id: { in: [] } };
+}
+
+/**
+ * A thread is active — readable, writable, counted — while it belongs to the
+ * request's current round, that round and the request are MATCHED to the
+ * thread's offer, and the request still belongs to the thread's customer.
+ */
+function isThreadActive(
+  thread: { offerId: string; roundId: string; customerUserId: string },
+  request: MatchChainRequest & { customerId: string | null },
+): boolean {
+  return (
+    request.currentRoundId === thread.roundId &&
+    currentMatchedOfferId(request) === thread.offerId &&
+    request.customerId === thread.customerUserId
+  );
 }
 
 function requireParticipant(

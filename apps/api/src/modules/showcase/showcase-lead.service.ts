@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  MatchRoundSource,
   Prisma,
   ProviderStatus,
   ServiceRequestStatus,
@@ -45,7 +46,11 @@ import {
   showcaseLeadPhoneVerificationRequired,
   showcaseLeadRateLimited,
 } from './showcase.errors';
-import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
+import {
+  getCurrentRoundOrThrow,
+  setRoundSource,
+  transitionRoundToCancelled,
+} from '../match-rounds/match-round-transitions';
 
 /** How long a consumed verification stays redeemable. */
 const VERIFICATION_REDEMPTION_WINDOW_MINUTES = 30;
@@ -284,6 +289,11 @@ export class ShowcaseLeadService {
             data: { showcaseLeadId: lead.id },
           });
 
+          // The request's Round 1 is held for this one business while the
+          // gate stands (REL-002): a DIRECT_SHOWCASE round.
+          const { currentRoundId } = await getCurrentRoundOrThrow(tx, created.id);
+          await setRoundSource(tx, { roundId: currentRoundId, source: MatchRoundSource.DIRECT_SHOWCASE });
+
           leadId = lead.id;
         },
       },
@@ -473,9 +483,10 @@ export class ShowcaseLeadService {
             where: { id: requestId },
             data: { directShowcaseProviderId: null },
           });
-          // REL-002 Faz 1: the round becomes a MARKETPLACE round with the gate
-          // (the publish below, when it happens, syncs it again).
-          await syncCurrentMatchRound(tx, requestId);
+          // The round is no longer held for one business: a MARKETPLACE round
+          // from here on (the publish below, when it happens, starts its clock).
+          const { currentRoundId } = await getCurrentRoundOrThrow(tx, requestId);
+          await setRoundSource(tx, { roundId: currentRoundId, source: MatchRoundSource.MARKETPLACE });
 
           // The market's reason to wait — "unread text must pass an operator
           // first" — no longer exists when auto-publish is on: the release is
@@ -512,9 +523,10 @@ export class ShowcaseLeadService {
           where: { id: requestId, status: { in: [ServiceRequestStatus.SUBMITTED] } },
           data: { status: ServiceRequestStatus.CANCELLED, cancelledAt: now },
         });
-        // REL-002 Faz 1: the round is cancelled with the request.
+        // The current round is cancelled with the request.
         if (cancelled.count === 1) {
-          await syncCurrentMatchRound(tx, requestId);
+          const { currentRoundId } = await getCurrentRoundOrThrow(tx, requestId);
+          await transitionRoundToCancelled(tx, { roundId: currentRoundId, cancelledAt: now });
         }
 
         return { decision: 'KEEP_CLOSED' as const, leadId: lead.id };

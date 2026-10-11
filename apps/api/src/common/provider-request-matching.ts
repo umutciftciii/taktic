@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { MatchRoundStatus, Prisma } from '@prisma/client';
 import { isPhoneVerificationRequired } from '../modules/phone-verification/phone-verification.constants';
 
 /**
@@ -102,4 +102,37 @@ export function isRequestVisibleToDirectGate(
 ): boolean {
   const gate = request.directShowcaseProviderId ?? null;
   return gate === null || gate === providerId;
+}
+
+/**
+ * REL-002 Faz 2 — the round gate, as a query fragment.
+ *
+ * A provider is offered a request only while its *current* match round is
+ * OPEN and they have not offered **in that round**. An offer in an earlier
+ * round does not hide a later one: a provider who lost Round 1 may bid in
+ * Round 2. (Excluding a provider who failed a match is Faz 3's exclusion
+ * model, not this filter.)
+ *
+ * The join is request → current round by primary key, then an anti-join on
+ * `Offer(providerId, matchRoundId)` — the unique index — so it costs one index
+ * probe per candidate, not a scan of the request's offers.
+ */
+export function currentRoundOpenForProviderFilter(
+  providerId: string,
+): Prisma.ServiceRequestWhereInput {
+  return {
+    currentRound: {
+      status: MatchRoundStatus.OPEN,
+      offers: { none: { providerId } },
+    },
+  };
+}
+
+/**
+ * The same round gate for a row already in hand — the detail and the offer
+ * paths. The provider's own offer in the round does not hide the detail (it
+ * is how they see what they sent); the offer path refuses a second one.
+ */
+export function isCurrentRoundOpen(request: { currentRound: { status: MatchRoundStatus } }): boolean {
+  return request.currentRound.status === MatchRoundStatus.OPEN;
 }

@@ -18,12 +18,16 @@ export const SEARCH_PROJECTION_OMIT = {
 } as const satisfies Prisma.GlobalOmitConfig;
 
 /**
- * REL-002 Faz 1: the match-round link columns are written by every lifecycle
- * writer and read by none yet. Left out of every default read for the same
- * reason as the search columns: a model returned without an explicit `select`
- * keeps the key set it had before the columns existed, so no API response
- * starts carrying round ids before Faz 2 decides what to show. The dual-write
- * reads them with an explicit `select`, which omit does not affect.
+ * REL-002: the match-round link columns. Since Faz 2 the matching core reads
+ * them on every decision — always through an explicit `select` (or a local
+ * `omit: { roundId: false }`), which this default does not affect. They stay
+ * out of every *default* read for the same reason as the search columns: a
+ * model returned without an explicit `select` keeps the key set it had before
+ * the columns existed, so no API response carries round ids until a product
+ * surface decides to show them (Faz 3).
+ *
+ * Note the types do not see this omit: a default read is typed as carrying
+ * the column but returns `undefined` for it. Read round ids explicitly.
  */
 export const MATCH_ROUND_PROJECTION_OMIT = {
   serviceRequest: { currentRoundId: true },

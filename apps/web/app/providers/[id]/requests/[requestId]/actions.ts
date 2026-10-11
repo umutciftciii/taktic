@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, ProviderOffer } from '../../../../../lib/api';
 import { parseLiraToMinor } from '../../../../../lib/lira-input';
+import { isOfferScheduleErrorCode, validateOfferSchedule } from '@taktic/shared';
 
 /** Pricing conflicts the API reports with a machine-readable code. */
 type OfferConflict = {
@@ -24,6 +25,16 @@ export async function createOfferAction(formData: FormData) {
   // validation error if the value is missing or below 1,00.
   const priceAmountMinor = parseLiraToMinor(readFormString(formData, 'priceAmount'));
 
+  // REL-002 §6.1: the schedule is required and checked before anything is
+  // sent — the same rules the API applies, so a refusal lands back on the form
+  // as a sentence rather than at the error boundary.
+  const estimatedStartDate = readOptionalFormString(formData, 'estimatedStartDate');
+  const estimatedCompletionDate = readOptionalFormString(formData, 'estimatedCompletionDate');
+  const schedule = validateOfferSchedule(estimatedStartDate, estimatedCompletionDate);
+  if (!schedule.ok) {
+    redirect(`/providers/${providerId}/requests/${requestId}?offerError=${schedule.code}`);
+  }
+
   try {
     await apiFetch<ProviderOffer>(`/providers/${providerId}/requests/${requestId}/offers`, {
       method: 'POST',
@@ -33,8 +44,8 @@ export async function createOfferAction(formData: FormData) {
         // never determines what is charged.
         expectedCreditCost: readOptionalFormNumber(formData, 'expectedCreditCost'),
         currency: readOptionalFormString(formData, 'currency'),
-        estimatedStartDate: readOptionalFormString(formData, 'estimatedStartDate'),
-        estimatedCompletionDate: readOptionalFormString(formData, 'estimatedCompletionDate'),
+        estimatedStartDate,
+        estimatedCompletionDate,
         message: readFormString(formData, 'message'),
         warrantyNote: readOptionalFormString(formData, 'warrantyNote'),
         internalNote: readOptionalFormString(formData, 'internalNote'),
@@ -64,6 +75,13 @@ export async function createOfferAction(formData: FormData) {
 
     if (conflict?.code === 'CATEGORY_INACTIVE') {
       redirect(`/providers/${providerId}/requests/${requestId}?offerError=categoryInactive`);
+    }
+
+    // The API's own schedule refusal (its clock may have crossed midnight
+    // since the check above): the same sentence on the same form.
+    const code = apiErrorCode(error);
+    if (isOfferScheduleErrorCode(code)) {
+      redirect(`/providers/${providerId}/requests/${requestId}?offerError=${code}`);
     }
 
     throw error;

@@ -18,6 +18,8 @@ import { leadDeadlineLabel, leadIsAnswerable, showcaseLeadBadgeClass } from '../
 import { ReportDialog } from '../../../requests/[requestId]/report-dialog';
 import { createShowcaseLeadOfferAction } from './actions';
 import { OfferPriceField } from '../../../../offer-price-field';
+import { OfferScheduleFields, OfferScheduleNotice } from '../../../../offer-schedule-fields';
+import { isOfferScheduleErrorCode } from '@taktic/shared';
 
 type LeadPageProps = {
   params: Promise<{ id: string; leadId: string }>;
@@ -95,7 +97,9 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
         </span>
       </header>
 
-      {error ? (
+      {error && isOfferScheduleErrorCode(error) ? (
+        <OfferScheduleNotice code={error} />
+      ) : error ? (
         <div className="pdash-notice pdash-notice-error" role="alert">
           Teklif gönderilemedi. Bilgileri kontrol edip tekrar deneyin.
         </div>
@@ -283,14 +287,7 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
               <span>Para birimi</span>
               <input name="currency" defaultValue="TRY" />
             </label>
-            <label className="pdash-form-row">
-              <span>Tahmini başlangıç</span>
-              <input name="estimatedStartDate" type="date" />
-            </label>
-            <label className="pdash-form-row">
-              <span>Tahmini bitiş</span>
-              <input name="estimatedCompletionDate" type="date" />
-            </label>
+            <OfferScheduleFields />
           </div>
 
           <label className="pdash-form-row">

@@ -5,6 +5,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationDispatcher } from './notification-dispatcher.service';
 import { deliverPendingIntents, IntentDeliveryResult, intentRow } from './notification-intents';
 import { findMatchingProviders, TransactionalMailService } from './transactional-mail.service';
+import { roundDedupeSuffix } from '../match-rounds/match-round-dedupe';
 
 /**
  * The approval fan-out as a durable intent rather than a synchronous send.
@@ -86,6 +87,7 @@ export class RequestPublishOutbox implements OnModuleDestroy, BackgroundWorkOwne
         district: true,
         neighborhood: true,
         directShowcaseProviderId: true,
+        currentRound: { select: { roundNumber: true } },
       },
     });
 
@@ -123,7 +125,9 @@ export class RequestPublishOutbox implements OnModuleDestroy, BackgroundWorkOwne
         intentRow({
           template: 'request-available',
           to: provider.recipient,
-          dedupeKey: `request-available:${request.id}:${provider.id}`,
+          // Round 1 keeps the key it always had; Round N ≥ 2 owes the same
+          // provider a new invitation (`:r<N>`, REL-002 §18).
+          dedupeKey: `request-available:${request.id}:${provider.id}${roundDedupeSuffix(request.currentRound.roundNumber)}`,
           requestId: request.id,
           userId: provider.userId,
           providerId: provider.id,

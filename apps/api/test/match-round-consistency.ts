@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import type { PrismaClient } from '@prisma/client';
 
 /**
- * REL-002 Faz 1: the request ↔ match-round consistency check, run from the
+ * REL-002: the request ↔ match-round consistency check, run from the
  * very file operators run (`scripts/ops/rel-002-round-consistency.sql`), so the
  * suite and the runbook can never check two different things.
  *

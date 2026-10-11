@@ -355,7 +355,33 @@ export async function fillOfferForm(
 ): Promise<void> {
   const form = provider.page.locator('form.pdash-form');
   await form.locator('input[name="priceAmount"]').fill(priceAmount);
+  await fillOfferSchedule(form);
   await form.locator('textarea[name="message"]').fill(message);
+}
+
+/** A calendar day in Europe/Istanbul, `days` from today, as `YYYY-MM-DD`. */
+export function istanbulDay(days = 0): string {
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Istanbul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const [year, month, day] = today.split('-').map(Number) as [number, number, number];
+  const utc = new Date(Date.UTC(year, month - 1, day + days));
+  return utc.toISOString().slice(0, 10);
+}
+
+/**
+ * The offer's schedule (REL-002 Faz 2: both dates are required): a start a few
+ * days out and a one-week job unless a test says otherwise.
+ */
+export async function fillOfferSchedule(
+  form: Locator,
+  schedule: { start?: string; end?: string } = {},
+): Promise<void> {
+  await form.locator('input[name="estimatedStartDate"]').fill(schedule.start ?? istanbulDay(3));
+  await form.locator('input[name="estimatedCompletionDate"]').fill(schedule.end ?? istanbulDay(10));
 }
 
 /** The id of the offer this provider has on this request, read from its link. */

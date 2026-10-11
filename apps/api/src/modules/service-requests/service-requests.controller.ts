@@ -73,6 +73,14 @@ export class ServiceRequestsController {
     return this.serviceRequestsService.getServiceRequest(id, user);
   }
 
+  /** REL-002: the request's match-round history (internal, read-only). */
+  @Get(':id/rounds')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.REQUESTS_READ)
+  listMatchRounds(@Param('id') id: string) {
+    return this.serviceRequestsService.listMatchRoundsForAdmin(id);
+  }
+
   @Get(':id/offers')
   @UseGuards(OptionalAuthGuard)
   listRequestOffers(@Param('id') id: string, @CurrentUser() user: AuthUser | null) {

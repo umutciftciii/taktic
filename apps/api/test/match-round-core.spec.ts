@@ -9,8 +9,8 @@ import {
 } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { roundOneId } from '../src/modules/match-rounds/match-round-projection';
-import { syncCurrentMatchRound } from '../src/modules/match-rounds/match-round-sync';
+import { roundOneId } from './match-round-fixtures';
+import { transitionRoundToExpired } from '../src/modules/match-rounds/match-round-transitions';
 import { RequestExpiryService } from '../src/modules/request-lifecycle/request-expiry.service';
 import { RequestReminderService } from '../src/modules/request-lifecycle/request-reminder.service';
 import { ShowcaseLeadSlaService } from '../src/modules/showcase/showcase-lead-sla.service';
@@ -38,8 +38,11 @@ import {
 import { roundInconsistencies } from './match-round-consistency';
 
 /**
- * REL-002 Faz 1 — every lifecycle writer keeps the request's Round 1 in step,
- * in its own transaction, and nothing about the product's behaviour changes.
+ * REL-002 — every lifecycle writer moves the request's current round through
+ * its explicit transition, in the writer's own transaction, together with the
+ * request projection; and with one round per request nothing about the
+ * product's behaviour changes (Faz 1 wrote the round as a mirror; since Faz 2
+ * the round is the authority and these cases pin that the two still agree).
  *
  * Each case drives a real endpoint (or the real scheduler service), then
  * asserts the round it expects *and* runs the operators' consistency check
@@ -301,7 +304,7 @@ describe('offers, acceptance and what hangs off the match', () => {
     ).toBe(OfferStatus.REJECTED);
 
     const reveal = await ctx.prisma.contactRevealEvent.findUniqueOrThrow({
-      where: { requestId },
+      where: { roundId: roundOneId(requestId) },
       select: { offerId: true, roundId: true },
     });
     expect(reveal).toEqual({ offerId: winnerOfferId, roundId: roundOneId(requestId) });
@@ -319,7 +322,7 @@ describe('offers, acceptance and what hangs off the match', () => {
       .send({ body: 'Merhaba, yarın geliyoruz.' })
       .expect(201);
     expect(
-      await ctx.prisma.messageThread.findUniqueOrThrow({ where: { requestId }, select: { roundId: true } }),
+      await ctx.prisma.messageThread.findFirstOrThrow({ where: { requestId }, select: { roundId: true } }),
     ).toEqual({ roundId: roundOneId(requestId) });
   });
 
@@ -480,7 +483,7 @@ describe('lifecycle schedulers', () => {
     });
   });
 
-  it('reminder: the request claim stays authoritative and the round records the same instant', async () => {
+  it('reminder: the round claim is authoritative and the request mirrors the same instant', async () => {
     const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 2 });
     const quiet = await createApprovedRequest(ctx.prisma, { categoryId: category.id, approvedAt: daysAgo(8) });
 
@@ -631,8 +634,8 @@ describe('vitrin direct lead', () => {
   });
 });
 
-describe('the dual-write itself', () => {
-  it('rolls back with the transaction that called it', async () => {
+describe('round authority', () => {
+  it('a round transition rolls back with the transaction that called it', async () => {
     const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 2 });
     const live = await createApprovedRequest(ctx.prisma, { categoryId: category.id, approvedAt: new Date() });
 
@@ -642,7 +645,7 @@ describe('the dual-write itself', () => {
           where: { id: live.id },
           data: { status: ServiceRequestStatus.EXPIRED, expiredAt: new Date() },
         });
-        await syncCurrentMatchRound(tx, live.id);
+        await transitionRoundToExpired(tx, { roundId: roundOneId(live.id), expiredAt: new Date() });
         throw new Error('boom');
       }),
     ).rejects.toThrow('boom');
@@ -650,7 +653,7 @@ describe('the dual-write itself', () => {
     expect(await roundOf(live.id)).toMatchObject({ status: MatchRoundStatus.OPEN, expiredAt: null });
   });
 
-  it('gives a request written without a round (an old release, a script) its Round 1 on the next write', async () => {
+  it('a request inserted without a round (a script, an older release) is born with Round 1 and expires on its clock', async () => {
     const category = await createCategory(ctx.prisma, 'Klima', { offerCreditCost: 2 });
     const bare = await ctx.prisma.serviceRequest.create({
       data: {

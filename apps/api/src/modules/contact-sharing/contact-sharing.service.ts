@@ -1,7 +1,12 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, ServiceRequestStatus, UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
+import {
+  currentMatchedOfferId,
+  findCurrentRoundReveal,
+  MATCH_CHAIN_REQUEST_SELECT,
+} from '../match-rounds/match-round-chain';
 import {
   readContactSharingConfig,
   requireContactSharingEnabled,
@@ -138,8 +143,7 @@ export class ContactSharingService {
       where: { id: requestId },
       select: {
         id: true,
-        status: true,
-        matchedOfferId: true,
+        ...MATCH_CHAIN_REQUEST_SELECT,
         customerId: true,
         ...customerContactSelect,
       },
@@ -149,14 +153,11 @@ export class ContactSharingService {
       throw new NotFoundException('Service request not found');
     }
 
-    const reveal = await this.prisma.contactRevealEvent.findUnique({
-      where: { requestId },
-      select: revealSelect,
-    });
+    // The current round's reveal (REL-002): an earlier round's reveal is
+    // history and is not what this view reports on.
+    const reveal = await findCurrentRoundReveal(this.prisma, request, revealSelect);
 
-    const consistent = Boolean(
-      reveal && request.status === ServiceRequestStatus.MATCHED && request.matchedOfferId === reveal.offerId,
-    );
+    const consistent = Boolean(reveal && currentMatchedOfferId(request) === reveal.offerId);
 
     if (!config.enabled || !reveal || !consistent) {
       return {
@@ -198,25 +199,24 @@ export class ContactSharingService {
       where: { id: requestId },
       select: {
         id: true,
-        status: true,
-        matchedOfferId: true,
+        ...MATCH_CHAIN_REQUEST_SELECT,
         customerId: true,
         ...customerContactSelect,
       },
     });
 
-    if (!request || request.status !== ServiceRequestStatus.MATCHED || !request.matchedOfferId) {
+    // The request and its current round must both be MATCHED to the same
+    // offer (REL-002 Faz 2).
+    const matchedOfferId = request ? currentMatchedOfferId(request) : null;
+    if (!request || !matchedOfferId) {
       throw new NotFoundException('Matched contact not found');
     }
 
-    const reveal = await this.prisma.contactRevealEvent.findUnique({
-      where: { requestId },
-      select: revealSelect,
-    });
-
-    // The audit row is the authority. A match without one — or one that names a
-    // different offer — discloses nothing, however the request looks.
-    if (!reveal || reveal.offerId !== request.matchedOfferId) {
+    // The current round's reveal is the authority. A match without one — or
+    // one that names a different offer — discloses nothing, however the
+    // request looks; an earlier round's reveal is never looked at.
+    const reveal = await findCurrentRoundReveal(this.prisma, request, revealSelect);
+    if (!reveal || reveal.offerId !== matchedOfferId) {
       throw new NotFoundException('Matched contact not found');
     }
 

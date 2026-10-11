@@ -339,7 +339,7 @@ describe('contact sharing — the acknowledgement given at the accept', () => {
     expect(stored.contactDisclosureVersion).toBe(DISCLOSURE_VERSION);
     expect(stored.contactDisclosureAcceptedAt).not.toBeNull();
 
-    const reveal = await ctx.prisma.contactRevealEvent.findUniqueOrThrow({
+    const reveal = await ctx.prisma.contactRevealEvent.findFirstOrThrow({
       where: { requestId: serviceRequest.id },
     });
     expect(reveal.offerId).toBe(winner.offerId);

@@ -25,6 +25,7 @@ import {
   createTestApp,
   createUser,
   loginAs,
+  offerPayload,
   resetDatabase,
   serviceAreaRow,
   type TestContext,
@@ -431,11 +432,7 @@ describe('turning auto-renew on and off', () => {
     const offer = await request(defaultCtx.server)
       .post(`/providers/${provider.id}/requests/${serviceRequest.id}/offers`)
       .set('Cookie', cookie)
-      .send({
-        priceAmount: 150_000,
-        currency: 'TRY',
-        message: 'Cancelled period still pays for this offer.',
-      });
+      .send(offerPayload({ currency: 'TRY', message: 'Cancelled period still pays for this offer.' }));
 
     expect(offer.status).toBe(201);
     const after = await defaultCtx.prisma.providerPackageEntitlement.findUniqueOrThrow({

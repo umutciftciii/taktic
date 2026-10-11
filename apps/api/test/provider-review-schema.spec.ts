@@ -13,6 +13,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+import { alignRoundWithRequest } from './match-round-fixtures';
 
 let ctx: TestContext;
 
@@ -58,6 +59,7 @@ async function completedJob() {
       completedAt: new Date(),
     },
   });
+  await alignRoundWithRequest(ctx.prisma, req.id);
   return { customer, provider, request: req, offerId: created.body.id as string };
 }
 

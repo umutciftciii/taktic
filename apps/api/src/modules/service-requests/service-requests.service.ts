@@ -46,7 +46,13 @@ import {
 import { resolveVisibleQuestionIds } from '../questions/question-visibility';
 import { ShowcaseLeadLifecycleService } from '../showcase/showcase-lead-lifecycle.service';
 import { RequestDraftsService } from '../request-drafts/request-drafts.service';
-import { syncCurrentMatchRound } from '../match-rounds/match-round-sync';
+import {
+  getCurrentRoundOrThrow,
+  publishRound,
+  roundPublicationFor,
+  transitionRoundToCancelled,
+  transitionRoundToCompleted,
+} from '../match-rounds/match-round-transitions';
 import {
   hasSystemFieldValue,
   SystemFieldRequestValues,
@@ -706,10 +712,9 @@ export class ServiceRequestsService {
         await this.publishOutbox.enqueue(tx, created.id, now);
       }
 
-      // REL-002 Faz 1: Round 1 is born with the request, in this transaction,
-      // after every hook above has written its part of the request (the vitrin
-      // lead's id included) so the round reflects the request as committed.
-      await syncCurrentMatchRound(tx, created.id);
+      // Round 1 was born with the request (REL-002 M2 birth trigger): OPEN,
+      // published from `approvedAt` when the request is born live. A vitrin
+      // lead's hook above marked it DIRECT_SHOWCASE when it attached the lead.
 
       return created;
       },
@@ -786,7 +791,9 @@ export class ServiceRequestsService {
       return false;
     }
 
-    await syncCurrentMatchRound(tx, requestId);
+    // The round's offer period starts with the same instant (REL-002).
+    const current = await getCurrentRoundOrThrow(tx, requestId);
+    await publishRound(tx, { roundId: current.currentRoundId, publishedAt: now });
     await this.publishOutbox.enqueue(tx, requestId, now);
     return true;
   }
@@ -943,6 +950,58 @@ export class ServiceRequestsService {
   }
 
   /** The operator's request page (REQUESTS_READ); the account block as in {@link listServiceRequests}. */
+  /**
+   * REL-002 Faz 2: the request's match rounds, oldest first — an internal,
+   * read-only history for support (REQUESTS_READ). Ids, states and the
+   * round clock only: the winner is named by offer and provider id, never by
+   * contact details. Faz 2 still opens a single round per request; this is
+   * the read surface that is ready for more.
+   */
+  async listMatchRoundsForAdmin(id: string) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        currentRoundId: true,
+        matchRounds: {
+          orderBy: { roundNumber: 'asc' },
+          select: {
+            id: true,
+            roundNumber: true,
+            status: true,
+            source: true,
+            openedBy: true,
+            openedAt: true,
+            publishedAt: true,
+            expiresAt: true,
+            reminderSentAt: true,
+            matchedAt: true,
+            matchedOfferId: true,
+            matchedProviderId: true,
+            completedAt: true,
+            cancelledAt: true,
+            expiredAt: true,
+            _count: { select: { offers: true } },
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    return {
+      requestId: request.id,
+      currentRoundId: request.currentRoundId,
+      rounds: request.matchRounds.map(({ _count, ...round }) => ({
+        ...round,
+        isCurrent: round.id === request.currentRoundId,
+        offerCount: _count.offers,
+      })),
+    };
+  }
+
   async getServiceRequest(id: string, viewer: AuthUser | null = null) {
     const customerAccount = mayEmbed(viewer, AdminPermission.CUSTOMERS_READ);
     const request = await this.prisma.serviceRequest.findUnique({
@@ -1138,10 +1197,15 @@ export class ServiceRequestsService {
             },
             include,
           });
-          // REL-002 Faz 1: publishedAt/expiresAt follow approvedAt — a
-          // (re-)approval or a reopen after removal refreshes them exactly as
-          // it refreshes approvedAt.
-          await syncCurrentMatchRound(tx, id);
+          // The round's offer period follows moderation: a (re-)approval or a
+          // reopen after removal (re)starts it from this approvedAt, a move
+          // back to IN_REVIEW suspends it. The guard above proved the request
+          // unmatched, so its round is OPEN.
+          const round = await getCurrentRoundOrThrow(tx, id);
+          await publishRound(tx, {
+            roundId: round.currentRoundId,
+            publishedAt: roundPublicationFor(updated.status, updated.approvedAt),
+          });
         }
 
         /*
@@ -1249,9 +1313,11 @@ export class ServiceRequestsService {
       });
     }
 
-    // REL-002 Faz 1: the round stays OPEN (a report's removal can be reopened
-    // into it); the request's REJECTED is what keeps it off the market.
-    await syncCurrentMatchRound(tx, requestId);
+    // The round stays OPEN — a report's removal can be reopened into it — and
+    // the request's REJECTED is what keeps it off the market. Only that round's
+    // offers are closed below: an earlier round is history and keeps whatever
+    // its own outcome settled.
+    const { currentRoundId } = await getCurrentRoundOrThrow(tx, requestId);
 
     // Otherwise an SLA clock would keep running against a business over a
     // request that no longer exists to answer. Quiet for the many requests
@@ -1268,7 +1334,7 @@ export class ServiceRequestsService {
     // has already ended on its own terms and is left as it is.
     const liveStatuses = [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED];
     const live = await tx.offer.findMany({
-      where: { requestId, status: { in: liveStatuses } },
+      where: { requestId, matchRoundId: currentRoundId, status: { in: liveStatuses } },
       orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
       select: {
         id: true,
@@ -1408,9 +1474,9 @@ export class ServiceRequestsService {
           throw new ConflictException('Only a matched request can be completed');
         }
 
-        // REL-002 Faz 1: the round completes in the same transaction, with the
-        // same completedAt.
-        await syncCurrentMatchRound(tx, id);
+        // The current round completes with the request, same completedAt.
+        const { currentRoundId } = await getCurrentRoundOrThrow(tx, id);
+        await transitionRoundToCompleted(tx, { roundId: currentRoundId, completedAt: now });
 
         // The invitation is owed by the same transaction that finished the job:
         // a crash between the two can no longer lose it, and a retry of this
@@ -1511,15 +1577,19 @@ export class ServiceRequestsService {
           throw cancelStateChangedException();
         }
 
-        // REL-002 Faz 1: the round is cancelled with the request, keeping the
-        // match record exactly as the request keeps matchedOfferId.
-        await syncCurrentMatchRound(tx, id);
+        // The current round is cancelled with the request and keeps its match
+        // record, exactly as the request keeps matchedOfferId.
+        const { currentRoundId } = await getCurrentRoundOrThrow(tx, id);
+        await transitionRoundToCancelled(tx, { roundId: currentRoundId, cancelledAt: now });
 
         await this.showcaseLeads.closeForRequest(tx, id, ShowcaseLeadCloseReason.CUSTOMER_CANCELLED, now);
 
+        // The current round's offers only. An earlier round is history: its
+        // competitors were settled when it ended, and a cancel today must not
+        // reach back and refund what that round's outcome kept (REL-002 §10).
         const acceptedOfferId = current.matchedOfferId;
         const offers = await tx.offer.findMany({
-          where: { requestId: id },
+          where: { requestId: id, matchRoundId: currentRoundId },
           orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
           select: {
             id: true,

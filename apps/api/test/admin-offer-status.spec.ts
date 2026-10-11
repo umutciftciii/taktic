@@ -261,7 +261,7 @@ describe('admin offer status — acceptance', () => {
       .send({ status: OfferStatus.ACCEPTED })
       .expect(200);
 
-    const reveal = await ctx.prisma.contactRevealEvent.findUnique({
+    const reveal = await ctx.prisma.contactRevealEvent.findFirst({
       where: { requestId: serviceRequest.id },
     });
     expect(reveal?.offerId).toBe(winner.offerId);

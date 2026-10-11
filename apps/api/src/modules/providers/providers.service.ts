@@ -15,6 +15,7 @@ import { matchesAdminSearch, parseAdminSearch } from '../../common/admin-search'
 import {
   AdminPermission,
   type BusinessRegistrationType,
+  MatchRoundStatus,
   CreditTransactionType,
   NumberedEntityType,
   OfferEntitlementSource,
@@ -39,11 +40,14 @@ import {
 } from '../../common/provider-email';
 import { assertEmailFreeForAccountKind } from '../../common/account-email';
 import {
+  currentRoundOpenForProviderFilter,
   directShowcaseVisibilityFilter,
+  isCurrentRoundOpen,
   isRequestVisibleToDirectGate,
   isRequestVisibleToProviders,
   matchesProviderArea,
   phoneVerifiedRequestFilter,
+  type ProviderServiceAreaLike,
 } from '../../common/provider-request-matching';
 import {
   AdminAuditEntry,
@@ -113,7 +117,13 @@ import {
 } from '../../common/provider-service-area-scope';
 import { UpdateProviderStatusDto } from './dto/update-provider-status.dto';
 import { UpdateProviderDto } from './dto/update-provider.dto';
-import { currentMatchRoundId, syncCurrentMatchRound } from '../match-rounds/match-round-sync';
+import {
+  assertOfferRoundCurrentAndOpen,
+  getCurrentRoundOrThrow,
+  offerRoundClosedException,
+  publishRound,
+} from '../match-rounds/match-round-transitions';
+import { validateOfferSchedule } from '../../common/offer-schedule';
 
 type ProviderOwnershipFilter = 'claimed' | 'unclaimed';
 
@@ -1291,7 +1301,9 @@ export class ProvidersService implements OnModuleInit {
         // their own offer moved it to APPROVED.
         ...directShowcaseVisibilityFilter(providerId),
         categoryId: { in: provider.serviceCategories.map((item) => item.categoryId) },
-        offers: { none: { providerId } },
+        // REL-002: the current round is OPEN and this provider has not offered
+        // in it. An offer in an earlier round does not hide a later one.
+        ...currentRoundOpenForProviderFilter(providerId),
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
         ...(normalizedFilters.city ? { city: { equals: normalizedFilters.city, mode: 'insensitive' } } : {}),
         ...(normalizedFilters.district
@@ -1351,27 +1363,35 @@ export class ProvidersService implements OnModuleInit {
         answers: {
           orderBy: { createdAt: 'asc' },
         },
-        offers: {
-          where: { providerId },
+        // This provider's own offer **in the current round**, if any — what
+        // the detail shows as "your offer". An offer from an earlier round is
+        // history and does not stand in for one in this round (REL-002).
+        currentRound: {
           select: {
-            id: true,
             status: true,
-            cancelledAt: true,
-            priceAmount: true,
-            creditCost: true,
-            creditSpentTransactionId: true,
-            creditRefundedTransactionId: true,
-            creditRefundedAt: true,
-            creditRefundReason: true,
-            unviewedRefundPolicy: true,
-            unviewedRefundWindowHours: true,
-            unviewedRefundEligibleAt: true,
-            refundBlockedAt: true,
-            viewedAt: true,
-            acceptedAt: true,
-            submittedAt: true,
+            offers: {
+              where: { providerId },
+              select: {
+                id: true,
+                status: true,
+                cancelledAt: true,
+                priceAmount: true,
+                creditCost: true,
+                creditSpentTransactionId: true,
+                creditRefundedTransactionId: true,
+                creditRefundedAt: true,
+                creditRefundReason: true,
+                unviewedRefundPolicy: true,
+                unviewedRefundWindowHours: true,
+                unviewedRefundEligibleAt: true,
+                refundBlockedAt: true,
+                viewedAt: true,
+                acceptedAt: true,
+                submittedAt: true,
+              },
+              take: 1,
+            },
           },
-          take: 1,
         },
         // This provider's own report on the request, if any — never another
         // provider's. A report never hides the request or changes its
@@ -1387,6 +1407,8 @@ export class ProvidersService implements OnModuleInit {
     if (
       !request ||
       request.status !== ServiceRequestStatus.APPROVED ||
+      // The list's round gate, on the row in hand (REL-002).
+      !isCurrentRoundOpen(request) ||
       !isRequestVisibleToProviders(request) ||
       // Same predicate as the list, applied to a row already in hand. Without
       // it, a provider who guessed a request id could read a lead addressed to
@@ -1399,8 +1421,9 @@ export class ProvidersService implements OnModuleInit {
     }
 
     const providerCreditBalance = await this.getProviderCreditBalance(providerId);
+    const { currentRound, ...rest } = request;
 
-    return toProviderRequestDetail(request, providerCreditBalance);
+    return toProviderRequestDetail({ ...rest, offers: currentRound.offers }, providerCreditBalance);
   }
 
   async createOffer(providerId: string, requestId: string, dto: CreateOfferDto) {
@@ -1413,52 +1436,70 @@ export class ProvidersService implements OnModuleInit {
     return offer;
   }
 
+  /**
+   * REL-002 Faz 2 closes the offer path's TOCTOU gap. Everything that decides
+   * whether this provider may offer on this request — the provider is
+   * APPROVED and bound to the category and area, the request is visible to
+   * them (verification and vitrin gates), it is APPROVED (or their own
+   * SUBMITTED direct lead), its current round is OPEN, and they have not
+   * offered in that round — is decided **inside** the Serializable
+   * transaction that writes the offer, on the rows that transaction reads.
+   * The checks before it are only a fast answer for a stale screen.
+   *
+   * That is what makes "offer vs accept" safe: accept moves the request and
+   * the round in its own Serializable transaction, so either this one sees the
+   * round OPEN and the accept then sees (and rejects) this offer as a
+   * competitor, or the two conflict and the loser is replayed against the
+   * winner's state — and then refused here as a request no longer open. The
+   * offer is written with `matchRoundId` = the round just checked; the
+   * `(providerId, matchRoundId)` unique is the backstop against a double
+   * submit, and the composite FK against a round of another request.
+   */
   private async createOfferRecord(providerId: string, requestId: string, dto: CreateOfferDto) {
-    const gate = await this.ensureProviderCanSeeRequest(providerId, requestId);
+    await this.ensureProviderCanSeeRequest(providerId, requestId);
     const payload = normalizeOfferPayload(dto);
-
-    const existingOffer = await this.prisma.offer.findUnique({
-      where: {
-        providerId_requestId: {
-          providerId,
-          requestId,
-        },
-      },
-      select: { id: true },
-    });
-
-    if (existingOffer) {
-      throw new ConflictException('Provider already submitted an offer for this request');
-    }
 
     try {
       return await runSerializable(
         this.prisma,
         async (tx) => {
-          // The price is read inside the transaction, in the same serialisation
-          // window as the balance read and the ledger write. Reading it outside
-          // would let an admin change the price between the read and the charge,
-          // so the amount charged could differ from the snapshot written to the
-          // offer.
+          // The authority. Same predicate as the fast check above, on rows
+          // read in this transaction; the price, the gate and the round come
+          // from the same read, so the charge and the decision cannot come from
+          // two different moments.
+          const provider = await this.getApprovedProviderForDiscovery(providerId, tx);
           const request = await tx.serviceRequest.findUnique({
             where: { id: requestId },
             select: {
-              status: true,
-              // Re-read inside the transaction rather than trusted from the
-              // guard above. A fallback release could have cleared the gate in
-              // the meantime, and the difference decides whether this offer is
-              // free — reading it outside the serialisation window would let
-              // the charge and the decision come from two different moments.
-              directShowcaseProviderId: true,
+              ...providerVisibilityRequestSelect,
               showcaseLeadId: true,
+              currentRoundId: true,
+              currentRound: { select: { status: true } },
               category: {
                 select: { id: true, slug: true, isActive: true, offerCreditCost: true },
               },
             },
           });
 
-          if (!request) {
+          if (!request || !canProviderActOnRequest(provider, request, providerId)) {
             throw new NotFoundException('Request not found');
+          }
+
+          // An APPROVED request whose round is not OPEN would be a request and
+          // a round that disagree; refuse rather than attach an offer to a
+          // closed round.
+          if (!isCurrentRoundOpen(request)) {
+            throw offerRoundClosedException();
+          }
+
+          const existingOffer = await tx.offer.findUnique({
+            where: {
+              providerId_matchRoundId: { providerId, matchRoundId: request.currentRoundId },
+            },
+            select: { id: true },
+          });
+          if (existingOffer) {
+            throw new ConflictException('Provider already submitted an offer for this request');
           }
 
           const category = request.category;
@@ -1551,17 +1592,14 @@ export class ProvidersService implements OnModuleInit {
             submittedAt.getTime() + refundWindowHours * 60 * 60 * 1000,
           );
 
-          // REL-002 Faz 1: the offer belongs to the request's current round.
-          // Read, not written, so concurrent offers on one request do not
-          // contend on the round row. No new eligibility rule here — the
-          // in-transaction round/status check is Faz 2.
-          const matchRoundId = await currentMatchRoundId(tx, requestId);
-
           const offer = await tx.offer.create({
             data: {
               providerId,
               requestId,
-              matchRoundId,
+              // The round checked OPEN above, in this transaction. Read, not
+              // written: concurrent offers on one round do not contend on the
+              // round row.
+              matchRoundId: request.currentRoundId,
               offerNumber,
               priceAmount: payload.priceAmount,
               currency: payload.currency,
@@ -1651,10 +1689,10 @@ export class ProvidersService implements OnModuleInit {
               where: { id: requestId, status: ServiceRequestStatus.SUBMITTED },
               data: { status: ServiceRequestStatus.APPROVED, approvedAt: submittedAt },
             });
-            // REL-002 Faz 1: the round's offer period starts with the same
-            // approvedAt; it stays a DIRECT_SHOWCASE round (the gate is kept).
+            // The round's offer period starts with the same approvedAt; it
+            // stays a DIRECT_SHOWCASE round (the gate is kept).
             if (approved.count === 1) {
-              await syncCurrentMatchRound(tx, requestId);
+              await publishRound(tx, { roundId: request.currentRoundId, publishedAt: submittedAt });
             }
           }
 
@@ -1763,7 +1801,7 @@ export class ProvidersService implements OnModuleInit {
      */
     const acceptedWorkScope =
       offer.status === OfferStatus.ACCEPTED
-        ? await this.loadAcceptedWorkScope(offer.requestId)
+        ? await this.loadAcceptedWorkScope(offer.id, offer.requestId)
         : null;
 
     const [projected] = await this.withRefundSettlements([withRefundEligibility(offer)]);
@@ -1785,10 +1823,13 @@ export class ProvidersService implements OnModuleInit {
    * Only the required questions. The optional ones are the customer's own
    * discretion and are scored as a bonus rather than as part of the brief.
    */
-  private async loadAcceptedWorkScope(requestId: string) {
+  private async loadAcceptedWorkScope(offerId: string, requestId: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
       select: {
+        matchedOfferId: true,
+        currentRoundId: true,
+        currentRound: { select: { status: true, matchedOfferId: true } },
         description: true,
         answers: {
           where: { question: { isRequired: true } },
@@ -1803,7 +1844,24 @@ export class ProvidersService implements OnModuleInit {
       },
     });
 
-    if (!request) {
+    // REL-002: an ACCEPTED offer alone is not enough. The brief belongs to
+    // the winner of the request's *current* round while that round is matched
+    // or completed, and the request's projection must agree. The winner of an
+    // earlier round that a later one replaced sees nothing of the later round.
+    if (
+      !request ||
+      !isWorkScopeRound(request.currentRound.status) ||
+      request.currentRound.matchedOfferId !== offerId ||
+      request.matchedOfferId !== offerId
+    ) {
+      return null;
+    }
+
+    const offer = await this.prisma.offer.findUnique({
+      where: { id: offerId },
+      select: { matchRoundId: true },
+    });
+    if (offer?.matchRoundId !== request.currentRoundId) {
       return null;
     }
 
@@ -1837,7 +1895,7 @@ export class ProvidersService implements OnModuleInit {
       async (tx) => {
           const offer = await tx.offer.findFirst({
             where: { id: offerId, providerId },
-            select: { id: true, requestId: true },
+            select: { id: true, requestId: true, matchRoundId: true },
           });
 
           // Somebody else's offer is indistinguishable from a missing one, so a
@@ -1846,16 +1904,17 @@ export class ProvidersService implements OnModuleInit {
             throw new NotFoundException('Offer not found');
           }
 
-          const request = await tx.serviceRequest.findUnique({
-            where: { id: offer.requestId },
-            select: { status: true },
-          });
+          const request = await getCurrentRoundOrThrow(tx, offer.requestId);
 
           // A matched, completed, cancelled or expired request is settled. Its
           // offers stay exactly as that lifecycle left them.
-          if (!request || request.status !== ServiceRequestStatus.APPROVED) {
+          if (request.status !== ServiceRequestStatus.APPROVED) {
             throw offerNotWithdrawableException();
           }
+
+          // An offer of a round that is no longer the current OPEN one is
+          // history (REL-002): 409 OFFER_ROUND_CLOSED.
+          assertOfferRoundCurrentAndOpen(offer.matchRoundId, request);
 
           const withdrawn = await tx.offer.updateMany({
             where: {
@@ -2016,8 +2075,11 @@ export class ProvidersService implements OnModuleInit {
     return provider;
   }
 
-  private async getApprovedProviderForDiscovery(providerId: string) {
-    const provider = await this.prisma.providerProfile.findUnique({
+  private async getApprovedProviderForDiscovery(
+    providerId: string,
+    client: Prisma.TransactionClient = this.prisma,
+  ) {
+    const provider = await client.providerProfile.findUnique({
       where: { id: providerId },
       include: {
         serviceCategories: {
@@ -2071,32 +2133,10 @@ export class ProvidersService implements OnModuleInit {
     const provider = await this.getApprovedProviderForDiscovery(providerId);
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: requestId },
-      select: {
-        id: true,
-        status: true,
-        categoryId: true,
-        city: true,
-        district: true,
-        neighborhood: true,
-        phoneVerifiedAt: true,
-        directShowcaseProviderId: true,
-      },
+      select: providerVisibilityRequestSelect,
     });
 
-    const isOwnDirectLead =
-      request !== null && request.directShowcaseProviderId === providerId;
-
-    if (
-      !request ||
-      !isRequestVisibleToProviders(request) ||
-      !isRequestVisibleToDirectGate(request, providerId) ||
-      !(
-        request.status === ServiceRequestStatus.APPROVED ||
-        (isOwnDirectLead && request.status === ServiceRequestStatus.SUBMITTED)
-      ) ||
-      !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
-      !matchesProviderArea(provider.serviceAreas, request)
-    ) {
+    if (!request || !canProviderActOnRequest(provider, request, providerId)) {
       throw new NotFoundException('Request not found');
     }
 
@@ -2117,6 +2157,49 @@ export class ProvidersService implements OnModuleInit {
     const requests = await this.listMatchingRequests(providerId, {});
     return requests.length;
   }
+}
+
+/** The round states in which a round's winner works on (or finished) the job. */
+function isWorkScopeRound(status: MatchRoundStatus): boolean {
+  return status === MatchRoundStatus.MATCHED || status === MatchRoundStatus.COMPLETED;
+}
+
+/** The request columns {@link canProviderActOnRequest} reads. */
+const providerVisibilityRequestSelect = {
+  id: true,
+  status: true,
+  categoryId: true,
+  city: true,
+  district: true,
+  neighborhood: true,
+  phoneVerifiedAt: true,
+  directShowcaseProviderId: true,
+} satisfies Prisma.ServiceRequestSelect;
+
+/**
+ * Whether this (APPROVED) provider may act on this request at all — the one
+ * predicate the offer path's fast check and its in-transaction authority both
+ * apply (see {@link ProvidersService.ensureProviderCanSeeRequest} for why a
+ * provider's own direct lead is reachable while still SUBMITTED).
+ */
+function canProviderActOnRequest(
+  provider: {
+    serviceCategories: { categoryId: string }[];
+    serviceAreas: ProviderServiceAreaLike[];
+  },
+  request: Prisma.ServiceRequestGetPayload<{ select: typeof providerVisibilityRequestSelect }>,
+  providerId: string,
+): boolean {
+  const isOwnDirectLead = request.directShowcaseProviderId === providerId;
+
+  return (
+    isRequestVisibleToProviders(request) &&
+    isRequestVisibleToDirectGate(request, providerId) &&
+    (request.status === ServiceRequestStatus.APPROVED ||
+      (isOwnDirectLead && request.status === ServiceRequestStatus.SUBMITTED)) &&
+    provider.serviceCategories.some((item) => item.categoryId === request.categoryId) &&
+    matchesProviderArea(provider.serviceAreas, request)
+  );
 }
 
 const providerInclude = {
@@ -2987,19 +3070,9 @@ function normalizeOfferPayload(dto: CreateOfferDto) {
   }
 
   const message = normalizeRequiredString(dto.message, 'Message');
-  const estimatedStartDate = normalizeOptionalDate(dto.estimatedStartDate, 'Estimated start date');
-  const estimatedCompletionDate = normalizeOptionalDate(
-    dto.estimatedCompletionDate,
-    'Estimated completion date',
-  );
-
-  if (
-    estimatedStartDate &&
-    estimatedCompletionDate &&
-    estimatedCompletionDate.getTime() < estimatedStartDate.getTime()
-  ) {
-    throw new BadRequestException('Estimated completion date must be after estimated start date');
-  }
+  // REL-002 §6.1: both dates required, ISO days, start ≥ today (Istanbul),
+  // end ≥ start, within the shared horizon. One helper, one set of codes.
+  const { estimatedStartDate, estimatedCompletionDate } = validateOfferSchedule(dto);
 
   return {
     priceAmount,
@@ -3013,20 +3086,6 @@ function normalizeOfferPayload(dto: CreateOfferDto) {
     warrantyNote: normalizeNullableString(dto.warrantyNote),
     internalNote: normalizeNullableString(dto.internalNote),
   };
-}
-
-function normalizeOptionalDate(value: string | null | undefined, fieldName: string) {
-  const normalized = normalizeNullableString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) {
-    throw new BadRequestException(`${fieldName} must be a valid date`);
-  }
-
-  return date;
 }
 
 function qualityLabel(score: number): QualityLabel {

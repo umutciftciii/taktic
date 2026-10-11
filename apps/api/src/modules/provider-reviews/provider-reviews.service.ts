@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
+  MatchRoundStatus,
   OfferStatus,
   Prisma,
   ProviderReviewModerationAction,
@@ -120,11 +121,15 @@ const customerReviewSelect = {
   status: true,
   customerId: true,
   completedAt: true,
+  // REL-002: the review belongs to the current round's completed match.
+  currentRoundId: true,
+  currentRound: { select: { status: true, matchedOfferId: true } },
   matchedOffer: {
     select: {
       id: true,
       providerId: true,
       status: true,
+      matchRoundId: true,
       provider: { select: { id: true, businessName: true } },
     },
   },
@@ -183,7 +188,7 @@ export class ProviderReviewsService {
     }
 
     const offer = request.matchedOffer;
-    if (!offer || offer.status !== OfferStatus.ACCEPTED) {
+    if (!offer || !isCurrentCompletedMatch(request, offer)) {
       throw conflict(MATCH_INCONSISTENT_CODE, 'Bu talebin kabul edilmiş bir teklifi bulunamadı.');
     }
 
@@ -476,6 +481,25 @@ export class ProviderReviewsService {
 }
 
 /**
+ * The match a review is for: the request's current round is COMPLETED, its
+ * winner is the request's matched offer, that offer is ACCEPTED and was made in
+ * that round (REL-002). With one round per request this is exactly the old
+ * "COMPLETED with an ACCEPTED matched offer"; with several, only the round
+ * that actually finished the job can be reviewed.
+ */
+function isCurrentCompletedMatch(
+  request: Pick<CustomerReviewRequest, 'currentRoundId' | 'currentRound'>,
+  offer: { id: string; status: OfferStatus; matchRoundId: string },
+): boolean {
+  return (
+    offer.status === OfferStatus.ACCEPTED &&
+    request.currentRound.status === MatchRoundStatus.COMPLETED &&
+    request.currentRound.matchedOfferId === offer.id &&
+    offer.matchRoundId === request.currentRoundId
+  );
+}
+
+/**
  * The verdict is worked out in the create predicate's order — switch, status,
  * match, then the window — with one exception: an existing review is reported
  * before the window is checked, because a review written in time stays the
@@ -489,7 +513,7 @@ function toCustomerReviewState(request: CustomerReviewRequest, enabled: boolean)
   const eligibility = ((): CustomerReviewEligibility => {
     if (!enabled) return 'disabled';
     if (request.status !== ServiceRequestStatus.COMPLETED) return 'not-completed';
-    if (!offer || offer.status !== OfferStatus.ACCEPTED) return 'not-completed';
+    if (!offer || !isCurrentCompletedMatch(request, offer)) return 'not-completed';
     if (review) return review.removedAt ? 'removed' : 'already-reviewed';
     if (!request.completedAt || !isReviewWindowOpen(request.completedAt)) return 'window-closed';
     return 'ok';

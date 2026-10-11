@@ -25,6 +25,7 @@ import {
 } from '../../../provider-ui';
 import { createOfferAction } from './actions';
 import { OfferPriceField } from '../../../offer-price-field';
+import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
 import { ReportDialog } from './report-dialog';
 
 type ProviderRequestDetailPageProps = {
@@ -270,6 +271,8 @@ export default async function ProviderRequestDetailPage({
               </div>
             ) : null}
 
+            <OfferScheduleNotice code={offerError} />
+
             {offerError === 'categoryInactive' ? (
               <div className="pdash-notice pdash-notice-error" role="alert">
                 <span>
@@ -366,14 +369,7 @@ export default async function ProviderRequestDetailPage({
                     <span>Para birimi</span>
                     <input name="currency" defaultValue="TRY" />
                   </label>
-                  <label className="pdash-form-row">
-                    <span>Tahmini başlangıç</span>
-                    <input name="estimatedStartDate" type="date" />
-                  </label>
-                  <label className="pdash-form-row">
-                    <span>Tahmini bitiş</span>
-                    <input name="estimatedCompletionDate" type="date" />
-                  </label>
+                  <OfferScheduleFields />
                 </div>
 
                 <label className="pdash-form-row">

@@ -20,6 +20,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+import { alignRoundWithRequest } from './match-round-fixtures';
 
 /**
  * Where a provider's rating is *shown*, as opposed to where it is computed.
@@ -98,6 +99,7 @@ async function completedJob(fixture: ProviderFixture, customerId?: string) {
       completedAt: new Date(),
     },
   });
+  await alignRoundWithRequest(ctx.prisma, serviceRequest.id);
   return { customer, serviceRequest, offer };
 }
 

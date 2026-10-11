@@ -17,6 +17,8 @@ import {
   fillOfferForm,
   openRequestAsProvider,
   readProviderOfferId,
+  fillOfferSchedule,
+  istanbulDay,
   submitOffer,
 } from '../src/journeys';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
@@ -112,6 +114,7 @@ test.describe('offer experience', () => {
       await price.blur();
       await expect(price).toHaveValue('4.500,50');
       await price.fill('4.500,00');
+      await fillOfferSchedule(leaving.page.locator('form.pdash-form'));
       await leaving.page.locator('textarea[name="message"]').fill('Hemen başlayabiliriz.');
       await leaving.page.getByRole('button', { name: 'Teklifi Gönder' }).click();
       await expect(leaving.page.getByText('Bu talebe daha önce teklif gönderdiniz')).toBeVisible();
@@ -286,6 +289,72 @@ test.describe('offer experience', () => {
       await expect(price).toHaveValue('1.500');
 
       expect(await prisma().offer.count({ where: { requestId } })).toBe(0);
+    } finally {
+      await Promise.all([customer.close(), admin.close(), provider.close()]);
+    }
+  });
+
+  test('the schedule is required and bounded; an end before the start comes back as a sentence, nothing charged', async ({
+    browser,
+  }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const customerAccount = await createCustomer();
+    const adminAccount = await createAdmin();
+    const providerAccount = await createProvider({ categoryId: category.id, location, credits: STARTING_CREDITS });
+
+    const customer = await Actor.open(browser, 'customer', primaryRuntime);
+    const admin = await Actor.open(browser, 'admin', primaryRuntime);
+    const provider = await Actor.open(browser, 'provider', primaryRuntime);
+
+    try {
+      await customer.loginToWeb(customerAccount.email, customerAccount.password);
+      const requestId = await createRequest(customer, category, requestFormValues(location, customerAccount.name));
+      await admin.loginToAdmin(adminAccount.email, adminAccount.password);
+      await approveRequest(admin, requestId);
+
+      await provider.loginToWeb(providerAccount.email, providerAccount.password);
+      await openRequestAsProvider(provider, providerAccount.id, requestId);
+      const page = provider.page;
+      const form = page.locator('form.pdash-form');
+      const start = form.locator('input[name="estimatedStartDate"]');
+      const end = form.locator('input[name="estimatedCompletionDate"]');
+
+      // REL-002 §6.1: both dates required, from today (Istanbul) to the horizon.
+      for (const field of [start, end]) {
+        await expect(field).toHaveAttribute('required', '');
+        await expect(field).toHaveAttribute('min', istanbulDay(0));
+        await expect(field).toHaveAttribute('max', istanbulDay(365));
+      }
+
+      // Empty: the browser's own "required" stops the submit.
+      await form.locator('input[name="priceAmount"]').fill('1500,00');
+      await form.locator('textarea[name="message"]').fill('Takvim denemesi.');
+      await page.getByRole('button', { name: 'Teklifi Gönder' }).click();
+      expect(await start.evaluate((el: HTMLInputElement) => el.validity.valueMissing)).toBe(true);
+
+      // Both within the window, but the end before the start: the server
+      // action refuses with the shared rule and the form says why.
+      await fillOfferSchedule(form, { start: istanbulDay(5), end: istanbulDay(2) });
+      await page.getByRole('button', { name: 'Teklifi Gönder' }).click();
+      await expect(page.getByTestId('offer-schedule-error')).toContainText(
+        'Bitiş tarihi başlangıç tarihinden önce olamaz.',
+      );
+      await assertNoErrorScreen(page);
+      expect(await prisma().offer.count({ where: { requestId } })).toBe(0);
+
+      // A valid schedule goes through and is stored as the days typed.
+      await openRequestAsProvider(provider, providerAccount.id, requestId);
+      await fillOfferForm(provider, '1500,00', 'Takvimle teklif.');
+      await fillOfferSchedule(page.locator('form.pdash-form'), { start: istanbulDay(0), end: istanbulDay(0) });
+      await page.getByRole('button', { name: 'Teklifi Gönder' }).click();
+      await expect(page.getByText('Bu talebe daha önce teklif gönderdiniz')).toBeVisible();
+      const offer = await prisma().offer.findFirstOrThrow({
+        where: { requestId },
+        select: { estimatedStartDate: true, estimatedCompletionDate: true },
+      });
+      expect(offer.estimatedStartDate?.toISOString().slice(0, 10)).toBe(istanbulDay(0));
+      expect(offer.estimatedCompletionDate?.toISOString().slice(0, 10)).toBe(istanbulDay(0));
     } finally {
       await Promise.all([customer.close(), admin.close(), provider.close()]);
     }
