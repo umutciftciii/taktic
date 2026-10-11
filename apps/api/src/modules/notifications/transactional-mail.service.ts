@@ -9,6 +9,7 @@ import {
   PackagePurchaseKind,
   PackagePurchaseStatus,
   Prisma,
+  ProviderIncidentDecision,
   ProviderReviewReportReason,
   ProviderStatus,
   ServiceCategoryStatus,
@@ -28,8 +29,10 @@ import {
 } from '../../common/provider-request-matching';
 import { describeArea } from '../../common/provider-service-area-scope';
 import {
+  adminProviderReliabilityUrl,
   adminProviderReviewUrl,
   adminRequestUrl,
+  adminServiceIncidentUrl,
   adminSupportTicketUrl,
   customerAccountUrl,
   customerNewRequestUrl,
@@ -40,6 +43,7 @@ import {
   customerSupportUrl,
   providerAccountUrl,
   providerCreditsUrl,
+  providerIncidentUrl,
   providerOfferUrl,
   providerProfileUrl,
   providerRequestUrl,
@@ -59,6 +63,8 @@ import {
   maskContactDetailsInNote,
   SERVICE_ISSUE_REASON_LABELS,
 } from '../service-issues/service-issue-eligibility';
+import { effectiveConfirmedCount } from '../service-incidents/incident-reliability';
+import { PROVIDER_OUTCOME_COPY } from '../service-incidents/service-incident-policy';
 import {
   currentMatchedOfferId,
   findCurrentRoundReveal,
@@ -1673,6 +1679,64 @@ export class TransactionalMailService {
         return { to: email, data: serviceIssueCustomerData(incident) };
       }
 
+      case 'service-incident-confirmed':
+      case 'service-incident-dismissed': {
+        // Keyed on the adjudication. Composed only while that adjudication is
+        // still the incident's decision: a notice a correction overtook before
+        // it was sent says nothing rather than a decision no longer in force.
+        const adjudication = await this.prisma.providerIncidentAdjudication.findUnique({
+          where: { id: source.ids[0] },
+          select: { id: true, decision: true, kind: true, incidentId: true },
+        });
+        if (!adjudication) {
+          return null;
+        }
+        const incident = await loadServiceIncident(this.prisma, adjudication.incidentId);
+        const expected = source.template === 'service-incident-confirmed' ? 'CONFIRMED' : 'DISMISSED';
+        if (!incident || incident.effectiveAdjudicationId !== adjudication.id || adjudication.decision !== expected) {
+          return null;
+        }
+        const recipient = recipientFor(incident.provider);
+        return recipient
+          ? { to: recipient, data: serviceIncidentDecidedData(incident, adjudication.decision, adjudication.kind === 'CORRECTION') }
+          : null;
+      }
+
+      case 'service-incident-provider-responded': {
+        const incident = await loadServiceIncident(this.prisma, source.ids[0]);
+        if (!incident || incident.providerRespondedAt === null) {
+          return null;
+        }
+        return { to: readSupportInboxEmail(), data: serviceIncidentProviderRespondedData(incident) };
+      }
+
+      case 'provider-reliability-review-opened': {
+        const review = await this.prisma.providerReliabilityReview.findUnique({
+          where: { id: source.ids[0] },
+          select: {
+            id: true,
+            providerId: true,
+            provider: { select: { businessName: true } },
+            triggerIncident: { select: { incidentNumber: true } },
+          },
+        });
+        if (!review) {
+          return null;
+        }
+        const confirmed = await effectiveConfirmedCount(this.prisma, review.providerId, new Date());
+        return {
+          to: readSupportInboxEmail(),
+          data: {
+            fullName: SUPPORT_INBOX_SALUTATION,
+            businessName: review.provider.businessName,
+            confirmedCount: String(confirmed),
+            incidentNumber: review.triggerIncident?.incidentNumber ?? null,
+            adminProviderUrl: adminProviderReliabilityUrl(review.providerId),
+            accountUrl: null,
+          },
+        };
+      }
+
       case 'request-reopened': {
         const round = await this.prisma.serviceRequestMatchRound.findUnique({
           where: { id: source.ids[0] },
@@ -2799,6 +2863,8 @@ function loadServiceIncident(prisma: PrismaService, incidentId: string) {
       reportedAt: true,
       offerId: true,
       providerId: true,
+      providerRespondedAt: true,
+      effectiveAdjudicationId: true,
       round: { select: { roundNumber: true } },
       request: {
         select: {
@@ -2870,6 +2936,42 @@ function providerIncidentNewData(incident: LoadedServiceIncident): MailData {
         ? `Tur ${incident.round.roundNumber} başarısız — talep incelemede (otomatik tur yok)`
         : `Tur ${incident.round.roundNumber} başarısız — talep yeniden açıldı`,
     adminRequestUrl: adminRequestUrl(incident.request.id),
+    accountUrl: null,
+  };
+}
+
+/**
+ * The provider's decision notice: the outcome in one safe sentence and where
+ * to read it. Never the rationale.
+ */
+function serviceIncidentDecidedData(
+  incident: LoadedServiceIncident,
+  decision: ProviderIncidentDecision,
+  corrected: boolean,
+): MailData {
+  return {
+    fullName: incident.provider.contactName,
+    incidentNumber: incident.incidentNumber,
+    requestNumber: incident.request.requestNumber,
+    categoryName: incident.request.category.name,
+    reasonLabel: SERVICE_ISSUE_REASON_LABELS[incident.reason],
+    outcomeText: PROVIDER_OUTCOME_COPY[decision],
+    corrected: corrected ? 'true' : 'false',
+    incidentUrl: providerIncidentUrl(incident.providerId, incident.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/** The support inbox: identifiers only; the response itself is read in the panel. */
+function serviceIncidentProviderRespondedData(incident: LoadedServiceIncident): MailData {
+  return {
+    fullName: SUPPORT_INBOX_SALUTATION,
+    incidentNumber: incident.incidentNumber,
+    requestNumber: incident.request.requestNumber ?? incident.request.id,
+    categoryName: incident.request.category.name,
+    businessName: incident.provider.businessName,
+    reasonLabel: SERVICE_ISSUE_REASON_LABELS[incident.reason],
+    adminIncidentUrl: adminServiceIncidentUrl(incident.id),
     accountUrl: null,
   };
 }
@@ -3395,6 +3497,13 @@ const RETRY_DEDUPE_PREFIXES = {
   'request-match-review': 'request-match-review',
   'provider-incident-opened': 'provider-incident-opened',
   'provider-incident-new': 'provider-incident-new',
+  // REL-002 Faz 4. The decision notices are keyed on the adjudication (a
+  // correction is a new row, so it owes a new message); the response notice on
+  // the incident (one response); the review notice on the review.
+  'service-incident-confirmed': 'service-incident-confirmed',
+  'service-incident-dismissed': 'service-incident-dismissed',
+  'service-incident-provider-responded': 'service-incident-provider-responded',
+  'provider-reliability-review-opened': 'provider-reliability-review-opened',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -3488,6 +3597,12 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'request-match-review': 1,
   'provider-incident-opened': 1,
   'provider-incident-new': 1,
+  /** The adjudication. */
+  'service-incident-confirmed': 1,
+  'service-incident-dismissed': 1,
+  'service-incident-provider-responded': 1,
+  /** The review. */
+  'provider-reliability-review-opened': 1,
 };
 
 /**

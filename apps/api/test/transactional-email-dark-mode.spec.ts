@@ -120,6 +120,10 @@ const FAMILIES: Record<string, TransactionalEmailTemplate[]> = {
     'request-match-review',
     'provider-incident-opened',
     'provider-incident-new',
+    'service-incident-confirmed',
+    'service-incident-dismissed',
+    'service-incident-provider-responded',
+    'provider-reliability-review-opened',
   ],
   'review/moderasyon': [
     'review-invitation',

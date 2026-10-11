@@ -20,6 +20,7 @@ import {
   IconProfile,
   IconSearch,
   IconSend,
+  IconShield,
   IconStar,
   IconStore,
 } from '../landing-icons';
@@ -32,6 +33,7 @@ type ProviderShellActive =
   | 'requests'
   | 'offers'
   | 'reviews'
+  | 'incidents'
   | 'showcase'
   | 'showcase-leads'
   | 'messages'
@@ -91,6 +93,7 @@ export async function ProviderShell({
   const requestsHref = providerId ? `/providers/${providerId}/requests` : '/providers/me';
   const offersHref = providerId ? `/providers/${providerId}/offers` : null;
   const reviewsHref = providerId ? `/providers/${providerId}/degerlendirmeler` : null;
+  const incidentsHref = providerId ? `/providers/${providerId}/aksakliklar` : null;
   const creditsHref = providerId ? `/providers/${providerId}/credits` : null;
   const subscriptionsHref = providerId ? `/providers/${providerId}/subscriptions` : null;
   const packagesHref = providerId ? `/providers/${providerId}/package-purchases` : null;
@@ -128,6 +131,10 @@ export async function ProviderShell({
     // offers because that is where it comes from; no badge, because a review
     // is not something waiting on the business.
     { key: 'reviews', label: 'Değerlendirmeler', Icon: IconStar, href: reviewsHref },
+    // REL-002 Faz 4: the service incidents customers reported, and the
+    // business's own response to each. Beside the reviews because both are
+    // what customers said about a job; no badge, the screen carries the window.
+    { key: 'incidents', label: 'Hizmet aksaklıkları', Icon: IconShield, href: incidentsHref },
     // Vitrin sits with the other things the business owns rather than with the
     // ones it answers. It is gated on the provider profile like every other
     // entry that needs an id: a card belongs to a business, and an account with

@@ -1,7 +1,7 @@
 # REL-002 — Provider Reliability / Match Round — Teknik Tasarım ve Fazlandırma
 
 - Baseline: `main@ad96b1360b3602510d63cd7e3efe6ddc486a8a0f` (doğrulandı), yerel DB 94 migration (doğrulandı), release `v0.1.0`
-- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. **Faz 2 uygulandı** (round matching core'un otoritesi, M2 enforce, teklif takvimi zorunlu) — gerçek şema, kısıtlar, hata kodları, ölçümler ve runbook §31'de; §2.2, §2.6, §5.1 (M2), §6.1 ve §19 Faz 2'nin gerçek hâline göre güncellendi. **Faz 3 uygulandı** (müşteri hizmet aksaklığı bildirimi, FAILED/MATCH_REVIEW, Round N+1, sağlayıcı dışlama, M3; bayrak arkasında, varsayılan kapalı) — gerçek şema, API, kararlar, ölçümler ve runbook §32'de; §2.1–2.4, §5.1 (M3), §5.3, §7, §10, §12 ve §27 Faz 3'ün gerçek hâline göre güncellendi. Faz 4–5 hâlâ tasarım.
+- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. **Faz 2 uygulandı** (round matching core'un otoritesi, M2 enforce, teklif takvimi zorunlu) — gerçek şema, kısıtlar, hata kodları, ölçümler ve runbook §31'de; §2.2, §2.6, §5.1 (M2), §6.1 ve §19 Faz 2'nin gerçek hâline göre güncellendi. **Faz 3 uygulandı** (müşteri hizmet aksaklığı bildirimi, FAILED/MATCH_REVIEW, Round N+1, sağlayıcı dışlama, M3; bayrak arkasında, varsayılan kapalı) — gerçek şema, API, kararlar, ölçümler ve runbook §32'de; §2.1–2.4, §5.1 (M3), §5.3, §7, §10, §12 ve §27 Faz 3'ün gerçek hâline göre güncellendi. **Faz 4 uygulandı** (sağlayıcı yanıtı, append-only karar + SUPER_ADMIN düzeltmesi, hesaplanan güvenilirlik, review akışı, M4; bayrak hâlâ kapalı) — gerçek şema, kararlar, ölçümler ve runbook §33'te; §2.4.1, §2.5, §14.1, §15–§17'deki taslaktan farklar §33.1'de. Faz 5 hâlâ tasarım.
 - Faz 1 öncesi yerel DB'ye yalnızca salt-okunur sorgu atıldı (`BEGIN READ ONLY`). Sonuçlar:
   - ServiceRequest: SUBMITTED 6 (3'ü direct lead), APPROVED 9 (2'sinde `approvedAt` NULL), REJECTED 1, MATCHED 2, COMPLETED 5.
   - Offer: 14 satır, 7 ACCEPTED. 14 tekliften yalnız 7'sinde `estimatedStartDate` / `estimatedCompletionDate` dolu.
@@ -1761,3 +1761,160 @@ Talep listesinde `MATCH_REVIEW` filtresi ve etiketi („Eşleşme İncelemesi"),
 4. MATCH_REVIEW için admin „Yeni tur aç" (Faz 5; `MatchRoundOpenedBy.ADMIN` hazır) ve kuyruk hücresi.
 5. Yerelde 2 takvimsiz MATCHED eşleşme: bayrak açılınca destek yoluna düşer (veri düzeltmesi yapılmadı, karar 1).
 6. Borçlar: expiry/reminder aday taraması (§31.7); unviewed-refund taramasının gerçekçi olmayan kötü durumda 2× maliyeti (izlenecek); `request.approvedAt`'in yalnız auto-publish reopen'da tazelenmesi (legacy alan; okuyucusu yok).
+
+---
+
+## 33. Faz 4 uygulama sonucu ve runbook
+
+Baseline `main@acaf9902`, yerel DB 97 migration, release `v0.1.0`. PR: „REL-002 Faz 4: add incident adjudication and provider reliability". Faz 3 bayrağı (`serviceIssueReportingEnabled`) **kapalı kaldı**; Faz 4 yalnız var olan incident'ları işler. Bu bölüm, §2.4.1, §2.5, §14.1, §15–§17'deki taslağın gerçek hâlidir; ayrıldığı yerler aşağıda belirtilmiştir (kullanıcının 2026-10-11 Faz 4 sözleşmesi taslağa üstündür: izin adları, uç noktalar, `INITIAL` adı).
+
+### 33.1 Gerçek M4 şeması
+
+Migration `20261012120000_add_incident_adjudication_reliability`. Tek dosya, tek transaction, backfill yok (bugün hiçbir incident karar almamış; yeni CHECK'ler mevcut satırlarda kendiliğinden doğru). İki migration'a bölünmedi: yeni `AdminPermission` değerleri migration içinde kullanılmaz (`ADD VALUE IF NOT EXISTS`, M3 deseni); üç yeni enum tipi bu transaction'da yaratılır, kısmi index yüklemleri onları doğrudan kullanabilir.
+
+| Nesne | Tür | Anlamı |
+|---|---|---|
+| `ProviderIncidentDecision` (CONFIRMED, DISMISSED), `ProviderIncidentAdjudicationKind` (INITIAL, CORRECTION), `ProviderReliabilityReviewStatus` (OPEN, ACKNOWLEDGED, RESOLVED) | yeni enum | |
+| `AdminPermission` += `SERVICE_INCIDENTS_READ`, `SERVICE_INCIDENTS_ADJUDICATE`, `SERVICE_INCIDENTS_CORRECT`, `PROVIDER_RELIABILITY_READ`, `PROVIDER_RELIABILITY_MANAGE` | enum değeri (`IF NOT EXISTS`) | izin kataloğu 88 → 93 |
+| `ProviderIncidentAdjudication` | tablo | `id, incidentId, sequence, kind, decision, rationale, decidedByAdminId, supersedesAdjudicationId?, createdAt`; uniq `(incidentId, sequence)`, `(id, incidentId)`, `supersedesAdjudicationId`; index `decidedByAdminId`; FK incident, user, **composite** `(supersedesAdjudicationId, incidentId) → (id, incidentId)` (zincir incident dışına çıkamaz) |
+| `ProviderServiceIncident.effectiveAdjudicationId` | kolon (nullable, unique) | zincirin başı; **composite** FK `(effectiveAdjudicationId, id) → adjudication(id, incidentId)` (baş, aynı incident'ın kararı) |
+| `ProviderServiceIncident` ek index'ler | `(providerId, reportedAt)`, uniq `(id, providerId)` (review FK hedefi), kısmi `ProviderServiceIncident_confirmed_recent_idx (reportedAt, providerId) WHERE status = 'CONFIRMED'` | 90 gün penceresi ve güvenilirlik kuyruğu |
+| `ProviderReliabilityReview` | tablo | `id, providerId, status, triggerIncidentId?, openedAt, openedBySystem, assignedAdminId?, acknowledgedAt?, acknowledgedById?, resolvedAt?, resolvedById?, note?, createdAt, updatedAt`; index `(providerId, createdAt)`, `(status, openedAt)`; FK provider, **composite** `(triggerIncidentId, providerId) → incident(id, providerId)`, üç User FK. Sayı saklamaz. |
+| `ProviderReliabilityReview_one_unresolved_per_provider` | kısmi unique `(providerId) WHERE status IN ('OPEN','ACKNOWLEDGED')` | sağlayıcı başına tek çözülmemiş inceleme — idempotent açılış |
+| `Adjudication_kind_shape` | CHECK | `sequence ≥ 1`; `INITIAL ⇔ sequence = 1 ⇔ supersedes IS NULL` (incident başına tek INITIAL) |
+| `Adjudication_rationale_rules` | CHECK | `rationale = btrim(rationale)`, 10..2000 |
+| `ProviderIncidentAdjudication_chain` | trigger (BEFORE INSERT) | INITIAL yalnız başı olmayan incident'a; CORRECTION yalnız incident'ın **güncel başını** ve `sequence = önceki + 1` ile (`INCIDENT_ALREADY_ADJUDICATED:` / `INCIDENT_ADJUDICATION_CHANGED:` mesajı) |
+| `ProviderIncidentAdjudication_append_only` | trigger | UPDATE/DELETE reddedilir |
+| `Incident_decided_has_head` | CHECK | `status ∈ {CONFIRMED, DISMISSED} ⇔ effectiveAdjudicationId IS NOT NULL` |
+| `Incident_response_rules` | CHECK | yanıt trim'li, 10..2000; yanıtı olan karar almamış incident `REPORTED` olamaz |
+| `ProviderServiceIncident_decision_projection` | trigger (BEFORE UPDATE) | baş NULL'a dönemez; ilk baş INITIAL, sonraki her baş bir öncekini supersede eder; `status`/`reviewedById`/`reviewedAt`/`reviewNote` başın kararı/yazarı/zamanı/gerekçesiyle **eşit**; yanıt bir kez yazılır ve karar sonrası yazılamaz (`INCIDENT_RESPONSE_ALREADY_SUBMITTED:` / `INCIDENT_ALREADY_ADJUDICATED:`) |
+| `ReliabilityReview_shape` | CHECK | her adımın kim+ne zaman çifti; OPEN'da ack/resolve yok; ACKNOWLEDGED'da ack var; RESOLVED ⇔ resolvedAt+resolvedById+not (trim, 10..2000) |
+| `ProviderReliabilityReview_lifecycle` | trigger | OPEN → ACKNOWLEDGED → RESOLVED (veya OPEN → RESOLVED), geri dönüş yok; RESOLVED final; açılış alanları ve ack damgası değişmez; DELETE yok |
+
+Taslaktan farklar: (1) taslaktaki „incident satırı ilk kararın kopyası, bir daha değişmez" yerine incident'ın `status`/`reviewed*` kolonları **geçerli kararın** projeksiyonudur ve trigger ile başa eşit tutulur — otorite yine adjudication tablosudur, eski adjudication hiç değişmez; kuyruk ve kısmi index projeksiyonu okuyabilir. (2) „en yüksek sequence" yerine açık baş işaretçisi (`effectiveAdjudicationId`) + CAS: „latest" hiçbir yerde `createdAt` sıralaması değildir. (3) `idempotencyKey` yok: ilk karar ikinci kez 409, düzeltme `expectedEffectiveAdjudicationId` ile optimistik. (4) Review taslaktaki „karar satırı" değil, yaşam döngülü iş akışı satırıdır (kullanıcı sözleşmesi §4).
+
+### 33.2 Effective decision (tek tanım)
+
+`effectiveIncidentDecision(client, incidentId)` (`service-incidents/incident-reliability.ts`): adjudication yok → `PENDING`; yoksa `effectiveAdjudicationId`'nin gösterdiği satır. Zincir doğrusal ve DB'de garantili: `(incidentId, sequence)` unique + `supersedes` unique + insert trigger'ı (yalnız güncel baş supersede edilebilir) + incident trigger'ı (baş yalnız ileri ve yalnız supersede eden satıra taşınır). Tutarlılık scriptinin 11. kontrolü bunu veri üzerinde de doğrular (baş = son halka, 1..n boşluksuz, karar = projeksiyon).
+
+### 33.3 Karar transaction'ları
+
+`AdminServiceIncidentsService.decide` (Serializable, `runSerializable`): incident oku → plan (INITIAL: baş NULL olmalı; CORRECTION: SUPER_ADMIN, baş = `expectedEffectiveAdjudicationId`, karar farklı) → adjudication INSERT → **CAS** `updateMany WHERE id AND effectiveAdjudicationId = okunan baş` (count 1 değilse 409) → projeksiyon (`status`, `reviewed*`) → sağlayıcı bildirimi (outbox) → CONFIRMED ise `ensureReliabilityReview` → commit sonrası güvenilirlik özeti yanıta eklenir. Hiçbir yolda: round, dışlama, kredi tabloları, eski eşleşme, talebin güncel turu ve sağlayıcı durumu yazılmaz (test: `snapshot` öncesi/sonrası birebir, `ProviderCreditTransaction` sayısı sabit).
+
+Yarışlar: iki ilk karar → biri 201, diğeri 409 `INCIDENT_ALREADY_ADJUDICATED`; aynı başa iki düzeltme → biri 201, diğeri 409 `INCIDENT_ADJUDICATION_CHANGED` (SSI 40001 → P2034 → yeniden deneme yeni başı okur; ya da `(incidentId, sequence)` P2002; ya da trigger mesajı — üçü de aynı koda çevrilir). Not: transaction içindeki her okuma/yazma model sorgusudur; ham sorgunun serileştirme hatası P2010 olarak gelir ve `runSerializable` onu (bilinçli olarak, `campaigns.service.ts` notu) yeniden denemez — bu yüzden 90 gün sayımı ve review açılışı tx içinde Prisma `count` ve `createMany({ skipDuplicates })` ile yapılır (`ON CONFLICT DO NOTHING`, kısmi unique'i de soğurur).
+
+Düzeltme denetimi: düzeltme satırının kendisi audit'tir — yazan SUPER_ADMIN, yeni karar, zorunlu gerekçe, `supersedesAdjudicationId` (önceki geçerli karar; önceki kararın değeri zincirden okunur ve admin detayında „önceki → yeni" olarak gösterilir), zaman; satır append-only. Ek olarak servis bir log satırı yazar (`CORRECTION by SUPER_ADMIN …: CONFIRMED (id) → DISMISSED (id)`). İlk karar da aynı tablodadır. Review açılış/üstlenme/sonuçlandırma damgaları review satırındadır (her biri bir kez, trigger korumalı). Sağlayıcı yanıtı incident satırındadır (`providerRespondedById`, bir kez). PII audit'e yazılmaz (gerekçe/notlar personel metnidir).
+
+### 33.4 Sağlayıcı yanıtı ve 72 saat
+
+`POST /providers/:providerId/incidents/:incidentId/response` (`AuthGuard + RolesGuard(PROVIDER) + ProviderAccessGuard`; SUPER_ADMIN dahil personel yanıt veremez — yanıt sağlayıcının beyanıdır). Metin trim+collapse, 10..2000 (`INCIDENT_RESPONSE_TOO_SHORT/TOO_LONG`). Aynı metin → 200 `replayed: true`; farklı metin → 409 `INCIDENT_RESPONSE_ALREADY_SUBMITTED`; karar sonrası → 409 `INCIDENT_ALREADY_ADJUDICATED`; başkasının incident'ı → 404 (başka `providerId` → 403). Yanıt `PROVIDER_RESPONDED` yapar, hiçbir şeyi karara bağlamaz, destek kutusuna `service-incident-provider-responded:<incidentId>` yazar.
+
+72 saat (`PROVIDER_RESPONSE_SLA_HOURS`): `responseDueAt = reportedAt + 72 saat` projeksiyonu, `responseOverdue` (karar yok + yanıt yok + süre geçti), admin `overdue` filtresi, `lateResponse`/`lateResponses` sinyali. **Teknik kilit değildir**: süre geçse de karar verilene kadar yanıt alınır; admin süre dolmadan karar verebilir (detayda engellemeyen uyarı). **Hatırlatıcı scheduler eklenmedi** (kullanıcı sözleşmesi §16'daki „scope şişiriyorsa" seçeneği): yeni bir zamanlayıcı işi, ayarı, claim kolonu ve test yüzeyi getirirdi; UI geri sayımı + admin gecikme filtresi sözleşmenin asgarisini karşılar. Faz 5 adayı.
+
+Sağlayıcı projeksiyonu açık allowlist'tir (`PROVIDER_INCIDENT_SELECT`): talep satırının iletişim kolonları hiç seçilmez; not `maskContactDetailsInNote` ile maskelenir; personel gerekçesi, kararı veren, yeni tur/yeni sağlayıcı yoktur; karar `outcome {decision, decidedAt, corrected, message}` olarak güvenli metinle (`PROVIDER_OUTCOME_COPY`) döner. Test tam anahtar setini ve müşteri adı/telefonu/e-postası/adres notunun yanıt gövdesinde geçmediğini doğrular.
+
+### 33.5 Güvenilirlik (hesap ve eşikler)
+
+`service-incident-policy.ts`: `RELIABILITY_WINDOW_DAYS = 90` (`reportedAt ≥ now − 90 gün`, sunucu saati), `RELIABILITY_WARNING_AT = 2`, `RELIABILITY_REVIEW_AT = 3`: 0–1 `NORMAL`, 2 `WARNING`, 3+ `ADMIN_REVIEW_REQUIRED`. Sayaç saklanmaz; her okuma effective adjudication join'iyle hesaplanır:
+
+- `effectiveConfirmedCount` (Prisma `count`, `effectiveAdjudication: { is: { decision: CONFIRMED } }`) — eşiklerin okuduğu sayı;
+- `providerReliabilitySummary` — confirmed, dismissed, pending, total, responded, `responseRate`, `lateResponses`, `overdueResponses`, seviye;
+- `confirmedCountsByProvider` — kuyruk ve risk filtresi (kısmi confirmed index + join).
+
+`ensureReliabilityReview`: confirmed ≥ 3 ve çözülmemiş review yoksa idempotent OPEN review (`triggerIncidentId`), destek kutusuna `provider-reliability-review-opened:<reviewId>`. Düzeltme sayıyı 3'ün altına indirirse review **silinmez/kapanmaz**; seviye yeni değeri gösterir, review personelin sonuçlandırmasını bekler. RESOLVED sonrası yeni bir doğrulama (hâlâ ≥ 3) yeni review açar. Otomatik askıya alma, yasaklama, teklif engeli yok; sağlayıcı durumu değişmez (test). Müşteri/kamu profili hiçbir güvenilirlik verisi göstermez.
+
+Review akışı: `POST /admin/provider-reliability-reviews/:id/acknowledge` (OPEN → ACKNOWLEDGED, `assignedAdminId` = üstlenen), `/resolve` (zorunlu not 10..2000) — `PROVIDER_RELIABILITY_MANAGE`. Askıya alma düğmesi yok; sağlayıcı sayfasındaki mevcut moderasyon akışına bağlantı verilir.
+
+### 33.6 Müşteri sinyali (yalnız admin)
+
+`customerReportSummary`: müşterinin 90 gündeki bildirimleri — total, confirmed, dismissed, pending, `dismissedRatio = dismissed / (confirmed + dismissed)`. `signal = 'HIGH_DISMISSAL_RATIO'` yalnız **karar verilmiş ≥ 3** (`CUSTOMER_SIGNAL_MIN_DECIDED`) ve oran **≥ 0,6** (`CUSTOMER_SIGNAL_DISMISSED_RATIO`) iken; altında sinyal yok. Yalnız admin incident detayında okunur; hiçbir kod yolu onunla bildirim engellemez, talep kısıtlamaz, öncelik düşürmez (test: sinyalden sonra aynı müşterinin yeni bildirimi geçer ve müşteri yanıtında sinyal yoktur).
+
+### 33.7 İzinler
+
+| İzin | Rota |
+|---|---|
+| `SERVICE_INCIDENTS_READ` | `GET /admin/service-incidents`, `GET /admin/service-incidents/:id` |
+| `SERVICE_INCIDENTS_ADJUDICATE` | `POST /admin/service-incidents/:id/adjudications` |
+| `SERVICE_INCIDENTS_CORRECT` | `POST /admin/service-incidents/:id/corrections` |
+| `PROVIDER_RELIABILITY_READ` | `GET /admin/provider-reliability`, `GET /admin/providers/:providerId/reliability` |
+| `PROVIDER_RELIABILITY_MANAGE` | `POST /admin/provider-reliability-reviews/:id/acknowledge`, `/resolve` |
+
+`SERVICE_INCIDENTS_CORRECT` **SUPER_ADMIN'e ayrılmıştır** (`SUPER_ADMIN_RESERVED_PERMISSIONS`, `admin-permissions.ts`): katalogda bir değerdir (rota ona bağlanır, SUPER_ADMIN'in izin listesi onu içerir), ama hiçbir rol taşıyamaz — rol oluşturma/izin değiştirme 400 `PERMISSION_RESERVED_FOR_SUPER_ADMIN`, `GET /admin/permissions` onu `reservedForSuperAdmin` altında ayrı listeler, ve `hasPermission` bir ADMIN'de (bir satır editörü atlatıp yazılmış olsa bile) onu yok sayar; servis ayrıca `isSuperAdmin` ister (403 `SUPER_ADMIN_REQUIRED`). Böylece „hiçbir şeyi açmayan kutucuk" yoktur (kapalı katalog ilkesi) ve düzeltme yalnız SUPER_ADMIN'dedir. Bir rol tohumu yoktur (roller operatörce tanımlanır); „varsayılan eşleme" SUPER_ADMIN'in örtük tüm-katalog yetkisidir.
+
+### 33.8 Bildirimler (outbox, aynı tx; `ServiceIssueOutbox`, lifecycle tick süpürür)
+
+| Şablon | Alıcı | Anahtar | Gönderim anı kuralı |
+|---|---|---|---|
+| `service-incident-confirmed` / `-dismissed` | sağlayıcı | `<şablon>:<adjudicationId>` | adjudication hâlâ baş ve karar şablonla aynıysa; aksi hâlde üretilmez (düzeltmenin geçtiği eski bildirim gitmez) |
+| `service-incident-provider-responded` | destek kutusu | `…:<incidentId>` | yanıt kayıtlı |
+| `provider-reliability-review-opened` | destek kutusu | `…:<reviewId>` | review mevcut; sayı gönderim anında hesaplanır |
+
+Sağlayıcı içeriği: sonuç cümlesi, bildirim/talep no, kategori, sebep, bağlantı; gerekçe, sayı, „strike" yok; düzeltmede „karar düzeltildi" notu. **Müşteriye karar maili gönderilmez**: talep zaten yeniden açıldı; karar müşteri için hiçbir şeyi değiştirmez (dışlama ve yeni tur aynen sürer), sağlayıcı yanıtı v0.2.0'da müşteriye gösterilmez — kapanmış bir eşleşme hakkında ikinci bir mail yalnız gürültü ve yanlış beklenti (iade/ceza) üretir. Hepsi retry tablosunda (`RETRY_DEDUPE_PREFIXES`), REQ-UX-007 shell'i, dark-mode/render testlerinde.
+
+### 33.9 UI
+
+- **Sağlayıcı paneli** (`apps/web`): „Hizmet aksaklıkları" menüsü; `/providers/[id]/aksakliklar` (açık / geçmiş), `/providers/[id]/aksakliklar/[incidentId]` (maskeli not, taahhüt günleri, yanıt süresi/„Yanıt süresi geçti", tek yanıt formu 10–2000 + sayaç, karar rozeti ve güvenli sonuç metni); teklif sayfasındaki başarısız eşleşme notundan bağlantı.
+- **Admin** (`apps/admin`): `/service-incidents` (durum, sebep, sağlayıcı, tarih, yanıt durumu, gecikme, risk seviyesi filtreleri; varsayılan açık + en eski önce), `/service-incidents/[id]` (referanslar, müşteri beyanı, yanıt ve 72 saat uyarısı, taahhüt anlık görüntüsü, dışlama kalıcı, „Otomatik kredi iadesi yok", sağlayıcı 90g özeti, müşteri bildirim geçmişi/sinyal, karar zaman çizelgesi; Doğrula/Reddet zorunlu gerekçeyle; SUPER_ADMIN için „Kararı düzelt"), `/provider-reliability` (uyarı / inceleme gerekli / açık inceleme; Üstlen / Sonuçlandır), sağlayıcı detayında `#guvenilirlik` kartı.
+- Etiketler: Bildirildi / Hizmet veren yanıtladı / Doğrulandı / Reddedildi; Normal / Uyarı / Yönetici incelemesi gerekli. „Strike" kelimesi hiçbir UI'da yok; admin iç terimi „doğrulanmış aksaklık".
+
+### 33.10 Performans (EXPLAIN ANALYZE, BUFFERS — ölçek DB'si)
+
+Atılabilir PostgreSQL 16.6 (tmpfs): M3'e kadar şema + 200k talep, 260k tur, 500k teklif, 3000 sağlayıcı, 50k müşteri, **60k incident + 60k dışlama** (70 % yanıtlı); M4 sonrası **50k INITIAL + 2k CORRECTION adjudication**, 15k CONFIRMED / 35k DISMISSED / 10k açık, 405 açık + 3000 sonuçlanmış review. Tutarlılık scripti (M4 kontrolleri dahil) 0 satır. Sorgular Prisma'nın ürettiği SQL ile (query log'dan).
+
+| Sorgu | Plan | Süre |
+|---|---|---|
+| Açık kuyruk sayfası (25) | `status_reportedAt_idx` bitmap + top-N | 4,2 ms (10k açık) |
+| Açık kuyruk sayımı | `status_reportedAt_idx` index-only | 0,8 ms |
+| Gecikmiş yanıt filtresi | `effectiveAdjudicationId_key` (IS NULL) | 1,7 ms |
+| Karar verilmiş geçmiş sayfası | parallel seq scan + top-N | 19 ms (50k karar) |
+| `effectiveConfirmedCount` (eşik) | `providerId_reportedAt_idx` + adjudication PK probe | 0,35 ms |
+| Sağlayıcı 90g özeti | `providerId_reportedAt_idx` + `id_incidentId_key` | 0,17 ms |
+| Güvenilirlik kuyruğu / risk filtresi | `confirmed_recent_idx` (kısmi) + hash join | 14 ms (6750 confirmed 90g) |
+| Müşteri sinyali | `customerUserId_reportedAt_idx` + PK probe | 0,26 ms |
+| Açık review var mı | `one_unresolved_per_provider` (kısmi unique) | 0,02 ms |
+| Çözülmemiş review'lar | aynı kısmi index | 0,07 ms |
+| Detay karar zinciri | `incidentId_sequence_key` | 0,03 ms |
+| Sağlayıcı zaman çizelgesi | `providerId_reportedAt_idx` | 0,08 ms |
+| Düzeltme CAS UPDATE (+ projeksiyon trigger'ı 0,3 ms + composite FK 0,06 ms) | PK | 1,1 ms |
+
+Ek index gerekmedi; karar geçmişi sayfası (19 ms) ve risk kuyruğu (14 ms) izlenir — gerekirse `(reportedAt) WHERE status IN ('CONFIRMED','DISMISSED')` kısmi index'i ve kuyruğun join'siz (projeksiyon üzerinden) sayımı ilk adaylardır. **Faz 2 borcu** (expiry/reminder aday taraması ~35 ms/tick) bu PR'a alınmadı: Faz 4 kapsamıyla ilgisiz ve küçük/güvenli bir index değişikliği değil (§32.10), borçta duruyor.
+
+### 33.11 Migration provası ve uygulama
+
+**Preflight** (aktif yerel DB, salt-okunur): 97 migration, `ProviderServiceIncident` 0, dışlama 0, FAILED round 0, MATCH_REVIEW 0, bayrak `false`, tutarlılık (M3 scripti) 0; `rel-002-preflight.sql` M4 bölümü `decided_without_adjudication = 0`, `response_breaking_rules = 0`.
+
+**Yedek** (API durdurulmuşken): `~/Backups/taktic/db/taktic-db-20261011T202742Z-pre-rel002-m4-acaf9902.dump`, sha256 `be34f1510258a7be02e0c9061505b2a8159b079f96c0ad3572cc10a14a9925ae`, 674 109 bayt (1175 TOC, 101 tablo, 97 migration). `restore-rehearsal.sh` geçti (101 tablo / 1231 satır manifest ile birebir).
+
+**Deploy provası** (dump atılabilir PG 16.6'ya `pg_restore`): M3 tutarlılık 0 → `migrate deploy` M4 **19 ms** (wall 0,75 s) → ikinci deploy „No pending" → drift 0 → yeni tutarlılık 0 → 100 tablonun veri hash'i (incident M3 kolonları üzerinden) birebir. Fingerprint: tablo 101 → 103, index 545 → 558 (+13), constraint 545 → 561 (+16), trigger 39 → 43 (+4), migration 97 → 98.
+
+**Rollback provası** (aynı kopya): kullanılmamış durumda `rel-002-m4-rollback.sql` 0,04 s → fingerprint M3 ile birebir (101/545/545/39/97), M3 şemasına (`acaf9902`) drift = yalnız bırakılan 5 `AdminPermission` değeri, veri hash'leri birebir → `migrate deploy` M4'ü yeniden uyguladı, drift 0. Kullanılmış durumda (yeni izin değerini taşıyan bir rol satırı eklenerek) script reddeder ve 98'de kalır.
+
+**Ölçek provası**: M3 baseline tutarlılık 0 → `migrate deploy` M4 **176 ms** (wall 1,04 s; 60k incident satırında iki yeni CHECK doğrulaması + üç index) → „No pending", drift 0, tutarlılık 0.
+
+**Aktif yerel DB 97 → 98**: API durduruldu, yedek alındı (yukarıda), aktif veri hash'i dump ile birebir; M4 **40 ms**, ikinci deploy „No pending", `migrate status` güncel, drift 0, tutarlılık 0, veri hash'leri değişmedi, bayrak `false`, ledger 41 satır. Main'deki Faz 3 kodu (`acaf9902`) M4 şemasıyla yeniden başlatıldı: `/health` 200, log'da hata yok — kod geri dönüşünün canlı kanıtı.
+
+**Geri dönüş sınırı (gerçek):** Faz 4 verisi (adjudication, review, sağlayıcı yanıtı, karar almış incident, yeni izinlerin rol ataması) oluşmadan önce: kod revert + gerekirse `rel-002-m4-rollback.sql`. İlk karar/yanıt yazıldıktan sonra **geriye şema dönüşü yoktur** — karar zinciri, bir sağlayıcı hakkında kimin neye karar verdiğinin audit'idir; yanlış karar SUPER_ADMIN düzeltmesiyle, hata kodda ileri-düzeltmeyle giderilir. Faz 3 kodu M4 şemasıyla çalışır (yukarıdaki canlı kanıt), dolayısıyla kod geri dönüşü şema geri dönüşü gerektirmez.
+
+### 33.12 Staging/production runbook (bu PR'da dokunulmadı)
+
+1. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/rel-002-preflight.sql` → M4 bölümü 0/0.
+2. M3 tutarlılık scripti (`acaf9902`) 0 satır.
+3. API durdur → `backup-db.sh` → `restore-rehearsal.sh` → `migrate deploy` (98) → ikinci deploy „No pending" → drift 0 → yeni tutarlılık scripti 0.
+4. API/web/admin aynı deploy'da. Bayrak kapalıyken yeni ekranlar boştur (incident yok); izinler rollere ayrıca verilir (`SERVICE_INCIDENTS_CORRECT` verilemez).
+5. Bayrak açma ayrı onayla (§32.11/5).
+
+### 33.13 Test kapısı (yerel)
+
+- Yeni `service-incident-adjudication.spec.ts` (30 entegrasyon testi): sağlayıcı yanıtı (sahip, replay/409/DB backstop, uzunluk, başka sağlayıcı 403/404, müşteri/ADMIN/SUPER_ADMIN 403, karar sonrası 409, 72 saat geçmişken kabul + gecikme sinyalleri, allowlist + PII yok + maske), ilk karar (confirm/dismiss + snapshot ve kredi değişmezliği, gerekçe zorunlu, izin matrisi, ikinci karar ve yarış, DB append-only/projeksiyon), düzeltme (ADMIN tüm izinlerle bile 403, rol satırına sızdırılmış izin 403, rol editörü 400, C→D→C zincir + eski satır birebir + bildirimler, ret kodları, aynı başa iki düzeltme → tek kazanan, DB çatal ve incident-dışı baş reddi), güvenilirlik (0/1/2/3 seviyeleri + tek review + 4. açmıyor + kuyruk + askı yok, 90 gün dışı ve dismissed sayılmıyor, 3'ün altına düzeltme review'u koruyor, D→C eşiği aşıyor, eşzamanlı üç onay → tek review, review yaşam döngüsü + DB final/no-delete), müşteri sinyali (örnek eşiği, kısıtlama yok), bildirimler (gerekçe sızmıyor, düzeltmenin geçtiği bildirim gitmiyor), regresyon (bayrak kapalı bildirim 404 iken karar çalışıyor, hiçbir karar kredi satırı yazmıyor). Her case sonunda tutarlılık scripti 0; yarış testleri 3 ardışık koşuda kararlı.
+- Güncellenen: `admin-rbac-route-map` (93 izin, 8 yeni rota), e-posta render (60 şablon) ve dark-mode, tutarlılık scripti (11–12).
+- Web: panel rota kaydı (2 yeni rota). Admin: yeni `service-incidents.spec.tsx` (14 test: metin, etiketler, „strike" yok, kapılar, rezerve izin, formlar, güvenilirlik kartı), `access-boundaries` (57 → 60 ekran), `nav`, `confirmation-proof` (4 yeni onay anahtarı: `service-incident.adjudicate`, `service-incident.correct`, `reliability-review.acknowledge`, `reliability-review.resolve`).
+- E2E (Chromium, hedefli): yeni `service-incident-adjudication.spec.ts` 3/3 — (1) müşteri bildirimi → sağlayıcı incident'ı görür (müşteri adı/telefonu/e-postası sayfada yok, „strike" yok) → yanıtlar → yalnız ADJUDICATE tutan personel doğrular ve „Kararı düzelt" görmez → sağlayıcı güvenli sonuç metnini görür, gerekçeyi görmez → güvenilirlik kartı 1 → SUPER_ADMIN düzeltir (C→D) → kart 0, zaman çizelgesinde iki karar; (2) ret → dışlama ve yeniden açılmış talep aynen, dışlanan sağlayıcı talebi açamaz; (3) üç doğrulama → „Yönetici incelemesi gerekli" + bant → kuyrukta tek satır → Üstlen → Sonuçlandır (not) → sağlayıcı durumu değişmez. Faz 3 `service-issue` 6/6. Güncellenen: `admin-route-scan` (60 ekran; `/service-incidents`, `/service-incidents/[id]`, `/provider-reliability`), `admin-shell` (iki yeni menü satırı), `admin-system-screens` (rol matrisi rezerve izni göstermez). WebKit projesine eklendi; yerelde WebKit'te yeni spec + Faz 3 9/9.
+
+### 33.14 Faz 5 ön koşulları ve kalan borçlar
+
+1. MATCH_REVIEW için admin „Yeni tur aç" (`MatchRoundOpenedBy.ADMIN` hazır) ve Genel görünüm kuyruk hücreleri (açık incident, açık review).
+2. Admin talep detayında tur zaman çizelgesi UI'ı (API hazır; incident detayına bağlantı).
+3. Sağlayıcı yanıt hatırlatıcısı (48. saat, tek seferlik, claim kolonu) — Faz 4'te bilinçli olarak eklenmedi (§33.4).
+4. Güvenilirlik sonucunun bir eylemi (KEEP_ACTIVE / mevcut moderasyonla askı aynı tx'te, §15 taslağı) ve 2. eşikte sağlayıcıya resmi uyarı e-postası (`provider-reliability-warning`) — ürün kararı bekliyor.
+5. Müşteriye sağlayıcı yanıtının/kararın gösterilmesi (v0.2.0 sonrası ürün kararı).
+6. Borçlar: karar geçmişi sayfası ve risk kuyruğu ölçekte 14–19 ms (§33.10); Faz 2 expiry/reminder taraması (§31.7); bayrak açılınca yerel 2 takvimsiz eşleşme destek yoluna düşer (§32.13/5).

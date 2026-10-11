@@ -33,9 +33,9 @@ const SHOTS = resolve(artifactsDir, 'admin-design');
  */
 const HOME_ROW = 'Genel görünüm';
 const FULL_MENU: Array<[group: string, rows: string[]]> = [
-  ['Talepler', ['Tüm talepler', 'Şikayet edilen talepler']],
+  ['Talepler', ['Tüm talepler', 'Şikayet edilen talepler', 'Hizmet aksaklıkları']],
   ['Teklifler', ['Tüm teklifler']],
-  ['Kişiler', ['Hizmet verenler', 'Hizmet alanlar', 'Destek talepleri']],
+  ['Kişiler', ['Hizmet verenler', 'Güvenilirlik', 'Hizmet alanlar', 'Destek talepleri']],
   [
     'Finans',
     [

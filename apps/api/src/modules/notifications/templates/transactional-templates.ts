@@ -231,6 +231,17 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'request-match-review',
   'provider-incident-opened',
   'provider-incident-new',
+  // REL-002 Faz 4: the decision on an incident and the staff follow-ups. The
+  // provider is told the outcome in one safe sentence — never the staff
+  // rationale, never a count, never the word "strike". The support inbox is
+  // told a provider answered and that a provider needs a reliability review.
+  // The customer is not written to (their request reopened already; the
+  // decision changes nothing for them, and the provider's response is not
+  // theirs to read in v0.2.0).
+  'service-incident-confirmed',
+  'service-incident-dismissed',
+  'service-incident-provider-responded',
+  'provider-reliability-review-opened',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -332,6 +343,14 @@ export function transactionalSubject(
       return withSuffix('Müşteri hizmet aksaklığı bildirdi', text(data.requestNumber));
     case 'provider-incident-new':
       return withSuffix('Yeni hizmet aksaklığı bildirimi', text(data.incidentNumber));
+    case 'service-incident-confirmed':
+      return withSuffix('Hizmet aksaklığı bildirimi doğrulandı', text(data.incidentNumber));
+    case 'service-incident-dismissed':
+      return withSuffix('Hizmet aksaklığı bildirimi reddedildi', text(data.incidentNumber));
+    case 'service-incident-provider-responded':
+      return withSuffix('Hizmet veren aksaklık bildirimine yanıt verdi', text(data.incidentNumber));
+    case 'provider-reliability-review-opened':
+      return withSuffix('Güvenilirlik incelemesi gerekli', text(data.businessName));
     case 'package-purchase-confirmation':
       return 'Kredi paketiniz hesabınıza yüklendi';
     case 'showcase-placement-activated':
@@ -494,6 +513,13 @@ export function buildDocument(
       return providerIncidentOpened(subject, fullName, data);
     case 'provider-incident-new':
       return providerIncidentNew(subject, fullName, data);
+    case 'service-incident-confirmed':
+    case 'service-incident-dismissed':
+      return serviceIncidentDecided(subject, fullName, data, template === 'service-incident-confirmed');
+    case 'service-incident-provider-responded':
+      return serviceIncidentProviderResponded(subject, fullName, data);
+    case 'provider-reliability-review-opened':
+      return providerReliabilityReviewOpened(subject, fullName, data);
     case 'match-customer':
       return matchCustomer(subject, fullName, data);
     case 'request-available':
@@ -3285,6 +3311,94 @@ function providerIncidentNew(subject: string, fullName: string, data: Data): Ema
       ]),
       spacer(24),
       cta('Talebi panelde aç', text(data.adminRequestUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * The provider's decision notice (REL-002 Faz 4): the outcome in one safe
+ * sentence. Never the staff rationale, never a count of anything, and nothing
+ * about credit (a decision moves none). A correction sends this again with the
+ * decision now in force.
+ */
+function serviceIncidentDecided(subject: string, fullName: string, data: Data, confirmed: boolean): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  return {
+    subject,
+    preheader: confirmed ? 'Bildirim doğrulandı.' : 'Bildirim reddedildi.',
+    audience: 'HİZMET VEREN',
+    kicker: confirmed ? 'Doğrulandı' : 'Reddedildi',
+    heading: confirmed ? 'Hizmet aksaklığı bildirimi doğrulandı' : 'Hizmet aksaklığı bildirimi reddedildi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(text(data.outcomeText) ?? ''),
+      spacer(4),
+      dataTable([
+        row('Bildirim no', text(data.incidentNumber)),
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Sebep', text(data.reasonLabel)),
+      ]),
+      spacer(24),
+      cta('Bildirimi görüntüle', text(data.incidentUrl), 'primary'),
+      spacer(20),
+      note(
+        data.corrected === 'true'
+          ? 'Bu bildirim için daha önce verilen karar düzeltildi; geçerli karar yukarıdakidir.'
+          : 'Karar, ilgili talepteki eşleşmenin sona ermesini ve talebin yeniden açılmasını değiştirmez.',
+      ),
+    ]),
+  };
+}
+
+/** The support inbox: the provider answered an incident. Identifiers only — the answer is read in the panel. */
+function serviceIncidentProviderResponded(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir hizmet veren aksaklık bildirimine yanıt verdi.',
+    audience: 'DESTEK',
+    kicker: 'Yanıt geldi',
+    heading: 'Hizmet veren yanıt verdi',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph('Hizmet veren, hakkındaki aksaklık bildirimine yanıt verdi. Bildirim karar bekliyor.'),
+      spacer(4),
+      dataTable([
+        row('Bildirim no', text(data.incidentNumber)),
+        row('Talep', joinNonEmpty([text(data.requestNumber), text(data.categoryName)], ' · ')),
+        row('Hizmet veren', text(data.businessName)),
+        row('Sebep', text(data.reasonLabel)),
+      ]),
+      spacer(24),
+      cta('Bildirimi panelde aç', text(data.adminIncidentUrl), 'primary'),
+    ]),
+  };
+}
+
+/** The support inbox: a provider reached the review threshold. No automatic action was taken. */
+function providerReliabilityReviewOpened(subject: string, fullName: string, data: Data): EmailDocument {
+  return {
+    subject,
+    preheader: 'Bir hizmet veren için güvenilirlik incelemesi açıldı.',
+    audience: 'DESTEK',
+    kicker: 'İnceleme gerekli',
+    heading: 'Güvenilirlik incelemesi açıldı',
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(
+        'Hizmet verenin son 90 gündeki doğrulanmış aksaklık sayısı inceleme eşiğine ulaştı. ' +
+          'Hesap üzerinde otomatik bir işlem yapılmadı; karar yöneticide.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Hizmet veren', text(data.businessName)),
+        row('Doğrulanmış aksaklık (90 gün)', text(data.confirmedCount)),
+        row('Tetikleyen bildirim', text(data.incidentNumber)),
+      ]),
+      spacer(24),
+      cta('Hizmet vereni panelde aç', text(data.adminProviderUrl), 'primary'),
     ]),
   };
 }

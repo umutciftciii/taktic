@@ -16,7 +16,12 @@ import {
   toAuditActor,
 } from '../../common/admin-audit';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ALL_ADMIN_PERMISSIONS, STAFF_ROLES } from '../auth/admin-permissions';
+import {
+  GRANTABLE_ADMIN_PERMISSIONS,
+  isReservedPermission,
+  STAFF_ROLES,
+  SUPER_ADMIN_RESERVED_PERMISSIONS,
+} from '../auth/admin-permissions';
 import type { AuthUser } from '../auth/auth.types';
 import {
   AssignAdminRoleDto,
@@ -56,7 +61,9 @@ export class AdminRolesService {
 
   /** The closed catalogue, for the screen that builds a role out of it. */
   listCatalogue() {
-    return { permissions: [...ALL_ADMIN_PERMISSIONS] };
+    // The reserved values (REL-002 Faz 4) are listed apart: they exist, but no
+    // role can be given one.
+    return { permissions: [...GRANTABLE_ADMIN_PERMISSIONS], reservedForSuperAdmin: [...SUPER_ADMIN_RESERVED_PERMISSIONS] };
   }
 
   async list() {
@@ -127,6 +134,7 @@ export class AdminRolesService {
     const name = dto.name.trim();
     const description = dto.description?.trim() || null;
     const permissions = dedupe(dto.permissions ?? []);
+    refuseReserved(permissions);
 
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -215,6 +223,7 @@ export class AdminRolesService {
     }
 
     const next = dedupe(dto.permissions);
+    refuseReserved(next);
     const previous = role.permissions.map((p) => p.permission).sort();
     const added = next.filter((p) => !previous.includes(p));
     const removed = previous.filter((p) => !next.includes(p));
@@ -445,4 +454,18 @@ function isJsonObject(value: Prisma.JsonValue): value is Prisma.JsonObject {
 
 function isUniqueViolation(error: unknown): boolean {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+}
+
+/** A role can never carry a SUPER_ADMIN-reserved permission (REL-002 Faz 4). */
+function refuseReserved(permissions: readonly AdminPermission[]): void {
+  const reserved = permissions.filter(isReservedPermission);
+  if (reserved.length > 0) {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: 'PERMISSION_RESERVED_FOR_SUPER_ADMIN',
+      message: 'Bu yetki yalnız süper yöneticiye aittir; bir role verilemez.',
+      permissions: reserved,
+    });
+  }
 }

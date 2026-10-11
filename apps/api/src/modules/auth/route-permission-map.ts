@@ -226,6 +226,16 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/users/:id', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id/status-history', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'PATCH', path: '/users/:id/status', permission: AdminPermission.ADMIN_USERS_STATUS },
+  // REL-002 Faz 4: provider service incidents and reliability. The correction
+  // route's permission is reserved for SUPER_ADMIN (no role can carry it).
+  { method: 'GET', path: '/admin/service-incidents', permission: AdminPermission.SERVICE_INCIDENTS_READ },
+  { method: 'GET', path: '/admin/service-incidents/:id', permission: AdminPermission.SERVICE_INCIDENTS_READ },
+  { method: 'POST', path: '/admin/service-incidents/:id/adjudications', permission: AdminPermission.SERVICE_INCIDENTS_ADJUDICATE },
+  { method: 'POST', path: '/admin/service-incidents/:id/corrections', permission: AdminPermission.SERVICE_INCIDENTS_CORRECT },
+  { method: 'GET', path: '/admin/provider-reliability', permission: AdminPermission.PROVIDER_RELIABILITY_READ },
+  { method: 'GET', path: '/admin/providers/:providerId/reliability', permission: AdminPermission.PROVIDER_RELIABILITY_READ },
+  { method: 'POST', path: '/admin/provider-reliability-reviews/:id/acknowledge', permission: AdminPermission.PROVIDER_RELIABILITY_MANAGE },
+  { method: 'POST', path: '/admin/provider-reliability-reviews/:id/resolve', permission: AdminPermission.PROVIDER_RELIABILITY_MANAGE },
   // SEO-004: the SEO screens. Reads need SEO_READ; content and redirects have
   // their own write permissions. A slug change is a category edit
   // (CATEGORIES_WRITE): its 301 is that edit's consequence, written in the

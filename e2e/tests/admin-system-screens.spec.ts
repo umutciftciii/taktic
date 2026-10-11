@@ -120,7 +120,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
     });
     const catalogueSize = (await prisma().$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM unnest(enum_range(NULL::"AdminPermission"))`,
-    ))[0]!.n;
+    ))[0]!.n - 1; // REL-002 Faz 4: SERVICE_INCIDENTS_CORRECT is SUPER_ADMIN-only and never offered to a role.
     const { actor } = await openAs(browser, 'super');
     const page = actor.page;
 

@@ -983,6 +983,57 @@ const CASES: Case[] = [
     },
     refused: refusedRedirect('/package-refunds/pr-1?error='),
   },
+  // ── REL-002 Faz 4: incident decisions and reliability reviews ──
+  {
+    name: 'service incident: karar ver',
+    key: 'service-incident.adjudicate',
+    run: async (proof) => {
+      const { adjudicateIncidentAction } = await import('../app/service-incidents/actions');
+      return adjudicateIncidentAction(
+        form({ incidentId: 'si-1', decision: 'CONFIRMED', rationale: 'Müşteri fotoğraf gönderdi.' }, proof),
+      );
+    },
+    refused: refusedRedirect('/service-incidents/si-1?error=confirmation'),
+  },
+  {
+    name: 'service incident: kararı düzelt',
+    key: 'service-incident.correct',
+    run: async (proof) => {
+      const { correctIncidentAction } = await import('../app/service-incidents/actions');
+      return correctIncidentAction(
+        form(
+          {
+            incidentId: 'si-1',
+            decision: 'DISMISSED',
+            rationale: 'Yeni kanıt bildirimi çürüttü.',
+            expectedEffectiveAdjudicationId: 'adj-1',
+          },
+          proof,
+        ),
+      );
+    },
+    refused: refusedRedirect('/service-incidents/si-1?error=confirmation'),
+  },
+  {
+    name: 'reliability review: üstlen',
+    key: 'reliability-review.acknowledge',
+    run: async (proof) => {
+      const { acknowledgeReliabilityReviewAction } = await import('../app/provider-reliability/actions');
+      return acknowledgeReliabilityReviewAction(form({ reviewId: 'rv-1', providerId: 'p-1', from: 'queue' }, proof));
+    },
+    refused: refusedRedirect('/provider-reliability?reliability=confirmation'),
+  },
+  {
+    name: 'reliability review: sonuçlandır',
+    key: 'reliability-review.resolve',
+    run: async (proof) => {
+      const { resolveReliabilityReviewAction } = await import('../app/provider-reliability/actions');
+      return resolveReliabilityReviewAction(
+        form({ reviewId: 'rv-1', providerId: 'p-1', from: 'provider', note: 'Hizmet verenle görüşüldü.' }, proof),
+      );
+    },
+    refused: refusedRedirect('/providers/p-1?reliability=confirmation#guvenilirlik'),
+  },
 ];
 
 describe('guarded server actions refuse a submission without a good proof, and write nothing', () => {

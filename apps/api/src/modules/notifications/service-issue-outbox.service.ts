@@ -28,6 +28,12 @@ export const SERVICE_ISSUE_NOTIFICATION_TEMPLATES = [
   'request-match-review',
   'provider-incident-opened',
   'provider-incident-new',
+  // REL-002 Faz 4: the decision, the response and the review — the same
+  // outbox, swept by the same tick.
+  'service-incident-confirmed',
+  'service-incident-dismissed',
+  'service-incident-provider-responded',
+  'provider-reliability-review-opened',
 ] as const;
 
 const DEFAULT_DELIVERY_LIMIT = 200;
@@ -125,6 +131,100 @@ export async function enqueueServiceIssueNotices(
     return 0;
   }
   const created = await tx.notificationLog.createMany({ data: rows, skipDuplicates: true });
+  return created.count;
+}
+
+/**
+ * REL-002 Faz 4 — the provider's notice of a decision (an INITIAL one or a
+ * CORRECTION), keyed on the adjudication so a correction owes a message of its
+ * own. Written inside the adjudication transaction.
+ */
+export async function enqueueIncidentDecisionNotice(
+  tx: Prisma.TransactionClient,
+  input: { adjudicationId: string },
+): Promise<number> {
+  const adjudication = await tx.providerIncidentAdjudication.findUnique({
+    where: { id: input.adjudicationId },
+    select: {
+      id: true,
+      decision: true,
+      incident: {
+        select: {
+          requestId: true,
+          providerId: true,
+          provider: { select: { userId: true, email: true, user: { select: { email: true } } } },
+        },
+      },
+    },
+  });
+  const recipient = adjudication ? recipientFor(adjudication.incident.provider) : null;
+  if (!adjudication || !recipient) {
+    return 0;
+  }
+  const template = adjudication.decision === 'CONFIRMED' ? 'service-incident-confirmed' : 'service-incident-dismissed';
+  const created = await tx.notificationLog.createMany({
+    data: [
+      intentRow({
+        template,
+        to: recipient,
+        dedupeKey: `${template}:${adjudication.id}`,
+        requestId: adjudication.incident.requestId,
+        userId: adjudication.incident.provider.userId,
+        providerId: adjudication.incident.providerId,
+      }),
+    ],
+    skipDuplicates: true,
+  });
+  return created.count;
+}
+
+/** REL-002 Faz 4 — the support inbox learns a provider answered (one response, so keyed on the incident). */
+export async function enqueueIncidentResponseNotice(
+  tx: Prisma.TransactionClient,
+  input: { incidentId: string; requestId: string; providerId: string },
+): Promise<number> {
+  const supportInbox = readSupportInboxEmail();
+  if (!supportInbox) {
+    return 0;
+  }
+  const created = await tx.notificationLog.createMany({
+    data: [
+      intentRow({
+        template: 'service-incident-provider-responded',
+        to: supportInbox,
+        dedupeKey: `service-incident-provider-responded:${input.incidentId}`,
+        requestId: input.requestId,
+        userId: null,
+        providerId: input.providerId,
+      }),
+    ],
+    skipDuplicates: true,
+  });
+  return created.count;
+}
+
+/** REL-002 Faz 4 — the support inbox learns a reliability review was opened (keyed on the review). */
+export async function enqueueReliabilityReviewNotice(
+  tx: Prisma.TransactionClient,
+  input: { reviewId: string; providerId: string },
+): Promise<number> {
+  const supportInbox = readSupportInboxEmail();
+  if (!supportInbox) {
+    return 0;
+  }
+  const created = await tx.notificationLog.createMany({
+    data: [
+      intentRow({
+        template: 'provider-reliability-review-opened',
+        to: supportInbox,
+        dedupeKey: `provider-reliability-review-opened:${input.reviewId}`,
+        requestId: null,
+        userId: null,
+        providerId: input.providerId,
+      }),
+    ],
+    skipDuplicates: true,
+  });
   return created.count;
 }
 

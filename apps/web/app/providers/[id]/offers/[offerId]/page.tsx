@@ -125,7 +125,10 @@ export default async function ProviderOfferDetailPage({
             ? ` (${SERVICE_ISSUE_REASON_LABELS[offer.matchFailure.reason]} · bildirim ${offer.matchFailure.incidentNumber}).`
             : '.'}{' '}
           Bu talebe artık erişemez ve teklif veremezsiniz; müşteri iletişim bilgileri ve mesajlaşma kapandı. Bildirim tek
-          başına hesabınıza bir yaptırım uygulamaz.
+          başına hesabınıza bir yaptırım uygulamaz.{' '}
+          <Link href={`/providers/${id}/aksakliklar`} data-testid="offer-incident-link">
+            Bildirimi görüntüle / yanıtla
+          </Link>
         </div>
       ) : null}
 

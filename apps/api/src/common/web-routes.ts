@@ -183,6 +183,28 @@ export function adminProviderReviewUrl(reviewId: string): string {
   return `${getAdminAppBaseUrl()}/provider-reviews/${encodeURIComponent(reviewId)}`;
 }
 
+// ───────────────────────────── service incidents (REL-002 Faz 4) ─────────────────────────────
+
+/** One service incident in the provider's panel. `apps/web/app/providers/[id]/aksakliklar/[incidentId]`. */
+export function providerIncidentUrl(providerId: string, incidentId: string): string {
+  return publicWebUrl(
+    `/providers/${encodeURIComponent(providerId)}/aksakliklar/${encodeURIComponent(incidentId)}`,
+  );
+}
+
+/**
+ * One service incident in the operator panel. `apps/admin/app/service-incidents/[id]`.
+ * Support-inbox notices only, on the same rule as `adminRequestUrl`.
+ */
+export function adminServiceIncidentUrl(incidentId: string): string {
+  return `${getAdminAppBaseUrl()}/service-incidents/${encodeURIComponent(incidentId)}`;
+}
+
+/** One provider's reliability in the operator panel. `apps/admin/app/providers/[id]`. Support-inbox only. */
+export function adminProviderReliabilityUrl(providerId: string): string {
+  return `${getAdminAppBaseUrl()}/providers/${encodeURIComponent(providerId)}#guvenilirlik`;
+}
+
 // ───────────────────────────── vitrin, phase two ─────────────────────────────
 
 /** The provider's own vitrin cards and runs. `apps/web/app/providers/[id]/vitrin`. */
