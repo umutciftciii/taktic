@@ -1,7 +1,7 @@
 # REL-002 — Provider Reliability / Match Round — Teknik Tasarım ve Fazlandırma
 
 - Baseline: `main@ad96b1360b3602510d63cd7e3efe6ddc486a8a0f` (doğrulandı), yerel DB 94 migration (doğrulandı), release `v0.1.0`
-- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. **Faz 2 uygulandı** (round matching core'un otoritesi, M2 enforce, teklif takvimi zorunlu) — gerçek şema, kısıtlar, hata kodları, ölçümler ve runbook §31'de; §2.2, §2.6, §5.1 (M2), §6.1 ve §19 Faz 2'nin gerçek hâline göre güncellendi. Faz 3–5 hâlâ tasarım.
+- Durum (2026-10-11): §29'daki 9 ürün kararı **kesinleşti** ve bu dokümana işlendi. **Faz 1 uygulandı** (match-round şeması, backfill, lifecycle dual-write; davranış değişikliği yok) — gerçek şema adları, uygulama sonucu ve runbook §30'da. **Faz 2 uygulandı** (round matching core'un otoritesi, M2 enforce, teklif takvimi zorunlu) — gerçek şema, kısıtlar, hata kodları, ölçümler ve runbook §31'de; §2.2, §2.6, §5.1 (M2), §6.1 ve §19 Faz 2'nin gerçek hâline göre güncellendi. **Faz 3 uygulandı** (müşteri hizmet aksaklığı bildirimi, FAILED/MATCH_REVIEW, Round N+1, sağlayıcı dışlama, M3; bayrak arkasında, varsayılan kapalı) — gerçek şema, API, kararlar, ölçümler ve runbook §32'de; §2.1–2.4, §5.1 (M3), §5.3, §7, §10, §12 ve §27 Faz 3'ün gerçek hâline göre güncellendi. Faz 4–5 hâlâ tasarım.
 - Faz 1 öncesi yerel DB'ye yalnızca salt-okunur sorgu atıldı (`BEGIN READ ONLY`). Sonuçlar:
   - ServiceRequest: SUBMITTED 6 (3'ü direct lead), APPROVED 9 (2'sinde `approvedAt` NULL), REJECTED 1, MATCHED 2, COMPLETED 5.
   - Offer: 14 satır, 7 ACCEPTED. 14 tekliften yalnız 7'sinde `estimatedStartDate` / `estimatedCompletionDate` dolu.
@@ -139,9 +139,11 @@ Bunların hepsi **Faz 2 tamamlanmadan** issue-report (Faz 3) açılamaz.
 ### 2.1 Yeni enum'lar
 
 ```prisma
-// M1'de (Faz 1) yalnız tek-turlu yaşam döngüsünün ulaşabildiği değerler var.
-// FAILED (M3, Faz 3), SERVICE_ISSUE (M3) ve ADMIN (M5, Faz 5) ilk kullanıldıkları
-// migration'da `ALTER TYPE ... ADD VALUE` ile eklenir.
+// M1'de (Faz 1) yalnız tek-turlu yaşam döngüsünün ulaşabildiği değerler vardı.
+// FAILED, SERVICE_ISSUE ve ADMIN M3'te (Faz 3) `ALTER TYPE ... ADD VALUE IF NOT
+// EXISTS` ile eklendi (ADMIN yalnız Faz 5 kontratı için; henüz yazan yok).
+// ServiceIssueReason, ProviderIncidentStatus ve ServiceIssueEligibilityBasis
+// M3'te oluşturuldu; ProviderIncidentOutcome ve ProviderReliabilityDecision Faz 4.
 enum MatchRoundStatus {
   OPEN       // teklif dönemi (moderasyon öncesi de dahil — bkz. 2.2 notu)
   MATCHED    // bir teklif kabul edildi, iş sürüyor
@@ -159,7 +161,7 @@ enum MatchRoundSource {
 enum MatchRoundOpenedBy {
   REQUEST_CREATED      // Round 1
   SERVICE_ISSUE        // otomatik yeniden açılış (yalnız R2, R3)       [M3]
-  ADMIN                // MATCH_REVIEW sonrası personel kararı (R4+, §21) [M5]
+  ADMIN                // MATCH_REVIEW sonrası personel kararı (R4+, §21) [M3'te eklendi, ilk yazıcı Faz 5]
 }
 
 enum ServiceIssueReason {
@@ -191,8 +193,15 @@ enum ProviderReliabilityDecision {
   SUSPENDED            // mevcut PROVIDERS_MODERATE akışıyla askıya alındı (referans)
 }
 
-// ServiceRequestStatus'a eklenecek değer:
+// M3'te ServiceRequestStatus'a eklendi:
 //   MATCH_REVIEW — 3. tur da başarısız; otomatik tur yok, personel kararı bekliyor (§21)
+// M3'te eklendi (Faz 3):
+enum ServiceIssueEligibilityBasis {
+  OFFER_DATES            // taahhüt edilen start/end günü geçti
+  PROVIDER_CANCELLATION  // PROVIDER_CANCELLED_BEFORE_START — tarih beklemez
+}
+// NumberedEntityType += SERVICE_INCIDENT (INC-YYYY-NNNNNN),
+// AdminPermission += SERVICE_ISSUE_SETTING_WRITE (bayrağın tek yazma izni).
 ```
 
 Neden `IN_REVIEW` reuse edilmiyor? `IN_REVIEW` moderasyon kuyruğu anlamına geliyor (`reviewSourceStatuses`). Bir moderatör bunu "içerik onayı" sanıp APPROVE ederse, round açılmadan istek yeniden yayınlanır. Ayrı değer, ayrı kuyruk ve ayrı izin gerektirir.
@@ -241,8 +250,8 @@ model ServiceRequestMatchRound {
 
 M2'de (Faz 2, `20261011180000_enforce_round_matching_core`) eklenenler: `@@unique([id, requestId])` (composite FK hedefi), `matchedOffer` ilişkisi composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)`, scheduler index'leri `@@index([status, expiresAt])` ve `@@index([status, reminderSentAt, publishedAt])`. `currentForRequest` ilişki listesi oldu (composite FK; `currentRoundId @unique` yine en fazla bir talep demek). Ayrıntı §31.1.
 
-Sonraki migration'larda eklenecekler:
-- **M3:** `failureIncidentId String? @unique` + `failureIncident` ilişkisi, `incidents` ilişkisi, `FAILED` değeri ve FAILED shape CHECK'i.
+M3'te (Faz 3, `20261012090000_add_service_issue_reopen_core`) eklenenler — uygulandı:
+- `failureIncidentId String? @unique` + composite FK `(failureIncidentId, id) → ProviderServiceIncident(id, roundId)` (`failureIncident`), `incidents` (liste; `incident.roundId @unique` tek tutar), `exclusionsSourced`, `FAILED` değeri, `MatchRound_failed_shape` ve `MatchRound_failure_incident_only_when_failed` CHECK'leri; terminal trigger FAILED'ı ve `failureIncidentId`'nin değişmezliğini kapsar (§32.1).
 
 Notlar:
 - **Round 1, isteğin kendisiyle birlikte doğar** (`openedAt = submittedAt`). Moderasyon öncesi aşamalar (DRAFT/SUBMITTED/IN_REVIEW) request.status'ta yaşar. Round OPEN kalır ama `publishedAt` NULL'dır. Yayından sonra IN_REVIEW'a geri alınan talepte `publishedAt` yeniden NULL olur (talep piyasada değil); yeniden onayda `approvedAt` ile dolar.
@@ -274,29 +283,33 @@ Diğer invariant'lar (M2'de uygulandı):
 - **Matched offer ↔ round uyumu**: composite FK `(matchedOfferId, id) → Offer(id, matchRoundId)`; Offer'da `@@unique([id, matchRoundId])`.
 - **"Round başına en fazla bir kabul edilmiş teklif"**: `matchedOfferId @unique` (M1) ve `Offer_one_accepted_per_round` (M2).
 
-### 2.3 `ServiceRequestProviderExclusion` (§9)
+### 2.3 `ServiceRequestProviderExclusion` (§9) — M3'te uygulandı
 
 ```prisma
 model ServiceRequestProviderExclusion {
-  id            String   @id @default(cuid())
+  id            String             @id @default(cuid())
   requestId     String
   providerId    String
   sourceRoundId String
-  incidentId    String   @unique
+  incidentId    String             @unique
   reason        ServiceIssueReason
-  createdAt     DateTime @default(now())
+  createdAt     DateTime           @default(now())
 
   request     ServiceRequest           @relation(fields: [requestId], references: [id], onDelete: Restrict)
   provider    ProviderProfile          @relation(fields: [providerId], references: [id], onDelete: Restrict)
-  sourceRound ServiceRequestMatchRound @relation(fields: [sourceRoundId], references: [id], onDelete: Restrict)
-  incident    ProviderServiceIncident  @relation(fields: [incidentId], references: [id], onDelete: Restrict)
+  sourceRound ServiceRequestMatchRound @relation(fields: [sourceRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  incident    ProviderServiceIncident  @relation(fields: [incidentId, requestId, providerId], references: [id, requestId, providerId], onDelete: Restrict)
 
-  @@unique([requestId, providerId])
-  @@unique([providerId, requestId])     // marketplace anti-join'i sağlayıcıdan başlar
+  @@unique([requestId, providerId])   // fan-out anti-join + tekil probe (isProviderExcluded)
+  @@index([providerId])               // keşif listesinin anti-join'i + provider FK restrict kontrolü
 }
 ```
 
+Composite FK'ler: kaynak tur talebin kendi turu; incident aynı talep ve aynı sağlayıcının incident'ı. Satırlar kalıcıdır: `ServiceRequestProviderExclusion_append_only` trigger'ı UPDATE/DELETE'i reddeder (TRUNCATE tetiklemez — test reset'i). Taslaktaki `@@unique([providerId, requestId])` yerine düz `@@index([providerId])` seçildi: tekillik zaten `(requestId, providerId)` unique'inde; ölçüm §32.10.
+
 ### 2.4 `ProviderServiceIncident` (§14)
+
+**M3'te uygulanan hâli §32.1'dedir**; aşağıdaki taslaktan farkları: `incidentNumber` zorunlu (`INC-YYYY-NNNNNN`, aynı tx'te numaralandırılır), `eligibilityBasis` bir enum (`ServiceIssueEligibilityBasis`), `providerRespondedBy` → `providerRespondedById` (User FK), round ve teklif composite FK ile bağlı (`(roundId, requestId) → round(id, requestId)`, `(offerId, roundId) → Offer(id, matchRoundId)`), composite FK hedefleri `@@unique([id, roundId])` ve `@@unique([id, requestId, providerId])`, ek `@@index([requestId])`; `Incident_confirmed_by_provider_idx` partial index'i ve `ProviderIncidentAdjudication` Faz 4'e (M4) kaldı. Satır silinemez (`ProviderServiceIncident_no_delete` trigger'ı).
 
 ```prisma
 model ProviderServiceIncident {
@@ -361,7 +374,7 @@ CREATE INDEX "Incident_confirmed_by_provider_idx"
   ON "ProviderServiceIncident"("providerId","reportedAt") WHERE status='CONFIRMED';
 ```
 
-### 2.4.1 `ProviderIncidentAdjudication` (§14.1, karar 5)
+### 2.4.1 `ProviderIncidentAdjudication` (§14.1, karar 5) — Faz 4 (M4)
 
 ```prisma
 model ProviderIncidentAdjudication {
@@ -582,12 +595,18 @@ Migration: `prisma/migrations/20261011180000_enforce_round_matching_core/migrati
 
 Swap güvenliği: M2 anında her request'in tek round'u var; yeni unique'ler eskilerle **eşdeğer** başlar, hiçbir satır ihlal edemez. Doğrulama bloğu bunu yeniden kanıtlar.
 
-**M3 — REL-002 tabloları (Faz 3):** `ServiceRequestProviderExclusion`, `ProviderServiceIncident`, `ProviderIncidentAdjudication`, `ServiceIssueReason` (PROVIDER_CANCELLED_BEFORE_START dahil), `MatchRoundStatus += FAILED`, `MatchRoundOpenedBy += SERVICE_ISSUE`, round'a `failureIncidentId` + FAILED shape CHECK'i, terminal trigger listesine FAILED, `ServiceRequestStatus += MATCH_REVIEW`, `NumberedEntityType += SERVICE_INCIDENT`, OperationsSettings flag'i.
-- `ALTER TYPE ... ADD VALUE` aynı tx'te kullanılamaz. Değer bu migration'da eklenir, ilk kullanım kodda olur. Repo'daki önceki enum eklemeleriyle aynı desen.
+**M3 — servis aksaklığı, yeniden açılış, dışlama (Faz 3) — UYGULANDI**
 
-**M4 — reliability (Faz 4):** `ProviderReliabilityReview` ve yeni `AdminPermission` değerleri.
+Migration: `prisma/migrations/20261012090000_add_service_issue_reopen_core/migration.sql` (yerel 96 → 97). Tek dosya, tek transaction; ayrıntı ve ölçümler §32.
+- Enum değerleri: `MatchRoundStatus += FAILED`, `MatchRoundOpenedBy += SERVICE_ISSUE, ADMIN`, `ServiceRequestStatus += MATCH_REVIEW`, `NumberedEntityType += SERVICE_INCIDENT`, `AdminPermission += SERVICE_ISSUE_SETTING_WRITE` — hepsi `ADD VALUE IF NOT EXISTS`.
+- **Neden iki dosyaya bölünmedi:** PostgreSQL ≥ 12 `ADD VALUE`'ya transaction içinde izin verir ama değeri commit'e kadar *kullandırmaz*. M3'ün CHECK'leri ve trigger gövdeleri yeni değerleri `"status"::text = 'FAILED'` biçiminde, text olarak karşılaştırır; literal enum'a cast edilmez, migration tek dosyada kalır (yerel 96 → 97, beklendiği gibi). `IF NOT EXISTS`: enum değeri düşürülemediği için M3 rollback'i değerleri bırakır; rollback sonrası yeniden deploy bunlara takılmaz (§32.8).
+- Yeni enum'lar `ServiceIssueReason`, `ProviderIncidentStatus`, `ServiceIssueEligibilityBasis`; tablolar `ProviderServiceIncident`, `ServiceRequestProviderExclusion`; `ServiceRequestMatchRound.failureIncidentId`; `OperationsSettings.serviceIssueReportingEnabled` (default false, metadata-only).
+- Ham SQL: incident CHECK'leri, FAILED shape, terminal trigger güncellemesi, dışlama append-only ve incident no-delete trigger'ları, `Offer_round_open_guard` INSERT backstop'u (§32.1).
+- Backfill yok, mevcut satır yeniden yazılmaz.
 
-**M5 — admin yeni tur (Faz 5):** `MatchRoundOpenedBy += ADMIN` (ilk kullanım Faz 5 kodunda).
+**M4 — reliability (Faz 4):** `ProviderIncidentAdjudication`, `ProviderReliabilityReview`, confirmed partial index'i ve yeni `AdminPermission` değerleri.
+
+**M5 — admin yeni tur (Faz 5):** `MatchRoundOpenedBy.ADMIN` M3'te eklendi; Faz 5 yalnız kodu (ve gerekirse audit tablosunu) getirir.
 
 ### 5.2 Lock ve ölçek riski
 
@@ -595,12 +614,13 @@ Swap güvenliği: M2 anında her request'in tek round'u var; yeni unique'ler esk
 - M1'deki `UPDATE "Offer"` tüm satırlara row lock alır. Kolon nullable olduğu için tablo yeniden yazılmaz (PG ≥11, default'suz ADD COLUMN metadata-only), ama UPDATE her satır için yeni tuple üretir.
 - Kural: Faz 1 PR'ı bir **preflight sayım scripti** taşır (`scripts/ops/rel-002-preflight.sql`, salt-okunur, `BEGIN READ ONLY … ROLLBACK`). Offer > ~100k ise backfill migration dışına alınır ve batch'lenir (`WHERE "matchRoundId" IS NULL LIMIT 5000` döngüsü). Bugünkü ölçekte tek migration yeterli (yerel ölçüm §30.4).
 - M2'deki `CREATE UNIQUE INDEX`, Prisma migration tx'i içinde `CONCURRENTLY` olamaz. Ölçüm (§31.6): 200k request / 500k offer'da M2 **3,2 s** tek transaction (en ağır adım doğrulama bloğu ~1,1 s, sonra `Offer_providerId_matchRoundId_key` ~0,4 s). Bu süre boyunca Offer/ServiceRequest/round yazmaları bekler. Prod ölçeği bunun çok üstündeyse index'ler elle `CONCURRENTLY` + `prisma migrate resolve` ile önceden kurulur.
-- Yerel prosedür (memory'deki desen): migrate öncesi `pg_dump` ile geri dönüş dump'ı alınır. `_prisma_migrations` sayısı 94 → 95 (M1) → 96 → 97 → 98 (→ 99, M5) olur.
+- Yerel prosedür (memory'deki desen): migrate öncesi `pg_dump` ile geri dönüş dump'ı alınır. `_prisma_migrations` sayısı 94 → 95 (M1) → 96 (M2) → 97 (M3) → 98 (M4) olur; M5 enum değeri M3'e alındığı için ayrı migration gerekmeyebilir.
 
 ### 5.3 Geri dönüş
 
 - **M1:** Kod revert edilir. Tablo ve kolonlar nullable kalır, okuyucu yoktur; eski kod round yazmaz, yalnız yeni satırlar round'suz kalır (M2'nin 0. adımı bunları toplar). Down-migration gerekmez.
 - **M2:** `scripts/ops/rel-002-m2-rollback.sql` (tek transaction; herhangi bir talepte >1 round varsa reddeder) şemayı M1 hâline döndürür ve `_prisma_migrations` kaydını siler; Faz 1 kodu (d55d92f1) bu şemayla çalışır. Prova edildi (§31.6). Faz 3 bir talepte ikinci turu açtıktan sonra geri dönüş yalnız ileri-düzeltme ile yapılır. Faz 1 kodu M2 şemasıyla da çalışır (round'ları kendisi yazar; doğum trigger'ı yalnız boş `currentRoundId`'yi doldurur), yani kodu geri alıp şemayı bırakmak da mümkündür.
+- **M3:** `scripts/ops/rel-002-m3-rollback.sql` — **yalnız akış hiç kullanılmadıysa** (incident, dışlama, FAILED round, MATCH_REVIEW ve birden fazla round yok; aksi hâlde script kendini reddeder). Tabloları, kolonları, CHECK'leri ve trigger'ları kaldırır, terminal trigger'ı M1 hâline döndürür, `_prisma_migrations` kaydını siler; enum değerlerini bırakır (PostgreSQL'de DROP VALUE yok; kullanılmıyorlar). Prova §32.8. **Gerçek geri dönüş sınırı:** bayrak açılıp ilk gerçek Round 2 oluştuğu andan itibaren ne M3 ne M2 geri alınabilir; Faz 2 kodu birden fazla round'u temsil edemez. Bu noktadan sonra tek yol bayrağı kapatmak (yeni bildirim durur, açılmış turlar geçerli veri olarak kalır) ve ileri-düzeltmedir. Faz 2 kodu M3 şemasıyla çalışır (yerelde kanıtlandı, §32.8) — bayrak hiç açılmadıysa kod geri alınıp şema bırakılabilir.
 
 ---
 
@@ -660,8 +680,10 @@ Yerelde 7/14 teklif tarihsiz. Tarihsiz kabul edilmiş bir teklif MATCHED durumda
 
 ```
 POST /service-requests/:id/service-issue
-Guards: AuthGuard + RolesGuard(CUSTOMER)      // SUPER_ADMIN değil: beyan müşterinin
-Throttle: kullanıcı başına 5 / 10 dk
+Guards: AuthGuard + RolesGuard(CUSTOMER) + ServiceIssueThrottlerGuard   // SUPER_ADMIN değil: beyan müşterinin
+Rate limit (uygulandı): deneme bütçesi kullanıcı başına 10 / 10 dk (named throttler `service-issues`,
+  SERVICE_ISSUE_RATE_LIMIT_MAX/_WINDOW_SECONDS ile ayarlanır) + kalıcı bütçe: başarılı bildirim
+  müşteri başına 5 / 10 dk (incident sayımı, tx içinde) → 429 SERVICE_ISSUE_RATE_LIMITED
 Body: { roundId: string, reason: ServiceIssueReason, note?: string (<= 1000), idempotencyKey: string (uuid) }
 ```
 
@@ -688,9 +710,12 @@ Sunucu kontrolleri, sırayla. Hepsi tx içinde yeniden yapılır:
 Yanıt:
 
 ```json
-{ "incidentId": "...", "failedRoundNumber": 1, "outcome": "REOPENED" | "ADMIN_REVIEW",
-  "currentRound": { "id": "...", "roundNumber": 2, "status": "OPEN", "expiresAt": "..." } }
+{ "incidentId": "...", "incidentNumber": "INC-2026-000001", "failedRoundNumber": 1,
+  "outcome": "REOPENED" | "ADMIN_REVIEW", "replayed": false, "requestStatus": "APPROVED",
+  "currentRound": { "id": "...", "roundNumber": 2, "status": "OPEN", "publishedAt": "...", "expiresAt": "..." } }
 ```
+
+Uygulamada (§32.3): HTTP 200 (yeni bildirim ve replay); bayrak kapalıyken, sahip olmayan müşteride ve olmayan talepte 404; sağlayıcı/admin rolü 403 (RolesGuard). Sıra: sahiplik → idempotency replay/`IDEMPOTENCY_KEY_REUSED` → `ROUND_ALREADY_FAILED` → `REQUEST_NOT_MATCHED` → `ROUND_CHANGED` → `MATCH_INCONSISTENT` → takvim (`SERVICE_ISSUE_REQUIRES_SUPPORT`, `SERVICE_ISSUE_REASON_NOT_YET_AVAILABLE` + `opensOn`) → not (`SERVICE_ISSUE_NOTE_REQUIRED` 400, `SERVICE_ISSUE_NOTE_TOO_LONG` 400, normalize sonrası > 1000) → bütçe (429).
 
 Okuma tarafı:
 - `GET /service-requests/my/:id` yanıtına `currentRound`, `rounds[]` (numara, durum, tarihler, sağlayıcı adı ve incident sebebi; karşı tarafın yanıtı yok) ve `serviceIssue` eklenir.
@@ -792,10 +817,10 @@ Exclusion, R(N+1)'i açan tx'te yazılır. R(N+1)'e teklif ancak o tx commit edi
 | Tur 1'in COMPETITOR_ACCEPTED rakipleri | Bugünkü gibi iade edilmez. Tarihsel kalır. |
 | Tur 2+ teklifleri | Normal kural: charge, 48 saat unviewed refund snapshot, recharge-on-accept. |
 | Talep tur 2'de iptal edilirse (staff) | `cancelServiceRequest` **yalnız `currentRoundId`'nin tekliflerini** dolaşır. Winner = current round'un kazananı (varsa), bugünkü REFUND/WITHHOLD politikası uygulanır. Önceki turların teklifleri (başarısız kazanan ve eski REJECTED rakipler dahil) **sorgu kapsamına bile girmez.** |
-| Talep `MATCH_REVIEW`'da iptal edilirse | Current round FAILED, winner yok → `NOT_MATCHED`. `closedOfferIds`/`refundedOfferIds` boş. |
+| Talep `MATCH_REVIEW`'da iptal edilirse | Current round FAILED, winner yok → `NOT_MATCHED`. `closedOfferIds`/`refundedOfferIds` boş. Uygulandı: iptal round'a dokunmaz (FAILED terminal kalır), FAILED turun tekliflerini sorgulamaz bile. |
 | Admin incident'ı dismiss ederse | Otomatik iade yok. İstisnai telafi `ManualCreditOperation` (ADMIN_GRANT, idempotencyKey zorunlu) ile ayrı bir operasyondur. |
-| Admin manuel teklif iadesi (`refundOfferCredit` / `OFFER_REFUND_*`) | Başarısız turun kazanan teklifi için **reddedilir**: 409 `FAILED_MATCH_NOT_REFUNDABLE`, mesaj "Manuel kredi işlemi kullanın". Gerekçe: teklif bazlı iade sistemin iade politikasıdır; telafi ayrı bir ledger nedeni taşımalı ki raporlar ikisini ayırabilsin. |
-| Unviewed-refund worker | Değişiklik yok. Kazanan teklif `viewedAt` dolu ya da `refundBlockedAt` set durumda olduğundan zaten dışarıda. Ek güvence olarak worker sorgusuna `matchRound.status = OPEN` koşulu eklenir: kapanmış bir turun teklifi 48 saat kuralıyla iade edilmez. **Not:** bu bugünkü davranışı değiştirebilir. Tur 1 EXPIRED/CANCELLED olduğunda 48 saat dolmamış teklifler bugün iade alıyor mu, Faz 2'de doğrulanmalı; değiştirmeden önce mevcut test sözleşmesi okunmalı. Ben bu koşulu **yalnız FAILED round** için öneriyorum (en dar kapsam). |
+| Admin manuel teklif iadesi (`refundOfferCredit` / `OFFER_REFUND_*`) | Başarısız turun kazanan teklifi için **reddedilir** (uygulandı): 409 `FAILED_MATCH_NOT_REFUNDABLE`, mesaj "Bu eşleşme hizmet aksaklığı bildirimiyle kapandı; teklif bazlı iade yapılamaz. Gerekiyorsa manuel kredi telafisi (kredi yükleme) kullanın." Kontrol diğer koşullardan önce yapılır. Gerekçe: teklif bazlı iade sistemin iade politikasıdır; telafi ayrı bir ledger nedeni taşımalı ki raporlar ikisini ayırabilsin. |
+| Unviewed-refund worker | **Uygulandı (Faz 3), en dar kapsam:** aday predicate'ine (`refundCandidateWhere`) `matchedForRound: { none: { status: FAILED } }` eklendi — FAILED turun **kazananı** hiçbir zaman aday olmaz (scan, run ve dashboard sayımı aynı predicate). FAILED turun **rakip** teklifleri bilinçli olarak dışlanmadı: görülmemiş bir rakibin 48 saat iadesi sağlayıcıya verilmiş bir sözdür ve başka birinin başarısızlığı onu bozmaz (OPEN/EXPIRED/CANCELLED davranışı değişmedi). Ek olarak `refundOfferCreditInTransaction` ve `refundOfferRechargeInTransaction` her çağrıda FAILED kazananı reddeder (409 `FAILED_MATCH_NOT_REFUNDABLE`) — worker, iptal ve manuel iade tek barikattan geçer. |
 
 Cancel ve reject'in current round'a daraltılması bugünkü tek-turlu davranışı değiştirmez (tek round var). Bu yüzden Faz 2'de güvenli.
 
@@ -818,7 +843,7 @@ Test gate'i: integration testi şunu doğrular. "Tur 1 FAILED, tur 2 MATCHED, st
 
 - Thread round-aware olur: `MessageThread.roundId @unique` ve `offerId @unique`, `requestId` index.
 - `resolveThreadForRequest(requestId)` → current round'un thread'ini get-or-create eder. `loadMatchChain` değişmez (MATCHED + matchedOfferId + ACCEPTED).
-- **Salt-okunur tarihsel mod (karar 4, Faz 3):** round'u FAILED, COMPLETED veya CANCELLED olan bir thread, o thread'in **orijinal katılımcılarına** (thread'in `customerUserId` / `providerUserId`'si) salt-okunur gösterilir:
+- **Salt-okunur tarihsel mod (karar 4, Faz 3) — uygulandı (§32.6):** round'u FAILED, COMPLETED veya CANCELLED olan bir thread, o thread'in **orijinal katılımcılarına** (thread'in `customerUserId` / `providerUserId`'si) salt-okunur gösterilir:
   - `GET threads/:id` ve `GET threads/:id/messages` açıktır; yanıt `mode: 'READ_ONLY'` ve kapanış sebebini (`closedReason: FAILED | COMPLETED | CANCELLED`) taşır.
   - **Yazma ve okundu-işaretleme mutasyonu yoktur:** `POST threads/:id/messages` ve `POST threads/:id/read` 403 `THREAD_READ_ONLY` döner. Okundu işareti tarihsel thread'de hiç değişmez.
   - Erişim kapısı `participantWhere` olarak kalır; zincir kontrolü (`assertChainStillHolds`) yalnız yazma ve read-mark yollarında çalışır. Yeni sağlayıcı (B) eski thread'i **göremez**: A'nın thread'inde katılımcı değildir, liste ve detay 404 döner.
@@ -1268,7 +1293,9 @@ Gerçek sonuç, sapmalar ve runbook §31'de. Aşağıdaki kapsam metni planland�
   - E2E: teklif ver → kabul → mesaj → tamamla.
 - **Rollback:** M2 ters migration'ı hazır tutulur. Faz 3 açılana kadar geri alınabilir (tek tur).
 
-### Faz 3 — Müşteri issue + reopen + exclusion + minimal incident (flag arkasında)
+### Faz 3 — Müşteri issue + reopen + exclusion + minimal incident (flag arkasında) — UYGULANDI
+
+Gerçek sonuç, sapmalar ve runbook §32'de. Aşağıdaki kapsam metni planlandığı hâliyle duruyor; farklar: admin tur zaman çizelgesi UI'ı yok (API verisi `GET /service-requests/:id/rounds`'ta, §32.9), sağlayıcı teklif detayında FAILED bandı var, bayrağın admin toggle'ı `SERVICE_ISSUE_SETTING_WRITE` izniyle.
 
 - **Kapsam:**
   - M3 (exclusion, incident, `MATCH_REVIEW`, numbering, `OperationsSettings.serviceIssueReportingEnabled` varsayılan false).
@@ -1283,7 +1310,7 @@ Gerçek sonuç, sapmalar ve runbook §31'de. Aşağıdaki kapsam metni planland�
   - Müşteri UI'ı (modal, tur geçmişi), sağlayıcı teklif detayında FAILED bandı.
   - Tur 3 → `MATCH_REVIEW`, otomatik R4 yok (admin aksiyonu Faz 5; bu fazda yalnız durum ve görünürlük).
   - Admin ayarlar ekranında flag toggle'ı (Faz 3E deseni).
-- **Migration:** evet (M3, 96 → 97).
+- **Migration:** evet (M3, 96 → 97, uygulandı).
 - **Risk:** orta. Yeni yol, ama flag kapalıyken erişilemez.
 - **Rollout:** flag kapalı deploy edilir. Yerel kabul testi sonrası açılır. Staging açılışı ayrı onayla yapılır.
 - **Test gate'i:**
@@ -1306,7 +1333,7 @@ Gerçek sonuç, sapmalar ve runbook §31'de. Aşağıdaki kapsam metni planland�
   - 90 günlük sayım (effective outcome), risk seviyesi, eşik bildirimleri.
   - Sağlayıcı "Güvenilirlik" sekmesi, bloklayıcı bant, ReliabilityReview akışı.
   - Genel görünüm hücreleri.
-- **Migration:** evet (M4, 97 → 98).
+- **Migration:** evet (M4, 97 → 98; `ProviderIncidentAdjudication` dahil).
 - **Risk:** orta. RBAC (yanıt projeksiyonu izin bazlı; PR #133/#134 deseni) ve bildirim hacmi.
 - **Rollout:** Faz 3 flag'iyle uyumlu. Incident'lar Faz 3'ten beri REPORTED olarak birikir, Faz 4 bunları işler.
 - **Test gate'i:**
@@ -1565,6 +1592,8 @@ Akış değişmedi: lead bağlanınca round DIRECT_SHOWCASE; sahibin teklifi tal
 
 ### 31.10 Faz 3 ön koşulları ve kalan borçlar
 
+Madde 1–5 Faz 3'te kapandı (§32); 6'nın müşteri tarafı kapandı (admin UI Faz 4/5); 7 borç olarak duruyor (§32.10); 8 staging/prod runbook'unda (§32.11).
+
 1. `MatchRoundStatus += FAILED` (+ shape CHECK, terminal trigger listesi), `MatchRoundOpenedBy += SERVICE_ISSUE`, `MATCH_REVIEW` (M3) ve Round N+1'i açan geçiş (`openNextRound`): `matchedOfferId/matchedAt` NULL, `publishedAt` kapısı (§20), birth trigger'ın yerine açık insert.
 2. Exclusion modeli ve `isProviderExcluded` — keşif filtresine, teklif tx'ine, accept'e ve fan-out'a aynı helper (bugün önceki round'un sağlayıcısı yeni round'u görür).
 3. Tutarlılık scripti: Round ≥ 2'de talep projeksiyonu kontrolleri (zaman alanları zaten yalnız Round 1'de) FAILED/`MATCH_REVIEW` için genişletilmeli.
@@ -1580,3 +1609,155 @@ Akış değişmedi: lead bağlanınca round DIRECT_SHOWCASE; sahibin teklifi tal
 - Yeni: `match-round-faz2.spec.ts` 31 test (ikinci tur güvenliği, stale-round 409'ları, takvim kodları, eşzamanlılık: aynı sağlayıcı çift teklif, offer-vs-accept, accept-vs-cancel, accept-vs-reject, expiry-vs-accept, reminder claim, thread çift açılış, reveal çift kayıt; DB invariant'ları) — iki ayrı koşuda yeşil, sleep/retry hilesi yok. `match-round-core.spec.ts` 20 test (her case sonrası tutarlılık scripti). `match-round-migration.spec.ts` 4 test (M1 + M2 yeniden-backfill/enforce + ihlalde tam geri alma).
 - Web 462, shared (takvim 9 dahil), typecheck/lint/build, `version:check`, ops scriptleri 54.
 - E2E Chromium (hedefli, 14 spec dosyası): 77/77 — pazar yeri create→teklif→accept→mesaj→complete, iptal/iade, contact, mesajlaşma, vitrin direct lead, review, teklif geri çekme, admin talep/teklif ve lifecycle onayları, teklif formu takvim doğrulaması (yeni).
+
+---
+
+## 32. Faz 3 uygulama sonucu ve runbook
+
+Baseline `main@1ffd4bb0`, yerel DB 96 migration, release `v0.1.0`. PR: „REL-002 Faz 3: add customer service-issue reopen and provider exclusion". Özellik bayrak arkasında, **varsayılan kapalı** (`OperationsSettings.serviceIssueReportingEnabled = false`).
+
+### 32.1 Gerçek M3 şeması
+
+Migration `20261012090000_add_service_issue_reopen_core` (§5.1). Tek dosya, tek transaction, backfill yok.
+
+| Nesne | Tür | Anlamı |
+|---|---|---|
+| `MatchRoundStatus.FAILED`, `MatchRoundOpenedBy.SERVICE_ISSUE/ADMIN`, `ServiceRequestStatus.MATCH_REVIEW`, `NumberedEntityType.SERVICE_INCIDENT`, `AdminPermission.SERVICE_ISSUE_SETTING_WRITE` | enum değeri (`ADD VALUE IF NOT EXISTS`) | Faz 3 durumları; ADMIN Faz 5 için rezerve |
+| `ServiceIssueReason`, `ProviderIncidentStatus`, `ServiceIssueEligibilityBasis` | yeni enum | §2.1 |
+| `ProviderServiceIncident` | tablo | uniq: `incidentNumber`, `roundId`, `offerId`, `idempotencyKey`, `(id, roundId)`, `(id, requestId, providerId)`; index: `(providerId, status)`, `(status, reportedAt)`, `(customerUserId, reportedAt)`, `(requestId)`; FK: provider, request, `(roundId, requestId) → round`, `(offerId, roundId) → Offer(id, matchRoundId)`, customer/respondedBy/reviewedBy → User |
+| `ServiceRequestProviderExclusion` | tablo | uniq `(requestId, providerId)`, `incidentId`; index `(providerId)`; FK: request, provider, `(sourceRoundId, requestId) → round`, `(incidentId, requestId, providerId) → incident` |
+| `ServiceRequestMatchRound.failureIncidentId` | kolon (nullable, unique) | FK `(failureIncidentId, id) → incident(id, roundId)` |
+| `OperationsSettings.serviceIssueReportingEnabled` | kolon, default false | bayrak (metadata-only `ADD COLUMN`) |
+| `Incident_note_rules` | CHECK | not trim'li, ≤ 1000; OTHER ve PROVIDER_CANCELLED_BEFORE_START için ≥ 20 |
+| `Incident_eligibility_shape` | CHECK | `reason = PROVIDER_CANCELLED_BEFORE_START ⇔ basis = PROVIDER_CANCELLATION`; iki taahhüt günü de dolu, end ≥ start |
+| `Incident_response_shape` | CHECK | yanıt/zaman/yazar üçü birlikte; PROVIDER_RESPONDED ⇒ yanıt var |
+| `Incident_decision_shape` | CHECK | CONFIRMED/DISMISSED ⇔ reviewedAt + reviewedById; karar yoksa reviewNote yok |
+| `MatchRound_failed_shape` | CHECK | FAILED: kazanan (offer, provider, matchedAt) + failedAt + failureIncidentId; completed/cancelled/expired NULL |
+| `MatchRound_failure_incident_only_when_failed` | CHECK | `failureIncidentId` ⇔ FAILED |
+| `MatchRound_terminal_status_immutable` | trigger (güncellendi) | COMPLETED/CANCELLED/EXPIRED/**FAILED** terminal; `failureIncidentId` bir kez yazılır; artık `UPDATE OF status, failureIncidentId` |
+| `ServiceRequestProviderExclusion_append_only` | trigger | UPDATE/DELETE reddedilir |
+| `ProviderServiceIncident_no_delete` | trigger | DELETE reddedilir (Faz 4 yanıt/karar kolonlarını günceller) |
+| `Offer_round_open_guard` | trigger (BEFORE INSERT) | dışlanan sağlayıcı → `PROVIDER_EXCLUDED: …`; teklifin round'u talebin current OPEN round'u değil → `OFFER_ROUND_CLOSED: …` (SQLSTATE 23514) |
+
+Yeni değerler migration içinde enum literal olarak kullanılmaz (`"status"::text = 'FAILED'`), bu yüzden M3 iki dosyaya bölünmedi (§5.1).
+
+**Trigger sırası:** PostgreSQL aynı zamanlamalı satır trigger'larını ad sırasıyla çalıştırır; `Offer_round_link_default` (M2) < `Offer_round_open_guard` (M3). Önce boş `matchRoundId` talebin current round'uyla dolar, sonra guard o round'u denetler. Test: `service-issue.spec.ts` „the database refuses an excluded provider's offer and an offer into a closed round" — raw INSERT'te round'suz teklif Round 2'ye bağlanır ve kabul edilir; dışlanan sağlayıcının ve kapalı round'un INSERT'i reddedilir. Servis katmanı trigger mesajını `offerInsertGuardException` ile 409 `PROVIDER_EXCLUDED` / `OFFER_ROUND_CLOSED`'a çevirir (uygulama zaten tx içinde önce kendisi reddeder).
+
+### 32.2 Durum makinesi (gerçek)
+
+```
+Round:   OPEN ─accept─► MATCHED ─service issue─► FAILED (terminal)
+                           ├─complete─► COMPLETED
+                           └─staff cancel─► CANCELLED
+Request (service issue, aynı tx):
+  N < 3, round.source MARKETPLACE      → APPROVED, Round N+1 OPEN, publishedAt=now, fan-out
+  N < 3, round.source DIRECT_SHOWCASE  → SUBMITTED, Round N+1 OPEN publishedAt NULL
+                                         (auto-publish açık + telefon kapısı açık → publishRequestInTransaction: APPROVED)
+  N ≥ 3                                → MATCH_REVIEW, currentRoundId = FAILED Round N, yeni round yok
+MATCH_REVIEW → müşteri/personel iptali → CANCELLED (current round FAILED kalır; teklif/kredi hareketi yok)
+```
+
+Round N+1: id `mr<N>_<requestId>`, `source MARKETPLACE`, `openedBy SERVICE_ISSUE`, `openedAt = now`, `expiresAt = publishedAt + 14g`, `reminderSentAt NULL` (`openNextRound`, `match-round-transitions.ts`). `request.approvedAt` reopen'da yazılmaz (yalnız auto-publish yolu, kanonik `publishRequestInTransaction` olarak yazar; moderasyon onayı da her zamanki gibi yazar). `MAX_AUTO_MATCH_ROUNDS = 3` (`limits.json` `maxAutoMatchRounds`).
+
+### 32.3 API
+
+`POST /service-requests/:id/service-issue` (`ServiceIssuesModule`), body `{ roundId, reason, note?, idempotencyKey (uuid) }`; `forbidNonWhitelisted` tarih alanını reddeder. Yanıt §7. Hata kodları:
+
+| Kod | HTTP |
+|---|---|
+| (bayrak kapalı / başkasının / olmayan talep) | 404 |
+| (müşteri olmayan rol) | 403 (RolesGuard) |
+| `IDEMPOTENCY_KEY_REUSED`, `ROUND_ALREADY_FAILED`, `REQUEST_NOT_MATCHED`, `ROUND_CHANGED`, `MATCH_INCONSISTENT`, `SERVICE_ISSUE_REQUIRES_SUPPORT`, `SERVICE_ISSUE_REASON_NOT_YET_AVAILABLE` (+`opensOn`), `CONCURRENT_MODIFICATION` | 409 |
+| `SERVICE_ISSUE_NOTE_REQUIRED` (+`minLength`), `SERVICE_ISSUE_NOTE_TOO_LONG` | 400 |
+| `SERVICE_ISSUE_RATE_LIMITED` / throttler | 429 |
+
+`GET /service-requests/my/:id` (sahip) ek alanlar: `currentRound {id, roundNumber, status, openedAt, publishedAt, expiresAt, matchedAt, failedAt}`, `rounds[] {id, roundNumber, status, source, openedBy, isCurrent, tarihler, provider {businessName} | null, offerId, issue {incidentNumber, reason, reportedAt, status:'RECORDED'} | null, messageThreadId}`, `serviceIssue {canReport, roundId, availableReasons, reasons[{reason, available, opensOn}], nextOpensOn, unavailableReason (FEATURE_DISABLED|NOT_MATCHED|SCHEDULE_MISSING|NOT_YET_AVAILABLE), supportOnly, maxAutoRoundsReached, consequence (REOPEN|ADMIN_REVIEW)}`. Sağlayıcı yanıtı, `reviewNote`, ham not müşteriye dönmez. Round id'leri yalnız bu sahip yanıtında (stale guard için) bulunur; `match-round-core.spec.ts` başka hiçbir yanıtın round id taşımadığını doğrular.
+
+Admin `GET /service-requests/:id/rounds` (REQUESTS_READ): round başına `failedAt`, `failureIncident {id, incidentNumber, providerId, offerId, reason, customerNote (ham), eligibilityBasis, promised*, status, reportedAt}` ve talebin `exclusions[]`. Sağlayıcı `GET /providers/:id/offers/:offerId`: `matchOutcome (ACTIVE|COMPLETED|FAILED|CANCELLED|null)`, `matchFailure {failedAt, incidentNumber, reason}`; FAILED'da `acceptedWorkScope` null. Vitrin lead (`GET /providers/:id/showcase/leads[/:leadId]`): lead'in işletmesi dışlandıysa `request.status = 'MATCH_ENDED'`, `matchEnded: true` — Round 2 durumu, yeni sağlayıcı ve teklif sayısı sızmaz.
+
+### 32.4 Eligibility matrisi (uygulandı)
+
+`service-issues/service-issue-eligibility.ts` (saf fonksiyon, sunucu `now`, `todayIsoDay` İstanbul). §6.3 matrisi aynen; `opensOn` = ilgili günün ertesi günü; `nextOpensOn` = açılmamış sebeplerin en erkeni. Takvimsiz (legacy) eşleşmede hiçbir sebep yok, `supportOnly`, UI destek bağlantısı (`/destek/yeni`). Birim testleri: İstanbul 23:59:59 / 00:00 (20:59:59Z / 21:00Z), 23:30Z kayması, tek günlük iş, end kapısı, legacy üç varyant.
+
+### 32.5 Issue transaction'ı ve idempotency
+
+`runSerializable` label `serviceRequests.reportServiceIssue`, sıra §8 ile aynı; idempotency kontrolü durum guard'larından **önce** (replay, kendi commit'inin taşıdığı talebe de cevap verir). Aynı anahtar + aynı payload (customer, request, round, reason, normalize not) → 200 `replayed: true`, bildirim yeniden kuyruğa girmez. P2002 `idempotencyKey` yarışı → işlem bir kez yeniden çalıştırılır ve replay döner; P2002 `roundId/offerId` → 409 `ROUND_ALREADY_FAILED`. Her koşullu yazım count === 1 (round `transitionRoundToFailed` → `MATCH_ROUND_STATE_CHANGED`; request `updateMany` → `ROUND_CHANGED`). **Kredi tablolarına hiç yazılmaz** — test: issue öncesi/sonrası `ProviderCreditTransaction` sayısı eşit.
+
+### 32.6 Dışlama zorlama noktaları (tek tanım: `common/provider-request-matching.ts`)
+
+| Yüzey | Uygulama |
+|---|---|
+| Keşif listesi | `notExcludedFromRequestFilter(providerId)` |
+| Talep detayı | `providerExclusions` satırı → 404 |
+| `ensureProviderCanSeeRequest` (teklif hızlı kontrolü + rapor yolu) | `isProviderExcluded` → 404 |
+| `createOfferRecord` (Serializable tx) | `isProviderExcluded(tx, …)` → 404; trigger hatası → 409 |
+| Publish fan-out + gönderim anı yeniden kurulum | `findMatchingProviders` içinde `providerNotExcludedFilter(requestId)` |
+| Accept | `isProviderExcluded(tx, …)` → 409 `PROVIDER_EXCLUDED` (defense-in-depth) |
+| DB | `Offer_round_open_guard` |
+| Contact / mesaj | projeksiyon NULL → `currentMatchedOfferId` null → 404/salt-okunur |
+| Vitrin lead inbox | `MATCH_ENDED` projeksiyonu |
+
+**Salt-okunur tarihsel thread (karar 4):** okuma (`GET threads/:id`, `/messages`) round'u FAILED/COMPLETED/CANCELLED olan thread'de orijinal katılımcılara açık (`mode: 'READ_ONLY'`, `closedReason`, `unreadCount: 0`); yazma ve **okundu işareti** 403 `THREAD_READ_ONLY`. Okundu işaretini engelleme gerekçesi: salt-okunur semantik = mutasyon yok; rozet zaten yalnız aktif thread'leri sayıyor (Faz 2), dolayısıyla sönmeyen rozet oluşmaz. Web: thread sayfası read-only'de `markThreadRead` çağırmaz, polling yapmaz, composer yerine bilgi notu ve „Kapandı · salt okunur" etiketi; liste satırında „Kapandı". Yeni sağlayıcı eski thread'i `participantWhere` ile 404 alır. Bugünkü COMPLETED/CANCELLED thread'leri de aynı davranışa geçti (önceden okuma da 403'tü).
+
+### 32.7 Kredi, bildirimler, bayrak, güvenlik
+
+- **Kredi:** §10 (uygulandı). `isFailedMatchWinner` = `ServiceRequestMatchRound(matchedOfferId, status FAILED)` probe'u (unique index). Manuel iade, worker ve iptal aynı barikattan geçer; worker predicate'i FAILED kazananı listelemez; FAILED turun rakipleri normal 48 saat semantiğinde kalır (test).
+- **Bildirimler (outbox, aynı tx, `ServiceIssueOutbox`, lifecycle tick süpürür):** `service-issue-recorded:<incidentId>` (müşteri), `request-reopened:<newRoundId>` (müşteri, yeni tur varsa; gönderim anında tur hâlâ current OPEN değilse üretilmez), `request-match-review:<incidentId>` (müşteri, Round 3; talep MATCH_REVIEW değilse üretilmez), `provider-incident-opened:<incidentId>` (başarısız sağlayıcı; müşteri adı/telefonu/e-postası/adresi yok, not `maskContactDetailsInNote` ile maskeli, kredi ifadesi yok), `provider-incident-new:<incidentId>` (destek kutusu; not yok). Round 2 yayını mevcut publish outbox'ı (`request-published:<req>:<ISO>`, `request-available:<req>:<provider>:r2`). Hepsi retry tablosunda (`RETRY_DEDUPE_PREFIXES`), REQ-UX-007 shell'i.
+- **Bayrak:** `ServiceIssueSettingsService` (fail-closed), `GET/PUT /operations-settings/service-issues` (`OPERATIONS_SETTINGS_READ` / `SERVICE_ISSUE_SETTING_WRITE`), `OperationsSettingsChange` audit'i, admin „Operasyon ayarları" kartı (iki yön için onay kanıtı `operations.service-issues-enable/-disable`). Kapalı: endpoint 404, `serviceIssue.unavailableReason = FEATURE_DISABLED`, UI'da CTA yok. Kapatmak açılmış turları geri almaz.
+- **Güvenlik/suistimal:** yalnız sahip müşteri (404 sızıntısız); istemci zamanı yok; not trim+collapse, ≤ 1000; sağlayıcı projeksiyonunda iletişim maskesi; throttler (kullanıcı başına deneme) + kalıcı başarılı-bildirim bütçesi (5/10 dk); 3 otomatik tur; idempotency; REPORTED tek başına hiçbir yaptırım üretmez (strike/askı yok).
+
+### 32.8 Migration provası, uygulama, geri dönüş
+
+**Preflight** (aktif yerel DB, salt-okunur, `rel-002-preflight.sql` M3 bölümü): `request_with_several_rounds = 0`, `round_with_failed_at = 0`; bilgi: MATCHED 2'nin ikisinin de kabul edilen teklifinde taahhüt günü yok (bayrak açılınca bu iki müşteri destek yoluna düşer), APPROVED 9, Offer 14. Baseline tutarlılık scripti (`1ffd4bb0`) 0 satır. (Yeni tutarlılık scripti M3 tablolarını okur; M3 öncesi DB'de baseline'ınki kullanılır.)
+
+**Yedek** (API durdurulmuşken): `~/Backups/taktic/db/taktic-db-20261011T170945Z-pre-rel002-m3-1ffd4bb0.dump`, sha256 `d2971299cf8ba247c5bf14be459ea33e59349dc471a45f53c5da71efc71641e3`, 650 423 bayt (1134 TOC, 99 tablo, 96 migration). `restore-rehearsal.sh` geçti (izole network, tmpfs; 99 tablo / 1227 satır manifest ile birebir).
+
+**Deploy provası** (dump atılabilir PostgreSQL 16.6'ya `pg_restore`): `migrate deploy` M3 **23 ms** (wall 0,81 s) → ikinci deploy „No pending" → drift 0 → tutarlılık 0 → tablo veri hash'leri (yeni kolonlar hariç, 98 tablo) birebir aynı. **Rollback provası** aynı kopyada: kullanılmış durumda script reddeder („forward-fix only"; ikinci round eklenerek denendi), kullanılmamışta `rel-002-m3-rollback.sql` 0,08 s → fingerprint M2 ile birebir (tablo 99, index 529, constraint 525, trigger 36, migration 96), Faz 2 şemasına drift = yalnız bırakılan 5 enum değişikliği → `migrate deploy` M3'ü yeniden uyguladı, drift 0. İlk provada `ADD VALUE` (IF NOT EXISTS'siz) rollback sonrası yeniden deploy'u 42710 ile düşürdü; migration `IF NOT EXISTS`'e çekildi ve döngü yeniden prova edildi.
+
+**Aktif yerel DB 96 → 97**: M3 uygulandı (47 ms), ikinci deploy „No pending", `migrate status` güncel, drift 0, tutarlılık 0, veri hash'leri değişmedi, bayrak `false`. (Geliştirme sırasında dışlama tablosuna `providerId` index'i eklenince yerel M3 bir kez prova edilmiş rollback ile geri alınıp son dosyayla yeniden uygulandı — rollback'in canlı kanıtı.) Fingerprint: tablo 99 → 101, index 529 → 545 (+16), constraint 525 → 545 (+20: 4 incident CHECK + 2 round CHECK + 2 pkey + 12 FK), trigger 36 → 39 (+3; terminal trigger yeniden yaratıldı); DB +212 KB. Yerel API (main'deki Faz 2 kodu) M3 şemasıyla yeniden başlatıldı: `/health` 200, log'da hata yok — Faz 2 kodunun M3 ile çalıştığının (kod geri dönüşü) canlı kanıtı.
+
+**Ölçek provası** (atılabilir PostgreSQL 16.6, tmpfs; 96 migration + sentetik 200k request, 500k offer, 200k round, 3000 sağlayıcı; 80k APPROVED/20k MATCHED/60k COMPLETED/20k EXPIRED/20k SUBMITTED): baseline tutarlılık 0 → `migrate deploy` M3 **196 ms** (wall 0,89 s; ilk ölçümde 102 ms) → „No pending", drift 0, tutarlılık 0, veri hash'leri önce/sonra birebir. En ağır adımlar round tablosundaki iki yeni CHECK'in doğrulaması (ACCESS EXCLUSIVE, tam tarama) ve Offer'a trigger eklenmesi (SHARE ROW EXCLUSIVE, anlık); yeni tablolar boş. Bu ölçekte yazma kesintisi ~0,2 s.
+
+**Geri dönüş sınırı (gerçek):** bayrak açılmadan önce geri dönüş mümkün (kod revert; gerekirse `rel-002-m3-rollback.sql`, sonra gerekirse M2 rollback). Bayrak açılıp ilk gerçek Round 2 oluştuğunda **geriye şema dönüşü yoktur** — M3 ve M2 rollback'leri kendilerini reddeder; yalnız ileri-düzeltme (bayrağı kapat, kodda düzelt).
+
+### 32.9 Admin minimum
+
+Talep listesinde `MATCH_REVIEW` filtresi ve etiketi („Eşleşme İncelemesi"), detayda durum açıklaması; round/incident/dışlama verisi `GET /service-requests/:id/rounds`'ta (UI zaman çizelgesi Faz 4/5). „Yeni tur aç" yok (Faz 5). İzin kataloğu 87 → 88.
+
+### 32.10 Performans (EXPLAIN ANALYZE, BUFFERS — ölçek DB'si + 2000 sentetik FAILED round/dışlama/Round 2, Prisma'nın ürettiği SQL)
+
+| Sorgu | Plan | Süre |
+|---|---|---|
+| Keşif listesi, kötü durum (82k APPROVED tek kategori, take 500) | status index → round `requestId_roundNumber` → `Offer_matchRoundId_status_idx` anti-join → `ServiceRequestProviderExclusion_providerId_idx` (bitmap, provider başına bir kez) | 25–39 ms (Faz 2 kötü durum 94 ms, take'siz) |
+| Fan-out kitlesi (sağlayıcı tarafı anti-join) | `…_requestId_providerId_key` index-only | < 0,01 ms |
+| `isProviderExcluded` | unique probe | 0,01 ms |
+| Müşteri detayı `rounds[]` (5 sorgu) | PK / `requestId_roundNumber` / `Offer_id_matchRoundId_key` / incident composite unique / `MessageThread_roundId_key` | her biri ≤ 0,02 ms |
+| `MATCH_REVIEW` filtresi | `ServiceRequest_status_idx` | 0,01 ms |
+| Incident idempotency / round / müşteri bütçesi | `idempotencyKey_key` / `roundId_key` / `customerUserId_reportedAt_idx` index-only | 0,008 / 0,008 / 0,14 ms (2000 satır) |
+| FAILED kazanan iade barikatı | `ServiceRequestMatchRound_matchedOfferId_key` | 0,01 ms |
+| Unviewed-refund aday taraması (sentetik kötü durum: 300k aday aynı anda uygun) | parallel seq scan + top-N; FAILED-kazanan anti-join 213 index probe | 85–95 ms (aynı veride Faz 3 koşulsuz 44–54 ms) |
+
+İlk ölçümde dışlama anti-join'i provider index'i olmadığından dışlama tablosunu seq scan ediyordu (tablo büyüdükçe lineer) — `@@index([providerId])` M3'e eklendi (küçük, güvenli düzeltme). Refund taraması farkı yalnız gerçek dışı „300k uygun aday" verisinde; gerçek aday kümesi (görülmemiş + 48 saat dolmuş) küçüktür. **Faz 2 borcu** (expiry/reminder aday taraması ~35 ms/tick) bu PR'a alınmadı: küçük ve güvenli bir index değişikliği değil (planner tahmin sorunu, raw SQL aday taraması gerekir), borç olarak duruyor.
+
+### 32.11 Staging/production runbook (bu PR'da dokunulmadı)
+
+1. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/rel-002-preflight.sql` → M3 bölümünde integrity 0; `matched_without_schedule` destek ekibine bilgi olarak iletilir.
+2. Baseline (`1ffd4bb0`) tutarlılık scripti 0 satır.
+3. API durdur → `backup-db.sh` → `restore-rehearsal.sh` → `migrate deploy` (97) → ikinci deploy „No pending" → drift 0 → yeni tutarlılık scripti 0.
+4. API/web/admin aynı deploy'da (bayrak kapalı; davranış farkı yalnız salt-okunur tarihsel thread'ler ve admin'deki yeni kart).
+5. Bayrak açma ayrı onayla: yerel kabul testi → staging'de açılış → doğrulama. **Bayrak açıldıktan ve ilk Round 2 oluştuktan sonra geri dönüş yalnız ileri-düzeltmedir** (§32.8).
+
+### 32.12 Test kapısı (yerel)
+
+- Yeni: `service-issue.spec.ts` 19 entegrasyon testi (bayrak, sahiplik, matris, legacy, stale/istemci tarihi, idempotency + iki yarış, issue↔complete, issue↔staff cancel, Round 1→2 kritik akış, DB backstop/trigger sırası/kalıcılık, Round 3→MATCH_REVIEW + iptal, manuel iade bloğu, worker, vitrin → pazar (auto-publish açık/kapalı)) — her case sonunda tutarlılık scripti 0; `service-issue-eligibility.spec.ts` 13 birim testi.
+- Güncellenen: `match-round-core` (sahip yanıtındaki round id istisnası), `match-round-faz2` (trigger nedeniyle fixture'lar UPDATE ile kuruluyor), `match-round-migration` (tutarlılık scripti öncesi zincir sona deploy edilir), `admin-rbac-route-map` (88 izin), e-posta render/dark-mode (5 şablon), admin `confirmation-proof` ve `system-screens`.
+- E2E (Chromium, hedefli): `service-issue.spec.ts` 6/6 — pazar yeri A→Round 2→B, vitrin → moderasyon, 3 tur → MATCH_REVIEW, salt-okunur thread, takvimsiz destek yolu, bayrak kapalı. WebKit projesine eklendi.
+
+### 32.13 Faz 4 ön koşulları ve kalan borçlar
+
+1. M4: `ProviderIncidentAdjudication` (append-only), `ProviderReliabilityReview`, confirmed partial index, `PROVIDER_INCIDENTS_READ/DECIDE`, `PROVIDER_RELIABILITY_REVIEW` izinleri; incident kolonları (yanıt/karar) ve CHECK'leri hazır.
+2. Sağlayıcı incident API/UI (yanıt penceresi 72 saat uyarısı), admin kuyruk/detay/karar (ConfirmGate + domain audit), strike sayımı (effective outcome).
+3. Admin talep detayında tur zaman çizelgesi UI'ı ve incident bağlantısı (API hazır).
+4. MATCH_REVIEW için admin „Yeni tur aç" (Faz 5; `MatchRoundOpenedBy.ADMIN` hazır) ve kuyruk hücresi.
+5. Yerelde 2 takvimsiz MATCHED eşleşme: bayrak açılınca destek yoluna düşer (veri düzeltmesi yapılmadı, karar 1).
+6. Borçlar: expiry/reminder aday taraması (§31.7); unviewed-refund taramasının gerçekçi olmayan kötü durumda 2× maliyeti (izlenecek); `request.approvedAt`'in yalnız auto-publish reopen'da tazelenmesi (legacy alan; okuyucusu yok).
