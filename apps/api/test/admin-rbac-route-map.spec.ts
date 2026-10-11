@@ -249,7 +249,9 @@ describe('PR-0 route/permission map', () => {
      * where that decision has to be typed out a second time. It is the reason
      * `CATALOG_READ` could not be added quietly: the number had to move, and
      * moving it meant naming the capability in a commit message.
+     * REL-002 Faz 3 moved it to 88: SERVICE_ISSUE_SETTING_WRITE, the customer
+     * service-issue switch (one write permission per operations switch).
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(87);
+    expect(Object.keys(AdminPermission)).toHaveLength(88);
   });
 });

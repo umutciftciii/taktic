@@ -56,6 +56,12 @@ function stageMigrations(upTo: string, inclusive = true) {
   }
 }
 
+/** Every migration in the repository, applied on top of whatever is there. */
+function deployToLatest() {
+  stageMigrations('99999999999999_latest');
+  deploy();
+}
+
 function deploy() {
   execFileSync('pnpm', ['exec', 'prisma', 'migrate', 'deploy', '--schema', join(workDir, 'schema.prisma')], {
     cwd: repoRoot,
@@ -312,7 +318,11 @@ describe('M1 backfill on a representative pre-M1 database', () => {
     ]);
     expect(links.filter((row) => row.kind === 'request').every((row) => row.round === `mr1_${row.id}`)).toBe(true);
 
-    // And the operators' check agrees with the backfill, row for row.
+    // And the operators' check agrees with the backfill, row for row. The
+    // check is the current release's (it reads M3's tables), so the database
+    // is carried through the rest of the chain first — every later migration
+    // must apply on top of this backfill, and none of them rewrites a row.
+    deployToLatest();
     expect(await roundInconsistencies(prisma)).toEqual([]);
   });
 
@@ -433,6 +443,8 @@ describe('M2 enforce on a post-M1 database', () => {
       }),
     ).toEqual({ roundNumber: 1, status: 'OPEN', publishedAt: null });
 
+    // The current release's check, after the rest of the chain (M3) applies.
+    deployToLatest();
     expect(await roundInconsistencies(prisma)).toEqual([]);
   });
 

@@ -171,6 +171,8 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PUT', path: '/operations-settings/marketplace-publish', permission: AdminPermission.MARKETPLACE_PUBLISH_WRITE },
   { method: 'GET', path: '/operations-settings/provider-reviews', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
   { method: 'PUT', path: '/operations-settings/provider-reviews', permission: AdminPermission.PROVIDER_REVIEWS_SETTING_WRITE },
+  { method: 'GET', path: '/operations-settings/service-issues', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
+  { method: 'PUT', path: '/operations-settings/service-issues', permission: AdminPermission.SERVICE_ISSUE_SETTING_WRITE },
   { method: 'GET', path: '/operations-settings/schedulers', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
   { method: 'PUT', path: '/operations-settings/schedulers/:job', permission: AdminPermission.SCHEDULERS_WRITE },
   { method: 'GET', path: '/package-purchases', permission: AdminPermission.PACKAGE_PURCHASES_READ },

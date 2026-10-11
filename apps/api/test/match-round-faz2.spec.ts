@@ -299,19 +299,14 @@ describe('second-round safety', () => {
 
   it('stale-round offers: accept, shortlist, reject and withdraw answer 409 OFFER_ROUND_CLOSED', async () => {
     const s = await secondRoundAfterMatch();
-    // A Round 1 offer still in play when the round ended (staged: a SUBMITTED
-    // offer of a third provider in Round 1).
-    const c = await addProvider(s.category.id);
-    const staleOffer = await ctx.prisma.offer.create({
-      data: {
-        requestId: s.requestId,
-        providerId: c.provider.id,
-        matchRoundId: roundOneId(s.requestId),
-        offerNumber: 'OF-STALE-1',
-        priceAmount: 120_000,
-        message: 'Tur 1',
-        status: OfferStatus.SUBMITTED,
-      },
+    // A Round 1 offer still in play when the round ended (staged: B's Round 1
+    // offer, closed by A's acceptance, put back to SUBMITTED). Staged by an
+    // UPDATE because Faz 3's Offer_round_open_guard refuses an INSERT into a
+    // round that is not the request's open current round.
+    const c = s.b;
+    const staleOffer = await ctx.prisma.offer.update({
+      where: { id: s.offerB1 },
+      data: { status: OfferStatus.SUBMITTED, rejectedAt: null, rejectionReason: null },
     });
 
     for (const body of [ACCEPT_OFFER, { action: 'SHORTLIST' }, { action: 'REJECT' }]) {
@@ -755,23 +750,26 @@ describe('concurrency: one winner, the rest 409 or nothing', () => {
     const { category, requestId, customerCookie } = await liveRequest();
     const party = await addProvider(category.id);
     const offerId = await submitOffer(party, requestId);
-    await act(requestId, offerId, customerCookie, ACCEPT_OFFER).expect(201);
     const other = await addProvider(category.id);
+    // Written while the round is still OPEN (Faz 3's offer guard refuses an
+    // offer INSERT into a matched round); the acceptance then closes it.
+    const otherOffer = await ctx.prisma.offer.create({
+      data: {
+        requestId,
+        providerId: other.provider.id,
+        offerNumber: 'OF-RACE-2',
+        priceAmount: 100_000,
+        message: 'x',
+        status: OfferStatus.SUBMITTED,
+      },
+    });
+    await act(requestId, offerId, customerCookie, ACCEPT_OFFER).expect(201);
 
     await expect(
       ctx.prisma.contactRevealEvent.create({
         data: {
           requestId,
-          offerId: (await ctx.prisma.offer.create({
-            data: {
-              requestId,
-              providerId: other.provider.id,
-              offerNumber: 'OF-RACE-2',
-              priceAmount: 100_000,
-              message: 'x',
-              status: OfferStatus.REJECTED,
-            },
-          })).id,
+          offerId: otherOffer.id,
           providerId: other.provider.id,
           disclosureVersion: 'v1',
         },

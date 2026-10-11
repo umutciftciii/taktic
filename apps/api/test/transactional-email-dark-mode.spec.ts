@@ -115,6 +115,11 @@ const FAMILIES: Record<string, TransactionalEmailTemplate[]> = {
     'request-cancelled-customer',
     'request-cancelled-winner',
     'request-cancelled-offer',
+    'service-issue-recorded',
+    'request-reopened',
+    'request-match-review',
+    'provider-incident-opened',
+    'provider-incident-new',
   ],
   'review/moderasyon': [
     'review-invitation',

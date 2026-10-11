@@ -11,6 +11,8 @@ import { OperationsSettingsService } from './operations-settings.service';
 import { ProviderReviewSettingsController } from './provider-review-settings.controller';
 import { ProviderReviewSettingsService } from './provider-review-settings.service';
 import { RefundPolicyController } from './refund-policy.controller';
+import { ServiceIssueSettingsController } from './service-issue-settings.controller';
+import { ServiceIssueSettingsService } from './service-issue-settings.service';
 import { SchedulerRunRegistry } from './scheduler-run-registry.service';
 import { SchedulerSettingsController } from './scheduler-settings.controller';
 import { SchedulerSettingsService } from './scheduler-settings.service';
@@ -34,6 +36,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     MarketplacePublishPolicyController,
     ProviderReviewSettingsController,
     CampaignEngineSettingsController,
+    ServiceIssueSettingsController,
   ],
   providers: [
     OperationsSettingsService,
@@ -42,6 +45,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     MarketplacePublishSettingsService,
     ProviderReviewSettingsService,
     CampaignEngineSwitchService,
+    ServiceIssueSettingsService,
   ],
   exports: [
     OperationsSettingsService,
@@ -50,6 +54,7 @@ import { SchedulerSettingsService } from './scheduler-settings.service';
     MarketplacePublishSettingsService,
     ProviderReviewSettingsService,
     CampaignEngineSwitchService,
+    ServiceIssueSettingsService,
   ],
 })
 export class OperationsSettingsModule {}

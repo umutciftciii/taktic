@@ -44,8 +44,10 @@ import {
   directShowcaseVisibilityFilter,
   isCurrentRoundOpen,
   isRequestVisibleToDirectGate,
+  isProviderExcluded,
   isRequestVisibleToProviders,
   matchesProviderArea,
+  notExcludedFromRequestFilter,
   phoneVerifiedRequestFilter,
   type ProviderServiceAreaLike,
 } from '../../common/provider-request-matching';
@@ -120,6 +122,7 @@ import { UpdateProviderDto } from './dto/update-provider.dto';
 import {
   assertOfferRoundCurrentAndOpen,
   getCurrentRoundOrThrow,
+  offerInsertGuardException,
   offerRoundClosedException,
   publishRound,
 } from '../match-rounds/match-round-transitions';
@@ -681,7 +684,9 @@ export class ProvidersService implements OnModuleInit {
           status: {
             in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
           },
-          request: {
+          // REL-002 Faz 3: per round. A failed earlier round keeps its
+          // ACCEPTED winner, which must not hide the live offers of the next.
+          matchRound: {
             offers: { none: { status: OfferStatus.ACCEPTED } },
           },
         },
@@ -907,7 +912,8 @@ export class ProvidersService implements OnModuleInit {
                 status: {
                   in: [OfferStatus.SUBMITTED, OfferStatus.VIEWED, OfferStatus.SHORTLISTED],
                 },
-                request: {
+                // Per round (REL-002 Faz 3), as in getAdminProviderOffers.
+                matchRound: {
                   offers: { none: { status: OfferStatus.ACCEPTED } },
                 },
               },
@@ -1304,6 +1310,8 @@ export class ProvidersService implements OnModuleInit {
         // REL-002: the current round is OPEN and this provider has not offered
         // in it. An offer in an earlier round does not hide a later one.
         ...currentRoundOpenForProviderFilter(providerId),
+        // REL-002 Faz 3: never a request this provider is excluded from.
+        ...notExcludedFromRequestFilter(providerId),
         ...(normalizedFilters.categoryId ? { categoryId: normalizedFilters.categoryId } : {}),
         ...(normalizedFilters.city ? { city: { equals: normalizedFilters.city, mode: 'insensitive' } } : {}),
         ...(normalizedFilters.district
@@ -1393,6 +1401,8 @@ export class ProvidersService implements OnModuleInit {
             },
           },
         },
+        // REL-002 Faz 3: whether this provider is excluded from the request.
+        providerExclusions: { where: { providerId }, select: { id: true }, take: 1 },
         // This provider's own report on the request, if any — never another
         // provider's. A report never hides the request or changes its
         // pricing; it only surfaces as `myReport` in the detail below.
@@ -1409,6 +1419,8 @@ export class ProvidersService implements OnModuleInit {
       request.status !== ServiceRequestStatus.APPROVED ||
       // The list's round gate, on the row in hand (REL-002).
       !isCurrentRoundOpen(request) ||
+      // An excluded provider is told the request does not exist (REL-002).
+      request.providerExclusions.length > 0 ||
       !isRequestVisibleToProviders(request) ||
       // Same predicate as the list, applied to a row already in hand. Without
       // it, a provider who guessed a request id could read a lead addressed to
@@ -1421,7 +1433,7 @@ export class ProvidersService implements OnModuleInit {
     }
 
     const providerCreditBalance = await this.getProviderCreditBalance(providerId);
-    const { currentRound, ...rest } = request;
+    const { currentRound, providerExclusions: _exclusions, ...rest } = request;
 
     return toProviderRequestDetail({ ...rest, offers: currentRound.offers }, providerCreditBalance);
   }
@@ -1482,6 +1494,13 @@ export class ProvidersService implements OnModuleInit {
           });
 
           if (!request || !canProviderActOnRequest(provider, request, providerId)) {
+            throw new NotFoundException('Request not found');
+          }
+
+          // REL-002 Faz 3: an excluded provider never offers again — read in
+          // this transaction, beside the round it would offer in. The
+          // `Offer_round_open_guard` trigger refuses it at the database too.
+          if (await isProviderExcluded(tx, requestId, providerId)) {
             throw new NotFoundException('Request not found');
           }
 
@@ -1718,6 +1737,12 @@ export class ProvidersService implements OnModuleInit {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ConflictException('Provider already submitted an offer for this request');
       }
+      // The database's own refusal (M3 trigger), for a writer that got past
+      // the checks above: the same 409 the application answers.
+      const guarded = offerInsertGuardException(error);
+      if (guarded) {
+        throw guarded;
+      }
 
       throw error;
     }
@@ -1804,8 +1829,38 @@ export class ProvidersService implements OnModuleInit {
         ? await this.loadAcceptedWorkScope(offer.id, offer.requestId)
         : null;
 
+    // REL-002 Faz 3: what became of the match this offer won, read from the
+    // round it won (an ACCEPTED offer of a FAILED round stays ACCEPTED). Null
+    // for an offer that never won. The incident's number and reason only —
+    // the customer's note reaches the provider masked, by mail (Faz 4 adds
+    // the panel view).
+    const wonRound =
+      offer.status === OfferStatus.ACCEPTED || offer.status === OfferStatus.CANCELLED
+        ? await this.prisma.serviceRequestMatchRound.findUnique({
+            where: { matchedOfferId: offer.id },
+            select: {
+              status: true,
+              failedAt: true,
+              failureIncident: { select: { incidentNumber: true, reason: true, reportedAt: true } },
+            },
+          })
+        : null;
+    const matchOutcome = wonRound ? matchOutcomeOf(wonRound.status) : null;
+
     const [projected] = await this.withRefundSettlements([withRefundEligibility(offer)]);
-    return { ...projected!, acceptedWorkScope };
+    return {
+      ...projected!,
+      acceptedWorkScope,
+      matchOutcome,
+      matchFailure:
+        wonRound?.status === MatchRoundStatus.FAILED && wonRound.failureIncident
+          ? {
+              failedAt: wonRound.failedAt,
+              incidentNumber: wonRound.failureIncident.incidentNumber,
+              reason: wonRound.failureIncident.reason,
+            }
+          : null,
+    };
   }
 
   /**
@@ -2136,7 +2191,13 @@ export class ProvidersService implements OnModuleInit {
       select: providerVisibilityRequestSelect,
     });
 
-    if (!request || !canProviderActOnRequest(provider, request, providerId)) {
+    if (
+      !request ||
+      !canProviderActOnRequest(provider, request, providerId) ||
+      // REL-002 Faz 3: excluded is "does not exist" for this provider — the
+      // offer path and the report path both come through here.
+      (await isProviderExcluded(this.prisma, requestId, providerId))
+    ) {
       throw new NotFoundException('Request not found');
     }
 
@@ -2156,6 +2217,22 @@ export class ProvidersService implements OnModuleInit {
   private async countMatchingApprovedRequests(providerId: string) {
     const requests = await this.listMatchingRequests(providerId, {});
     return requests.length;
+  }
+}
+
+/** What became of a won match, as the provider's offer screen reads it. */
+function matchOutcomeOf(status: MatchRoundStatus): 'ACTIVE' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | null {
+  switch (status) {
+    case MatchRoundStatus.MATCHED:
+      return 'ACTIVE';
+    case MatchRoundStatus.COMPLETED:
+      return 'COMPLETED';
+    case MatchRoundStatus.FAILED:
+      return 'FAILED';
+    case MatchRoundStatus.CANCELLED:
+      return 'CANCELLED';
+    default:
+      return null;
   }
 }
 

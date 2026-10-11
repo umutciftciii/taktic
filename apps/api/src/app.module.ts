@@ -13,6 +13,7 @@ import { LocationsModule } from './modules/locations/locations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
+import { ServiceIssuesModule } from './modules/service-issues/service-issues.module';
 import { ShowcaseModule } from './modules/showcase/showcase.module';
 import { SitemapModule } from './modules/sitemap/sitemap.module';
 import { SeoAdminModule } from './modules/seo/admin/seo-admin.module';
@@ -71,6 +72,8 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     // path so a reordering here fails loudly.
     RequestReportsModule,
     ServiceRequestsModule,
+    // REL-002 Faz 3: POST /service-requests/:id/service-issue.
+    ServiceIssuesModule,
     ProviderClaimModule,
     // Before ProvidersModule: `GET /providers/me/business-registration` must not
     // be read as anything of ProvidersController's.

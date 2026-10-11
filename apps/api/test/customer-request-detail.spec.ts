@@ -89,12 +89,18 @@ describe('GET /service-requests/my/:id', () => {
     expect(detail.body.preferredDate).toBe('2026-09-15T00:00:00.000Z');
     expect(detail.body.preferredDateEnd).toBe('2026-09-20T00:00:00.000Z');
     expect(detail.body.showcaseLead).toBeNull();
-    // The detail is the list row plus the request's own answers — nothing
-    // else may differ between the two reads.
-    const { answers, ...detailRow } = detail.body;
+    // The detail is the list row plus the request's own answers and its
+    // matching view (REL-002 Faz 3: currentRound, rounds, serviceIssue) —
+    // nothing else may differ between the two reads.
+    const { answers, currentRound, rounds, serviceIssue, ...detailRow } = detail.body;
     expect(detailRow).toEqual(list.body[0]);
     expect(answers).toEqual([]);
-    expect(list.body[0]).not.toHaveProperty('answers');
+    expect(currentRound).toMatchObject({ roundNumber: 1, status: 'OPEN' });
+    expect(rounds).toHaveLength(1);
+    expect(serviceIssue).toMatchObject({ canReport: false });
+    for (const key of ['answers', 'currentRound', 'rounds', 'serviceIssue']) {
+      expect(list.body[0]).not.toHaveProperty(key);
+    }
   });
 
   /*

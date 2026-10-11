@@ -80,6 +80,12 @@ async function Inbox({ user }: { user: AuthUser }) {
                 <span className="msg-thread-main">
                   <span className="msg-thread-name" data-testid="thread-counterpart">
                     {thread.counterpart.name}
+                    {thread.mode === 'READ_ONLY' ? (
+                      <span className="tag tag-neutral thread-closed-tag" data-testid="thread-closed-tag">
+                        {' '}
+                        Kapandı
+                      </span>
+                    ) : null}
                   </span>
                   <span className="msg-thread-context">
                     {thread.request.category.name} ·{' '}

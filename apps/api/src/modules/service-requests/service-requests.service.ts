@@ -19,7 +19,7 @@ import { matchesAdminSearch, parseAdminSearch } from '../../common/admin-search'
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
-import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, MatchRoundStatus, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -34,6 +34,8 @@ import { RequestPublishOutbox } from '../notifications/request-publish-outbox.se
 import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import { MarketplacePublishSettingsService } from '../operations-settings/marketplace-publish-settings.service';
+import { ServiceIssueSettingsService } from '../operations-settings/service-issue-settings.service';
+import { customerServiceIssueView } from '../service-issues/service-issue-view';
 import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { refundOfferCreditInTransaction, refundOfferRechargeInTransaction } from '../offers/offers.service';
@@ -405,6 +407,7 @@ export class ServiceRequestsService {
     @Inject(RequestPublishOutbox) private readonly publishOutbox: RequestPublishOutbox,
     @Inject(ReviewInvitationOutbox) private readonly reviewInvitations: ReviewInvitationOutbox,
     @Inject(RequestCancellationOutbox) private readonly cancellationNotices: RequestCancellationOutbox,
+    @Inject(ServiceIssueSettingsService) private readonly serviceIssueSettings: ServiceIssueSettingsService,
   ) {}
 
   /**
@@ -943,19 +946,145 @@ export class ServiceRequestsService {
     }
 
     const { answers, ...row } = request;
+    const matching = await this.customerMatchingView(id, customerId, row.status);
     return {
       ...toCustomerServiceRequest(row),
       answers: answers.map(toCustomerAnswer),
+      ...matching,
+    };
+  }
+
+  /**
+   * REL-002 Faz 3 — the owner's view of the request's matching history and
+   * of the service-issue action, computed here so the screen never judges a
+   * date itself.
+   *
+   * - `currentRound`: where the request stands.
+   * - `rounds[]`: every round, oldest first, with the matched business's
+   *   name (already the customer's to know), the round's dates and, for a
+   *   FAILED round, the customer's own report (number, reason, when). Never
+   *   the provider's response, and never anything about another round's
+   *   offers.
+   * - `serviceIssue`: whether a report can be made now, with which reasons,
+   *   when the next one opens, and why not when it cannot.
+   */
+  private async customerMatchingView(requestId: string, customerId: string, status: ServiceRequestStatus) {
+    const [enabled, request] = await Promise.all([
+      this.serviceIssueSettings.isEnabled(),
+      this.prisma.serviceRequest.findUniqueOrThrow({
+        where: { id: requestId },
+        select: {
+          matchedOfferId: true,
+          currentRoundId: true,
+          matchRounds: {
+            orderBy: { roundNumber: 'asc' },
+            select: {
+              id: true,
+              roundNumber: true,
+              status: true,
+              source: true,
+              openedBy: true,
+              openedAt: true,
+              publishedAt: true,
+              expiresAt: true,
+              matchedAt: true,
+              failedAt: true,
+              completedAt: true,
+              cancelledAt: true,
+              expiredAt: true,
+              matchedOffer: {
+                select: {
+                  id: true,
+                  estimatedStartDate: true,
+                  estimatedCompletionDate: true,
+                  provider: { select: { businessName: true } },
+                },
+              },
+              failureIncident: {
+                select: { incidentNumber: true, reason: true, reportedAt: true, customerUserId: true },
+              },
+              messageThread: { select: { id: true, customerUserId: true } },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const rounds = request.matchRounds.map((round) => ({
+      id: round.id,
+      roundNumber: round.roundNumber,
+      status: round.status,
+      source: round.source,
+      openedBy: round.openedBy,
+      isCurrent: round.id === request.currentRoundId,
+      openedAt: round.openedAt,
+      publishedAt: round.publishedAt,
+      expiresAt: round.expiresAt,
+      matchedAt: round.matchedAt,
+      failedAt: round.failedAt,
+      completedAt: round.completedAt,
+      cancelledAt: round.cancelledAt,
+      expiredAt: round.expiredAt,
+      provider: round.matchedOffer ? { businessName: round.matchedOffer.provider.businessName } : null,
+      offerId: round.matchedOffer?.id ?? null,
+      issue:
+        round.failureIncident && round.failureIncident.customerUserId === customerId
+          ? {
+              incidentNumber: round.failureIncident.incidentNumber,
+              reason: round.failureIncident.reason,
+              reportedAt: round.failureIncident.reportedAt,
+              // What the customer is told about their report (REL-002
+              // decision 6: never the provider's side of it).
+              status: 'RECORDED' as const,
+            }
+          : null,
+      // The conversation of that round, read-only once it ended.
+      messageThreadId:
+        round.messageThread && round.messageThread.customerUserId === customerId ? round.messageThread.id : null,
+    }));
+
+    const current = request.matchRounds.find((round) => round.id === request.currentRoundId)!;
+    const currentRound = {
+      id: current.id,
+      roundNumber: current.roundNumber,
+      status: current.status,
+      openedAt: current.openedAt,
+      publishedAt: current.publishedAt,
+      expiresAt: current.expiresAt,
+      matchedAt: current.matchedAt,
+      failedAt: current.failedAt,
+    };
+
+    return {
+      currentRound,
+      rounds,
+      serviceIssue: customerServiceIssueView({
+        enabled,
+        status,
+        matchedOfferId: request.matchedOfferId,
+        current: {
+          id: current.id,
+          roundNumber: current.roundNumber,
+          status: current.status,
+          matchedOfferId: current.matchedOffer?.id ?? null,
+          schedule: {
+            start: current.matchedOffer?.estimatedStartDate ?? null,
+            end: current.matchedOffer?.estimatedCompletionDate ?? null,
+          },
+        },
+        now: new Date(),
+      }),
     };
   }
 
   /** The operator's request page (REQUESTS_READ); the account block as in {@link listServiceRequests}. */
   /**
-   * REL-002 Faz 2: the request's match rounds, oldest first — an internal,
+   * REL-002: the request's match rounds, oldest first — an internal,
    * read-only history for support (REQUESTS_READ). Ids, states and the
-   * round clock only: the winner is named by offer and provider id, never by
-   * contact details. Faz 2 still opens a single round per request; this is
-   * the read surface that is ready for more.
+   * round clock: the winner is named by offer and provider id, never by
+   * contact details. Faz 3 adds, per FAILED round, the service incident
+   * behind it (the customer's reason and note as written — staff read it
+   * raw — and its status), and the request's provider exclusions.
    */
   async listMatchRoundsForAdmin(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
@@ -981,8 +1110,28 @@ export class ServiceRequestsService {
             completedAt: true,
             cancelledAt: true,
             expiredAt: true,
+            failedAt: true,
+            failureIncident: {
+              select: {
+                id: true,
+                incidentNumber: true,
+                providerId: true,
+                offerId: true,
+                reason: true,
+                customerNote: true,
+                eligibilityBasis: true,
+                promisedStartDate: true,
+                promisedEndDate: true,
+                status: true,
+                reportedAt: true,
+              },
+            },
             _count: { select: { offers: true } },
           },
+        },
+        providerExclusions: {
+          orderBy: { createdAt: 'asc' },
+          select: { providerId: true, sourceRoundId: true, incidentId: true, reason: true, createdAt: true },
         },
       },
     });
@@ -994,6 +1143,7 @@ export class ServiceRequestsService {
     return {
       requestId: request.id,
       currentRoundId: request.currentRoundId,
+      exclusions: request.providerExclusions,
       rounds: request.matchRounds.map(({ _count, ...round }) => ({
         ...round,
         isCurrent: round.id === request.currentRoundId,
@@ -1578,9 +1728,15 @@ export class ServiceRequestsService {
         }
 
         // The current round is cancelled with the request and keeps its match
-        // record, exactly as the request keeps matchedOfferId.
-        const { currentRoundId } = await getCurrentRoundOrThrow(tx, id);
-        await transitionRoundToCancelled(tx, { roundId: currentRoundId, cancelledAt: now });
+        // record, exactly as the request keeps matchedOfferId. A request in
+        // MATCH_REVIEW (REL-002 Faz 3) has no live round: its current round
+        // FAILED, which is terminal and stays exactly as it is — and so do its
+        // offers, the failed winner's included (no refund, ever).
+        const { currentRoundId, currentRound } = await getCurrentRoundOrThrow(tx, id);
+        const roundEnded = currentRound.status === MatchRoundStatus.FAILED;
+        if (!roundEnded) {
+          await transitionRoundToCancelled(tx, { roundId: currentRoundId, cancelledAt: now });
+        }
 
         await this.showcaseLeads.closeForRequest(tx, id, ShowcaseLeadCloseReason.CUSTOMER_CANCELLED, now);
 
@@ -1588,21 +1744,23 @@ export class ServiceRequestsService {
         // competitors were settled when it ended, and a cancel today must not
         // reach back and refund what that round's outcome kept (REL-002 §10).
         const acceptedOfferId = current.matchedOfferId;
-        const offers = await tx.offer.findMany({
-          where: { requestId: id, matchRoundId: currentRoundId },
-          orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
-          select: {
-            id: true,
-            providerId: true,
-            status: true,
-            creditCost: true,
-            entitlementSource: true,
-            creditSpentTransactionId: true,
-            creditRefundedTransactionId: true,
-            creditRechargeTransactionId: true,
-            creditRechargeRefundedTransactionId: true,
-          },
-        });
+        const offers = roundEnded
+          ? []
+          : await tx.offer.findMany({
+              where: { requestId: id, matchRoundId: currentRoundId },
+              orderBy: [{ submittedAt: 'asc' }, { id: 'asc' }],
+              select: {
+                id: true,
+                providerId: true,
+                status: true,
+                creditCost: true,
+                entitlementSource: true,
+                creditSpentTransactionId: true,
+                creditRefundedTransactionId: true,
+                creditRechargeTransactionId: true,
+                creditRechargeRefundedTransactionId: true,
+              },
+            });
 
         const closedOfferIds: string[] = [];
         const refundedOfferIds: string[] = [];

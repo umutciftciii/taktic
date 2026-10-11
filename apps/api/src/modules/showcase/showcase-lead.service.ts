@@ -803,6 +803,7 @@ export class ShowcaseLeadService {
  */
 const providerLeadSelect = {
   id: true,
+  providerId: true,
   status: true,
   urgencyBucket: true,
   slaHoursSnapshot: true,
@@ -840,11 +841,27 @@ const providerLeadSelect = {
         orderBy: { createdAt: 'asc' },
         select: { id: true, questionKey: true, questionLabel: true, questionType: true, value: true },
       },
+      // REL-002 Faz 3: who the request excludes — only ever read to decide
+      // whether *this* lead's business is one of them, never projected.
+      providerExclusions: { select: { providerId: true } },
     },
   },
 } satisfies Prisma.ShowcaseLeadSelect;
 
 type ProviderLeadRow = Prisma.ShowcaseLeadGetPayload<{ select: typeof providerLeadSelect }>;
+
+/**
+ * The lead's request as its business may see it. Once that business's match
+ * on the request failed (REL-002 Faz 3) the lead stays in their inbox as
+ * history — the placement did produce it — but the request is somebody
+ * else's market now: its live status, which would say "open for offers" or
+ * name a later state, is frozen to MATCH_ENDED.
+ */
+function toProviderLeadRequest(lead: ProviderLeadRow) {
+  const { providerExclusions, ...request } = lead.request;
+  const excluded = providerExclusions.some((row) => row.providerId === lead.providerId);
+  return excluded ? { ...request, status: 'MATCH_ENDED' as const, matchEnded: true } : { ...request, matchEnded: false };
+}
 
 function toProviderLead(lead: ProviderLeadRow) {
   return {
@@ -864,6 +881,6 @@ function toProviderLead(lead: ProviderLeadRow) {
     ...(lead.kindSnapshot === ShowcaseCardKind.SERVICE
       ? { listedServicePriceAmount: lead.listedPriceSnapshot }
       : {}),
-    request: lead.request,
+    request: toProviderLeadRequest(lead),
   };
 }

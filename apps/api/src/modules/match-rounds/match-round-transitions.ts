@@ -1,5 +1,12 @@
 import { ConflictException, HttpStatus } from '@nestjs/common';
-import { MatchRoundSource, MatchRoundStatus, Prisma, ServiceRequestStatus } from '@prisma/client';
+import limits from '@taktic/shared/limits.json';
+import {
+  MatchRoundOpenedBy,
+  MatchRoundSource,
+  MatchRoundStatus,
+  Prisma,
+  ServiceRequestStatus,
+} from '@prisma/client';
 import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.constants';
 
 /**
@@ -14,8 +21,9 @@ import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.cons
  * same transaction.
  *
  * Round 1 is born with its request in the database
- * (`ServiceRequest_round_one_at_birth`, M2), so nothing here creates rounds:
- * Faz 3 adds the transition that opens Round N+1.
+ * (`ServiceRequest_round_one_at_birth`, M2). Round N+1 is opened by
+ * {@link openNextRound}, which only the service-issue transaction calls
+ * (Faz 3), and never past {@link MAX_AUTO_MATCH_ROUNDS}.
  *
  * A transition that matches nothing throws {@link roundStateChangedException}.
  * Callers run inside a transaction whose own guard (the request's conditional
@@ -28,6 +36,22 @@ export const OFFER_ROUND_CLOSED_CODE = 'OFFER_ROUND_CLOSED';
 export const MATCH_ROUND_STATE_CHANGED_CODE = 'MATCH_ROUND_STATE_CHANGED';
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * REL-002 decision 3: rounds the platform opens on its own. A service issue on
+ * Round 1 or 2 reopens the request into the next round; on Round 3 it does
+ * not — the request goes to MATCH_REVIEW and only staff may open Round 4+
+ * (Faz 5). Shared with the web through `limits.json`.
+ */
+export const MAX_AUTO_MATCH_ROUNDS: number = limits.maxAutoMatchRounds;
+
+/** The round id Round N ≥ 2 is written with: deterministic, like Round 1's `mr1_`. */
+export function nextRoundId(requestId: string, roundNumber: number): string {
+  if (!Number.isInteger(roundNumber) || roundNumber < 2) {
+    throw new Error(`Only Round 2 and later are opened by the application (got ${roundNumber})`);
+  }
+  return `mr${roundNumber}_${requestId}`;
+}
 
 /** The round columns the matching core reads. */
 export const CURRENT_ROUND_SELECT = {
@@ -42,6 +66,7 @@ export const CURRENT_ROUND_SELECT = {
   matchedOfferId: true,
   matchedProviderId: true,
   matchedAt: true,
+  failedAt: true,
 } satisfies Prisma.ServiceRequestMatchRoundSelect;
 
 export type CurrentRound = Prisma.ServiceRequestMatchRoundGetPayload<{
@@ -60,6 +85,39 @@ export function offerRoundClosedException() {
     code: OFFER_ROUND_CLOSED_CODE,
     message: 'Bu teklifin ait olduğu eşleşme turu kapandı; işlem yapılamaz.',
   });
+}
+
+export const PROVIDER_EXCLUDED_CODE = 'PROVIDER_EXCLUDED';
+
+/**
+ * 409 for an action by a provider excluded from the request (REL-002 Faz 3):
+ * their match on it failed, and they may not act on it again. Surfaces only
+ * where the provider already knows the request (their own stale offer); a
+ * provider who merely guessed an id gets the ordinary 404.
+ */
+export function providerExcludedException() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: PROVIDER_EXCLUDED_CODE,
+    message: 'Bu talepteki eşleşmeniz müşteri bildirimiyle sona erdi; bu talep için işlem yapamazsınız.',
+  });
+}
+
+/**
+ * The `Offer_round_open_guard` trigger (M3) refuses an offer INSERT with a
+ * message that starts with its code. Turns that refusal into the 409 the
+ * application itself would have answered; `null` for any other error.
+ */
+export function offerInsertGuardException(error: unknown): ConflictException | null {
+  const message = error instanceof Error ? error.message : '';
+  if (message.includes(`${PROVIDER_EXCLUDED_CODE}:`)) {
+    return providerExcludedException();
+  }
+  if (message.includes(`${OFFER_ROUND_CLOSED_CODE}:`)) {
+    return offerRoundClosedException();
+  }
+  return null;
 }
 
 /** 409 for a round transition whose expected state no longer holds. */
@@ -223,6 +281,62 @@ export function transitionRoundToCancelled(
     { id: input.roundId, status: { in: [MatchRoundStatus.OPEN, MatchRoundStatus.MATCHED] } },
     { status: MatchRoundStatus.CANCELLED, cancelledAt: input.cancelledAt },
   );
+}
+
+/**
+ * MATCHED → FAILED (REL-002 Faz 3): the customer reported a service issue.
+ * Conditional on the round still being MATCHED to this very offer, so a
+ * completion, a cancel or a second report that got there first leaves this
+ * one matching nothing. The winner stays recorded; the incident says why.
+ */
+export function transitionRoundToFailed(
+  tx: Prisma.TransactionClient,
+  input: { roundId: string; offerId: string; incidentId: string; failedAt: Date },
+) {
+  return transition(
+    tx,
+    { id: input.roundId, status: MatchRoundStatus.MATCHED, matchedOfferId: input.offerId },
+    { status: MatchRoundStatus.FAILED, failedAt: input.failedAt, failureIncidentId: input.incidentId },
+  );
+}
+
+/**
+ * Opens Round N+1 after Round N failed (REL-002 Faz 3). A marketplace round
+ * always: the failed provider is excluded and a vitrin lead's gate is gone.
+ *
+ * `publishedAt` is the moment the new round's offer period starts, or NULL
+ * when the request must first pass moderation (a direct lead that never did,
+ * §20) — then the ordinary publish path stamps it later. `expiresAt` is the
+ * snapshot `publishedAt + REQUEST_EXPIRY_DAYS`; `reminderSentAt` starts NULL.
+ *
+ * Inserted, not upserted: the `(requestId, roundNumber)` unique and the
+ * one-active-round partial unique refuse a second Round N+1, whatever raced.
+ */
+export async function openNextRound(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; failedRoundNumber: number; openedAt: Date; publishedAt: Date | null },
+): Promise<{ id: string; roundNumber: number }> {
+  const roundNumber = input.failedRoundNumber + 1;
+  if (roundNumber > MAX_AUTO_MATCH_ROUNDS) {
+    throw new Error(`Round ${roundNumber} is past the automatic limit (${MAX_AUTO_MATCH_ROUNDS})`);
+  }
+  const round = await tx.serviceRequestMatchRound.create({
+    data: {
+      id: nextRoundId(input.requestId, roundNumber),
+      requestId: input.requestId,
+      roundNumber,
+      status: MatchRoundStatus.OPEN,
+      source: MatchRoundSource.MARKETPLACE,
+      openedBy: MatchRoundOpenedBy.SERVICE_ISSUE,
+      openedAt: input.openedAt,
+      publishedAt: input.publishedAt,
+      expiresAt: input.publishedAt
+        ? new Date(input.publishedAt.getTime() + REQUEST_EXPIRY_DAYS * DAY_IN_MS)
+        : null,
+    },
+    select: { id: true, roundNumber: true },
+  });
+  return round;
 }
 
 /** OPEN (with no winner) → EXPIRED. */

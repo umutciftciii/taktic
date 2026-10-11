@@ -16,15 +16,25 @@
 -- The time fields (openedAt, publishedAt/expiresAt, reminderSentAt) and the
 -- round number are compared for Round 1 only — a later round (Faz 3) runs its
 -- own clock and is not a function of the request's legacy columns.
+--
+-- Faz 3: a request in MATCH_REVIEW projects to a FAILED current round, and a
+-- FAILED round keeps its winner while the request's projection is NULL, so the
+-- match columns are not compared for it; checks 7–10 cover the failure record
+-- itself (incident, exclusion, terminal history, no excluded provider back).
 WITH expected AS (
   SELECT
     r."id"                                               AS "requestId",
     r."currentRoundId",
-    (CASE r."status"
+    -- ::text so the script also runs on a database before M3, whose enum has
+    -- no MATCH_REVIEW yet (a literal would be cast to the enum and refused).
+    (CASE r."status"::text
         WHEN 'MATCHED'   THEN 'MATCHED'
         WHEN 'COMPLETED' THEN 'COMPLETED'
-        WHEN 'CANCELLED' THEN 'CANCELLED'
+        -- Cancelled from MATCH_REVIEW: the current round had already FAILED
+        -- (terminal) and the cancel leaves it as it was.
+        WHEN 'CANCELLED' THEN CASE WHEN c."previousStatus"::text = 'MATCH_REVIEW' THEN 'FAILED' ELSE 'CANCELLED' END
         WHEN 'EXPIRED'   THEN 'EXPIRED'
+        WHEN 'MATCH_REVIEW' THEN 'FAILED'
         ELSE 'OPEN'
      END)                                                AS "status",
     (CASE
@@ -40,7 +50,8 @@ WITH expected AS (
     CASE WHEN m."carries" THEN r."matchedOfferId" END    AS "matchedOfferId",
     CASE WHEN m."carries" THEN o."providerId" END        AS "matchedProviderId",
     CASE WHEN r."status" = 'COMPLETED' THEN r."completedAt" END AS "completedAt",
-    CASE WHEN r."status" = 'CANCELLED' THEN r."cancelledAt" END AS "cancelledAt",
+    CASE WHEN r."status" = 'CANCELLED' AND c."previousStatus"::text IS DISTINCT FROM 'MATCH_REVIEW'
+         THEN r."cancelledAt" END                        AS "cancelledAt",
     CASE WHEN r."status" = 'EXPIRED'   THEN r."expiredAt"   END AS "expiredAt"
   FROM "ServiceRequest" r
   CROSS JOIN LATERAL (
@@ -50,6 +61,7 @@ WITH expected AS (
     SELECT (r."status" IN ('MATCHED', 'COMPLETED', 'CANCELLED') AND r."matchedOfferId" IS NOT NULL) AS "carries"
   ) m
   LEFT JOIN "Offer" o ON o."id" = r."matchedOfferId"
+  LEFT JOIN "ServiceRequestCancellation" c ON c."requestId" = r."id"
 )
 -- 1. Every request points at a round of its own.
 SELECT e."requestId", 'request_current_round' AS "check",
@@ -81,13 +93,13 @@ SELECT e."requestId", 'round_projection',
          CASE WHEN mr."roundNumber" = 1 AND mr."publishedAt" IS DISTINCT FROM e."publishedAt" THEN 'publishedAt' END,
          CASE WHEN mr."roundNumber" = 1 AND mr."expiresAt" IS DISTINCT FROM e."expiresAt" THEN 'expiresAt' END,
          CASE WHEN mr."roundNumber" = 1 AND mr."reminderSentAt" IS DISTINCT FROM e."reminderSentAt" THEN 'reminderSentAt' END,
-         CASE WHEN mr."matchedAt" IS DISTINCT FROM e."matchedAt" THEN 'matchedAt' END,
-         CASE WHEN mr."matchedOfferId" IS DISTINCT FROM e."matchedOfferId" THEN 'matchedOfferId' END,
-         CASE WHEN mr."matchedProviderId" IS DISTINCT FROM e."matchedProviderId" THEN 'matchedProviderId' END,
+         CASE WHEN e."status" <> 'FAILED' AND mr."matchedAt" IS DISTINCT FROM e."matchedAt" THEN 'matchedAt' END,
+         CASE WHEN e."status" <> 'FAILED' AND mr."matchedOfferId" IS DISTINCT FROM e."matchedOfferId" THEN 'matchedOfferId' END,
+         CASE WHEN e."status" <> 'FAILED' AND mr."matchedProviderId" IS DISTINCT FROM e."matchedProviderId" THEN 'matchedProviderId' END,
          CASE WHEN mr."completedAt" IS DISTINCT FROM e."completedAt" THEN 'completedAt' END,
          CASE WHEN mr."cancelledAt" IS DISTINCT FROM e."cancelledAt" THEN 'cancelledAt' END,
          CASE WHEN mr."expiredAt" IS DISTINCT FROM e."expiredAt" THEN 'expiredAt' END,
-         CASE WHEN mr."failedAt" IS NOT NULL THEN 'failedAt (no FAILED round before Faz 3)' END)
+         CASE WHEN e."status" <> 'FAILED' AND mr."failedAt" IS NOT NULL THEN 'failedAt on a round that did not fail' END)
 FROM expected e
 JOIN "ServiceRequestMatchRound" mr ON mr."id" = e."currentRoundId"
 WHERE mr."status"::text <> e."status"
@@ -97,13 +109,14 @@ WHERE mr."status"::text <> e."status"
       OR mr."publishedAt" IS DISTINCT FROM e."publishedAt"
       OR mr."expiresAt" IS DISTINCT FROM e."expiresAt"
       OR mr."reminderSentAt" IS DISTINCT FROM e."reminderSentAt"))
-   OR mr."matchedAt" IS DISTINCT FROM e."matchedAt"
-   OR mr."matchedOfferId" IS DISTINCT FROM e."matchedOfferId"
-   OR mr."matchedProviderId" IS DISTINCT FROM e."matchedProviderId"
+   OR (e."status" <> 'FAILED' AND (
+         mr."matchedAt" IS DISTINCT FROM e."matchedAt"
+      OR mr."matchedOfferId" IS DISTINCT FROM e."matchedOfferId"
+      OR mr."matchedProviderId" IS DISTINCT FROM e."matchedProviderId"
+      OR mr."failedAt" IS NOT NULL))
    OR mr."completedAt" IS DISTINCT FROM e."completedAt"
    OR mr."cancelledAt" IS DISTINCT FROM e."cancelledAt"
    OR mr."expiredAt" IS DISTINCT FROM e."expiredAt"
-   OR mr."failedAt" IS NOT NULL
 
 UNION ALL
 -- 3b. A round's winner was made in that round (also a composite FK since M2).
@@ -132,5 +145,49 @@ SELECT t."requestId", 'thread_round', t."id" || ' → ' || coalesce(t."roundId",
 FROM "MessageThread" t
 JOIN "Offer" o ON o."id" = t."offerId"
 WHERE t."roundId" IS NULL OR t."roundId" IS DISTINCT FROM o."matchRoundId"
+
+UNION ALL
+-- 7. A FAILED round carries its own incident — same request, round, offer and
+--    provider — and the provider's exclusion from the request names it.
+SELECT mr."requestId", 'failed_round_record',
+       mr."id" || concat_ws(' ',
+         CASE WHEN i."id" IS NULL THEN 'no incident' END,
+         CASE WHEN i."id" IS NOT NULL AND (i."roundId" <> mr."id" OR i."requestId" <> mr."requestId") THEN 'incident elsewhere' END,
+         CASE WHEN i."offerId" IS DISTINCT FROM mr."matchedOfferId" THEN 'incident offer' END,
+         CASE WHEN i."providerId" IS DISTINCT FROM mr."matchedProviderId" THEN 'incident provider' END,
+         CASE WHEN x."id" IS NULL THEN 'no exclusion' END,
+         CASE WHEN o."status"::text <> 'ACCEPTED' THEN 'winner not ACCEPTED' END)
+FROM "ServiceRequestMatchRound" mr
+LEFT JOIN "ProviderServiceIncident" i ON i."id" = mr."failureIncidentId"
+LEFT JOIN "ServiceRequestProviderExclusion" x
+       ON x."incidentId" = mr."failureIncidentId" AND x."requestId" = mr."requestId" AND x."providerId" = mr."matchedProviderId"
+LEFT JOIN "Offer" o ON o."id" = mr."matchedOfferId"
+WHERE mr."status"::text = 'FAILED'
+  AND (i."id" IS NULL OR i."roundId" <> mr."id" OR i."requestId" <> mr."requestId"
+       OR i."offerId" IS DISTINCT FROM mr."matchedOfferId" OR i."providerId" IS DISTINCT FROM mr."matchedProviderId"
+       OR x."id" IS NULL OR o."status"::text <> 'ACCEPTED')
+
+UNION ALL
+-- 8. Every incident is the failure record of its round.
+SELECT i."requestId", 'incident_without_failed_round', i."id" || ' → ' || i."roundId"
+FROM "ProviderServiceIncident" i
+JOIN "ServiceRequestMatchRound" mr ON mr."id" = i."roundId"
+WHERE mr."status"::text <> 'FAILED' OR mr."failureIncidentId" IS DISTINCT FROM i."id"
+
+UNION ALL
+-- 9. Only the current round may be live: every earlier round ended.
+SELECT mr."requestId", 'earlier_round_still_live', mr."id" || ' ' || mr."status"
+FROM "ServiceRequestMatchRound" mr
+JOIN "ServiceRequest" r ON r."id" = mr."requestId"
+WHERE mr."id" <> r."currentRoundId" AND mr."status"::text IN ('OPEN', 'MATCHED')
+
+UNION ALL
+-- 10. No excluded provider has an offer in a round after the one they failed.
+SELECT x."requestId", 'excluded_provider_offered_again', o."id" || ' in round ' || orr."roundNumber"
+FROM "ServiceRequestProviderExclusion" x
+JOIN "ServiceRequestMatchRound" src ON src."id" = x."sourceRoundId"
+JOIN "Offer" o ON o."requestId" = x."requestId" AND o."providerId" = x."providerId"
+JOIN "ServiceRequestMatchRound" orr ON orr."id" = o."matchRoundId"
+WHERE orr."roundNumber" > src."roundNumber"
 
 ORDER BY 1, 2;

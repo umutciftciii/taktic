@@ -1346,6 +1346,8 @@ function lifecycleSentence(request: ServiceRequest, daysLeft: number | null): st
       return 'Talep iptal edildi; hizmet verenlere gösterilmiyor.';
     case 'REJECTED':
       return 'Talep reddedildi; hizmet verenlere gösterilmiyor.';
+    case 'MATCH_REVIEW':
+      return 'Üç otomatik eşleşme turu da müşterinin hizmet aksaklığı bildirimiyle kapandı. Talep pazaryerinde görünmez ve zamanlanmış işler ona dokunmaz; otomatik yeni tur açılmaz. Müşteri talebi iptal edebilir.';
     default:
       return 'Talebin durumu için planlanmış bir işlem yok.';
   }

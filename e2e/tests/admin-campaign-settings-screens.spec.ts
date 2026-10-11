@@ -193,9 +193,10 @@ test.describe('ADMIN-DESIGN-001 Faz 3E — campaigns, eligibility and operations
       for (const state of ['auto-publish-state', 'provider-reviews-state', 'campaign-engine-state', 'scheduler-state-request-expiry']) {
         await expect(page.getByTestId(state)).toHaveText(/^(Açık|Kapalı)$/);
       }
-      // The five change lists, each either its table or its empty sentence.
+      // The six change lists (REL-002 Faz 3 added the service-issue switch's),
+      // each either its table or its empty sentence.
       const lists = page.locator('#neler-oldu .settings-audit');
-      await expect(lists).toHaveCount(5);
+      await expect(lists).toHaveCount(6);
       // Only real settings: none of the design's rows that are not settings here.
       const main = page.locator('main');
       for (const absent of ['kaç gün yayında kalsın', 'kaçıncı günde', 'kaç krediye mal olsun', 'en fazla kaç teklif', 'tekrar teklif verebilsin']) {

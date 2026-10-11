@@ -93,6 +93,7 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
   { label: 'Reddedildi', value: 'REJECTED' },
   { label: 'İptal Edildi', value: 'CANCELLED' },
   { label: 'Süresi Doldu', value: 'EXPIRED' },
+  { label: 'Eşleşme İncelemesi', value: 'MATCH_REVIEW' },
 ];
 
 /**

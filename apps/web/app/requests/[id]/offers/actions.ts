@@ -9,6 +9,7 @@ import {
   CustomerServiceRequest,
 } from '../../../../lib/api';
 import { clientForwardingHeaders } from '../../../../lib/forwarded-for';
+import { serviceIssueErrorMessage } from '../../../../lib/service-issue';
 import { turnstileHeaders } from '../../../../lib/turnstile';
 
 /**
@@ -168,4 +169,52 @@ function readErrorCode(body: string): string | null {
   } catch {
     return null;
   }
+}
+
+export type ServiceIssueFormState = { error: string | null };
+
+/**
+ * REL-002 Faz 3 — the customer reports that the matched provider did not
+ * deliver. Everything that decides — ownership, the match, the promised days,
+ * the note rule, exactly-once — is the API's; this forwards the form and
+ * turns a refusal into the sentence the dialog shows, keeping it open.
+ *
+ * Success lands on the request page with the outcome in the query string; the
+ * page reads the new state (Round 2, or the team's review) from the API.
+ */
+export async function reportServiceIssueAction(
+  _previous: ServiceIssueFormState,
+  formData: FormData,
+): Promise<ServiceIssueFormState> {
+  const requestId = readFormString(formData, 'requestId');
+  const note = readFormString(formData, 'note').trim();
+  const body = {
+    roundId: readFormString(formData, 'roundId'),
+    reason: readFormString(formData, 'reason'),
+    idempotencyKey: readFormString(formData, 'idempotencyKey'),
+    ...(note ? { note } : {}),
+  };
+  if (!body.reason) {
+    return { error: 'Lütfen bir sebep seçin.' };
+  }
+
+  let outcome: 'reopened' | 'reopened-review' | 'review';
+  try {
+    const result = await apiFetch<{ outcome: 'REOPENED' | 'ADMIN_REVIEW'; requestStatus: string }>(
+      `/service-requests/${requestId}/service-issue`,
+      { method: 'POST', body: JSON.stringify(body) },
+    );
+    outcome =
+      result.outcome === 'ADMIN_REVIEW' ? 'review' : result.requestStatus === 'SUBMITTED' ? 'reopened-review' : 'reopened';
+  } catch (error) {
+    if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+      return { error: serviceIssueErrorMessage(readErrorCode(error.body)) };
+    }
+    return { error: serviceIssueErrorMessage(null) };
+  }
+
+  revalidatePath('/requests/my');
+  revalidatePath(`/requests/${requestId}/offers`);
+  revalidatePath('/mesajlar');
+  redirect(`/requests/${requestId}/offers?issue=${outcome}`);
 }

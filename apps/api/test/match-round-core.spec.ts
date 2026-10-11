@@ -684,8 +684,23 @@ describe('round authority', () => {
     const { requestId, customerCookie, admin, winner, winnerOfferId } = await matchedScenario();
     const leak = /"(currentRoundId|matchRoundId|roundId)"|mr1_/;
 
+    // The owner's own detail names its rounds by id on purpose (REL-002 Faz 3:
+    // `currentRound.id`, `rounds[].id` and `serviceIssue.roundId` — the round a
+    // service-issue report sends back as its stale guard). Nothing else in it
+    // may carry one.
+    const own = await request(ctx.server).get(`/service-requests/my/${requestId}`).set('Cookie', customerCookie);
+    expect(own.status).toBe(200);
+    const { currentRound, rounds, serviceIssue, ...rest } = own.body;
+    expect(JSON.stringify(rest)).not.toMatch(leak);
+    expect(Object.keys(currentRound).filter((key) => /round/i.test(key))).toEqual(['roundNumber']);
+    for (const round of rounds) {
+      expect(Object.keys(round).filter((key) => /round/i.test(key))).toEqual(['roundNumber']);
+    }
+    expect(Object.keys(serviceIssue).filter((key) => /round/i.test(key)).sort()).toEqual(
+      ['maxAutoRoundsReached', 'roundId'].sort(),
+    );
+
     const responses = await Promise.all([
-      request(ctx.server).get(`/service-requests/my/${requestId}`).set('Cookie', customerCookie),
       request(ctx.server).get(`/service-requests/${requestId}/offers`).set('Cookie', customerCookie),
       request(ctx.server).get(`/service-requests/${requestId}`).set('Cookie', admin),
       request(ctx.server).get(`/providers/${winner.provider.id}/offers`).set('Cookie', winner.cookie),

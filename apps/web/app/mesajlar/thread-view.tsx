@@ -30,6 +30,11 @@ type ThreadViewProps = {
   initialCursor: string | null;
   /** Whether the counterpart has seen everything, as the server last said. */
   counterpartHasRead: boolean;
+  /**
+   * REL-002 Faz 3: the match this conversation belonged to ended. The history
+   * is shown as it is — no composer, no polling, no read mark.
+   */
+  readOnly?: boolean;
 };
 
 export function ThreadView({
@@ -39,6 +44,7 @@ export function ThreadView({
   initialMessages,
   initialCursor,
   counterpartHasRead,
+  readOnly = false,
 }: ThreadViewProps) {
   const [messages, setMessages] = useState<ThreadMessage[]>(initialMessages);
   const [cursor, setCursor] = useState<string | null>(initialCursor);
@@ -105,6 +111,10 @@ export function ThreadView({
 
   // ---- polling, only while somebody is looking ----------------------------
   useEffect(() => {
+    if (readOnly) {
+      // Nothing new can arrive in an ended conversation.
+      return;
+    }
     const interval = window.setInterval(() => {
       if (document.visibilityState === 'visible') {
         void poll();
@@ -124,12 +134,15 @@ export function ThreadView({
       window.clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [poll]);
+  }, [poll, readOnly]);
 
   // ---- opening the thread is reading it -----------------------------------
   useEffect(() => {
-    void markRead(threadId);
-  }, [threadId]);
+    // A read-only thread keeps its read mark where it is (the API refuses it).
+    if (!readOnly) {
+      void markRead(threadId);
+    }
+  }, [threadId, readOnly]);
 
   // ---- after a send -------------------------------------------------------
   useEffect(() => {
@@ -208,6 +221,11 @@ export function ThreadView({
         </p>
       ) : null}
 
+      {readOnly ? (
+        <p className="cdash-notice" role="status" data-testid="thread-read-only">
+          Bu eşleşme kapandı. Konuşma salt okunur; yeni mesaj gönderilemez.
+        </p>
+      ) : (
       <form className="msg-composer" action={formAction} ref={formRef}>
         <input type="hidden" name="threadId" value={threadId} />
         <input type="hidden" name="clientToken" value={clientToken} />
@@ -252,6 +270,7 @@ export function ThreadView({
           </p>
         ) : null}
       </form>
+      )}
     </div>
   );
 }

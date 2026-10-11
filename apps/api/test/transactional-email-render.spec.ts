@@ -233,6 +233,58 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     requestsUrl: `${WEB}/providers/p1/requests`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'service-issue-recorded': {
+    fullName: 'Deniz Yılmaz',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'Hizmet veren gelmedi',
+    reportedAt: '2026-10-12T09:30:00.000Z',
+    requestUrl: `${WEB}/requests/r1/offers`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'request-reopened': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    roundNumber: '2',
+    awaitingReview: '',
+    requestUrl: `${WEB}/requests/r1/offers`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'request-match-review': {
+    fullName: 'Deniz Yılmaz',
+    incidentNumber: 'INC-2026-000003',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    reasonLabel: 'İş başlamadı',
+    reportedAt: '2026-10-12T09:30:00.000Z',
+    requestUrl: `${WEB}/requests/r1/offers`,
+    accountUrl: `${WEB}/account/profile`,
+  },
+  'provider-incident-opened': {
+    fullName: 'Murat Şahin',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    city: 'Ankara',
+    district: 'Çankaya',
+    reasonLabel: 'Hizmet veren gelmedi',
+    maskedNote: 'Usta gelmedi, telefonu da açmadı.',
+    offerUrl: `${WEB}/providers/p1/offers/o1`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'provider-incident-new': {
+    fullName: 'Destek ekibi',
+    incidentNumber: 'INC-2026-000001',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    businessName: 'Usta Klima',
+    reasonLabel: 'Hizmet veren gelmedi',
+    outcomeLabel: 'Tur 1 başarısız — talep yeniden açıldı',
+    adminRequestUrl: `${ADMIN}/requests/r1`,
+    accountUrl: null,
+  },
   'package-purchase-confirmation': {
     fullName: 'Murat Şahin',
     packageName: 'Başlangıç Paketi',
@@ -611,8 +663,9 @@ describe('transactional e-mail rendering', () => {
     // Twenty-eight before vitrin's four, then the seven of the run's life,
     // then the two of a request report, then the four of a provider review,
     // then the provider's mailbox proof (AUTH-PROVIDER-CONTACT-001), then the
-    // refused revision of a live card (API-HARDENING-001).
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(51);
+    // refused revision of a live card (API-HARDENING-001), then the five of a
+    // customer service issue (REL-002 Faz 3).
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(56);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -847,6 +900,11 @@ describe('transactional e-mail rendering', () => {
       'request-cancelled-customer': 'Talebiniz iptal edildi — #T-90412',
       'request-cancelled-winner': 'Kabul edilen teklifinizin talebi iptal edildi — #T-90412',
       'request-cancelled-offer': 'Teklif verdiğiniz talep iptal edildi — #T-90412',
+      'service-issue-recorded': 'Hizmet aksaklığı bildiriminiz alındı — #T-90412',
+      'request-reopened': 'Talebiniz yeniden teklif almaya açıldı — #T-90412',
+      'request-match-review': 'Talebiniz ekibimiz tarafından inceleniyor — #T-90412',
+      'provider-incident-opened': 'Müşteri hizmet aksaklığı bildirdi — #T-90412',
+      'provider-incident-new': 'Yeni hizmet aksaklığı bildirimi — INC-2026-000001',
       'package-purchase-confirmation': 'Kredi paketiniz hesabınıza yüklendi',
       'request-removed': 'Talebiniz yayından kaldırıldı',
       'request-report-new-for-support': 'Yeni talep bildirimi — #T-90412',

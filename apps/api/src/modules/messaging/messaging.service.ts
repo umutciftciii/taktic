@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  MatchRoundStatus,
   MessageSenderRole,
   Prisma,
   UserRole,
@@ -107,6 +108,33 @@ const THREAD_UNAVAILABLE_MESSAGES: Record<ThreadUnavailableReason, string> = {
 };
 
 /**
+ * REL-002 Faz 3 (decision 4) — a thread whose round ended (FAILED, COMPLETED
+ * or CANCELLED) stays readable by its two original participants, and nothing
+ * on it changes any more: no new message and no read mark (the badge counts
+ * active threads only, so an ended thread never asks to be read). A thread
+ * whose round is still current and matched is ACTIVE; anything else — a
+ * thread out of step with its request — is refused as before.
+ */
+export const THREAD_READ_ONLY_CODE = 'THREAD_READ_ONLY';
+
+export type ThreadMode = 'ACTIVE' | 'READ_ONLY';
+
+const HISTORICAL_ROUND_STATUSES: ReadonlySet<MatchRoundStatus> = new Set([
+  MatchRoundStatus.FAILED,
+  MatchRoundStatus.COMPLETED,
+  MatchRoundStatus.CANCELLED,
+]);
+
+function threadReadOnlyException() {
+  return new ForbiddenException({
+    statusCode: HttpStatus.FORBIDDEN,
+    error: 'Forbidden',
+    code: THREAD_READ_ONLY_CODE,
+    message: 'Bu eşleşme kapandığı için konuşma salt okunur; yeni mesaj gönderilemez.',
+  });
+}
+
+/**
  * Everything a thread row needs to carry, and the context the two screens show
  * around it. The category name and the request number are the job's own
  * identity — they are already on every screen either party can reach.
@@ -170,11 +198,13 @@ export class MessagingService {
       orderBy: [{ lastMessageAt: 'desc' }, { createdAt: 'desc' }],
     });
     const active = await this.activeThreadIds(threads);
+    const roundStatuses = await this.roundStatuses(threads.map((thread) => thread.roundId));
 
     return Promise.all(
       threads.map(async (thread) => {
         const participant = requireParticipant(thread, user);
         const isActive = active.has(thread.id);
+        const closedReason = isActive ? null : historicalReason(roundStatuses.get(thread.roundId));
         const [lastMessage, unreadCount] = await Promise.all([
           this.prisma.message.findFirst({
             where: { threadId: thread.id },
@@ -189,6 +219,8 @@ export class MessagingService {
         return {
           ...toThreadSummary(thread, participant),
           active: isActive,
+          mode: (isActive ? 'ACTIVE' : 'READ_ONLY') as ThreadMode,
+          closedReason,
           unreadCount,
           lastMessage: lastMessage ? toMessage(lastMessage) : null,
         };
@@ -235,12 +267,16 @@ export class MessagingService {
 
   /** One thread, with its most recent page of messages. */
   async getThread(threadId: string, user: AuthUser) {
-    const { thread, participant } = await this.loadThreadForParticipant(threadId, user);
+    const { thread, participant, mode, closedReason } = await this.loadThreadForParticipant(threadId, user, 'read');
     const page = await this.readMessages(thread.id, {});
-    const unreadCount = await this.countUnread(thread, participant);
+    // A read-only thread never asks to be read (no read mark can move).
+    const unreadCount = mode === 'ACTIVE' ? await this.countUnread(thread, participant) : 0;
 
     return {
       ...toThreadSummary(thread, participant),
+      active: mode === 'ACTIVE',
+      mode,
+      closedReason,
       unreadCount,
       messages: page.messages,
       hasMoreBefore: page.hasMoreBefore,
@@ -262,7 +298,7 @@ export class MessagingService {
     user: AuthUser,
     query: { before?: string; after?: string; limit?: number },
   ) {
-    const { thread } = await this.loadThreadForParticipant(threadId, user);
+    const { thread } = await this.loadThreadForParticipant(threadId, user, 'read');
 
     if (query.before && query.after) {
       throw new BadRequestException('Pass either before or after, not both');
@@ -286,7 +322,7 @@ export class MessagingService {
     user: AuthUser,
     input: { body: string; clientToken?: string | null },
   ) {
-    const { thread, participant } = await this.loadThreadForParticipant(threadId, user);
+    const { thread, participant } = await this.loadThreadForParticipant(threadId, user, 'write');
 
     const body = normalizeBody(input.body);
     const clientToken = input.clientToken?.trim() || null;
@@ -359,7 +395,10 @@ export class MessagingService {
    * it was opened, from where, or on what.
    */
   async markRead(threadId: string, user: AuthUser) {
-    const { thread, participant } = await this.loadThreadForParticipant(threadId, user);
+    // A mutation, so an ended thread refuses it (THREAD_READ_ONLY): the read
+    // mark of a read-only conversation never moves, and its unread count is
+    // already zero everywhere.
+    const { thread, participant } = await this.loadThreadForParticipant(threadId, user, 'write');
     const now = new Date();
 
     await this.prisma.messageThread.update({
@@ -443,7 +482,7 @@ export class MessagingService {
    * whole answer on purpose: "this thread exists, you may not see it" tells a
    * stranger a match happened.
    */
-  private async loadThreadForParticipant(threadId: string, user: AuthUser) {
+  private async loadThreadForParticipant(threadId: string, user: AuthUser, access: 'read' | 'write') {
     const thread = await this.prisma.messageThread.findFirst({
       where: { id: threadId, ...participantWhere(user) },
       include: threadInclude,
@@ -453,15 +492,40 @@ export class MessagingService {
     if (!thread) {
       throw new NotFoundException('Message thread not found');
     }
+    const participant = requireParticipant(thread, user);
 
     // The thread row is a cache of a chain that was true when it was written.
     // Re-deriving it here is what keeps a conversation from outliving the match
     // it belongs to — a request that was cancelled, or an offer that somehow
     // stopped being the accepted one, closes the thread rather than leaving a
     // channel open on the strength of a stale row.
-    await this.assertChainStillHolds(thread);
+    if (await this.chainStillHolds(thread)) {
+      return { thread, participant, mode: 'ACTIVE' as ThreadMode, closedReason: null };
+    }
 
-    return { thread, participant: requireParticipant(thread, user) };
+    // Ended: its round is history. The two people who wrote it may read it
+    // (the participant scope above already decided who they are); nobody
+    // writes to it or marks it read again (REL-002 decision 4).
+    const closedReason = historicalReason((await this.roundStatuses([thread.roundId])).get(thread.roundId));
+    if (!closedReason) {
+      throw new ForbiddenException('This conversation is no longer available');
+    }
+    if (access === 'write') {
+      throw threadReadOnlyException();
+    }
+    return { thread, participant, mode: 'READ_ONLY' as ThreadMode, closedReason };
+  }
+
+  /** Each round's status, by id. */
+  private async roundStatuses(roundIds: readonly string[]): Promise<Map<string, MatchRoundStatus>> {
+    if (roundIds.length === 0) {
+      return new Map();
+    }
+    const rounds = await this.prisma.serviceRequestMatchRound.findMany({
+      where: { id: { in: [...new Set(roundIds)] } },
+      select: { id: true, status: true },
+    });
+    return new Map(rounds.map((round) => [round.id, round.status]));
   }
 
   /**
@@ -560,15 +624,13 @@ export class MessagingService {
    * passes here, so a thread of an ended or earlier round can never be
    * written to again.
    */
-  private async assertChainStillHolds(thread: ThreadRow) {
+  private async chainStillHolds(thread: ThreadRow): Promise<boolean> {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id: thread.requestId },
       select: { customerId: true, ...MATCH_CHAIN_REQUEST_SELECT },
     });
 
-    if (!request || !isThreadActive(thread, request)) {
-      throw new ForbiddenException('This conversation is no longer available');
-    }
+    return request !== null && isThreadActive(thread, request);
   }
 
   /** The ids of the given threads whose chain still holds (see {@link isThreadActive}). */
@@ -742,6 +804,13 @@ function isThreadActive(
     currentMatchedOfferId(request) === thread.offerId &&
     request.customerId === thread.customerUserId
   );
+}
+
+/** The closed reason of a thread whose round ended, or null when it did not end that way. */
+function historicalReason(status: MatchRoundStatus | undefined): 'FAILED' | 'COMPLETED' | 'CANCELLED' | null {
+  return status !== undefined && HISTORICAL_ROUND_STATUSES.has(status)
+    ? (status as 'FAILED' | 'COMPLETED' | 'CANCELLED')
+    : null;
 }
 
 function requireParticipant(

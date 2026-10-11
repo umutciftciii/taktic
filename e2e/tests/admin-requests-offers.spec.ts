@@ -94,13 +94,21 @@ async function seedGuestRequest(categoryId: string, location: { city: string; di
 }
 
 /** A matched request with a contact-sharing audit row behind it. */
-async function seedMatchedRequest() {
+/**
+ * `beforeMatch` seeds whatever else the round held while it was still OPEN:
+ * since REL-002 Faz 3 the database refuses an offer INSERT into a round that
+ * is not the request's open current round (`Offer_round_open_guard`).
+ */
+async function seedMatchedRequest<T = undefined>(
+  beforeMatch?: (scene: { requestId: string; categoryId: string; location: ReturnType<typeof uniqueLocation> }) => Promise<T>,
+) {
   const location = uniqueLocation();
   const category = await createCategory(3);
   const customer = await createCustomer('E2E Faz3A Eşleşme');
   const provider = await createProvider({ categoryId: category.id, location, credits: STARTING_CREDITS });
   const request = await seedCustomerRequest({ customerId: customer.id, categoryId: category.id, location, content: 'full' });
   const offer = await seedOffer({ requestId: request.id, providerId: provider.id, status: 'ACCEPTED' });
+  const extra = beforeMatch ? await beforeMatch({ requestId: request.id, categoryId: category.id, location }) : undefined;
   await prisma().serviceRequest.update({
     where: { id: request.id },
     data: { status: 'MATCHED', matchedOfferId: offer.id, matchedAt: new Date() },
@@ -115,7 +123,7 @@ async function seedMatchedRequest() {
       disclosureVersion: 'e2e-faz3a-v1',
     },
   });
-  return { request, offer };
+  return { request, offer, extra: extra as T };
 }
 
 async function openAs(
@@ -1132,21 +1140,24 @@ test.describe('Faz 3A: API refusals land on the screen, not the error boundary',
   test('the matched cancel: the dialog counts what it will do, and the database shows exactly that', async ({
     browser,
   }, testInfo) => {
-    const matched = await seedMatchedRequest();
-    const request = await prisma().serviceRequest.findUniqueOrThrow({
-      where: { id: matched.request.id },
-      select: { categoryId: true, city: true, district: true },
-    });
-    const location = { city: request.city, district: request.district };
-    const winnerProviderId = (await prisma().offer.findUniqueOrThrow({ where: { id: matched.offer.id } })).providerId;
     // An old row the acceptance did not close, a competitor it rejected, and
-    // one the customer rejected by hand before accepting.
-    const straggler = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
-    const loser = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
-    const declined = await createProvider({ categoryId: request.categoryId, location, credits: STARTING_CREDITS });
-    const liveOffer = await seedOffer({ requestId: matched.request.id, providerId: straggler.id, status: 'VIEWED' });
-    const lostOffer = await seedOffer({ requestId: matched.request.id, providerId: loser.id });
-    const declinedOffer = await seedOffer({ requestId: matched.request.id, providerId: declined.id });
+    // one the customer rejected by hand before accepting — all offered while
+    // the round was still open.
+    const matched = await seedMatchedRequest(async ({ requestId, categoryId, location }) => {
+      const straggler = await createProvider({ categoryId, location, credits: STARTING_CREDITS });
+      const loser = await createProvider({ categoryId, location, credits: STARTING_CREDITS });
+      const declined = await createProvider({ categoryId, location, credits: STARTING_CREDITS });
+      return {
+        straggler,
+        loser,
+        declined,
+        liveOffer: await seedOffer({ requestId, providerId: straggler.id, status: 'VIEWED' }),
+        lostOffer: await seedOffer({ requestId, providerId: loser.id }),
+        declinedOffer: await seedOffer({ requestId, providerId: declined.id }),
+      };
+    });
+    const { straggler, loser, declined, liveOffer, lostOffer, declinedOffer } = matched.extra;
+    const winnerProviderId = (await prisma().offer.findUniqueOrThrow({ where: { id: matched.offer.id } })).providerId;
     await prisma().offer.update({
       where: { id: lostOffer.id },
       data: { status: 'REJECTED', rejectedAt: new Date(), rejectionReason: 'COMPETITOR_ACCEPTED' },

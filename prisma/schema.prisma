@@ -137,6 +137,11 @@ enum ServiceRequestStatus {
   REJECTED
   CANCELLED
   EXPIRED
+  /// REL-002 Faz 3: Round 3 (the last automatic round) failed on a customer
+  /// service issue. No round is open; the request waits for staff. Not a
+  /// moderation state (IN_REVIEW is), not on the market, not touched by the
+  /// schedulers; the customer may still cancel it.
+  MATCH_REVIEW
 }
 
 /// Why a provider brought a request in front of an operator.
@@ -313,6 +318,8 @@ enum NumberedEntityType {
   SERVICE_REQUEST
   OFFER
   PACKAGE_PURCHASE
+  /// REL-002 Faz 3: ProviderServiceIncident.incidentNumber (INC-YYYY-NNNNNN).
+  SERVICE_INCIDENT
 }
 
 /// Which side of a matched pair wrote a message.
@@ -549,6 +556,11 @@ model User {
   seoRedirectsDeactivated         SeoRedirect[]                        @relation("SeoRedirectDeactivatedBy")
   seoNotFoundDecisions            SeoNotFoundPath[]                    @relation("SeoNotFoundPathDecidedBy")
   seoAuditEntries                 SeoAuditLog[]                        @relation("SeoAuditActor")
+  /// REL-002 Faz 3: service issues this customer reported; incident decisions
+  /// and provider responses (Faz 4) name their author here.
+  reportedServiceIncidents        ProviderServiceIncident[]            @relation("IncidentCustomer")
+  reviewedServiceIncidents        ProviderServiceIncident[]            @relation("IncidentReviewedBy")
+  respondedServiceIncidents       ProviderServiceIncident[]            @relation("IncidentRespondedBy")
 
   @@index([role])
   @@index([isActive])
@@ -681,6 +693,15 @@ model OperationsSettings {
   /// the admin campaign screens, which show it as "engine off"; there is no
   /// endpoint that turns it on, and no code path that grants credits from it.
   campaignEngineEnabled                   Boolean  @default(false)
+  /// REL-002 Faz 3: whether a customer may report a service issue on a matched
+  /// request (close the match, exclude the provider, reopen the request).
+  ///
+  /// Same contract as the switches above: false by default, read fail-closed
+  /// on every report and every customer read that offers the action, switched
+  /// on by a person on the operations screen and never by a migration or an
+  /// environment variable. Off: the endpoint answers 404 and no screen offers
+  /// it. Turning it off never undoes a reopen that already happened.
+  serviceIssueReportingEnabled            Boolean  @default(false)
   createdAt                               DateTime @default(now())
   updatedAt                               DateTime @updatedAt
   /// Who last saved this. Nullable and SetNull for the same reason
@@ -1180,14 +1201,14 @@ model ServiceRequest {
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt
 
-  category               ServiceCategory             @relation(fields: [categoryId], references: [id])
-  currentRound           ServiceRequestMatchRound    @relation("ServiceRequestCurrentRound", fields: [currentRoundId, id], references: [id, requestId], onDelete: Restrict)
-  matchRounds            ServiceRequestMatchRound[]  @relation("ServiceRequestMatchRounds")
-  entryCategory          ServiceCategory?            @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
-  customer               User?                       @relation(fields: [customerId], references: [id])
+  category               ServiceCategory                   @relation(fields: [categoryId], references: [id])
+  currentRound           ServiceRequestMatchRound          @relation("ServiceRequestCurrentRound", fields: [currentRoundId, id], references: [id, requestId], onDelete: Restrict)
+  matchRounds            ServiceRequestMatchRound[]        @relation("ServiceRequestMatchRounds")
+  entryCategory          ServiceCategory?                  @relation("ServiceRequestEntryCategory", fields: [entryCategoryId], references: [id])
+  customer               User?                             @relation(fields: [customerId], references: [id])
   answers                ServiceRequestAnswer[]
   offers                 Offer[]
-  matchedOffer           Offer?                      @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
+  matchedOffer           Offer?                            @relation("ServiceRequestMatchedOffer", fields: [matchedOfferId], references: [id])
   phoneVerifications     PhoneVerification[]
   notificationLogs       NotificationLog[]
   /// One per matched round (REL-002 M2: `roundId` is the unique, not `requestId`).
@@ -1198,14 +1219,20 @@ model ServiceRequest {
   /// Restrict both ways. The lead carries the customer's urgency choice, the
   /// SLA they were promised and their fallback decision; none of it may be
   /// removed by removing something else.
-  showcaseLead           ShowcaseLead?               @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
-  showcaseLeadSource     ShowcaseLead?               @relation("ShowcaseLeadRequest")
-  directShowcaseProvider ProviderProfile?            @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
+  showcaseLead           ShowcaseLead?                     @relation("ServiceRequestShowcaseLead", fields: [showcaseLeadId], references: [id], onDelete: Restrict)
+  showcaseLeadSource     ShowcaseLead?                     @relation("ShowcaseLeadRequest")
+  directShowcaseProvider ProviderProfile?                  @relation("ServiceRequestDirectShowcaseProvider", fields: [directShowcaseProviderId], references: [id], onDelete: Restrict)
   reports                ServiceRequestReport[]
   /// A list only because Prisma's one-to-one needs a scalar `@unique` on the
   /// review's side and the review's uniqueness is `(requestId, providerId)`.
   /// At most one row in practice: a request has one accepted offer.
   reviews                ProviderReview[]
+  /// REL-002 Faz 3: providers who may never act on this request again (one
+  /// row per provider whose match on it failed). Never deleted.
+  providerExclusions     ServiceRequestProviderExclusion[]
+  /// REL-002 Faz 3: the service issues reported on this request, one per
+  /// failed round.
+  serviceIncidents       ProviderServiceIncident[]
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -1304,6 +1331,10 @@ enum MatchRoundStatus {
   COMPLETED
   CANCELLED
   EXPIRED
+  /// REL-002 Faz 3 (M3): the customer reported a service issue on the round's
+  /// match. Terminal. The winner stays recorded (and its offer stays ACCEPTED);
+  /// `failedAt` and `failureIncidentId` say when and why.
+  FAILED
 }
 
 /// REL-002: who the round is open to. DIRECT_SHOWCASE while a vitrin lead's
@@ -1314,10 +1345,14 @@ enum MatchRoundSource {
   DIRECT_SHOWCASE
 }
 
-/// REL-002: what opened the round. Faz 1–2 only ever open Round 1, with the
-/// request itself; SERVICE_ISSUE and ADMIN arrive with Faz 3 and Faz 5.
+/// REL-002: what opened the round. REQUEST_CREATED is Round 1, born with the
+/// request; SERVICE_ISSUE is Round 2 or 3, opened by the transaction that
+/// failed the previous round (Faz 3); ADMIN is reserved for the staff decision
+/// that reopens a MATCH_REVIEW request (Faz 5) and is written by nothing yet.
 enum MatchRoundOpenedBy {
   REQUEST_CREATED
+  SERVICE_ISSUE
+  ADMIN
 }
 
 /// REL-002 — one matching cycle of a service request.
@@ -1359,27 +1394,35 @@ model ServiceRequestMatchRound {
   matchedAt         DateTime?
   matchedOfferId    String?            @unique
   matchedProviderId String?
-  /// When a customer-reported service issue ended the round. Reserved: always
-  /// NULL until the FAILED status and its writer arrive with Faz 3 (M3).
+  /// When a customer-reported service issue ended the round (FAILED only).
   failedAt          DateTime?
+  /// The incident that failed the round (FAILED only, CHECK). Composite FK
+  /// (failureIncidentId, id) → incident (id, roundId): the incident is this
+  /// round's own.
+  failureIncidentId String?            @unique
   completedAt       DateTime?
   cancelledAt       DateTime?
   expiredAt         DateTime?
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
-  request           ServiceRequest      @relation("ServiceRequestMatchRounds", fields: [requestId], references: [id], onDelete: Restrict)
+  request           ServiceRequest                    @relation("ServiceRequestMatchRounds", fields: [requestId], references: [id], onDelete: Restrict)
   /// A list only because the relation is a composite FK (Prisma's one-to-one
   /// would need a redundant unique over it); `currentRoundId @unique` keeps it
   /// to at most one request.
-  currentForRequest ServiceRequest[]    @relation("ServiceRequestCurrentRound")
+  currentForRequest ServiceRequest[]                  @relation("ServiceRequestCurrentRound")
   /// Composite FK (matchedOfferId, id) → offer (id, matchRoundId): a round's
   /// winner is always an offer made in that round.
-  matchedOffer      Offer?              @relation("MatchRoundMatchedOffer", fields: [matchedOfferId, id], references: [id, matchRoundId], onDelete: Restrict)
-  matchedProvider   ProviderProfile?    @relation("MatchRoundMatchedProvider", fields: [matchedProviderId], references: [id], onDelete: Restrict)
-  offers            Offer[]             @relation("OfferMatchRound")
+  matchedOffer      Offer?                            @relation("MatchRoundMatchedOffer", fields: [matchedOfferId, id], references: [id, matchRoundId], onDelete: Restrict)
+  matchedProvider   ProviderProfile?                  @relation("MatchRoundMatchedProvider", fields: [matchedProviderId], references: [id], onDelete: Restrict)
+  offers            Offer[]                           @relation("OfferMatchRound")
   contactReveal     ContactRevealEvent?
   messageThread     MessageThread?
+  /// The service issue reported on this round. A list only because the
+  /// relation is a composite FK; `incident.roundId @unique` keeps it to one.
+  incidents         ProviderServiceIncident[]         @relation("IncidentRound")
+  failureIncident   ProviderServiceIncident?          @relation("MatchRoundFailureIncident", fields: [failureIncidentId, id], references: [id, roundId], onDelete: Restrict)
+  exclusionsSourced ServiceRequestProviderExclusion[]
 
   @@unique([requestId, roundNumber])
   /// The target of the composite FKs that pin a request's current round, an
@@ -1392,6 +1435,141 @@ model ServiceRequestMatchRound {
   /// cutoff. reminderSentAt leads publishedAt because it is the equality
   /// predicate.
   @@index([status, reminderSentAt, publishedAt])
+}
+
+/// REL-002 Faz 3: why a customer closed a match.
+///
+/// Eligibility is the server's, from the accepted offer's own promised days
+/// (Europe/Istanbul, a day has "passed" only once it is over):
+/// PROVIDER_CANCELLED_BEFORE_START any time while matched; PROVIDER_NO_SHOW,
+/// WORK_NOT_STARTED and OTHER once the start day has passed;
+/// WORK_NOT_COMPLETED and PROVIDER_STOPPED_WORK once the end day has passed.
+/// OTHER and PROVIDER_CANCELLED_BEFORE_START need a note (CHECK).
+enum ServiceIssueReason {
+  PROVIDER_NO_SHOW
+  WORK_NOT_STARTED
+  WORK_NOT_COMPLETED
+  PROVIDER_STOPPED_WORK
+  PROVIDER_CANCELLED_BEFORE_START
+  OTHER
+}
+
+/// REL-002: where a provider service incident stands. Faz 3 writes REPORTED
+/// only; the provider's response (PROVIDER_RESPONDED) and the first staff
+/// decision (CONFIRMED / DISMISSED, immutable) arrive with Faz 4. REPORTED on
+/// its own is no penalty of any kind.
+enum ProviderIncidentStatus {
+  REPORTED
+  PROVIDER_RESPONDED
+  CONFIRMED
+  DISMISSED
+}
+
+/// Which rule let the issue be reported: OFFER_DATES — the promised start
+/// (or end) day had passed; PROVIDER_CANCELLATION — the provider said they
+/// would not do the job (PROVIDER_CANCELLED_BEFORE_START, no date to wait for).
+/// There is no legacy fallback: a match without promised days cannot be
+/// reported here at all (support path).
+enum ServiceIssueEligibilityBasis {
+  OFFER_DATES
+  PROVIDER_CANCELLATION
+}
+
+/// REL-002 Faz 3 — a customer's report that the matched provider did not
+/// deliver: the record behind a FAILED round.
+///
+/// Written by one transaction with the round's FAILED transition, the
+/// provider's exclusion and the next round (or MATCH_REVIEW). Nothing about
+/// credit is written with it, ever: the accepted offer stays paid.
+///
+/// One per round (`roundId` unique) and one per accepted offer (`offerId`
+/// unique); `idempotencyKey` makes a retried report the same report. The
+/// promised days are snapshotted from the offer so the row explains itself.
+/// Composite FKs pin the round to the request and the offer to the round.
+/// Raw-SQL CHECKs (M3, `20261012090000_add_service_issue_reopen_core`): note
+/// rules, basis ↔ reason, response and decision shapes.
+///
+/// Faz 4 fills the provider response and the staff decision columns; Faz 3
+/// leaves them NULL (status REPORTED).
+model ProviderServiceIncident {
+  id                    String                       @id @default(cuid())
+  incidentNumber        String                       @unique
+  providerId            String
+  requestId             String
+  roundId               String                       @unique
+  offerId               String                       @unique
+  customerUserId        String
+  reason                ServiceIssueReason
+  /// Trimmed and whitespace-collapsed; required (>= 20) for OTHER and
+  /// PROVIDER_CANCELLED_BEFORE_START. Raw for staff; masked for the provider.
+  customerNote          String?
+  idempotencyKey        String                       @unique
+  reportedAt            DateTime                     @default(now())
+  /// The accepted offer's promised days at the moment of the report.
+  promisedStartDate     DateTime?
+  promisedEndDate       DateTime?
+  eligibilityBasis      ServiceIssueEligibilityBasis
+  status                ProviderIncidentStatus       @default(REPORTED)
+  providerResponse      String?
+  providerRespondedAt   DateTime?
+  providerRespondedById String?
+  reviewedById          String?
+  reviewedAt            DateTime?
+  reviewNote            String?
+  createdAt             DateTime                     @default(now())
+  updatedAt             DateTime                     @updatedAt
+
+  provider     ProviderProfile                   @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  request      ServiceRequest                    @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  round        ServiceRequestMatchRound          @relation("IncidentRound", fields: [roundId, requestId], references: [id, requestId], onDelete: Restrict)
+  offer        Offer                             @relation(fields: [offerId, roundId], references: [id, matchRoundId], onDelete: Restrict)
+  customer     User                              @relation("IncidentCustomer", fields: [customerUserId], references: [id], onDelete: Restrict)
+  respondedBy  User?                             @relation("IncidentRespondedBy", fields: [providerRespondedById], references: [id], onDelete: Restrict)
+  reviewedBy   User?                             @relation("IncidentReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  /// Lists only because the relations are composite FKs; both are at most
+  /// one (`failureIncidentId @unique`, `exclusion.incidentId @unique`).
+  failedRounds ServiceRequestMatchRound[]        @relation("MatchRoundFailureIncident")
+  exclusions   ServiceRequestProviderExclusion[]
+
+  /// Composite FK targets: the round's failure incident is the round's own,
+  /// and an exclusion names the incident's own request and provider.
+  @@unique([id, roundId])
+  @@unique([id, requestId, providerId])
+  @@index([providerId, status])
+  @@index([status, reportedAt])
+  @@index([customerUserId, reportedAt])
+  @@index([requestId])
+}
+
+/// REL-002 Faz 3 — a provider that may never act on a request again: written
+/// by the service-issue transaction for the provider whose match failed.
+///
+/// A customer's decision about their own request, not a penalty: it outlives
+/// any later decision on the incident (a DISMISSED incident keeps it) and no
+/// endpoint deletes it. Enforced by every provider-facing surface through
+/// `isProviderExcluded` / `notExcludedFromRequestFilter`
+/// (common/provider-request-matching.ts) and, for offers, by the
+/// `Offer_round_open_guard` trigger.
+model ServiceRequestProviderExclusion {
+  id            String             @id @default(cuid())
+  requestId     String
+  providerId    String
+  sourceRoundId String
+  incidentId    String             @unique
+  reason        ServiceIssueReason
+  createdAt     DateTime           @default(now())
+
+  request     ServiceRequest           @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  provider    ProviderProfile          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  sourceRound ServiceRequestMatchRound @relation(fields: [sourceRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  incident    ProviderServiceIncident  @relation(fields: [incidentId, requestId, providerId], references: [id, requestId, providerId], onDelete: Restrict)
+
+  /// One exclusion per (request, provider): the fan-out's anti-join and the
+  /// single-pair probe (`isProviderExcluded`) are an equality on both.
+  @@unique([requestId, providerId])
+  /// The discovery list's anti-join reads "this provider's exclusions" once
+  /// per query, and the provider FK's restrict check needs it too.
+  @@index([providerId])
 }
 
 /// A one-time code proving control of a phone number.
@@ -1654,6 +1832,10 @@ model ProviderProfile {
   promotionEligibilityReviews     PromotionEligibilityReview[]
   /// REL-002: the match rounds this provider won.
   matchedRounds                   ServiceRequestMatchRound[]           @relation("MatchRoundMatchedProvider")
+  /// REL-002 Faz 3: requests this provider is excluded from, and the service
+  /// issues reported against it.
+  requestExclusions               ServiceRequestProviderExclusion[]
+  serviceIncidents                ProviderServiceIncident[]
 
   /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
   statusChanges ProviderStatusChange[]
@@ -1861,6 +2043,10 @@ model Offer {
   /// The customer's rating of this offer's delivery. Unique on the review's
   /// side: one review per accepted offer.
   review             ProviderReview?
+  /// REL-002 Faz 3: the service issue reported on this (accepted) offer's
+  /// match. A list only because the relation is a composite FK;
+  /// `incident.offerId @unique` keeps it to one.
+  serviceIncidents   ProviderServiceIncident[]
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_round",
   // UNIQUE ("matchRoundId") WHERE status = 'ACCEPTED' — is created by the REL-002
   // M2 migration (it replaced the per-request "Offer_one_accepted_per_request").
@@ -2994,9 +3180,9 @@ model MessageThread {
   request      ServiceRequest           @relation(fields: [requestId], references: [id])
   offer        Offer                    @relation(fields: [offerId], references: [id])
   round        ServiceRequestMatchRound @relation(fields: [roundId], references: [id], onDelete: Restrict)
-  customer     User                      @relation("MessageThreadCustomer", fields: [customerUserId], references: [id])
-  provider     ProviderProfile           @relation(fields: [providerId], references: [id])
-  providerUser User                      @relation("MessageThreadProviderUser", fields: [providerUserId], references: [id])
+  customer     User                     @relation("MessageThreadCustomer", fields: [customerUserId], references: [id])
+  provider     ProviderProfile          @relation(fields: [providerId], references: [id])
+  providerUser User                     @relation("MessageThreadProviderUser", fields: [providerUserId], references: [id])
   messages     Message[]
 
   @@index([requestId])
@@ -5238,6 +5424,8 @@ enum AdminPermission {
   SCHEDULERS_WRITE
   MARKETPLACE_PUBLISH_WRITE
   PROVIDER_REVIEWS_SETTING_WRITE
+  /// REL-002 Faz 3: the customer service-issue switch (reopen + exclusion).
+  SERVICE_ISSUE_SETTING_WRITE
 
   CREDIT_PACKAGES_READ
   CREDIT_PACKAGES_WRITE

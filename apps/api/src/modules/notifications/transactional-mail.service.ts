@@ -1,6 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   CreditTransactionType,
+  MatchRoundOpenedBy,
   MatchRoundStatus,
   NotificationStatus,
   OfferPackageType,
@@ -23,6 +24,7 @@ import {
 import {
   matchesProviderArea,
   phoneVerifiedRequestFilter,
+  providerNotExcludedFilter,
 } from '../../common/provider-request-matching';
 import { describeArea } from '../../common/provider-service-area-scope';
 import {
@@ -53,6 +55,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { isOfferLedgerReference } from '../credits/offer-ledger-reference';
 import { readOfferRefundSettlements, type OfferRefundSettlement } from '../credits/offer-refund-settlement';
 import { readContactSharingConfig } from '../contact-sharing/contact-sharing.config';
+import {
+  maskContactDetailsInNote,
+  SERVICE_ISSUE_REASON_LABELS,
+} from '../service-issues/service-issue-eligibility';
 import {
   currentMatchedOfferId,
   findCurrentRoundReveal,
@@ -1639,6 +1645,81 @@ export class TransactionalMailService {
         };
       }
 
+      case 'service-issue-recorded':
+      case 'request-match-review':
+      case 'provider-incident-opened':
+      case 'provider-incident-new': {
+        const incident = await loadServiceIncident(this.prisma, source.ids[0]);
+        if (!incident) {
+          return null;
+        }
+        if (source.template === 'provider-incident-opened') {
+          const recipient = recipientFor(incident.provider);
+          return recipient ? { to: recipient, data: providerIncidentOpenedData(incident) } : null;
+        }
+        if (source.template === 'provider-incident-new') {
+          return { to: readSupportInboxEmail(), data: providerIncidentNewData(incident) };
+        }
+        const email = incident.request.customerEmail?.trim();
+        if (!email) {
+          return null;
+        }
+        if (source.template === 'request-match-review') {
+          // Only while the request is still waiting for the team.
+          return incident.request.status === ServiceRequestStatus.MATCH_REVIEW
+            ? { to: email, data: serviceIssueCustomerData(incident) }
+            : null;
+        }
+        return { to: email, data: serviceIssueCustomerData(incident) };
+      }
+
+      case 'request-reopened': {
+        const round = await this.prisma.serviceRequestMatchRound.findUnique({
+          where: { id: source.ids[0] },
+          select: {
+            id: true,
+            roundNumber: true,
+            status: true,
+            openedBy: true,
+            publishedAt: true,
+            requestId: true,
+          },
+        });
+        if (!round || round.openedBy !== MatchRoundOpenedBy.SERVICE_ISSUE) {
+          return null;
+        }
+        const request = await this.prisma.serviceRequest.findUnique({
+          where: { id: round.requestId },
+          select: {
+            id: true,
+            status: true,
+            currentRoundId: true,
+            requestNumber: true,
+            customerName: true,
+            customerEmail: true,
+            category: { select: { name: true } },
+          },
+        });
+        const email = request?.customerEmail?.trim();
+        // Only while the reopened round is still the request's current, open
+        // one: a reopen notice for a round that has since ended says nothing true.
+        if (!request || !email || request.currentRoundId !== round.id || round.status !== MatchRoundStatus.OPEN) {
+          return null;
+        }
+        return {
+          to: email,
+          data: {
+            fullName: request.customerName,
+            requestNumber: request.requestNumber,
+            categoryName: request.category.name,
+            roundNumber: String(round.roundNumber),
+            awaitingReview: round.publishedAt ? '' : '1',
+            requestUrl: customerRequestUrl(request.id),
+            accountUrl: customerAccountUrl(),
+          },
+        };
+      }
+
       case 'request-report-new-for-support': {
         const report = await this.prisma.serviceRequestReport.findUnique({
           where: { id: source.ids[0] },
@@ -1837,6 +1918,10 @@ export async function findMatchingProviders(
     const providers = await prisma.providerProfile.findMany({
       where: {
         status: ProviderStatus.APPROVED,
+        // REL-002 Faz 3: a provider whose match on this request failed is
+        // never invited back to it — in the fan-out, and in the send-time
+        // re-check that rebuilds every queued invitation through here.
+        ...providerNotExcludedFilter(request.id),
         // The binding has to be live supply, not release preparation. A DRAFT
         // category's requests are the admin's own smoke tests, and mailing them
         // out would both hand a provider a request they cannot open and put an
@@ -2702,6 +2787,93 @@ function requestReportNewForSupportData(report: {
   };
 }
 
+/** REL-002 Faz 3: what the service-issue notices are rebuilt from. */
+function loadServiceIncident(prisma: PrismaService, incidentId: string) {
+  return prisma.providerServiceIncident.findUnique({
+    where: { id: incidentId },
+    select: {
+      id: true,
+      incidentNumber: true,
+      reason: true,
+      customerNote: true,
+      reportedAt: true,
+      offerId: true,
+      providerId: true,
+      round: { select: { roundNumber: true } },
+      request: {
+        select: {
+          id: true,
+          status: true,
+          requestNumber: true,
+          customerName: true,
+          customerEmail: true,
+          city: true,
+          district: true,
+          category: { select: { name: true } },
+        },
+      },
+      provider: {
+        select: { businessName: true, contactName: true, userId: true, email: true, user: { select: { email: true } } },
+      },
+    },
+  });
+}
+
+type LoadedServiceIncident = NonNullable<Awaited<ReturnType<typeof loadServiceIncident>>>;
+
+/** The customer's two notices: their own report, their own request. */
+function serviceIssueCustomerData(incident: LoadedServiceIncident): MailData {
+  return {
+    fullName: incident.request.customerName,
+    incidentNumber: incident.incidentNumber,
+    requestNumber: incident.request.requestNumber,
+    categoryName: incident.request.category.name,
+    reasonLabel: SERVICE_ISSUE_REASON_LABELS[incident.reason],
+    reportedAt: incident.reportedAt.toISOString(),
+    requestUrl: customerRequestUrl(incident.request.id),
+    accountUrl: customerAccountUrl(),
+  };
+}
+
+/**
+ * The provider's notice. The request's number, category, city and district —
+ * what the discovery card already showed — the reason, and the customer's
+ * note with every contact detail masked. No customer name, phone, e-mail or
+ * address, and nothing about credit.
+ */
+function providerIncidentOpenedData(incident: LoadedServiceIncident): MailData {
+  return {
+    fullName: incident.provider.contactName,
+    incidentNumber: incident.incidentNumber,
+    requestNumber: incident.request.requestNumber,
+    categoryName: incident.request.category.name,
+    city: incident.request.city,
+    district: incident.request.district,
+    reasonLabel: SERVICE_ISSUE_REASON_LABELS[incident.reason],
+    maskedNote: maskContactDetailsInNote(incident.customerNote),
+    offerUrl: providerOfferUrl(incident.providerId, incident.offerId),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/** The support inbox: identifiers and the outcome, never the note. */
+function providerIncidentNewData(incident: LoadedServiceIncident): MailData {
+  return {
+    fullName: SUPPORT_INBOX_SALUTATION,
+    incidentNumber: incident.incidentNumber,
+    requestNumber: incident.request.requestNumber ?? incident.request.id,
+    categoryName: incident.request.category.name,
+    businessName: incident.provider.businessName,
+    reasonLabel: SERVICE_ISSUE_REASON_LABELS[incident.reason],
+    outcomeLabel:
+      incident.request.status === ServiceRequestStatus.MATCH_REVIEW
+        ? `Tur ${incident.round.roundNumber} başarısız — talep incelemede (otomatik tur yok)`
+        : `Tur ${incident.round.roundNumber} başarısız — talep yeniden açıldı`,
+    adminRequestUrl: adminRequestUrl(incident.request.id),
+    accountUrl: null,
+  };
+}
+
 function loadCancellation(prisma: PrismaService, requestId: string) {
   return prisma.serviceRequestCancellation.findUnique({
     where: { requestId },
@@ -3215,6 +3387,14 @@ const RETRY_DEDUPE_PREFIXES = {
   // so one transition is one message and a replayed webhook (no new audit row)
   // is none. *Delivered* through this table by PackageRefundNotificationOutbox.
   'package-refund-status': 'package-refund-status',
+  // REL-002 Faz 3. Keyed on the incident (the reopen notice on the new
+  // round), rows this product never deletes; *delivered* through this table by
+  // ServiceIssueOutbox, which rebuilds each one from these prefixes.
+  'service-issue-recorded': 'service-issue-recorded',
+  'request-reopened': 'request-reopened',
+  'request-match-review': 'request-match-review',
+  'provider-incident-opened': 'provider-incident-opened',
+  'provider-incident-new': 'provider-incident-new',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -3302,6 +3482,12 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'review-removed': 1,
   /** The audit row of the refund request's transition. */
   'package-refund-status': 1,
+  'service-issue-recorded': 1,
+  /** The round the reopen opened (its id already names the request). */
+  'request-reopened': 1,
+  'request-match-review': 1,
+  'provider-incident-opened': 1,
+  'provider-incident-new': 1,
 };
 
 /**

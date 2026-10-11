@@ -6,5 +6,8 @@
   "providerReviewPublicMinCount": 3,
   "providerReviewWindowDays": 90,
   "creditLedgerIntegerMax": 2147483647,
-  "offerScheduleMaxDays": 365
+  "offerScheduleMaxDays": 365,
+  "maxAutoMatchRounds": 3,
+  "serviceIssueNoteMinLength": 20,
+  "serviceIssueNoteMaxLength": 1000
 }

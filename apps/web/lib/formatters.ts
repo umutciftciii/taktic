@@ -26,6 +26,8 @@ export function statusLabel(status: string) {
     ACCEPTED: 'Kabul edildi',
     WITHDRAWN: 'Geri çekildi',
     EXPIRED: 'Süresi doldu',
+    // REL-002 Faz 3: Round 3 failed; the team takes over.
+    MATCH_REVIEW: 'Ekip incelemesinde',
     PENDING_REVIEW: 'İnceleme bekliyor',
     PENDING: 'Bekliyor',
     PAID: 'Ödendi',

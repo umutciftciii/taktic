@@ -30,14 +30,29 @@ import { completeRequestAction } from './actions';
 import { PhoneVerificationCard } from './phone-verification-card';
 import { readTurnstileWebConfig } from '../../../../lib/turnstile';
 import { OffersView } from './offers-view';
+import { ServiceIssueDialog } from './service-issue-dialog';
+import {
+  SERVICE_ISSUE_OUTCOME_MESSAGES,
+  SERVICE_ISSUE_REASON_LABELS,
+} from '../../../../lib/service-issue';
+import type { CustomerMatchRoundHistory } from '../../../../lib/api';
 
 type RequestOffersPageProps = {
   params: Promise<{ id: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-/** Open, unmatched statuses: the only ones a customer may cancel from. */
-const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<string> = new Set(['SUBMITTED', 'IN_REVIEW', 'APPROVED']);
+/**
+ * Open, unmatched statuses: the only ones a customer may cancel from. A request
+ * the team is reviewing after three failed matches (MATCH_REVIEW) has no live
+ * match either, so its owner may still call it off.
+ */
+const CUSTOMER_CANCELLABLE_STATUSES: ReadonlySet<string> = new Set([
+  'SUBMITTED',
+  'IN_REVIEW',
+  'APPROVED',
+  'MATCH_REVIEW',
+]);
 const CUSTOMER_LIVE_OFFER_STATUSES: ReadonlySet<string> = new Set(['SUBMITTED', 'VIEWED', 'SHORTLISTED']);
 
 const CANCEL_OUTCOME_MESSAGES: Record<string, { tone: 'success' | 'error'; text: string }> = {
@@ -58,6 +73,7 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
   const query = (await searchParams) ?? {};
   const verificationState = typeof query.verification === 'string' ? query.verification : null;
   const cancelOutcome = typeof query.cancel === 'string' ? query.cancel : null;
+  const issueOutcome = typeof query.issue === 'string' ? query.issue : null;
 
   const user = await getCurrentUser();
   if (!user || user.role !== 'CUSTOMER') {
@@ -119,6 +135,11 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           data-testid="customer-cancel-outcome"
         >
           {CANCEL_OUTCOME_MESSAGES[cancelOutcome]!.text}
+        </div>
+      ) : null}
+      {issueOutcome && SERVICE_ISSUE_OUTCOME_MESSAGES[issueOutcome] ? (
+        <div className="cdash-notice" role="status" data-testid="service-issue-outcome">
+          {SERVICE_ISSUE_OUTCOME_MESSAGES[issueOutcome]}
         </div>
       ) : null}
       <Link className="cdash-page-back" href="/requests/my">
@@ -215,6 +236,31 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
           ) : null}
 
           {/*
+            REL-002 Faz 3: the service-issue entry, entirely the API's call —
+            absent while the switch is off, the cancellation-only link before
+            the promised start day, the full form after it, and the support
+            path for a match whose offer carries no promised days.
+          */}
+          {summary?.status === 'MATCHED' && summary.serviceIssue?.canReport ? (
+            <div style={{ marginTop: 12 }}>
+              <ServiceIssueDialog requestId={id} view={summary.serviceIssue} />
+            </div>
+          ) : null}
+          {summary?.status === 'MATCHED' && summary.serviceIssue?.supportOnly ? (
+            <p className="cdash-offer-sub" style={{ marginTop: 12 }} data-testid="service-issue-support">
+              Bu eşleşmeyle ilgili bir sorun yaşıyorsanız{' '}
+              <Link href="/destek/yeni">destek ekibimizle iletişime geçin</Link> ve talep numaranızı ({requestReference})
+              belirtin.
+            </p>
+          ) : null}
+
+          {summary?.status === 'MATCH_REVIEW' ? (
+            <div className="cdash-notice" role="status" style={{ marginTop: 16 }} data-testid="request-match-review">
+              Talebiniz ekibimiz tarafından inceleniyor. Size dönüş yapacağız.
+            </div>
+          ) : null}
+
+          {/*
             The review call to action, only once the job is done and only while
             reviews are on. The API's customer state is what says both: it is
             `disabled` with the switch off, and the link is simply absent then —
@@ -291,6 +337,16 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         emptyText={noOffersYetText(summary)}
       />
 
+      {/*
+        Ended matches: every earlier round that had one, and the current round
+        too once it FAILED (MATCH_REVIEW keeps the failed Round 3 current).
+      */}
+      <PreviousMatches
+        rounds={(summary?.rounds ?? []).filter(
+          (round) => round.provider && (!round.isCurrent || round.status === 'FAILED'),
+        )}
+      />
+
       {withdrawnOffers.length > 0 ? (
         <>
           <div className="cdash-section-head">
@@ -336,6 +392,56 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </>
       ) : null}
     </CustomerShell>
+  );
+}
+
+/**
+ * "Önceki eşleşmeler" (REL-002 Faz 3): the rounds before the current one that
+ * had a match — the business, what became of it and when, and the round's
+ * conversation, read-only. Nothing about the provider's side of a report.
+ */
+function PreviousMatches({ rounds }: { rounds: CustomerMatchRoundHistory[] }) {
+  if (rounds.length === 0) {
+    return null;
+  }
+  return (
+    <section style={{ marginTop: 32 }} aria-labelledby="previous-matches-heading" data-testid="previous-matches">
+      <div className="cdash-section-head">
+        <h2 className="cdash-section-title" id="previous-matches-heading">
+          <span>Önceki eşleşmeler</span>
+          <span className="cdash-section-count">{rounds.length}</span>
+        </h2>
+      </div>
+      <ul className="cdash-history">
+        {rounds.map((round) => (
+          <li className="cdash-history-item" key={round.roundNumber} data-testid="previous-match">
+            <span className="tag tag-neutral">
+              {round.status === 'FAILED'
+                ? 'Aksaklık bildirildi'
+                : round.status === 'COMPLETED'
+                  ? 'Tamamlandı'
+                  : round.status === 'CANCELLED'
+                    ? 'İptal edildi'
+                    : 'Kapandı'}
+            </span>
+            <span className="cdash-history-name">{round.provider?.businessName}</span>
+            <span className="cdash-history-time">
+              {formatDateTime(round.failedAt ?? round.completedAt ?? round.cancelledAt ?? round.matchedAt)}
+            </span>
+            {round.issue ? (
+              <span className="cdash-history-notice" data-testid="previous-match-issue">
+                {SERVICE_ISSUE_REASON_LABELS[round.issue.reason]} · Bildirim {round.issue.incidentNumber}
+              </span>
+            ) : null}
+            {round.messageThreadId ? (
+              <Link href={`/mesajlar/${round.messageThreadId}`} data-testid="previous-match-thread">
+                Mesajları görüntüle (salt okunur)
+              </Link>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

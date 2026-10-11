@@ -136,3 +136,38 @@ export function currentRoundOpenForProviderFilter(
 export function isCurrentRoundOpen(request: { currentRound: { status: MatchRoundStatus } }): boolean {
   return request.currentRound.status === MatchRoundStatus.OPEN;
 }
+
+/**
+ * REL-002 Faz 3 — provider exclusion, the single definition.
+ *
+ * A provider whose match on a request failed (the customer reported a service
+ * issue) may never act on that request again, in any later round, whatever is
+ * later decided about the incident. Every provider-facing surface asks this
+ * one question through one of the two forms below — the marketplace list, the
+ * request detail, the offer transaction, the accept, the publish fan-out and
+ * the send-time audience re-check — and the `Offer_round_open_guard` trigger
+ * refuses an excluded provider's offer at the database whatever the writer.
+ *
+ * The anti-join is one probe of the `(requestId, providerId)` unique index.
+ */
+export function notExcludedFromRequestFilter(providerId: string): Prisma.ServiceRequestWhereInput {
+  return { providerExclusions: { none: { providerId } } };
+}
+
+/** The same rule from the provider's side: requests this provider is not excluded from. */
+export function providerNotExcludedFilter(requestId: string): Prisma.ProviderProfileWhereInput {
+  return { requestExclusions: { none: { requestId } } };
+}
+
+/** The same rule for one (request, provider) pair, read with the caller's client. */
+export async function isProviderExcluded(
+  client: Pick<Prisma.TransactionClient, 'serviceRequestProviderExclusion'>,
+  requestId: string,
+  providerId: string,
+): Promise<boolean> {
+  const row = await client.serviceRequestProviderExclusion.findUnique({
+    where: { requestId_providerId: { requestId, providerId } },
+    select: { id: true },
+  });
+  return row !== null;
+}
