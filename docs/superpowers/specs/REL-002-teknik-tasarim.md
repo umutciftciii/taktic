@@ -1357,4 +1357,77 @@ Diğer her nokta kilitli kararlardan (A–M) veya mevcut kod invariant'larından
 
 ## 30. Faz 1 uygulama sonucu ve runbook
 
-<!-- FAZ1_RESULT -->
+### 30.1 Preflight (yerel, 2026-10-11, salt-okunur)
+
+`scripts/ops/rel-002-preflight.sql` sonucu:
+- ServiceRequest: SUBMITTED 6, APPROVED 9, REJECTED 1, MATCHED 2, COMPLETED 5 (23). Offer: SUBMITTED 3, ACCEPTED 7, WITHDRAWN 2, CANCELLED 2 (14). ContactRevealEvent 4, MessageThread 1.
+- Integrity sayaçlarının hepsi 0: MATCHED/COMPLETED'da eksik `matchedOfferId`, ACCEPTED olmayan winner, `offer.requestId` uyuşmazlığı, açık status'ta `matchedOfferId`, reveal/thread request↔offer uyuşmazlığı.
+- Bilgi: `approvedAt` NULL olan APPROVED 2 (round'da `publishedAt` NULL kalır), gate'li direct lead 3, release edilmiş lead 0.
+- Faz 2/3'te değişecek unique'ler yerinde: `Offer_providerId_requestId_key`, `Offer_one_accepted_per_request`, `ContactRevealEvent_requestId_key`, `MessageThread_requestId_key`, `ServiceRequest_matchedOfferId_key`.
+
+### 30.2 Dual-write yazıcı envanteri
+
+Her satır: request update'i → aynı tx'te `syncCurrentMatchRound(tx, requestId)` (ya da yalnız bağ yazan yerlerde round id okuması).
+
+| Yazıcı | Dosya | Round etkisi |
+|---|---|---|
+| Talep oluşturma (form, vitrin lead, auto-publish) | `service-requests.service.ts` `create` | R1 oluşturulur (`mr1_<id>`), `currentRoundId` set; onCreated hook'ları ve yayın sonrası |
+| Yayın (telefon doğrulama, RELEASE + auto-publish) | `publishRequestInTransaction` | `publishedAt/expiresAt` |
+| Moderasyon IN_REVIEW / APPROVED (re-approval dahil) | `updateServiceRequestStatus` | `publishedAt/expiresAt` = `approvedAt` (+14g) ya da NULL |
+| Reddetme / rapor kaldırma | `rejectRequestInTransaction` | OPEN kalır |
+| Rapor sonrası yeniden açma | `reopenAfterRemoval` → `updateServiceRequestStatus` | `publishedAt/expiresAt` tazelenir, `reminderSentAt` korunur |
+| Teklif oluşturma | `providers.service.ts` `createOffer` | `Offer.matchRoundId = currentRoundId` (yalnız okuma; eligibility değişmedi) |
+| Direct lead'e sahibin teklifi (SUBMITTED→APPROVED) | aynı | `publishedAt`, kaynak DIRECT_SHOWCASE kalır |
+| Kabul | `offers.service.ts` `acceptRequestOffer` | MATCHED + `matchedOfferId/matchedProviderId/matchedAt`; reveal `roundId` = teklifin round'u |
+| Tamamlama | `completeServiceRequest` | COMPLETED + aynı `completedAt` |
+| İptal (müşteri, personel, iadesiz personel) | `cancelServiceRequest` | CANCELLED + aynı `cancelledAt`; eşleşme kaydı korunur |
+| Vitrin RELEASE | `showcase-lead.service.ts` `decideFallback` | kaynak MARKETPLACE |
+| Vitrin KEEP_CLOSED / terk edilmiş lead taraması | `decideFallback`, `showcase-lead-sla.service.ts` | CANCELLED |
+| Expiry | `request-expiry.service.ts` | EXPIRED + aynı `expiredAt` |
+| Reminder claim | `request-reminder.service.ts` | `reminderSentAt` (claim + kopya tek tx; request claim'i otoriter kalır) |
+| Mesaj thread'i (lazy) | `messaging.service.ts` `resolveThreadForRequest` | `roundId` = eşleşen teklifin round'u |
+
+Dokunulmayanlar (round alanı yazmayanlar): kalite skoru yeniden hesabı, telefon doğrulamanın `phoneVerifiedAt` yazımı (yayın kısmı yukarıda), disclosure kaydı, teklif shortlist/reject/withdraw/view (round'u değiştirmez; teklif kendi `matchRoundId`'sini taşır).
+
+### 30.3 Request ↔ round invariant'ları
+
+`scripts/ops/rel-002-round-consistency.sql` (ihlal başına bir satır; boş = tutarlı):
+1. Her request'in `currentRoundId`'si var ve kendi round'unu gösteriyor.
+2. Faz 1: her request'in tam bir round'u var.
+3. Current round, request'in projeksiyonuyla alan alan aynı (status, source, roundNumber=1, openedAt, publishedAt, expiresAt, reminderSentAt, matched*, completed/cancelled/expiredAt; `failedAt` NULL).
+4. Her offer kendi request'inin round'unda.
+5–6. Reveal ve thread, teklifinin round'unda.
+
+`match-round-dual-write.spec.ts` her case'ten sonra bu dosyayı çalıştırır (afterEach). Yerel DB'de M1 sonrası 0 satır.
+
+### 30.4 Migration provası, uygulama ve ölçümler (yerel)
+
+- Dump (API durdurulmuşken): `~/Backups/taktic/db/taktic-db-20261011T090635Z-pre-rel002-m1-ad96b136.dump`, sha256 `794615c1e4429e202bf79749a8f3cf04b18f34b9ffb39fc8b47736c5fe28d7c1` (1101 TOC, 98 tablo, 94 migration).
+- `restore-rehearsal.sh` (izole internal network, tmpfs) geçti; `taktic-migrate:6814ded2` ile status güncel, drift yok.
+- Deploy provası: dump ayrı bir atılabilir PostgreSQL 16.6'ya açıldı, `prisma migrate deploy` → M1 21 ms (wall 0,76 s); tutarlılık 0 satır; drift yok; mevcut 98 tablonun veri hash'leri (yeni kolonlar hariç) birebir aynı.
+- Aktif yerel DB: 94 → 95 (M1 60 ms), ikinci deploy "No pending", `migrate status` güncel, drift yok, tutarlılık 0 satır.
+- Fingerprint önce → sonra: tablo 98 → 99, index 516 → 525 (+9), constraint 510 → 520 (+10: pkey, 7 FK, 2 CHECK), trigger 31 → 32; tablo başına veri hash'leri değişmedi.
+- Boyut: her yeni index 16 kB (9 × 16 kB), round tablosu 8 kB; DB boyutu +319 KB (yerel), provada +368 KB.
+- Round dağılımı (yerel): OPEN/MARKETPLACE 13 (8'inde `publishedAt`), OPEN/DIRECT_SHOWCASE 3, MATCHED 2, COMPLETED 5.
+- **Ölçek provası** (atılabilir PostgreSQL 16.6, sentetik veri: 200k request, 500k offer, 50k reveal, 20k thread): M1 **15,1 s** (wall 15,8 s), tutarlılık 0 satır. DB 413 MB → 686 MB (+273 MB; çoğu backfill UPDATE'inin yeni tuple'ları — VACUUM sonrası geri kazanılır). Index boyutları: `Offer_matchRoundId_status_idx` 15 MB, `ServiceRequest_currentRoundId_key` 9,2 MB, round pkey 7,6 MB, `requestId_roundNumber` 6 MB, `matchedOfferId` 4,8 MB, one-active 3 MB, reveal/thread `roundId` 2,6 / 1 MB; round tablosu 23 MB.
+- Sonuç: M1 tek transaction'da `ALTER TABLE` kilitlerini commit'e kadar tutar; bu ölçekte ~15 s yazma kesintisi demektir. Prod ölçeği bunun altındaysa tek migration yeterli; üstündeyse (§5.2) backfill migration dışına alınıp batch'lenir. Staging/prod sayıları preflight ile ölçülmeden karar verilmez.
+- Hot path: okuyucular değişmedi. Lifecycle yazıcıları başına +1 okuma (request + matched offer'ın providerId'si) ve +1 upsert (round); teklif oluşturmada +1 okuma (`currentRoundId`), round satırına yazma yok (eşzamanlı teklifler round'da çakışmaz).
+
+### 30.5 Runbook (staging / production için; bu PR'da dokunulmadı)
+
+1. `psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/rel-002-preflight.sql` → integrity sayaçlarının hepsi 0 olmalı. Değilse DUR (M1'in doğrulama bloğu da reddeder).
+2. Offer sayısı ~100k'yı aşıyorsa backfill'i batch'lemeyi değerlendir (§5.2); aksi hâlde tek migration.
+3. Normal deploy sırası: API durdur → `backup-db.sh` → `restore-rehearsal.sh` → `migrate deploy` (95) → ikinci deploy "No pending" → `migrate drift` 0.
+4. `psql ... -f scripts/ops/rel-002-round-consistency.sql` → 0 satır.
+5. Yeni API'yi başlat. Web/admin değişmedi (recreate gerekmez).
+6. Geri dönüş: kod revert; şema kalır (nullable, okuyucusuz). Eski kodun ürettiği round'suz satırlar M2'nin 0. adımıyla toplanır.
+
+### 30.6 Faz 2 için kalan gerçek blocker'lar
+
+1. Okuyucular hâlâ request kolonlarında: discovery `offers: none` filtresi, accept'in `OFFER_ROUND_CLOSED` kontrolü, contact/messaging lookup, review, admin projeksiyonları (§24 "Değişen", Faz 2 satırları).
+2. Per-request unique'ler (`Offer_providerId_requestId_key`, `Offer_one_accepted_per_request`, reveal/thread `requestId` unique) — M2 swap'ı.
+3. NOT NULL ve composite FK'ler (M2) — önce deploy penceresinin round'suz satırları için 0. adım backfill.
+4. `createOfferRecord` tx-içi status/round kontrolü (mevcut TOCTOU).
+5. Scheduler'lar (expiry/reminder) ve publish fan-out dedupe anahtarı round saatine/turuna geçmeli; retry parser `:r<N>`.
+6. Teklif start/end tarihlerinin zorunlu hale gelmesi (API + web formları aynı deploy'da).
+7. Dual-write'ın yerini açık round geçişleri almalı (`syncCurrentMatchRound` yalnız Round 1'i bilir); `MatchRound_open_has_no_match` CHECK'i ve scheduler index'leri M2'de.
