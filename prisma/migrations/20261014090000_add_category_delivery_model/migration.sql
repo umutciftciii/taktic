@@ -21,7 +21,7 @@
 --
 -- The guard is created after the columns, so it never sees the backfill.
 -- Nothing else is rewritten; no index is added (matching filters by
--- category, not by these columns — see docs/match-001-delivery-model.md §8).
+-- category, not by these columns — see docs/match-001-delivery-model.md §12).
 --
 -- Irreversibility boundary: while every category is ON_SITE and every request
 -- is ON_SITE, scripts/ops/match-001-rollback.sql can drop all of this (it

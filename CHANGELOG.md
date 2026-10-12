@@ -6,6 +6,20 @@ are in [docs/release.md](docs/release.md).
 
 ## Unreleased
 
+### Added
+
+- MATCH-001: category delivery model (`ON_SITE` / `REMOTE` / `HYBRID`) and
+  location-independent remote matching. A request snapshots its delivery mode
+  at creation (HYBRID: the customer chooses); REMOTE requests reach every
+  eligible provider of the category regardless of service areas — discovery,
+  detail, offer and the publish fan-out share one location rule, and every
+  other guard (approval, category, round, exclusion, credit, schedule) is
+  unchanged. Existing categories and requests stay ON_SITE; a later category
+  change never moves an existing request (database-enforced). Admin category
+  form, request forms, vitrin leads, provider area settings and request screens
+  show the mode. Migration 99 → 100; rollback only before the feature is used.
+  See `docs/match-001-delivery-model.md`.
+
 ## 0.2.0 - 2026-10-12
 
 Match rounds and service assurance (REL-002 Faz 1–5). A request is now matched
