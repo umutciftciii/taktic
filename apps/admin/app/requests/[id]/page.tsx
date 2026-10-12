@@ -259,9 +259,9 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
   // `?tab=` pointing at it falls back to the first tab.
   const tabKeys: TabKey[] = [
     '',
-    'turlar',
     ...(canReadOffers ? (['teklifler'] as const) : []),
     ...(canReadReports ? (['sikayet'] as const) : []),
+    'turlar',
     'gecmis',
   ];
   const activeTab = resolveTab<TabKey>(rawTab, tabKeys, '');
@@ -270,7 +270,6 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
     activeTab === 'turlar' ? await apiFetch<AdminRoundTimeline>(`/service-requests/${id}/rounds`) : null;
   const tabs: TabItem[] = [
     { key: '', label: 'Talep bilgileri', testId: 'request-tab-bilgiler' },
-    { key: 'turlar', label: 'Eşleşme turları', testId: 'request-tab-turlar' },
     ...(canReadOffers
       ? [{ key: 'teklifler', label: 'Teklifler', count: offers?.length ?? null, testId: 'request-tab-teklifler' }]
       : []),
@@ -284,6 +283,8 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
           },
         ]
       : []),
+    // REL-002 Faz 5: the full round timeline, next to the request's history.
+    { key: 'turlar', label: 'Eşleşme turları', testId: 'request-tab-turlar' },
     { key: 'gecmis', label: 'Neler oldu', testId: 'request-tab-gecmis' },
   ];
 

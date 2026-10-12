@@ -142,7 +142,7 @@ const requestTabs = (page: Page) => page.getByRole('navigation', { name: 'Talep 
 const offerTabs = (page: Page) => page.getByRole('navigation', { name: 'Teklif sekmeleri' });
 
 test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
-  test('the request detail is four URL tabs: deep links, Back/Forward and the keyboard', async ({
+  test('the request detail is five URL tabs: deep links, Back/Forward and the keyboard', async ({
     browser,
   }, testInfo) => {
     const { request, provider, reporter } = await seedScene();
@@ -154,7 +154,8 @@ test.describe('requests and offers (ADMIN-DESIGN-001 Faz 3A)', () => {
       await admin.gotoAdmin(path);
       await assertNoErrorScreen(page);
       const tabs = requestTabs(page);
-      await expect(tabs.getByRole('link')).toHaveCount(4);
+      // REL-002 Faz 5 added „Eşleşme turları".
+      await expect(tabs.getByRole('link')).toHaveCount(5);
       await expect(tabs.getByRole('link', { name: 'Talep bilgileri' })).toHaveAttribute('aria-current', 'page');
       await expect(page.getByTestId('request-panel-bilgiler')).toBeVisible();
       await expect(page.getByTestId('request-open-reports')).toHaveText('1 şikayet karar bekliyor');
@@ -510,7 +511,7 @@ test.describe('Faz 3A permissions: sections and actions follow /admin/me/permiss
     try {
       const page = reader.page;
       await reader.gotoAdmin(`/requests/${request.id}`);
-      await expect(requestTabs(page).getByRole('link')).toHaveCount(4);
+      await expect(requestTabs(page).getByRole('link')).toHaveCount(5);
       for (const name of ['Onayla', 'İncelemeye al', 'Talebi reddet', 'Kaliteyi yeniden hesapla', 'İptal et', 'Hizmeti tamamlandı işaretle']) {
         await expect(page.getByRole('button', { name, includeHidden: true }), name).toHaveCount(0);
       }
@@ -528,7 +529,12 @@ test.describe('Faz 3A permissions: sections and actions follow /admin/me/permiss
       await noAudit.gotoAdmin(`/requests/${matched.request.id}`);
       await expect(noAudit.page.getByTestId('request-panel-bilgiler')).toBeVisible();
       await expect(noAudit.page.getByTestId('contact-reveal-audit')).toHaveCount(0);
-      await expect(requestTabs(noAudit.page).getByRole('link')).toHaveText([/^Talep bilgileri/, /^Teklifler/, 'Neler oldu']);
+      await expect(requestTabs(noAudit.page).getByRole('link')).toHaveText([
+        /^Talep bilgileri/,
+        /^Teklifler/,
+        'Eşleşme turları',
+        'Neler oldu',
+      ]);
     } finally {
       await reader.close();
       await noAudit.close();

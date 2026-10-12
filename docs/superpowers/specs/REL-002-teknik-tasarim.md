@@ -974,7 +974,7 @@ REPORTED ──provider yanıtı──► PROVIDER_RESPONDED
 **Talep detayı** (`/requests/[id]`):
 - `MatchCard` yerine **tur zaman çizelgesi**: her tur için numara, kaynak, açılış/yayın, eşleşen sağlayıcı, sonuç, incident bağlantısı.
 - Teklifler sekmesine tur filtresi eklenir (varsayılan: current).
-- `MATCH_REVIEW` durumunda StatusCard aksiyonları: "Yeni tur aç" (`REQUESTS_REOPEN`, zorunlu not + audit, §21) ve "İptal et" (mevcut).
+- `MATCH_REVIEW` durumunda StatusCard aksiyonları: "Yeni tur aç" (`REQUESTS_REOPEN`, zorunlu not + audit, §21) ve "İptal et" (mevcut). **[Faz 5'te değişti — §34.2/§34.10]** İzin `MATCH_REVIEW_OPEN_ROUND` (SUPER_ADMIN'e ayrılmış); aksiyon StatusCard'da değil, ayrı „Eşleşme turları" sekmesinde.
 
 **Incident kuyruğu** (`/provider-incidents`):
 - Filtreler: status (varsayılan REPORTED + PROVIDER_RESPONDED), sağlayıcı, tarih.
@@ -992,7 +992,7 @@ REPORTED ──provider yanıtı──► PROVIDER_RESPONDED
 - `PROVIDER_INCIDENTS_READ`
 - `PROVIDER_INCIDENTS_DECIDE`
 - `PROVIDER_RELIABILITY_REVIEW`
-- Yeni tur açmak için mevcut `REQUESTS_REOPEN` reuse edilir.
+- Yeni tur açmak için mevcut `REQUESTS_REOPEN` reuse edilir. **[Faz 5'te değişti — §34.2]** `REQUESTS_REOPEN` bildirimle kaldırılan talebi geri açmanın iznidir; Round 4+ ayrı ve SUPER_ADMIN'e ayrılmış `MATCH_REVIEW_OPEN_ROUND` ile açılır.
 - `route-permission-map` ve rol tohumları güncellenir.
 
 **Genel görünüm:** iki yeni kuyruk hücresi, `openProviderIncidents` ve `providerReliabilityReviews`. `DESTINATION_PERMISSIONS` ile kapılı.
@@ -1087,9 +1087,9 @@ Yeni template'ler:
   - Scheduler'lar dokunmaz.
   - Müşteri iptal edebilir (eşleşme yok, `assertCancellable` CUSTOMER'a izin verir; `terminalStatuses`'a girmez).
   - Müşteri ekranı: "Talebiniz ekibimiz tarafından inceleniyor. Size dönüş yapacağız."
-- Admin kuyruğu: Genel görünüme `matchReviewRequests` hücresi ve talep listesinde status filtresi.
+- Admin kuyruğu: Genel görünüme `matchReviewRequests` hücresi ve talep listesinde status filtresi. (Faz 5'te uygulandı, §34.11.)
 - Admin aksiyonları:
-  - **Yeni tur aç** (`POST /admin/service-requests/:id/rounds`, `REQUESTS_REOPEN`, body `{ note (zorunlu ≥ 10), idempotencyKey, expectedRoundId }`): R(N+1) OPEN (`openedBy ADMIN`), request APPROVED, fan-out. Exclusion'lar korunur. Domain audit kaydı yazılır (ADMIN-ACTION-AUDIT-001), ConfirmGate deseni.
+  - **Yeni tur aç** (`POST /admin/service-requests/:id/rounds`, `REQUESTS_REOPEN`, body `{ note (zorunlu ≥ 10), idempotencyKey, expectedRoundId }`): R(N+1) OPEN (`openedBy ADMIN`), request APPROVED, fan-out. Exclusion'lar korunur. Domain audit kaydı yazılır (ADMIN-ACTION-AUDIT-001), ConfirmGate deseni. **[Faz 5'te değişti — §34.3–§34.6]** Gerçek uç `POST /admin/service-requests/:id/open-next-round`, body `{ expectedCurrentRoundId, note (10..2000), idempotencyKey }`, izin `MATCH_REVIEW_OPEN_ROUND`; talep doğrudan APPROVED olmaz, **kanonik yayın kapısından** geçer (otomatik yayın açık → yayında, kapalı → moderasyon).
   - **İptal et**: mevcut akış. Winner yok, kredi hareketi yok.
 - İlk sürümde admin manuel turları için **sabit hard-cap yok** (karar 3): her açılış zorunlu notlu ve audit'li bir personel kararıdır. Her manuel tur yine başarısız olursa talep tekrar `MATCH_REVIEW`'a döner.
 - `MATCH_REVIEW` için SLA/otomatik kapanış bu fazda yok (borç notu).
@@ -1345,6 +1345,8 @@ Gerçek sonuç, sapmalar ve runbook §32'de. Aşağıdaki kapsam metni planland�
 
 ### Faz 5 — MATCH_REVIEW admin aksiyonları, sertleştirme, E2E ve temizlik
 
+> **Bu taslağın yerine §34 geçer** (Faz 5 gerçek sonucu). Taslaktan farklar: uç `open-next-round`; M5 yalnız enum değeri değil (`MatchRoundOpenedBy.ADMIN` M3'te geldi) — `ServiceRequestRoundOpening` tablosu + `MATCH_REVIEW_OPEN_ROUND` izni; müşteri abuse sinyali Faz 4'te geldi (§33.6); legacy alan kaldırma ayrı PR.
+
 - **Kapsam:**
   - `POST /admin/service-requests/:id/rounds` (zorunlu not + audit, hard-cap yok; M5 `MatchRoundOpenedBy += ADMIN`), admin `MATCH_REVIEW` UI'ı ve kuyruğu.
   - Müşteri abuse sinyali (DISMISSED sayı/oran rozeti; otomatik kısıt yok, karar 7).
@@ -1353,7 +1355,7 @@ Gerçek sonuç, sapmalar ve runbook §32'de. Aşağıdaki kapsam metni planland�
   - Ops runbook (`docs/ops/`).
   - Legacy alanlar (`request.reminderSentAt` vb.) için okuyucu kalmadığının doğrulanması (kaldırma ayrı bir PR).
   - CHANGELOG ve `v0.2.0` release notu.
-- **Migration:** M5 (yalnız enum değeri).
+- **Migration:** M5 (yalnız enum değeri). **[Gerçekte: §34.1]**
 - **Risk:** düşük.
 - **Test gate'i:** E2E yeşil, post-merge gate (CI-SPEED-001).
 - **Rollback:** kod revert.
@@ -1918,3 +1920,211 @@ Ek index gerekmedi; karar geçmişi sayfası (19 ms) ve risk kuyruğu (14 ms) iz
 4. Güvenilirlik sonucunun bir eylemi (KEEP_ACTIVE / mevcut moderasyonla askı aynı tx'te, §15 taslağı) ve 2. eşikte sağlayıcıya resmi uyarı e-postası (`provider-reliability-warning`) — ürün kararı bekliyor.
 5. Müşteriye sağlayıcı yanıtının/kararın gösterilmesi (v0.2.0 sonrası ürün kararı).
 6. Borçlar: karar geçmişi sayfası ve risk kuyruğu ölçekte 14–19 ms (§33.10); Faz 2 expiry/reminder taraması (§31.7); bayrak açılınca yerel 2 takvimsiz eşleşme destek yoluna düşer (§32.13/5).
+
+---
+
+## 34. Faz 5 uygulama sonucu, final denetimler ve release hazırlığı
+
+Baseline `main@36c14708`, yerel DB 98 migration, release `v0.1.0`. PR: „REL-002 Faz 5: add match-review recovery and release hardening". Faz 3 bayrağı (`serviceIssueReportingEnabled`) **kapalı kaldı**. Bu bölüm §17, §21 ve §27/Faz 5 taslağının gerçek hâlidir; ayrıldığı yerler o bölümlerde „[Faz 5'te değişti]" diye işaretlendi. Kullanıcının 2026-10-12 Faz 5 sözleşmesi taslağa üstündür (uç adı, izin, yayın kapısı). Operasyon adımları [`docs/ops/rel-002-runbook.md`](../../ops/rel-002-runbook.md).
+
+### 34.1 M5 kararı: migration gerekli
+
+`MatchRoundOpenedBy.ADMIN` M3'ten beri vardı; yalnız enum'la yetinilemedi:
+
+1. **Idempotency anahtarının yeri yok.** Sözleşme „aynı anahtar + aynı payload → replay, farklı payload → 409" istiyor; anahtarın kalıcı ve unique bir yerde durması gerekir. Round satırında böyle bir kolon yok, eklemek round'a personel verisini karıştırırdı.
+2. **Genel audit log yok.** ADMIN-ACTION-AUDIT-001 bilinçli olarak alan başına append-only domain tablosu kullanır (`AccountStatusChange`, `ProviderStatusChange`, `CatalogAuditLog`…); okuma tarafı ortak şekle projekte eder. Round satırı açan personeli ve notu taşımıyor.
+3. **İzin enum değeri.** v0.2.0'da açılış yalnız SUPER_ADMIN'in; Faz 4 deseni (rezerve değer) migration ister.
+
+Migration `20261013090000_add_match_review_round_opening` (tek dosya, tek transaction, backfill yok, dolu tablo taranmaz):
+
+| Nesne | Tür | Anlamı |
+|---|---|---|
+| `AdminPermission.MATCH_REVIEW_OPEN_ROUND` | enum değeri (`ADD VALUE IF NOT EXISTS`) | izin kataloğu 93 → 94 |
+| `ServiceRequestRoundOpening` | tablo | `id, requestId, fromRoundId, openedRoundId, openedByAdminId, note, idempotencyKey, createdAt` |
+| uniq `fromRoundId`, `openedRoundId`, `idempotencyKey`; index `(requestId, createdAt)`, `openedByAdminId` | | başarısız tur bir kez kurtarılır; tur başına bir açılış |
+| FK `requestId → ServiceRequest`, **composite** `(fromRoundId, requestId)` ve `(openedRoundId, requestId) → round(id, requestId)`, `openedByAdminId → User` | | iki tur da aynı talebin |
+| `RoundOpening_note_rules` | CHECK | `note = btrim(note)`, 10..2000 |
+| `RoundOpening_distinct_rounds` | CHECK | `fromRoundId <> openedRoundId` |
+| `ServiceRequestRoundOpening_shape` | trigger (BEFORE INSERT) | from-round FAILED; opened round OPEN, `openedBy = ADMIN`, numarası from + 1 (`ROUND_OPENING_SHAPE:`) |
+| `ServiceRequestRoundOpening_append_only` | trigger | UPDATE/DELETE reddedilir |
+
+Rollback: `scripts/ops/rel-002-m5-rollback.sql` — yalnız açılış, ADMIN tur ve yeni iznin rol ataması yokken; enum değeri bırakılır (IF NOT EXISTS ile yeniden deploy güvenli).
+
+### 34.2 İzin
+
+`MATCH_REVIEW_OPEN_ROUND` → `SUPER_ADMIN_RESERVED_PERMISSIONS` (Faz 4 `SERVICE_INCIDENTS_CORRECT` deseni): katalogda bir değer, rota ona bağlı, SUPER_ADMIN'in listesinde var; hiçbir rol taşıyamaz (rol editörü 400 `PERMISSION_RESERVED_FOR_SUPER_ADMIN`, `GET /admin/permissions` → `reservedForSuperAdmin: [SERVICE_INCIDENTS_CORRECT, MATCH_REVIEW_OPEN_ROUND]`), `hasPermission` ADMIN'de yok sayar; servis ayrıca `isSuperAdmin` ister (403 `SUPER_ADMIN_REQUIRED`). `REQUESTS_REOPEN` (bildirimle kaldırılan talebi geri açma) **reuse edilmedi**: farklı bir karar, farklı risk. Normal ADMIN (`REQUESTS_READ`): kuyruğu, MATCH_REVIEW'u ve zaman çizelgesini görür, „Yeni tur aç" görmez (yerine „yalnız süper yöneticiye açıktır" notu).
+
+### 34.3 API
+
+| Uç | İzin | |
+|---|---|---|
+| `POST /admin/service-requests/:id/open-next-round` | `MATCH_REVIEW_OPEN_ROUND` | body `{ expectedCurrentRoundId, note, idempotencyKey (uuid) }`; 200 (yeni açılış ve replay, `replayed`) |
+| `GET /admin/service-requests/match-review` | `REQUESTS_READ` | kuyruk, en eski başarısızlık önce, en çok 200 satır + `total` |
+| `GET /service-requests/:id/rounds` | `REQUESTS_READ` | zaman çizelgesi (genişletildi, §34.10) |
+| `GET /dashboard/admin-summary` | `DASHBOARD_READ` | + `matchReviewRequests` (yalnız `REQUESTS_READ` ile; yoksa anahtar yok) |
+
+Yanıt: `{ openingId, requestId, requestStatus, fromRound {id, roundNumber}, round {id, roundNumber, status, publishedAt, expiresAt}, published, replayed }`.
+
+Ret kodları: 404 (talep yok); 403 (rol/izin, `SUPER_ADMIN_REQUIRED`); 400 `MATCH_REVIEW_NOTE_REQUIRED` (+`minLength`), `MATCH_REVIEW_NOTE_TOO_LONG`; 409 `REQUEST_NOT_IN_MATCH_REVIEW`, `ROUND_CHANGED`, `MATCH_REVIEW_INCONSISTENT` (güncel tur FAILED değil / tur < 3 / canlı tur var), `IDEMPOTENCY_KEY_REUSED`, `MATCH_REVIEW_ALREADY_REOPENED` (+`roundNumber`), `CONCURRENT_MODIFICATION`.
+
+### 34.4 Idempotency ve eşzamanlılık
+
+- Not trim + boşluk katlama (`normalizeIncidentText`), sonra 10..2000. Payload = (talep, `expectedCurrentRoundId`, normalize not, açan admin).
+- Sıra: talep oku → **anahtar** (aynı payload → replay; farklı → 409 `IDEMPOTENCY_KEY_REUSED`) → bu başarısız turdan zaten açılış var mı (→ 409 `MATCH_REVIEW_ALREADY_REOPENED`) → durum guard'ları. Anahtar kontrolü durum guard'larından **önce**: kendi commit'i talebi ilerletmiş bir retry de cevabını alır.
+- CAS: `serviceRequest.updateMany WHERE id AND status = MATCH_REVIEW AND currentRoundId = beklenen` → count ≠ 1 ⇒ 409 `MATCH_REVIEW_ALREADY_REOPENED`.
+- Backstop'lar: tur `(requestId, roundNumber)` unique, deterministik id `mr<N>_<req>`, tek-aktif-tur kısmi unique, açılışın `fromRoundId`/`openedRoundId`/`idempotencyKey` unique'leri. Herhangi bir P2002 → işlem **bir kez daha** commit edilmiş duruma karşı çalışır: aynı anahtar → replay, başka anahtar → `MATCH_REVIEW_ALREADY_REOPENED`. Serileştirme çakışması (P2034) `runSerializable` ile yeniden denenir. Tx içinde ham sorgu yok (Faz 4 P2010 tuzağı).
+- Test: iki SUPER_ADMIN, iki anahtar, aynı anda → tam bir 200 + bir 409 `MATCH_REVIEW_ALREADY_REOPENED`, tek Tur 4, tek açılış; aynı anahtar iki kez aynı anda → ikisi de 200, biri `replayed`. 3 ardışık koşuda kararlı. E2E: iki tarayıcıda iki süper yönetici aynı anda onaylar → biri „Yeni tur açıldı", diğeri „zaten açıldı".
+
+### 34.5 Transaction (tek Serializable, `matchReview.openNextRound`)
+
+1. talep + güncel tur oku; 2. idempotency/guard'lar (§34.4); 3. `nextRoundNumber = güncel + 1` (güncel tur = son tur, kontrol 2 garanti eder); 4. `openAdminRound` (`match-round-transitions.ts`): OPEN, `source MARKETPLACE`, `openedBy ADMIN`, `openedAt now`, `publishedAt/expiresAt NULL`, tur ≤ 3 için açmayı reddeder; 5. CAS ile projeksiyon: `status SUBMITTED`, `currentRoundId = yeni`, `matchedOfferId/matchedAt/directShowcaseProviderId NULL`; 6. açılış satırı (audit); 7. yayın kapısı (§34.6); 8. `request-manually-reopened` outbox niyeti; 9. kredi yazımı **yok**.
+
+Dokunulmayanlar (test: `frozen()` anlık görüntüsü önce/sonra birebir): eski turlar, dışlamalar, incident'lar, adjudication'lar, review'lar, teklifler, `ProviderCreditTransaction`, `ShowcaseLead`. Eski teklif diriltilmez, mesaj/iletişim kopyalanmaz.
+
+### 34.6 Yayın kapısı
+
+Taze bir pazar yeri talebinin doğduğu üç koşul aynen: otomatik yayın açık **ve** vitrin talebi değil (`directShowcaseProviderId` az önce NULL) **ve** telefon kapısı kapalı ya da numara kanıtlı → aynı tx'te `publishRequestInTransaction` (SUBMITTED → APPROVED, `approvedAt = now`, `publishRound`, round-aware fan-out `request-available:<req>:<provider>:r<N>`). Aksi hâlde SUBMITTED, moderasyon kuyruğunda; onay `roundPublicationFor` ile turun `publishedAt`'ini yazar ve fan-out o anda olur. Testler: kapalı → SUBMITTED + `publishedAt NULL`, onayla yayın ve fan-out yalnız D/E'ye; açık → hemen APPROVED; telefon kapısı açık + kanıtsız numara → SUBMITTED.
+
+### 34.7 Yeni tur davranışı (R4+ = her pazar yeri turu)
+
+Taze teklifler (teklif unique'i `(providerId, matchRoundId)`); dışlananlar keşifte, detayda, teklifte (servis + `Offer_round_open_guard`), fan-out'ta ve kabulde görünmez/engellenir; yalnız önceki bir turda kaybetmiş (dışlanmamış) sağlayıcı yeniden teklif verebilir (test: E Round 1'de kaybetti, Round 4'te teklif verdi); bildirim anahtarları `:r<N>`; süre/hatırlatma turun saatinde; iletişim ve mesaj thread'i tura özgü; eski thread'ler salt okunur; değerlendirme son COMPLETED güncel turun. R4 de başarısız olursa yine `MATCH_REVIEW` (yeni incident, dışlama, yeni `request-match-review:<incidentId>` bildirimi) ve sınır olmadan Tur 5 açılabilir (test).
+
+### 34.8 Bildirimler
+
+| Şablon | Alıcı | Anahtar | Gönderim anı kuralı |
+|---|---|---|---|
+| `request-manually-reopened` | müşteri | `request-manually-reopened:<roundId>` | tur hâlâ talebin güncel, OPEN, `openedBy = ADMIN` turu; `publishedAt` NULL ise „kısa bir kontrolden sonra" metni |
+
+Konu: „Talebiniz yeniden teklif almaya açıldı"; personel notu hiçbir bildirimde yok (test). Sağlayıcılar normal `request-available` fan-out'unu alır (dışlananlar hariç). Admin'e kendine e-posta yok. Retry tablosunda (`RETRY_DEDUPE_PREFIXES`), REQ-UX-007 shell'i, render ve dark-mode testlerinde (61 şablon). Hepsi outbox; tx içinde doğrudan gönderim yok.
+
+### 34.9 Audit
+
+`ServiceRequestRoundOpening` satırı açılışın audit'idir: talep, önceki tur (id; numarası FK'den), yeni tur (id; numarası FK'den), admin, not, zaman. Append-only (trigger), not düzeltilemez — yanlış bir açılış geçmiş değiştirilerek değil, ayrı bir işlemle ele alınır (v0.2.0'da yok). Admin zaman çizelgesinde açan yöneticinin adı, zaman ve iç not; açanın e-postası yalnız `ADMIN_USERS_READ` ile.
+
+### 34.10 Admin talep detayı: „Eşleşme turları" sekmesi
+
+`/requests/[id]?tab=turlar` (yalnız bu sekme `GET /service-requests/:id/rounds` okur). Tur başına etiketli `<article>`: numara; durum (metinle, rengin yanında); „Güncel tur"; „Yönetici açtı"; kaynak; açılış (kim/ne zaman); yayın / yayın sonu (moderasyonda „Yayın bekliyor"); gelen teklif; eşleşme; tamamlanma/başarısızlık/iptal/süre dolumu; eşleşen hizmet veren ve kabul edilen teklif (yalnız `OFFERS_READ`; yoksa anahtar yok, ekranda „Teklif okuma izniniz yok"); taahhüt günleri; takvimsiz eşleşmede „Taahhüt tarihi yok — otomatik sorun bildirimi kullanılamaz"; hizmet aksaklığı (no, sebep, zaman, durum, geçerli karar, „düzeltildi"; `SERVICE_INCIDENTS_READ` ile bağlantı; `PROVIDER_RELIABILITY_READ` + `PROVIDERS_READ_DETAIL` ile güvenilirlik kaydına bağlantı); dışlama; mesajlaşma („Açık yazışma" / „Kapandı · salt okunur" / „Yazışma yok"); iletişim paylaşımı (yalnız `CONTACT_REVEAL_READ`); personel açılışı (yönetici, zaman, iç not). Geçmiş turlarda hiçbir mutasyon yok.
+
+„Yeni tur aç" yalnız talep MATCH_REVIEW'da, güncel tur FAILED ve ≥ 3, canlı tur yokken, yalnız `MATCH_REVIEW_OPEN_ROUND` tutan oturumda: zorunlu iç not (`required`, 10..2000, etiketli), gizli `expectedCurrentRoundId` ve sayfa render'ında üretilen `idempotencyKey` (çift gönderim/yeniden deneme aynı açılış), `ConfirmDialog` (proof `request.open-next-round`; neyin değişmediğini söyler: önceki turlar, dışlamalar, kredi iadesi yok), bekleyen gönderimde düğme kapalı. Durum kartında MATCH_REVIEW notu ve sekmeye bağlantı. Ret kodları sekmede Türkçe cümle (`role=alert`), başarı `role=status`.
+
+### 34.11 MATCH_REVIEW kuyruğu ve Genel görünüm
+
+Talep listesine „Eşleşme İncelemesi" kayıtlı görünümü; bu görünüm „İnceleme bekleyen eşleşmeler" kartıyla açılır (en eski başarısızlık önce: talep, başarısız tur, düştüğü an, son aksaklık + sağlayıcı + durum, dışlanan sayısı; bağlantılar: Turlar, Aksaklık, Güvenilirlik — her biri kendi izniyle). Genel görünüm: `matchReviewRequests` metriği ve „Önce bunlara bak" hücresi (kicker „Eşleşme"); sayı listenin `total`'ı ile aynı eşitlik.
+
+### 34.12 Müşteri deneyimi
+
+MATCH_REVIEW metni korundu: „Talebiniz ekibimiz tarafından inceleniyor. Size dönüş yapacağız." Pazar yeri/sağlayıcı durumu sızmaz; müşteri yeni turu kendisi açamaz (403); iptal edebilir (kredi hareketi yok). Personel turu açınca talep normal akışa döner (otomatik yayın kapalıyken „ön incelemede" metni), R1–R3 „Önceki eşleşmeler"de kalır, R4 güncel turdur; personel notu müşteri yanıtında ve sayfasında yok (API + E2E). Web'de kod değişikliği gerekmedi.
+
+### 34.13 Gözlemlenebilirlik
+
+Ayrı metrik yığını eklenmedi. `common/rel-002-events.ts` tek satırlık olay formatı: `rel002_event event=<ad> key=value…` — yalnız id/sayı/enum. Olaylar: `service_issue_reported`, `round_reopened_automatically`, `match_review_entered` (Faz 3 servis), `manual_round_opened` (Faz 5), `incident_adjudicated`, `incident_correction_applied`, `reliability_review_opened` (Faz 4 servis). Sayaç karşılıkları ve sorgular runbook §6'da. Standing sayılar admin'de (MATCH_REVIEW kuyruğu, incident ve güvenilirlik kuyrukları).
+
+### 34.14 Final durum makinesi denetimi
+
+Yazıcılar (kod taraması): oluşturma (SUBMITTED/APPROVED), moderasyon (`reviewSourceStatuses` = SUBMITTED/IN_REVIEW/APPROVED → IN_REVIEW/APPROVED; `REMOVABLE_STATUSES` → REJECTED), bildirimle kaldırılanı geri açma (REJECTED → APPROVED), telefon doğrulaması (SUBMITTED → APPROVED), kabul (APPROVED → MATCHED), tamamlama (MATCHED → COMPLETED), iptal (terminal olmayan → CANCELLED), süre dolumu (APPROVED → EXPIRED), hizmet aksaklığı (MATCHED → APPROVED/SUBMITTED/MATCH_REVIEW), personel açılışı (MATCH_REVIEW → SUBMITTED/APPROVED). Hepsi koşullu yazım + Serializable.
+
+| Talep | Güncel tur | Çıkışlar (yasal) |
+|---|---|---|
+| DRAFT/SUBMITTED/IN_REVIEW | OPEN, `publishedAt NULL` | moderasyon, telefon doğrulaması, ret, iptal |
+| APPROVED | OPEN, yayınlı (R1'de `approvedAt`; R≥2'de `publishedAt/expiresAt` dolu — kontrol 14) | kabul → MATCHED, süre → EXPIRED, IN_REVIEW, ret, iptal |
+| MATCHED | MATCHED (kazanan = projeksiyon) | COMPLETED, iptal (personel), hizmet aksaklığı → FAILED |
+| COMPLETED | COMPLETED | — (terminal) |
+| EXPIRED | EXPIRED | — (terminal) |
+| CANCELLED | CANCELLED; MATCH_REVIEW'dan iptalde FAILED kalır | — (terminal) |
+| REJECTED | OPEN (yayından kaldırılmış) | bildirimle kaldırıldıysa geri açma |
+| MATCH_REVIEW | **FAILED, ≥ 3** | yalnız personel açılışı (→ SUBMITTED/APPROVED, yeni OPEN tur) veya iptal |
+
+Tur: OPEN → MATCHED/EXPIRED/CANCELLED; MATCHED → COMPLETED/CANCELLED/FAILED; COMPLETED/CANCELLED/EXPIRED/FAILED terminal (trigger). Yasa dışı geçişler reddedilir (yeni test: MATCH_REVIEW'da moderasyon APPROVED/IN_REVIEW 409, ret 4xx, tamamlama 409, eski tekliflerin kabulü 409, yeni teklif 404). Tutarlılık scripti: 1–12 (önceki fazlar) + **13** (ADMIN turu ≥ 4, tam bir açılışı var, açılış bir önceki FAILED turdan; her açılış ADMIN tur adlar) + **14** (R≥2 güncel OPEN turun yayını talebin moderasyon durumuna uyar). „İki aktif tur yok" kısmi unique + kontrol 9; „MATCH_REVIEW yalnız FAILED güncel turda" kontrol 3; preflight M5 bölümü bunları M5 öncesi de ölçer. Her API testi tutarlılık 0 ile biter; ölçek DB'sinde (20k talep, 150k tur) 0 satır, 1,44 s.
+
+### 34.15 Final kredi matrisi
+
+| | Durum | Kredi | Kanıt |
+|---|---|---|---|
+| A | normal teklif | harcanır (kategori bedeli) | R4'te D `creditCost 2` |
+| B | görülmemiş uygun teklif | mevcut sözleşmeyle (48 saat) iade | `unviewed-offer-refund`, Faz 3 „FAILED turun rakibi" testi |
+| C | kabul edilen kazanan | ödenmiş kalır | tüm FAILED kazananlar ACCEPTED |
+| D | iade edildi sonra kabul | mevcut recharge invariant'ı | `offer-refund-accept-recharge` |
+| E | başarısız eşleşen sağlayıcı | **iade yok** (`FAILED_MATCH_NOT_REFUNDABLE`) | Faz 3; Faz 5 R1–R3 kazananlarında `OFFER_REFUND` 0 |
+| F | incident doğrulama | iade yok | Faz 4 |
+| G | incident reddi | iade yok | Faz 4 |
+| H | düzeltme | iade yok | Faz 4 |
+| I | başarısız tarihî turdan sonra iptal | yalnız güncel turun canlı teklifleri | Faz 5: R4 iptalinde `closedOfferIds = refundedOfferIds = [D]`, A/B/C'ye 0 |
+| J | personel R4 açılışı | **hiç finansal yazım yok** | `frozen()` ledger birebir |
+| K | R4 teklifleri | normal taze fiyat | D/E `creditCost 2` |
+
+### 34.16 Tarihî erişim, vitrin zinciri, güvenilirlik yalıtımı
+
+- **Tarihî erişim:** eski turun sağlayıcısı kendi teklifini (başarısız eşleşme notu) ve kendi thread'ini salt okunur görür (yazma/okundu 403), sonraki turların sağlayıcısını/thread'ini/iletişimini göremez (404); müşteri tüm geçmişini ve eski thread'leri okur, güncel thread ayrı; admin tüm turları görür. Faz 5 testi: thread R1'de ACTIVE, başarısızlıktan sonra READ_ONLY; başka sağlayıcı 404, katılımcı 200.
+- **Vitrin zinciri:** DIRECT R1 → başarısız → pazar R2 → başarısız → R3 → başarısız → MATCH_REVIEW → personel R4 (API + E2E): `ShowcaseLead` birebir aynı, `directShowcaseProviderId NULL`, vitrin sahibi kalıcı dışlı (teklif 404, keşifte yok, lead inbox'ında `MATCH_ENDED`), sonraki turlarda doğrudan kapı yok, R4 `MARKETPLACE` ve normal fiyat.
+- **Güvenilirlik yalıtımı:** açılış incident'ların etkin kararlarına, strike sayısına, review'lara ve müşteri sinyaline dokunmaz (`frozen()`: incident/adjudication/review satırları birebir). Açılış yalnız operasyonel kurtarmadır; servis hiçbir incident, adjudication ya da review tablosuna yazmaz ve güvenilirlik hesabını çağırmaz (yalnız not normalleştiricisini paylaşır).
+
+### 34.17 Bayrak semantiği
+
+`serviceIssueReportingEnabled=false` kaldı (yerel DB, test sonrası). Kapalıyken şema/API/UI tamamen deploy edilebilir; bayrak çalışma anında iki yönde değişir (`ServiceIssueSettingsService`, fail-closed). Kapalı = yeni bildirim yok (uç 404, CTA yok); mevcut incident'lar, turlar, admin geçmişi, karar akışı ve **MATCH_REVIEW kurtarma** çalışır (Faz 5 testi: bayrak kapalıyken Tur 4 açıldı, bildirim 404, zaman çizelgesi okundu). Gerçek Round 2'den sonra kapatmak veriyi bozmaz; geri dönüş = bayrağı kapatmak.
+
+### 34.18 Takvimsiz eski eşleşmeler
+
+Yerelde 2 MATCHED talep, teklifinde taahhüt günü yok. Tarih uydurulmadı, backfill yok. Ürün davranışı: bayrak açıkken müşteri formu değil destek bağlantısını görür (`SERVICE_ISSUE_REQUIRES_SUPPORT`); admin zaman çizelgesinde „Taahhüt tarihi yok — otomatik sorun bildirimi kullanılamaz" (API `winnerScheduleMissing`, değer yok). Deploy notu: preflight `matched_without_schedule` sayısı destek ekibine iletilir (runbook §7).
+
+### 34.19 Expiry/reminder ~35 ms borcu — karar: dokunulmadı
+
+Yeniden değerlendirildi: aday taraması APPROVED talepler üzerinde hash join yapıyor; düşürmek ham SQL aday taraması ya da planner'ı zorlayan bir yeniden yazım ister (Faz 3 §32.10: küçük, güvenli bir index değişikliği değil). Saatlik bir tarama için 35 ms, REL-002'yi kapatan bir PR'da risk almaya değmez. Borç olarak duruyor (§34.24).
+
+### 34.20 Migration provası ve uygulama
+
+- **Preflight** (aktif yerel DB, salt-okunur): 98 migration; SUBMITTED 6 / APPROVED 9 / REJECTED 1 / MATCHED 2 / COMPLETED 5; 23 tur, en büyük tur no 1; MATCH_REVIEW 0; incident/adjudication/review/dışlama 0; bayrak `false`; M2/M3/M4 bütünlük 0; M4 tutarlılık 0.
+- **Yedek** (API durdurulmuşken): `~/Backups/taktic/db/taktic-db-20261012T121759Z-pre-rel002-m5-36c14708.dump`, sha256 `902fe13ddb3f8ebd098c5f37845bc59503c4d679f0c48bad035e8bd491c27a7f`, 699 055 bayt (1212 TOC, 103 tablo, 98 migration). `restore-rehearsal.sh` geçti (103 tablo / 1235 satır manifest ile birebir).
+- **Deploy provası** (atılabilir PG 16.6-alpine, tmpfs; dump'tan): M4 tutarlılık 0, M5 preflight 0/0 → `migrate deploy` M5 **14 ms** (wall 0,73 s) → ikinci deploy „No pending" → drift 0 → yeni tutarlılık 0 → veri hash'i (`_prisma_migrations` ve yeni tablo hariç, 102 tablo) dump ile birebir. Fingerprint tablo 103 → 104, index 558 → 564 (+6), constraint 561 → 568 (+7: pkey, 4 FK, 2 CHECK), trigger 43 → 45, migration 98 → 99.
+- **Rollback provası:** kullanılmamışta `rel-002-m5-rollback.sql` 0,08 s → fingerprint M4 ile birebir (103/558/561/43/98), veri hash'i birebir, M4 şemasına (`36c14708`) drift yalnız bırakılan `MATCH_REVIEW_OPEN_ROUND` → `migrate deploy` M5'i yeniden uyguladı, drift 0. Kullanılmışta (yeni izni taşıyan rol satırı) betik reddetti, 99'da kaldı.
+- **Ölçek provası:** 20k talep × 5–10 tur (150k tur, 150k teklif, 132k incident/dışlama/thread, 90k personel açılışı, 2000 MATCH_REVIEW) üzerinde M5 DDL'i 19 ms; tutarlılık 0 (1,44 s).
+- **Aktif yerel DB 98 → 99:** M5 **25 ms**, ikinci deploy „No pending", `migrate status` güncel, drift 0, tutarlılık 0, veri hash'i değişmedi, bayrak `false`, ledger 41. Ana checkout'taki Faz 4 kodu (`36c14708`) M5 şemasıyla yeniden başlatıldı: `/health` 200, log'da hata yok — kod geri dönüşünün canlı kanıtı.
+- **Geri dönüş sınırı:** personel açılışı (ve dolayısıyla ADMIN tur) ya da yeni iznin rol ataması oluşmadan önce: kod revert + gerekirse M5 rollback. İlk Round 4'ten sonra **geriye şema dönüşü yok**; ileri-düzeltme.
+
+### 34.21 Performans (EXPLAIN ANALYZE, BUFFERS — ölçek DB'si, Prisma'nın ürettiği SQL)
+
+| Sorgu | Plan | Süre |
+|---|---|---|
+| Zaman çizelgesi, 10 turlu talep (10 sorgu) | PK / `requestId_roundNumber` + sort / `Offer` bitmap / `incident_roundId_key` / `MessageThread_roundId_key` / açılış `openedRoundId` | her biri ≤ 0,17 ms (wall 5–17 ms, N+1 yok: sorgu sayısı tur sayısından bağımsız) |
+| MATCH_REVIEW kuyruğu (2000 bekleyen, 200 satır) | `status_idx` → tur PK probe → sayfa PK probe → dışlama/açılış `groupBy` index-only | adımlar 2,4 / 7,6 / 0,6 / 1,9 / 1,3 / 0,4 / 0,3 ms |
+| Genel görünüm sayısı | `status_submittedAt_idx` index-only | 0,14 ms |
+| Keşif çekirdeği, 12 002 talepten dışlanmış sağlayıcı (take 500) | nested loop anti join + `exclusion_requestId_providerId_key` index-only | 1,3 ms |
+| Fan-out kitlesi (9 dışlamalı talep) | hash anti join, index-only | 0,02 ms |
+| Açılış tx'i (otomatik yayın açık, fan-out dahil, 29 ifade) | PK/unique probe'lar | wall 25 ms |
+| Açılış replay'i | `idempotencyKey_key` | wall 3,6 ms |
+
+İlk ölçümde kuyruk tek sorguda ilişki üzerinden sıralıyordu (`orderBy currentRound.failedAt`): Prisma tur tablosunu join ediyor, planner 150k turu seq scan + hash join yapıyordu (24–64 ms, tur sayısıyla doğrusal); `_count` ilişkisi de açılış tablosunu tümden tarıyordu (38 ms). Kuyruk üç index-bound adıma ve `groupBy` sayımlarına çevrildi. Kalan tek seq scan, 2000 id'lik tur probe'unda planner'ın paralel seq scan seçmesi (7,6 ms; gerçek kuyruk birkaç satır olduğundan pratikte PK probe'dur).
+
+### 34.22 Test kapısı (yerel)
+
+- Yeni API `match-review.spec.ts` (20 entegrasyon testi): yetki (ADMIN tüm verilebilir izinlerle 403, rol satırına sızdırılmış izin 403, müşteri/sağlayıcı 403, rol editörü 400, katalog `reservedForSuperAdmin`, `REQUESTS_READ` kuyruk + zaman çizelgesi), guard'lar (not kısa/uzun/yok, uuid, eski tur, bilinmeyen talep, MATCH_REVIEW olmayan), yasa dışı çıkışlar, müşteri açamaz/iptal edebilir, otomatik yayın kapalı (moderasyon → yayın → fan-out yalnız D/E, A/B/C 404, R4 tamamlandı, iade yok, müşteri yanıtında not yok, `frozen()` birebir), açık, telefon kapısı, sınırsız (R4 başarısız → MATCH_REVIEW → R5), bayrak kapalıyken kurtarma, R4 iptali kredi matrisi, idempotency (replay / farklı not / farklı admin / sonraki anahtar), iki yarış, DB append-only + shape trigger + not CHECK, vitrin zinciri, zaman çizelgesi blok izinleri, thread modu, takvimsiz eşleşme, kuyruk sırası + Genel görünüm anahtarı, olay satırı formatı. Her case sonunda tutarlılık 0; 3 ardışık koşuda kararlı.
+- Güncellenen API: `admin-rbac-route-map` (94 izin, 2 yeni rota), `service-incident-adjudication` (rezerve liste), `admin-dashboard-summary` (`matchReviewRequests`), e-posta render (61 şablon) ve dark-mode.
+- Admin: yeni `match-rounds.spec.tsx` (11 test: hedef kuralı, etiketli article'lar, form ve gizli alanlar, izinsiz not, ADMIN turu notu, takvimsiz uyarı, ret kodu cümleleri, `OFFERS_READ`'siz görünüm, kuyruk kartı bağlantıları, Genel görünüm hücresi, izin etiketi).
+- E2E (Chromium, hedefli): yeni `match-review-recovery.spec.ts` 5/5 — (1) 3 başarısızlık → MATCH_REVIEW → `REQUESTS_READ` ADMIN kuyruğu ve zaman çizelgesini görür, aksiyonu görmez → SUPER_ADMIN diyalogla Tur 4 açar → A görmez, D teklif verir, kazanır, tamamlar; müşteri sayfasında not yok; (2) iki süper yönetici aynı anda → tek tur, diğeri „zaten açıldı"; (3) vitrin zinciri → pazar R4, sahip dışlı; (4) klavye/odak/etiket/durum metni/375 px; (5) takvimsiz eşleşme zaman çizelgesi uyarısı. `admin-accessibility` yapı taramasına `/requests?status=MATCH_REVIEW`, `/service-incidents`, `/provider-reliability` eklendi. Faz 3 `service-issue` 6/6, Faz 4 `service-incident-adjudication` 3/3 yeniden geçti. WebKit projesine eklendi.
+
+### 34.23 v0.2.0 release hazırlığı (bu PR'da bump/tag/release YOK)
+
+Kontrol listesi:
+
+- [x] REL-002 Faz 1–5 tamam (bu PR merge olunca).
+- [x] Migration sayısı: main'de **99** (M1–M5).
+- [x] CHANGELOG `Unreleased`'da Faz 1–5 girdileri (taslak, aşağıda).
+- [x] Breaking API notu: teklif tarihleri zorunlu (Faz 2; CHANGELOG „Changed").
+- [x] Deploy bağlılığı: şema önce, sonra API + web + admin birlikte (runbook §2).
+- [x] Bayrak açma notu: deploy kararlıyken, ayrı onayla, kontrollü ortamda önce (runbook §4).
+- [x] Geri dönüş sınırları: Faz 3 (gerçek Round 2), Faz 4 (karar/yanıt), Faz 5 (personel açılışı) — sonrası ileri-düzeltme (runbook §5).
+- [x] Bilinen borçlar (§34.24).
+- [ ] Staging kabul planı (ayrı onayla): (1) preflight + yedek + restore provası; (2) 99'a deploy, API+web+admin; (3) bayrak kapalı duman testi; (4) bayrak staging'de açılır → R1→R2→R3→MATCH_REVIEW→R4 kabul turu (iki test sağlayıcı + bir yeni), kredi ve bildirim kontrolü; (5) Faz 4 karar/düzeltme turu; (6) tutarlılık 0; (7) karar: production'da bayrak.
+- [ ] Bump: root `package.json` `0.2.0`, `Unreleased` → `## 0.2.0 - <tarih>`, `pnpm version:check`; tag merge commit'inde (docs/release.md).
+
+v0.2.0 notu taslağı (CHANGELOG'a taşınacak özet): „Eşleşme turları ve hizmet güvencesi: her talep turlarla eşleşir; müşteri teslim edilmeyen hizmeti bildirerek talebini yeniden açabilir (bayrak arkasında, varsayılan kapalı); başarısız sağlayıcı talepten kalıcı dışlanır ve iade almaz; ekip aksaklıkları karara bağlar (yalnız süper yönetici düzeltir), sağlayıcı güvenilirliği 90 günlük doğrulanmış aksaklıktan hesaplanır; üç başarısız turdan sonra talep ekip incelemesine düşer ve süper yönetici notla yeni tur açar. API için kırıcı: teklif oluştururken başlangıç ve bitiş günü zorunlu."
+
+### 34.24 Kalan borçlar
+
+1. Expiry/reminder aday taraması ~35 ms/tick (§19, §34.19).
+2. Sağlayıcı yanıt hatırlatıcısı (48. saat) yok (§33.4).
+3. Güvenilirlik sonucunun bir eylemi ve 2. eşikte sağlayıcıya resmi uyarı e-postası — ürün kararı (§33.14/4).
+4. Müşteriye sağlayıcı yanıtı/karar gösterimi — v0.2.0 sonrası ürün kararı.
+5. MATCH_REVIEW SLA'sı/otomatik kapanışı yok; yanlış personel açılışını geri almak için ayrı bir işlem yok (bilinçli: geçmiş değişmez).
+6. Karar geçmişi sayfası ve risk kuyruğu ölçekte 14–19 ms (§33.10); MATCH_REVIEW kuyruğunun büyük-id-listesi probe'u (§34.21).
+7. Legacy alanlar (`request.approvedAt`/`reminderSentAt` aynası) için kaldırma PR'ı; yerel 2 takvimsiz eşleşme destek yolunda.
+8. Staging/production'da REL-002 hiç deploy edilmedi; bayrak her ortamda kapalı.

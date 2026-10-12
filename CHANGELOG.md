@@ -78,6 +78,32 @@ are in [docs/release.md](docs/release.md).
   page's reliability card. Ops: `scripts/ops/rel-002-m4-rollback.sql` (only
   before any Faz 4 data exists), preflight M4 section, consistency checks
   11–12.
+- REL-002 Faz 5: staff recovery from `MATCH_REVIEW` and release hardening —
+  REL-002 is complete (migration `20261013090000_add_match_review_round_opening`;
+  the Faz 3 switch stays **off**). A SUPER_ADMIN opens Round 4, 5, … on a
+  request whose three automatic rounds failed:
+  `POST /admin/service-requests/:id/open-next-round`
+  (`expectedCurrentRoundId`, mandatory internal note 10–2000, idempotency key;
+  same key and payload replays, `409 IDEMPOTENCY_KEY_REUSED` otherwise, a
+  concurrent second opening is `409 MATCH_REVIEW_ALREADY_REOPENED`). The new
+  round is a marketplace round on the same request (`openedBy = ADMIN`, no
+  hard cap) and enters the ordinary publish gate (auto-publish on → live at
+  once with the round-aware fan-out; off → moderation). Earlier rounds,
+  exclusions, incidents and credit are untouched; nothing is refunded. Each
+  opening is recorded in the append-only `ServiceRequestRoundOpening` (who,
+  note, from which failed round, into which round). New permission
+  `MATCH_REVIEW_OPEN_ROUND`, reserved for SUPER_ADMIN. New customer notice
+  `request-manually-reopened` (never the staff note). Admin: the request's
+  „Eşleşme turları" tab — a full round timeline (source, opener, clock,
+  outcome, winner, incident and its effective decision, exclusion, thread
+  mode, contact reveal, staff opening) — and „Yeni tur aç"; the MATCH_REVIEW
+  queue (`GET /admin/service-requests/match-review`, oldest first) on the
+  requests list and the dashboard („İnceleme bekleyen eşleşmeler",
+  `matchReviewRequests`). Observability: one-line `rel002_event` log events
+  (ids and enums only). Ops: `docs/ops/rel-002-runbook.md` (deploy order,
+  flag procedure, emergency, MATCH_REVIEW recovery, legacy dateless matches),
+  `scripts/ops/rel-002-m5-rollback.sql`, preflight M5 section, consistency
+  checks 13–14.
 
 ### Changed
 
