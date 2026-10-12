@@ -72,6 +72,8 @@ export const CONFIRMATION_PROOF_KEYS = [
   'request.unpublish',
   'request.complete',
   'request.reopen',
+  // REL-002 Faz 5: staff open Round 4+ on a request in MATCH_REVIEW.
+  'request.open-next-round',
   'request.report-dismiss',
   'request.cancel',
   'request.reject',

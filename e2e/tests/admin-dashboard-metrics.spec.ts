@@ -137,8 +137,13 @@ test.describe('admin dashboard (Genel görünüm)', () => {
       const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul' }).format(new Date());
       await expect(admin.page.getByTestId('dashboard-date')).toHaveAttribute('datetime', today);
 
-      // A super admin may open everything: four cells, four figures, the list.
-      await expect(admin.page.getByTestId('dashboard-queue')).toHaveCount(4);
+      // A super admin may open everything: five cells (REL-002 Faz 5 added the
+      // MATCH_REVIEW queue), four figures, the list.
+      await expect(admin.page.getByTestId('dashboard-queue')).toHaveCount(5);
+      await expect(admin.page.locator('[data-testid="dashboard-queue"][data-metric="matchReviewRequests"]')).toHaveAttribute(
+        'href',
+        '/requests?status=MATCH_REVIEW',
+      );
       await expect(admin.page.getByTestId('dashboard-kpi')).toHaveCount(4);
       await expect(admin.page.getByTestId('dashboard-system')).toBeVisible();
       await expect(admin.page.getByRole('link', { name: 'Talepleri incele' })).toHaveAttribute('href', '/requests');
@@ -325,13 +330,17 @@ test.describe('admin dashboard (Genel görünüm)', () => {
         await supportActor.close();
       }
 
-      // OPERATIONS_SETTINGS_READ + REQUESTS_READ: the system list and both header actions, no queue.
+      // OPERATIONS_SETTINGS_READ + REQUESTS_READ: the system list, both header
+      // actions, and only the queue REQUESTS_READ opens (REL-002 Faz 5: the
+      // MATCH_REVIEW queue).
       const opsActor = await Actor.open(browser, 'admin-dashboard-k2-ops', primaryRuntime, { viewport: DESKTOP });
       try {
         await opsActor.loginToAdmin(operations.email, operations.password);
         await opsActor.gotoAdmin('/');
         await assertNoErrorScreen(opsActor.page);
-        await expect(opsActor.page.getByTestId('dashboard-queues')).toHaveCount(0);
+        const opsCells = opsActor.page.getByTestId('dashboard-queue');
+        await expect(opsCells).toHaveCount(1);
+        await expect(opsCells.first()).toHaveAttribute('data-metric', 'matchReviewRequests');
         await expect(opsActor.page.getByTestId('dashboard-system')).toBeVisible();
         await expect(opsActor.page.getByRole('link', { name: 'Talepleri incele' })).toBeVisible();
         await expect(

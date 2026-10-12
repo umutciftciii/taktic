@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import type { MatchReviewQueue } from '../../lib/match-rounds';
+import { MatchReviewQueueCard } from './match-review-queue';
 import {
   apiFetch,
   formatBudgetRange,
@@ -100,7 +102,7 @@ const statusFilters: Array<{ label: string; value: StatusFilter }> = [
  * The saved views: the status filter's values an operator works through, in
  * that order. Every other status stays one select away in the filter bar.
  */
-const VIEW_STATUSES: ServiceRequestStatus[] = ['SUBMITTED', 'IN_REVIEW', 'APPROVED', 'MATCHED'];
+const VIEW_STATUSES: ServiceRequestStatus[] = ['SUBMITTED', 'IN_REVIEW', 'APPROVED', 'MATCHED', 'MATCH_REVIEW'];
 
 const qualityFilters: Array<{ label: string; value: QualityFilter }> = [
   { label: 'Tümü', value: 'all' },
@@ -195,11 +197,14 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   const toDate = parseDateBoundary(toRaw, 'end');
   const page = parsePage(params.page);
 
-  const [requests, categories] = await Promise.all([
+  const [requests, categories, matchReviewQueue] = await Promise.all([
     apiFetch<ServiceRequest[]>(
       query ? `/service-requests?${new URLSearchParams({ q: query }).toString()}` : '/service-requests',
     ),
     listCatalogueForFilter(),
+    // REL-002 Faz 5: the MATCH_REVIEW view opens with its own queue, oldest
+    // failure first (REQUESTS_READ, like this list).
+    status === 'MATCH_REVIEW' ? apiFetch<MatchReviewQueue>('/admin/service-requests/match-review') : Promise.resolve(null),
   ]);
 
   const normalizedCity = toLower(cityFilter);
@@ -359,6 +364,14 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
           <input id="request-to" name="to" type="date" defaultValue={toRaw} />
         </FilterField>
       </FilterBar>
+
+      {matchReviewQueue ? (
+        <MatchReviewQueueCard
+          queue={matchReviewQueue}
+          canOpenIncidents={can('SERVICE_INCIDENTS_READ')}
+          canOpenReliability={can('PROVIDER_RELIABILITY_READ') && can('PROVIDERS_READ_DETAIL')}
+        />
+      ) : null}
 
       <div className="data-list-card">
         {filtered.length === 0 ? (

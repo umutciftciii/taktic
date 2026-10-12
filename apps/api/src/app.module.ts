@@ -15,6 +15,7 @@ import { QuestionsModule } from './modules/questions/questions.module';
 import { ServiceRequestsModule } from './modules/service-requests/service-requests.module';
 import { ServiceIssuesModule } from './modules/service-issues/service-issues.module';
 import { ServiceIncidentsModule } from './modules/service-incidents/service-incidents.module';
+import { MatchReviewModule } from './modules/match-review/match-review.module';
 import { ShowcaseModule } from './modules/showcase/showcase.module';
 import { SitemapModule } from './modules/sitemap/sitemap.module';
 import { SeoAdminModule } from './modules/seo/admin/seo-admin.module';
@@ -76,6 +77,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     // REL-002 Faz 3: POST /service-requests/:id/service-issue.
     ServiceIssuesModule,
     ServiceIncidentsModule,
+    MatchReviewModule,
     ProviderClaimModule,
     // Before ProvidersModule: `GET /providers/me/business-registration` must not
     // be read as anything of ProvidersController's.

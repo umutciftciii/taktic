@@ -64,7 +64,12 @@ test.describe('admin action visibility', () => {
       // each belong to another permission: none is rendered — not the tab,
       // and not the block behind a hand-typed ?tab= either.
       const tabs = admin.page.getByRole('navigation', { name: 'Talep sekmeleri' });
-      await expect(tabs.getByRole('link')).toHaveText(['Talep bilgileri', 'Neler oldu']);
+      // REL-002 Faz 5: the round timeline is REQUESTS_READ's own — its tab is
+      // there; opening a new round is not (a super admin's alone).
+      await expect(tabs.getByRole('link')).toHaveText(['Talep bilgileri', 'Eşleşme turları', 'Neler oldu']);
+      await admin.gotoAdmin(`/requests/${request.id}?tab=turlar`);
+      await expect(admin.page.getByTestId('round-timeline')).toBeVisible();
+      await expect(admin.page.getByTestId('open-next-round-form')).toHaveCount(0);
       for (const tab of ['teklifler', 'sikayet']) {
         await admin.gotoAdmin(`/requests/${request.id}?tab=${tab}`);
         await expect(admin.page.getByTestId('request-panel-bilgiler'), tab).toBeVisible();

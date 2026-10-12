@@ -163,6 +163,8 @@ describe('who may read the summary', () => {
       // ADMIN-BACKEND-TRUTH-001: queue counts a super admin may follow.
       reportedRequests: 0,
       pendingShowcaseReviews: 0,
+      // REL-002 Faz 5: the MATCH_REVIEW queue.
+      matchReviewRequests: 0,
     });
   });
 

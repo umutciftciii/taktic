@@ -1520,6 +1520,8 @@ export type AdminSummary = {
   reportedRequests?: number;
   /** Card versions waiting on an operator — the vitrin review queue. Absent without SHOWCASE_REVIEW_READ. */
   pendingShowcaseReviews?: number;
+  /** REL-002 Faz 5: the MATCH_REVIEW queue (REQUESTS_READ only). */
+  matchReviewRequests?: number;
 };
 
 export type FinanceSummaryRecentTransaction = {
@@ -4265,6 +4267,10 @@ export function adminPermissionLabel(permission: AdminPermission): {
   }
   if (permission === 'REQUESTS_CANCEL_WITHOUT_REFUND') {
     return { area: 'Talepler', action: 'kazanan teklifin kredisini iade etmeden iptal (gerekçe zorunlu)' };
+  }
+  // REL-002 Faz 5: Round 4+ from MATCH_REVIEW, reserved for a super admin.
+  if (permission === 'MATCH_REVIEW_OPEN_ROUND') {
+    return { area: 'Talepler', action: 'eşleşme incelemesinden yeni tur açma (yalnız süper yönetici)' };
   }
 
   const parts = permission.split('_');

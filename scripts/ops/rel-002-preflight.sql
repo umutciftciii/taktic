@@ -144,4 +144,17 @@ SELECT
 \echo '   information: incidents by status (all REPORTED before Faz 4)'
 SELECT "status", count(*) FROM "ProviderServiceIncident" GROUP BY "status" ORDER BY "status";
 
+\echo '== M5 (Faz 5) — before 20261013090000_add_match_review_round_opening =='
+\echo '   integrity: must be 0 (no ADMIN round exists before Faz 5 — M5 has no backfill)'
+SELECT
+  (SELECT count(*) FROM "ServiceRequestMatchRound" WHERE "openedBy"::text = 'ADMIN')   AS admin_rounds,
+  (SELECT count(*) FROM "ServiceRequest" r JOIN "ServiceRequestMatchRound" cr ON cr.id = r."currentRoundId"
+     WHERE r.status::text = 'MATCH_REVIEW' AND cr.status::text <> 'FAILED')            AS match_review_not_on_failed_round;
+\echo '   information: the MATCH_REVIEW queue, rounds per request, the flag'
+SELECT
+  (SELECT count(*) FROM "ServiceRequest" WHERE status::text = 'MATCH_REVIEW')          AS match_review_requests,
+  (SELECT coalesce(max("roundNumber"), 0) FROM "ServiceRequestMatchRound")             AS max_round_number,
+  (SELECT count(*) FROM "ServiceRequestProviderExclusion")                             AS exclusions,
+  (SELECT bool_or("serviceIssueReportingEnabled") FROM "OperationsSettings")           AS service_issue_flag;
+
 ROLLBACK;

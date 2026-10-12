@@ -26,6 +26,11 @@
 -- tables, so this file needs M4. On a database before M4 run the M3 version
 -- (main@acaf9902). A decision never removes the exclusion: check 7 keeps
 -- holding for CONFIRMED and DISMISSED incidents alike.
+--
+-- Faz 5 (M5): check 13 reads the staff round-opening table, so this file
+-- needs M5. On a database before M5 run the M4 version (main@36c14708).
+-- Check 14 holds a later round's clock to its request's moderation state
+-- (Round 1's is already compared in check 3).
 WITH expected AS (
   SELECT
     r."id"                                               AS "requestId",
@@ -219,5 +224,39 @@ FROM "ProviderReliabilityReview" rr
 WHERE rr."status"::text IN ('OPEN', 'ACKNOWLEDGED')
 GROUP BY rr."providerId"
 HAVING count(*) > 1
+
+UNION ALL
+-- 13. (M5) A round staff opened is Round 4+ and has exactly one opening, from
+--     the FAILED round right before it; an opening names an ADMIN round.
+SELECT mr."requestId", 'admin_round_opening',
+       mr."id" || concat_ws(' ',
+         CASE WHEN mr."roundNumber" <= 3 THEN 'admin round within the automatic limit' END,
+         CASE WHEN o."id" IS NULL THEN 'no opening' END,
+         CASE WHEN o."id" IS NOT NULL AND (fr."roundNumber" <> mr."roundNumber" - 1 OR fr."status"::text <> 'FAILED')
+              THEN 'opening not from the failed round before' END)
+FROM "ServiceRequestMatchRound" mr
+LEFT JOIN "ServiceRequestRoundOpening" o ON o."openedRoundId" = mr."id"
+LEFT JOIN "ServiceRequestMatchRound" fr ON fr."id" = o."fromRoundId"
+WHERE mr."openedBy"::text = 'ADMIN'
+  AND (mr."roundNumber" <= 3 OR o."id" IS NULL
+       OR fr."roundNumber" <> mr."roundNumber" - 1 OR fr."status"::text <> 'FAILED')
+
+UNION ALL
+SELECT o."requestId", 'opening_without_admin_round', o."id" || ' → ' || o."openedRoundId"
+FROM "ServiceRequestRoundOpening" o
+JOIN "ServiceRequestMatchRound" mr ON mr."id" = o."openedRoundId"
+WHERE mr."openedBy"::text <> 'ADMIN' OR mr."requestId" <> o."requestId"
+
+UNION ALL
+-- 14. (Faz 5) A later round's offer period follows its request's moderation
+--     state: published while the request is APPROVED, unpublished while it is
+--     still in moderation. (Round 1 is compared field by field in check 3.)
+SELECT r."id", 'later_round_publication', cr."id" || ' ' || r."status" || ' publishedAt ' ||
+       coalesce(cr."publishedAt"::text, '<null>')
+FROM "ServiceRequest" r
+JOIN "ServiceRequestMatchRound" cr ON cr."id" = r."currentRoundId"
+WHERE cr."roundNumber" >= 2 AND cr."status"::text = 'OPEN'
+  AND ((r."status"::text = 'APPROVED' AND (cr."publishedAt" IS NULL OR cr."expiresAt" IS NULL))
+    OR (r."status"::text IN ('DRAFT', 'SUBMITTED', 'IN_REVIEW') AND cr."publishedAt" IS NOT NULL))
 
 ORDER BY 1, 2;

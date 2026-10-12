@@ -34,6 +34,8 @@ export const SERVICE_ISSUE_NOTIFICATION_TEMPLATES = [
   'service-incident-dismissed',
   'service-incident-provider-responded',
   'provider-reliability-review-opened',
+  // REL-002 Faz 5: staff opened Round 4+ from MATCH_REVIEW.
+  'request-manually-reopened',
 ] as const;
 
 const DEFAULT_DELIVERY_LIMIT = 200;
@@ -221,6 +223,41 @@ export async function enqueueReliabilityReviewNotice(
         requestId: null,
         userId: null,
         providerId: input.providerId,
+      }),
+    ],
+    skipDuplicates: true,
+  });
+  return created.count;
+}
+
+/**
+ * REL-002 Faz 5 — the customer learns staff opened a new round on their
+ * request (from MATCH_REVIEW), keyed on the new round. Written inside the
+ * opening transaction. The staff note is never part of it. Providers hear of
+ * the round through the ordinary publish fan-out (`request-available:…:r<N>`),
+ * which skips every excluded provider.
+ */
+export async function enqueueManualReopenNotice(
+  tx: Prisma.TransactionClient,
+  input: { roundId: string },
+): Promise<number> {
+  const round = await tx.serviceRequestMatchRound.findUnique({
+    where: { id: input.roundId },
+    select: { requestId: true, request: { select: { customerId: true, customerEmail: true } } },
+  });
+  const email = round?.request.customerEmail?.trim();
+  if (!round || !email) {
+    return 0;
+  }
+  const created = await tx.notificationLog.createMany({
+    data: [
+      intentRow({
+        template: 'request-manually-reopened',
+        to: email,
+        dedupeKey: `request-manually-reopened:${input.roundId}`,
+        requestId: round.requestId,
+        userId: round.request.customerId,
+        providerId: null,
       }),
     ],
     skipDuplicates: true,

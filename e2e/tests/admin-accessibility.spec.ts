@@ -28,6 +28,10 @@ const LIST_SCREENS = [
   '/',
   '/requests',
   '/requests/reports',
+  // REL-002 Faz 4–5: incidents, reliability and the MATCH_REVIEW queue.
+  '/requests?status=MATCH_REVIEW',
+  '/service-incidents',
+  '/provider-reliability',
   '/offers',
   '/refund-scan',
   '/providers',

@@ -23,7 +23,7 @@ import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, MatchRound
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { mayEmbed, mayEmbedStaffEmail } from '../auth/embedded-permissions';
+import { mayEmbed, mayEmbedStaffEmail, staffActorSelect } from '../auth/embedded-permissions';
 import {
   CONTACT_DISCLOSURE_REQUIRED_CODE,
   readContactSharingConfig,
@@ -1086,11 +1086,28 @@ export class ServiceRequestsService {
    * behind it (the customer's reason and note as written — staff read it
    * raw — and its status), and the request's provider exclusions.
    */
-  async listMatchRoundsForAdmin(id: string) {
+  /**
+   * REL-002 — the request's full round timeline for the admin detail
+   * (REQUESTS_READ), oldest round first.
+   *
+   * Per round: its clock and outcome, the failure incident with its effective
+   * decision, the exclusion it wrote, whether it had a message thread (and
+   * whether that thread is still writable), and — Faz 5 — the staff opening
+   * that created it (Round 4+: who, when and the internal note). Whether the
+   * winner's offer carried no promised days is a flag, never the dates.
+   *
+   * Cross-domain blocks follow `mayEmbed`: the winner's business and offer
+   * are OFFERS_READ's, the contact-reveal fact CONTACT_REVEAL_READ's, the
+   * opener's e-mail ADMIN_USERS_READ's — absent, not null, without them.
+   */
+  async listMatchRoundsForAdmin(id: string, viewer: AuthUser | null = null) {
+    const offersBlock = mayEmbed(viewer, AdminPermission.OFFERS_READ);
+    const revealBlock = mayEmbed(viewer, AdminPermission.CONTACT_REVEAL_READ);
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
       select: {
         id: true,
+        status: true,
         currentRoundId: true,
         matchRounds: {
           orderBy: { roundNumber: 'asc' },
@@ -1111,6 +1128,15 @@ export class ServiceRequestsService {
             cancelledAt: true,
             expiredAt: true,
             failedAt: true,
+            matchedOffer: {
+              select: {
+                id: true,
+                offerNumber: true,
+                estimatedStartDate: true,
+                estimatedCompletionDate: true,
+                provider: { select: { id: true, businessName: true } },
+              },
+            },
             failureIncident: {
               select: {
                 id: true,
@@ -1124,6 +1150,19 @@ export class ServiceRequestsService {
                 promisedEndDate: true,
                 status: true,
                 reportedAt: true,
+                effectiveAdjudication: { select: { decision: true, kind: true, createdAt: true } },
+              },
+            },
+            messageThread: { select: { id: true } },
+            contactReveal: { select: { id: true, createdAt: true } },
+            openedByOpening: {
+              take: 1,
+              select: {
+                id: true,
+                note: true,
+                createdAt: true,
+                fromRoundId: true,
+                openedByAdmin: staffActorSelect(viewer),
               },
             },
             _count: { select: { offers: true } },
@@ -1140,15 +1179,61 @@ export class ServiceRequestsService {
       throw new NotFoundException('Service request not found');
     }
 
+    const live = new Set<MatchRoundStatus>([MatchRoundStatus.OPEN, MatchRoundStatus.MATCHED]);
     return {
       requestId: request.id,
+      requestStatus: request.status,
       currentRoundId: request.currentRoundId,
       exclusions: request.providerExclusions,
-      rounds: request.matchRounds.map(({ _count, ...round }) => ({
-        ...round,
-        isCurrent: round.id === request.currentRoundId,
-        offerCount: _count.offers,
-      })),
+      rounds: request.matchRounds.map(
+        ({ _count, matchedOffer, failureIncident, messageThread, contactReveal, openedByOpening, ...round }) => {
+          const opening = openedByOpening[0] ?? null;
+          const { effectiveAdjudication, ...incident } = failureIncident ?? { effectiveAdjudication: null };
+          return {
+            ...round,
+            isCurrent: round.id === request.currentRoundId,
+            offerCount: _count.offers,
+            // A winner whose offer promised no days cannot be reported
+            // through the service-issue flow (REL-002 decision 1): support only.
+            winnerScheduleMissing: matchedOffer
+              ? matchedOffer.estimatedStartDate === null || matchedOffer.estimatedCompletionDate === null
+              : null,
+            ...(offersBlock
+              ? {
+                  matchedProvider: matchedOffer?.provider ?? null,
+                  matchedOffer: matchedOffer
+                    ? {
+                        id: matchedOffer.id,
+                        offerNumber: matchedOffer.offerNumber,
+                        estimatedStartDate: matchedOffer.estimatedStartDate,
+                        estimatedCompletionDate: matchedOffer.estimatedCompletionDate,
+                      }
+                    : null,
+                }
+              : {}),
+            failureIncident: failureIncident
+              ? {
+                  ...incident,
+                  effectiveDecision: effectiveAdjudication?.decision ?? null,
+                  corrected: effectiveAdjudication?.kind === 'CORRECTION',
+                }
+              : null,
+            thread: messageThread
+              ? { id: messageThread.id, mode: live.has(round.status) ? ('ACTIVE' as const) : ('READ_ONLY' as const) }
+              : null,
+            ...(revealBlock ? { contactRevealed: contactReveal !== null } : {}),
+            opening: opening
+              ? {
+                  id: opening.id,
+                  fromRoundId: opening.fromRoundId,
+                  note: opening.note,
+                  createdAt: opening.createdAt,
+                  openedBy: opening.openedByAdmin,
+                }
+              : null,
+          };
+        },
+      ),
     };
   }
 

@@ -5,6 +5,7 @@ import {
   ProviderIncidentDecision,
   ProviderIncidentStatus,
 } from '@prisma/client';
+import { logRel002Event } from '../../common/rel-002-events';
 import { CONCURRENT_MODIFICATION_CODE, runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { isSuperAdmin } from '../auth/admin-permissions';
@@ -334,6 +335,7 @@ export class AdminServiceIncidentsService {
       `incident ${incidentId}: ${result.decision} by ${admin.id} (adjudication ${result.adjudicationId})` +
         (result.openedReviewId ? `, reliability review ${result.openedReviewId} opened` : ''),
     );
+    this.logEvents(result, admin.id);
     return result;
   }
 
@@ -379,7 +381,30 @@ export class AdminServiceIncidentsService {
       `incident ${incidentId}: CORRECTION by SUPER_ADMIN ${admin.id}: ${before?.decision} (${before?.id}) → ` +
         `${result.decision} (${result.adjudicationId})`,
     );
+    this.logEvents(result, admin.id);
     return { ...result, previousAdjudicationId: before!.id, previousDecision: before!.decision };
+  }
+
+  /** REL-002 Faz 5 observability: one event per decision, and one per review it opened. */
+  private logEvents(result: AdjudicationResult, actorId: string) {
+    logRel002Event(
+      this.logger,
+      result.kind === ProviderIncidentAdjudicationKind.CORRECTION ? 'incident_correction_applied' : 'incident_adjudicated',
+      {
+        incidentId: result.incidentId,
+        adjudicationId: result.adjudicationId,
+        decision: result.decision,
+        sequence: result.sequence,
+        actorId,
+      },
+    );
+    if (result.openedReviewId) {
+      logRel002Event(this.logger, 'reliability_review_opened', {
+        reviewId: result.openedReviewId,
+        incidentId: result.incidentId,
+        confirmed: result.providerReliability.confirmed,
+      });
+    }
   }
 
   /**

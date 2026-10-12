@@ -29,6 +29,7 @@ export class DashboardService {
     const now = new Date();
     const mayReadShowcaseQueue = mayEmbed(viewer, AdminPermission.SHOWCASE_REVIEW_READ);
     const mayReadReportQueue = mayEmbed(viewer, AdminPermission.REQUEST_REPORTS_READ);
+    const mayReadRequests = mayEmbed(viewer, AdminPermission.REQUESTS_READ);
     const [
       totalRequests,
       pendingRequests,
@@ -42,6 +43,7 @@ export class DashboardService {
       openRequestReports,
       reportedRequests,
       pendingShowcaseReviews,
+      matchReviewRequests,
     ] = await Promise.all([
       this.prisma.serviceRequest.count(),
       this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.SUBMITTED } }),
@@ -79,6 +81,11 @@ export class DashboardService {
       mayReadShowcaseQueue
         ? this.prisma.showcaseCardVersion.count({ where: showcaseReviewQueueWhere() })
         : Promise.resolve(null),
+      // REL-002 Faz 5: requests whose three automatic rounds failed and which
+      // wait for staff — the MATCH_REVIEW queue's `total` (same equality).
+      mayReadRequests
+        ? this.prisma.serviceRequest.count({ where: { status: ServiceRequestStatus.MATCH_REVIEW } })
+        : Promise.resolve(null),
     ]);
 
     return {
@@ -94,6 +101,7 @@ export class DashboardService {
       openRequestReports,
       ...(reportedRequests === null ? {} : { reportedRequests }),
       ...(pendingShowcaseReviews === null ? {} : { pendingShowcaseReviews }),
+      ...(matchReviewRequests === null ? {} : { matchReviewRequests }),
     };
   }
 }

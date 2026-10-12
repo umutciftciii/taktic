@@ -566,6 +566,8 @@ model User {
   reliabilityReviewsAssigned      ProviderReliabilityReview[]          @relation("ReliabilityReviewAssignedAdmin")
   reliabilityReviewsAcknowledged  ProviderReliabilityReview[]          @relation("ReliabilityReviewAcknowledgedBy")
   reliabilityReviewsResolved      ProviderReliabilityReview[]          @relation("ReliabilityReviewResolvedBy")
+  /// REL-002 Faz 5: the Round 4+ openings this staff member made.
+  matchRoundOpenings              ServiceRequestRoundOpening[]         @relation("RoundOpeningAdmin")
 
   @@index([role])
   @@index([isActive])
@@ -1238,6 +1240,8 @@ model ServiceRequest {
   /// REL-002 Faz 3: the service issues reported on this request, one per
   /// failed round.
   serviceIncidents       ProviderServiceIncident[]
+  /// REL-002 Faz 5: every staff opening of Round 4+ from MATCH_REVIEW.
+  roundOpenings          ServiceRequestRoundOpening[]
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -1428,6 +1432,12 @@ model ServiceRequestMatchRound {
   incidents         ProviderServiceIncident[]         @relation("IncidentRound")
   failureIncident   ProviderServiceIncident?          @relation("MatchRoundFailureIncident", fields: [failureIncidentId, id], references: [id, roundId], onDelete: Restrict)
   exclusionsSourced ServiceRequestProviderExclusion[]
+  /// REL-002 Faz 5: the staff opening that recovered from this round (it
+  /// failed and an admin opened the next). At most one (`fromRoundId` is
+  /// unique); a list only because the relation is a composite FK.
+  reopenedFrom      ServiceRequestRoundOpening[]      @relation("RoundOpeningFrom")
+  /// The staff opening that created this round (ADMIN rounds only).
+  openedByOpening   ServiceRequestRoundOpening[]      @relation("RoundOpeningOpened")
 
   @@unique([requestId, roundNumber])
   /// The target of the composite FKs that pin a request's current round, an
@@ -1562,6 +1572,44 @@ model ProviderServiceIncident {
   @@index([status, reportedAt])
   @@index([customerUserId, reportedAt])
   @@index([requestId])
+}
+
+/// REL-002 Faz 5 — a staff member opened Round N+1 (N ≥ 3) on a request in
+/// MATCH_REVIEW: the audit of that decision and its idempotency record.
+///
+/// Its own domain table (ADMIN-ACTION-AUDIT-001 pattern): who, why, from which
+/// failed round, into which new round, and when. Append-only (trigger refuses
+/// UPDATE and DELETE); the note is never edited — a mistaken opening is a new,
+/// separate act, never a rewrite of this one. The new round itself carries
+/// `openedBy = ADMIN`; the consistency script holds the two together (every
+/// ADMIN round has exactly one opening).
+///
+/// Composite FKs keep both rounds inside the request; a BEFORE INSERT trigger
+/// checks the shape at write time: the from-round FAILED, the opened round
+/// OPEN, `openedBy = ADMIN` and numbered from + 1.
+model ServiceRequestRoundOpening {
+  id              String   @id @default(cuid())
+  requestId       String
+  /// The FAILED round the request sat on in MATCH_REVIEW. Unique: a failed
+  /// round is recovered from once.
+  fromRoundId     String   @unique
+  /// The round this opening created. Unique: one opening per round.
+  openedRoundId   String   @unique
+  openedByAdminId String
+  /// Internal only — never shown to the customer or a provider. Trimmed,
+  /// 10..2000 characters (CHECK).
+  note            String
+  /// The client's key: the same key with the same payload replays this row.
+  idempotencyKey  String   @unique
+  createdAt       DateTime @default(now())
+
+  request       ServiceRequest           @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  fromRound     ServiceRequestMatchRound @relation("RoundOpeningFrom", fields: [fromRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  openedRound   ServiceRequestMatchRound @relation("RoundOpeningOpened", fields: [openedRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  openedByAdmin User                     @relation("RoundOpeningAdmin", fields: [openedByAdminId], references: [id], onDelete: Restrict)
+
+  @@index([requestId, createdAt])
+  @@index([openedByAdminId])
 }
 
 /// REL-002 Faz 3 — a provider that may never act on a request again: written
@@ -5654,6 +5702,10 @@ enum AdminPermission {
   PROVIDER_RELIABILITY_READ
   /// Acknowledging and resolving a reliability review. Never a suspension.
   PROVIDER_RELIABILITY_MANAGE
+  /// REL-002 Faz 5: opening Round 4+ on a request in MATCH_REVIEW. Reserved
+  /// for SUPER_ADMIN in v0.2.0 (`SUPER_ADMIN_RESERVED_PERMISSIONS`): no role
+  /// may carry it, so an ADMIN never holds it.
+  MATCH_REVIEW_OPEN_ROUND
 
   SHOWCASE_PACKAGES_READ
   SHOWCASE_PACKAGES_WRITE

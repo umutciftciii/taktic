@@ -80,8 +80,16 @@ export function mayReachAdminPanel(user: PermissionPrincipal | null | undefined)
  *
  * SERVICE_INCIDENTS_CORRECT: rewriting a staff decision about a provider is a
  * correction of the record, by product decision a SUPER_ADMIN act.
+ *
+ * MATCH_REVIEW_OPEN_ROUND (REL-002 Faz 5): opening Round 4+ on a request whose
+ * three automatic rounds failed has no hard cap, so in v0.2.0 it is a
+ * SUPER_ADMIN decision. An ADMIN still reads MATCH_REVIEW and the timeline
+ * (REQUESTS_READ).
  */
-export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [AdminPermission.SERVICE_INCIDENTS_CORRECT];
+export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [
+  AdminPermission.SERVICE_INCIDENTS_CORRECT,
+  AdminPermission.MATCH_REVIEW_OPEN_ROUND,
+];
 
 export function isReservedPermission(permission: AdminPermission): boolean {
   return SUPER_ADMIN_RESERVED_PERMISSIONS.includes(permission);
