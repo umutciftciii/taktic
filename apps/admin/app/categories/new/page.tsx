@@ -3,6 +3,7 @@ import { createCategoryAction } from '../actions';
 import { CategoryCreateSubmit } from '../category-gates';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
 import { CategoryImageUploader } from '../category-image-uploader';
+import { DeliveryModelField } from '../delivery-model-field';
 import { apiFetch, CATEGORY_ICON_KEYS, Category, requireAdmin } from '../../../lib/api';
 import { PageHeader } from '../../../components/page-header';
 import { SectionCard } from '../../../components/section-card';
@@ -142,6 +143,7 @@ export default async function NewCategoryPage({
                   Yalnızca grup tipindeki kategoriler üst kategori olabilir.
                 </span>
               </label>
+              <DeliveryModelField id="category-new-delivery-model" defaultValue="ON_SITE" kind={null} existing={false} />
               <label className="field field-12">
                 <span>Kısa ad (slug) *</span>
                 <input

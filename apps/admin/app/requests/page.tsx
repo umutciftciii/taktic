@@ -1,3 +1,4 @@
+import { CATEGORY_DELIVERY_MODEL_LABELS, requestDeliveryMode } from '@taktic/shared';
 import Link from 'next/link';
 import type { MatchReviewQueue } from '../../lib/match-rounds';
 import { MatchReviewQueueCard } from './match-review-queue';
@@ -455,6 +456,13 @@ function RequestRow({ request, canReadOffers }: { request: ServiceRequest; canRe
         <div className="cell-stack">
           <span>
             {request.city}/{request.district}
+            {/* MATCH-001: a remote request's place is context, not where the work happens. */}
+            {requestDeliveryMode(request) === 'REMOTE' ? (
+              <span className="cell-muted" data-testid="request-row-remote">
+                {' '}
+                · {CATEGORY_DELIVERY_MODEL_LABELS.REMOTE}
+              </span>
+            ) : null}
           </span>
           {secondaryLocation ? <span className="cell-muted">{secondaryLocation}</span> : null}
         </div>

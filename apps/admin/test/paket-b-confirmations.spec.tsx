@@ -55,6 +55,7 @@ const STORED: CategoryStored = {
   parentId: null,
   offerCreditCost: 3,
   unlimitedPackageEligible: false,
+  deliveryModel: 'ON_SITE',
 };
 
 const FIELDS = {

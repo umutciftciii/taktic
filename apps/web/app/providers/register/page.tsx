@@ -14,6 +14,7 @@ import { CategoryVisual } from '../../category-visual';
 import { isProviderClaimEnabled } from '../../../lib/provider-claim';
 import { IconArrowRight } from '../../landing-icons';
 import { createProviderAction } from '../actions';
+import { ServiceAreaDeliveryNote } from '../service-area-delivery-note';
 
 type ProviderRegisterPageProps = {
   searchParams: Promise<{ error?: string }>;
@@ -152,6 +153,7 @@ export default async function ProviderApplyPage({ searchParams }: ProviderRegist
             <ProviderApplicationFields
               emailRequired={emailRequired}
               provinces={provinces}
+              serviceAreaNote={<ServiceAreaDeliveryNote categories={categories} />}
               serviceScope={
                 <section className="provider-apply-card">
                   <div className="provider-apply-card-head">

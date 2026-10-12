@@ -18,6 +18,7 @@ import { IconArrowRight } from '../../../landing-icons';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
 import { providerStatusBadgeClass, formatBudgetRange } from '../../provider-ui';
+import { DeliveryModeBadge } from '../../../request-fields/delivery-mode-badge';
 
 type ProviderRequestsPageProps = {
   params: Promise<{ id: string }>;
@@ -170,6 +171,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
                   ) : null}
                 </h3>
                 <p className="datarow-meta">
+                  <DeliveryModeBadge request={request} />
                   <span>
                     {request.city}/{request.district}
                     {request.neighborhood ? `/${request.neighborhood}` : ''}

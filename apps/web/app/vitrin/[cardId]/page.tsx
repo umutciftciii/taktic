@@ -292,6 +292,7 @@ export default async function ShowcaseCardPublicPage({ params, searchParams }: C
                   initialDraft={draft.kind === 'payload' ? draft.payload : null}
                   wrongAccount={draft.kind === 'wrong-account'}
                   formPath={formPath}
+                  deliveryModel={category?.deliveryModel}
                 />
               ) : (
                 /*

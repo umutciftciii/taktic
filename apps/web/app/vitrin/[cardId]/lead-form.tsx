@@ -3,6 +3,12 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
+import {
+  fixedDeliveryMode,
+  isRequestDeliveryMode,
+  type CategoryDeliveryModel,
+  type RequestDeliveryMode,
+} from '@taktic/shared';
 import type { ContactDisclosureConfig, Question, ShowcaseFeedCard } from '../../../lib/api';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
@@ -28,6 +34,7 @@ import {
   type TurnstileWebConfig,
 } from '../../../lib/turnstile';
 import { IdentityNotice } from '../../request-fields/identity-notice';
+import { DeliveryModeField } from '../../request-fields/delivery-mode-field';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
 import { TimingFields } from '../../request-fields/timing-fields';
@@ -107,6 +114,12 @@ type LeadFormProps = {
    * told to come back to.
    */
   formPath: string;
+  /**
+   * MATCH-001: the card's category's delivery model. REMOTE (or a HYBRID
+   * answered REMOTE) is not held to the card's coverage — the API does not
+   * refuse an address off the shelf for remote work. Absent is ON_SITE.
+   */
+  deliveryModel?: CategoryDeliveryModel | null;
 };
 
 /**
@@ -165,6 +178,7 @@ export function ShowcaseLeadForm({
   initialDraft = null,
   wrongAccount = false,
   formPath,
+  deliveryModel = null,
 }: LeadFormProps) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
@@ -173,6 +187,11 @@ export function ShowcaseLeadForm({
   const [leaving, startLeave] = useTransition();
 
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  /** MATCH-001: the HYBRID choice; the category's own mode otherwise. */
+  const [deliveryChoice, setDeliveryChoice] = useState<RequestDeliveryMode | null>(
+    isRequestDeliveryMode(initialDraft?.deliveryMode) ? initialDraft.deliveryMode : null,
+  );
+  const remote = (fixedDeliveryMode(deliveryModel) ?? deliveryChoice) === 'REMOTE';
   const [guestContact, setGuestContact] = useState<AlternateContact>({
     ...EMPTY_ALTERNATE_CONTACT,
     phone: prefill.phone,
@@ -636,11 +655,22 @@ export function ShowcaseLeadForm({
       </section>
 
       <section className="showcase-lead-section">
-        <h3>İşin yapılacağı yer</h3>
-        <p className="pdash-form-hint">
-          Bu hizmet yalnız {coverage} kapsamındaki işler için sunulur; kapsam dışındaysa
-          talebinizi genel akıştan oluşturabilirsiniz.
-        </p>
+        <h3>{remote ? 'Konumunuz' : 'İşin yapılacağı yer'}</h3>
+        <DeliveryModeField
+          model={deliveryModel}
+          value={deliveryChoice}
+          onChange={(value) => {
+            setDeliveryChoice(value);
+            if (areaNotServed) setFailure(null);
+          }}
+          idPrefix="lead-delivery-mode"
+        />
+        {remote ? null : (
+          <p className="pdash-form-hint">
+            Bu hizmet yalnız {coverage} kapsamındaki işler için sunulur; kapsam dışındaysa
+            talebinizi genel akıştan oluşturabilirsiniz.
+          </p>
+        )}
         <LocationFields
           provinces={provinces}
           /* The draft wins over the query string: it is what was actually filled in. */
@@ -653,7 +683,7 @@ export function ShowcaseLeadForm({
                 }
               : prefill
           }
-          neighborhoodRequired={addressQuestion?.isRequired ?? false}
+          neighborhoodRequired={(addressQuestion?.isRequired ?? false) && !remote}
           neighborhoodHelpText={addressQuestion?.helpText}
           onChange={() => {
             // A new address is a new question; the last answer no longer applies.

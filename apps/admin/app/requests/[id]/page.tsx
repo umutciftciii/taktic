@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { requestDeliveryMode } from '@taktic/shared';
 import Link from 'next/link';
 import {
   ApiError,
@@ -36,6 +37,7 @@ import {
 } from '../../../lib/api';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { CancelRequestForm, type CancelOfferCounts } from './cancel-request-form';
+import { requestDeliveryItems } from './request-delivery';
 import { DataTable, type DataColumn } from '../../../components/data-table';
 import { DetailHeader } from '../../../components/detail-header';
 import { EmptyState } from '../../../components/empty-state';
@@ -540,10 +542,19 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                 ]}
               />
             </SectionCard>
-            <SectionCard title="Adres ve erişim" subtitle="Hizmetin verileceği yer.">
+            <SectionCard
+              title="Adres ve erişim"
+              subtitle={
+                requestDeliveryMode(request) === 'REMOTE'
+                  ? 'Müşterinin bulunduğu yer; uzaktan talepte eşleşmeyi etkilemez.'
+                  : 'Hizmetin verileceği yer.'
+              }
+            >
               <KeyValueList
                 items={[
-                  { label: 'İl / ilçe', value: `${request.city}/${request.district}` },
+                  // MATCH-001: the request's delivery mode, the category's
+                  // today, and the place — marked as context on a remote one.
+                  ...requestDeliveryItems(request),
                   { label: 'Mahalle', value: request.neighborhood },
                   {
                     label: 'Adres notu',

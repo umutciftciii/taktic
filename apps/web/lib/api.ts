@@ -1,7 +1,7 @@
 export * from './formatters';
 export * from './request-reports';
 export * from './reviews';
-import type { ServiceAreaScope } from '@taktic/shared';
+import type { CategoryDeliveryModel, RequestDeliveryMode, ServiceAreaScope } from '@taktic/shared';
 import type { ProviderRequestReport } from './request-reports';
 import type { PublicReviewSummary, ReviewSummary } from './reviews';
 import {
@@ -117,6 +117,11 @@ export type Category = {
    * and is never listed.
    */
   kind?: CategoryKind;
+  /**
+   * MATCH-001: how the service is delivered — ON_SITE, REMOTE or HYBRID.
+   * Absent on an API older than the field, which every reader treats as ON_SITE.
+   */
+  deliveryModel?: CategoryDeliveryModel;
   sortOrder: number;
   questions?: Question[];
   /** When the row last changed; the sitemap's `lastmod`, and nothing else reads it. */
@@ -188,6 +193,8 @@ export type CustomerServiceRequest = {
   customerEmail: string | null;
   city: string;
   district: string;
+  /** MATCH-001: the mode this request was created with; absent reads ON_SITE. */
+  deliveryMode?: RequestDeliveryMode;
   /*
    * What the customer typed into the form, as they typed it. Each is null when
    * the form field was left empty — the API never fills one in — and optional
@@ -364,6 +371,8 @@ export type ProviderEnrollmentCategory = {
   parent: { id: string; name: string; slug: string } | null;
   /** LIVE takes requests today; UPCOMING has not been released yet. */
   availability: 'LIVE' | 'UPCOMING';
+  /** MATCH-001: a REMOTE-only provider needs no service area; absent reads ON_SITE. */
+  deliveryModel?: CategoryDeliveryModel;
 };
 
 export type ProviderServiceCategory = {
@@ -502,6 +511,12 @@ export type ProviderRequestListItem = {
   city: string;
   district: string;
   neighborhood: string | null;
+  /**
+   * MATCH-001: the request's own delivery mode. REMOTE reached this provider
+   * regardless of their service areas; the screens say "Uzaktan" next to the
+   * place. Optional so an API older than the field still reads (ON_SITE).
+   */
+  deliveryMode?: RequestDeliveryMode;
   budgetMin: number | null;
   budgetMax: number | null;
   preferredDate: string | null;

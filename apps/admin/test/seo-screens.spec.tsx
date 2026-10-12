@@ -726,6 +726,7 @@ describe('the category form’s address', () => {
     sortOrder: 0,
     offerCreditCost: 3,
     unlimitedPackageEligible: false,
+    deliveryModel: 'ON_SITE',
     providerEnrollmentOpen: true,
     description: null,
     imageUrl: null,

@@ -19,6 +19,7 @@ import { BusinessRegistrationFields } from '../../business-registration-fields';
 import { updateBusinessRegistrationAction, updateProviderAction } from '../../actions';
 import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
+import { ServiceAreaDeliveryNote } from '../../service-area-delivery-note';
 
 type ProviderEditPageProps = {
   params: Promise<{ id: string }>;
@@ -188,9 +189,12 @@ export default async function ProviderEditPage({ params, searchParams }: Provide
         <section className="pdash-form-section">
           <h2>Hizmet Bölgeleri</h2>
           <p className="pdash-form-hint">
-            Talepler yalnızca buradaki bölgelerle eşleşir. Çalıştığınız her yeri ekleyin; il
-            geneli, ilçe geneli veya tek bir mahalle seçebilirsiniz.
+            Yerinde hizmet talepleri yalnızca buradaki bölgelerle eşleşir. Çalıştığınız her yeri
+            ekleyin; il geneli, ilçe geneli veya tek bir mahalle seçebilirsiniz.
           </p>
+          <ServiceAreaDeliveryNote
+            categories={categories.filter((category) => selectedCategoryIds.has(category.id))}
+          />
           {/* Optional district and neighbourhood, for the reason given on the
               application form: leaving a level out is how a provider says "the
               whole province" or "the whole district". */}

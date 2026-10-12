@@ -12,6 +12,7 @@ import {
   ProviderIncidentDecision,
   ProviderReviewReportReason,
   ProviderStatus,
+  RequestDeliveryMode,
   ServiceCategoryStatus,
   ServiceRequestReportReason,
   ServiceRequestStatus,
@@ -23,7 +24,7 @@ import {
   SupportTicketRequesterRole,
 } from '@prisma/client';
 import {
-  matchesProviderArea,
+  matchesRequestLocation,
   phoneVerifiedRequestFilter,
   providerNotExcludedFilter,
 } from '../../common/provider-request-matching';
@@ -1968,6 +1969,7 @@ export async function findMatchingProviders(
     city: string;
     district: string;
     neighborhood: string | null;
+    deliveryMode: RequestDeliveryMode;
   }) {
     // Re-reads the request through the same gate the discovery query applies,
     // so a deployment that requires phone verification does not fan out an
@@ -2014,7 +2016,7 @@ export async function findMatchingProviders(
     });
 
     return providers
-      .filter((provider) => matchesProviderArea(provider.serviceAreas, request))
+      .filter((provider) => matchesRequestLocation(provider.serviceAreas, request))
       .map((provider) => ({
         id: provider.id,
         userId: provider.userId,
@@ -2142,6 +2144,8 @@ function loadRequest(prisma: PrismaService, requestId: string) {
         city: true,
         district: true,
         neighborhood: true,
+        /** MATCH-001: the fan-out's location step reads it; the mail says "Uzaktan". */
+        deliveryMode: true,
         preferredDate: true,
         preferredDateEnd: true,
         urgency: true,
@@ -3125,6 +3129,9 @@ function requestAvailableData(
     // matched.
     city: request.city,
     district: request.district,
+    // MATCH-001: a remote request reached this provider regardless of where
+    // they serve, so the message says so rather than "in your area".
+    deliveryMode: request.deliveryMode,
     qualityScore: String(request.qualityScore),
     creditCost:
       request.category.offerCreditCost === null

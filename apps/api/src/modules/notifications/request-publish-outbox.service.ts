@@ -86,6 +86,8 @@ export class RequestPublishOutbox implements OnModuleDestroy, BackgroundWorkOwne
         city: true,
         district: true,
         neighborhood: true,
+        // MATCH-001: REMOTE reaches every bound provider, wherever they serve.
+        deliveryMode: true,
         directShowcaseProviderId: true,
         currentRound: { select: { roundNumber: true } },
       },

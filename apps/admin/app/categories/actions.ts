@@ -60,9 +60,10 @@ export async function updateCategoryAction(formData: FormData) {
 
   // What this save changes is judged against the category as the API has it
   // now, never on the form's word: a new type or parent, a new offer
-  // price, the unlimited-package switch going on, or a status move each need
-  // their own proof (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A save of
-  // the name, description, pictures or order needs none.
+  // price, the unlimited-package switch going on, a service's new delivery
+  // model (MATCH-001) or a status move each need their own proof
+  // (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B). A save of the name,
+  // description, pictures or order needs none.
   const stored = await readStoredCategory(id);
   const required = stored ? categoryProofKeys(categoryChanges(stored, payload)) : everyEditProof(payload);
   if (required.length > 0 && !(await hasConfirmationProofs(formData, required))) {
@@ -376,6 +377,9 @@ function everyEditProof(payload: CategoryPayload): ConfirmationProofKey[] {
     'category.structure-update',
     ...(payload.offerCreditCost !== undefined ? (['category.offer-credit-update'] as const) : []),
     ...(payload.unlimitedPackageEligible ? (['category.unlimited-enable'] as const) : []),
+    ...(payload.kind === 'LEAF' && payload.deliveryModel !== undefined
+      ? (['category.delivery-model-update'] as const)
+      : []),
     ...(payload.status !== undefined ? [categoryStatusProofKey(payload.status)] : []),
   ];
 }

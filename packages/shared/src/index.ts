@@ -63,3 +63,15 @@ export {
   validateOfferSchedule,
 } from './offer-schedule';
 export type { OfferScheduleErrorCode } from './offer-schedule';
+
+export {
+  CATEGORY_DELIVERY_MODELS,
+  CATEGORY_DELIVERY_MODEL_HINTS,
+  CATEGORY_DELIVERY_MODEL_LABELS,
+  REQUEST_DELIVERY_MODE_LABELS,
+  fixedDeliveryMode,
+  isCategoryDeliveryModel,
+  isRequestDeliveryMode,
+  requestDeliveryMode,
+} from './delivery-model';
+export type { CategoryDeliveryModel, RequestDeliveryMode } from './delivery-model';

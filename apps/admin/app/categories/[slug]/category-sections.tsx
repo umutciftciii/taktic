@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { CATEGORY_DELIVERY_MODEL_LABELS } from '@taktic/shared';
 import { CategoryImageUploader } from '../category-image-uploader';
+import { DeliveryModelField } from '../delivery-model-field';
 import type { CategoryPlacementImpact } from '../category-changes';
 import { CategoryEditSubmit, CategoryStatusSubmit, RouterRulesSubmit } from '../category-gates';
 import {
@@ -280,6 +282,17 @@ export function CategoryInfoSection({
                   : 'Açıkken bu kategori (ve grup seçilirse alt kategorileri) kategori limitsiz paketlerin kapsamına eklenebilir. Regüle veya yüksek değerli kategorilerde kapalı bırakın.'}
               </span>
             </label>
+            {/*
+              MATCH-001: which providers a new request in this service reaches.
+              A change asks first on a service (`category.delivery-model-update`);
+              open requests keep the mode they were created with.
+            */}
+            <DeliveryModelField
+              id={`category-delivery-model-${category.id}`}
+              defaultValue={category.deliveryModel ?? 'ON_SITE'}
+              kind={category.kind}
+              existing
+            />
             <label className="field field-12">
               <span>Açıklama</span>
               <textarea name="description" defaultValue={category.description ?? ''} />
@@ -316,11 +329,11 @@ export function CategoryInfoSection({
               </span>
             </label>
           </div>
-          <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde geçerlidir. Adres bu formdan değişmez.">
+          <DetailFormFooter note="Teklif kredisi değişikliği yalnız bundan sonra verilecek tekliflerde, hizmet şekli değişikliği yalnız bundan sonra oluşturulan taleplerde geçerlidir. Adres bu formdan değişmez.">
             {/*
               Asks first when the save moves the type or parent, the
-              offer price, switches unlimited eligibility on or moves the
-              status (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B); the action
+              offer price, a service's delivery model, switches unlimited
+              eligibility on or moves the status (ADMIN-DESTRUCTIVE-CONFIRMATION-001 Paket B); the action
               judges the same against the stored category.
             */}
             <CategoryEditSubmit
@@ -362,6 +375,14 @@ function CategoryReadOnlyDetails({ category }: { category: Category }) {
                   : 'Kapalı',
           },
           { label: 'Limitsiz paket uygunluğu', value: category.unlimitedPackageEligible ? 'Açık' : 'Kapalı' },
+          {
+            label: 'Hizmet şekli',
+            value:
+              category.kind === 'LEAF'
+                ? CATEGORY_DELIVERY_MODEL_LABELS[category.deliveryModel ?? 'ON_SITE']
+                : `${CATEGORY_DELIVERY_MODEL_LABELS[category.deliveryModel ?? 'ON_SITE']} (bu tipte kullanılmaz)`,
+            testId: 'category-delivery-model-value',
+          },
           { label: 'Fallback ikon anahtarı', value: category.iconKey ?? '—' },
           { label: 'Açıklama', value: category.description ?? '—' },
           {

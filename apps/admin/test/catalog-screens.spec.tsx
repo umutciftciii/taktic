@@ -52,6 +52,7 @@ function category(overrides: Partial<Category> = {}): Category {
     offerCreditCost: 3,
     providerEnrollmentOpen: false,
     unlimitedPackageEligible: false,
+    deliveryModel: 'ON_SITE',
     supplyStatus: 'EMPTY',
     _count: { questions: 2, children: 0, providers: 0, providerInvites: 1 },
     ...overrides,

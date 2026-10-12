@@ -10,6 +10,7 @@ import {
 import {
   AdminPermission,
   CatalogAuditEntity,
+  CategoryDeliveryModel,
   Prisma,
   ProviderStatus,
   ServiceCategory,
@@ -319,6 +320,12 @@ export type ProviderEnrollmentCategory = {
   illustrationKey: string | null;
   parent: { id: string; name: string; slug: string } | null;
   availability: 'LIVE' | 'UPCOMING';
+  /**
+   * MATCH-001: whether choosing this service asks for a service area at all —
+   * a provider whose every service is REMOTE needs none. Public already (the
+   * category page carries it); the form says it next to the area picker.
+   */
+  deliveryModel: CategoryDeliveryModel;
 };
 
 @Injectable()
@@ -429,6 +436,7 @@ export class CategoriesService {
         imageUrl: true,
         illustrationKey: true,
         status: true,
+        deliveryModel: true,
         parent: { select: { id: true, name: true, slug: true } },
       },
     });
@@ -762,6 +770,8 @@ export class CategoriesService {
             // Opt-in, always. A newly created or newly imported category is never
             // sellable as part of an unlimited package until somebody says so.
             unlimitedPackageEligible: dto.unlimitedPackageEligible ?? false,
+            // MATCH-001: ON_SITE unless the operator says otherwise.
+            ...(dto.deliveryModel !== undefined ? { deliveryModel: dto.deliveryModel } : {}),
             // Written together, never one without the other: see
             // ServiceCategoryStatus in the schema.
             isActive: isActiveFor(status),
@@ -883,6 +893,7 @@ export class CategoriesService {
               dto.providerEnrollmentOpen !== current.providerEnrollmentOpen) ||
             (dto.unlimitedPackageEligible !== undefined &&
               dto.unlimitedPackageEligible !== current.unlimitedPackageEligible) ||
+            (dto.deliveryModel !== undefined && dto.deliveryModel !== current.deliveryModel) ||
             (dto.sortOrder !== undefined && dto.sortOrder !== current.sortOrder);
 
           assertDeltaPermissions(
@@ -921,6 +932,10 @@ export class CategoriesService {
               ...(dto.unlimitedPackageEligible !== undefined
                 ? { unlimitedPackageEligible: dto.unlimitedPackageEligible }
                 : {}),
+              // MATCH-001: the category's model only. No request is touched —
+              // each one keeps the `deliveryMode` it was created with (the
+              // database refuses an UPDATE of that column anyway).
+              ...(dto.deliveryModel !== undefined ? { deliveryModel: dto.deliveryModel } : {}),
               ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
             },
           });

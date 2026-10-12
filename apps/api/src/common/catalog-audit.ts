@@ -39,6 +39,8 @@ export const CATEGORY_AUDIT_FIELDS = [
   'offerCreditCost',
   'unlimitedPackageEligible',
   'providerEnrollmentOpen',
+  // MATCH-001: how the service is delivered; affects requests created after it.
+  'deliveryModel',
   'description',
   'sortOrder',
   'iconKey',
@@ -108,6 +110,7 @@ type CategoryRow = {
   offerCreditCost: number | null;
   unlimitedPackageEligible: boolean;
   providerEnrollmentOpen: boolean;
+  deliveryModel: string;
   description: string | null;
   sortOrder: number;
   iconKey: string | null;
@@ -142,6 +145,8 @@ export async function categoryAuditSnapshot(
     offerCreditCost: row.offerCreditCost,
     unlimitedPackageEligible: row.unlimitedPackageEligible,
     providerEnrollmentOpen: row.providerEnrollmentOpen,
+    // MATCH-001: a delivery model change is recorded like any other field.
+    deliveryModel: row.deliveryModel,
     description: row.description,
     sortOrder: row.sortOrder,
     iconKey: row.iconKey,

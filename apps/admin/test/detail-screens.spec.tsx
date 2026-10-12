@@ -56,6 +56,7 @@ function category(overrides: Partial<Category> = {}): Category {
     offerCreditCost: 3,
     providerEnrollmentOpen: false,
     unlimitedPackageEligible: false,
+    deliveryModel: 'ON_SITE',
     supplyStatus: 'EMPTY',
     createdAt: '2026-07-09T12:30:00.000Z',
     updatedAt: '2026-09-12T07:20:00.000Z',

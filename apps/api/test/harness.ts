@@ -3,7 +3,7 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import { ModulesContainer } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
-import { AdminPermission, BusinessRegistrationType, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, SourceChannel, UserRole } from '@prisma/client';
+import { AdminPermission, BusinessRegistrationType, CategoryDeliveryModel, CreditTransactionType, CustomerOrigin, OfferPackageType, PrismaClient, ProviderServiceAreaScope, ProviderStatus, ProviderEntitlementStatus, RequestDeliveryMode, ServiceCategoryKind, ServiceCategoryStatus, ServiceRequestStatus, ShowcaseCardKind, SourceChannel, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
@@ -504,6 +504,8 @@ export async function createCategory(
     providerEnrollmentOpen?: boolean;
     /** Defaults to false, exactly as the column does. */
     unlimitedPackageEligible?: boolean;
+    /** MATCH-001. Defaults to ON_SITE, exactly as the column does. */
+    deliveryModel?: CategoryDeliveryModel;
   } = {},
 ) {
   const suffix = uniqueSuffix();
@@ -523,6 +525,7 @@ export async function createCategory(
       offerCreditCost: options.offerCreditCost ?? null,
       providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
       unlimitedPackageEligible: options.unlimitedPackageEligible ?? false,
+      ...(options.deliveryModel ? { deliveryModel: options.deliveryModel } : {}),
     },
   });
 }
@@ -682,6 +685,8 @@ export async function createApprovedRequest(
     customerPhone?: string;
     /** Defaults to the column's own `@default(now())` — pass one to backdate the row out of a rolling-window count (e.g. the per-phone 24h budget) while it still counts as "open". */
     submittedAt?: Date;
+    /** MATCH-001. Defaults to the column's ON_SITE; a REMOTE category's request must say REMOTE (the guard trigger). */
+    deliveryMode?: RequestDeliveryMode;
   },
 ) {
   const suffix = uniqueSuffix();
@@ -705,6 +710,7 @@ export async function createApprovedRequest(
         approvedAt: options.approvedAt ?? null,
         qualityScore: 80,
         ...(options.submittedAt !== undefined ? { submittedAt: options.submittedAt } : {}),
+        ...(options.deliveryMode ? { deliveryMode: options.deliveryMode } : {}),
       },
     });
     return created;

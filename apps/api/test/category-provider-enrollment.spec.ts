@@ -237,6 +237,8 @@ describe('the provider enrollment catalogue', () => {
 
     expect(Object.keys(row).sort()).toEqual([
       'availability',
+      // MATCH-001: whether the service needs a service area at all (public on the category page too).
+      'deliveryModel',
       'iconKey',
       'id',
       'illustrationKey',
