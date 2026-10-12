@@ -6,6 +6,120 @@ are in [docs/release.md](docs/release.md).
 
 ## Unreleased
 
+## 0.2.0 - 2026-10-12
+
+Match rounds and service assurance (REL-002 Faz 1–5). A request is now matched
+in rounds; a customer whose provider did not deliver can close that match and
+reopen the request without that provider; staff adjudicate the incident and
+recover requests whose automatic rounds ran out. The customer-facing service
+issue report ships **off** and is enabled separately after deploy.
+
+### Highlights
+
+- Match rounds: every request has numbered rounds; offers, contact reveals,
+  threads, notifications, schedulers and reviews belong to a round.
+- Customer service-issue reporting (behind
+  `serviceIssueReportingEnabled`): the failed match round closes as `FAILED`,
+  a provider incident is recorded and the provider is permanently excluded
+  from that request.
+- Automatic reopen into Round 2 and Round 3; after a third failure the request
+  goes to `MATCH_REVIEW` instead of a Round 4.
+- Staff recovery: a SUPER_ADMIN opens Round 4, 5, … from `MATCH_REVIEW` with a
+  mandatory internal note; no hard cap.
+- Incident handling: the failed provider answers once; staff adjudicate
+  (`CONFIRMED` / `DISMISSED`) with a rationale; only a SUPER_ADMIN corrects a
+  decision, as an append-only correction.
+- Provider reliability review, computed from effective `CONFIRMED` incidents
+  of the last 90 days (2 = warning, 3+ = admin review); no automatic sanction.
+- Offers require an estimated start and completion day.
+- Conversations of an ended match stay readable, read-only.
+- Admin: per-request round timeline („Eşleşme turları"), `MATCH_REVIEW` queue
+  and dashboard counter, incident and reliability queues.
+- Credit: the failed provider's offer credit is never refunded.
+
+### Provider / customer impact
+
+- Providers must give `estimatedStartDate` and `estimatedCompletionDate` on
+  every new offer (marketplace and vitrin lead forms enforce it).
+- A provider excluded after a failed match no longer sees or can offer on that
+  request in any round; it reads its own incidents (masked) and may answer
+  once. Decisions are told to the provider as an outcome only, never the
+  rationale; nothing is shown on public profiles or to customers.
+- Customers (once the flag is on) see a „Hizmetle ilgili sorun bildir" action
+  after the promised days, earlier matches on the request page, and notices
+  for a recorded issue, reopening, match review and a manual reopening (never
+  the staff note).
+- Ended conversations (completed, cancelled, failed) are read-only for both
+  participants instead of `403`.
+
+### Admin / ops impact
+
+- New permissions: `SERVICE_ISSUE_SETTING_WRITE`, `SERVICE_INCIDENTS_READ`,
+  `SERVICE_INCIDENTS_ADJUDICATE`, `PROVIDER_RELIABILITY_READ`,
+  `PROVIDER_RELIABILITY_MANAGE`; reserved for SUPER_ADMIN (no role may carry
+  them): `SERVICE_INCIDENTS_CORRECT`, `MATCH_REVIEW_OPEN_ROUND`.
+- New request status `MATCH_REVIEW` (list filter, queue, dashboard
+  `matchReviewRequests`).
+- Read-only ops checks: `scripts/ops/rel-002-preflight.sql`,
+  `scripts/ops/rel-002-round-consistency.sql` (checks 1–14, 0 rows =
+  consistent); `rel002_event` log lines (ids and enums only).
+- Procedures: [docs/ops/rel-002-runbook.md](docs/ops/rel-002-runbook.md).
+
+### Breaking API changes
+
+1. `POST` offer creation requires `estimatedStartDate` and
+   `estimatedCompletionDate` (`YYYY-MM-DD`, Istanbul calendar days).
+2. A client that omits or sends invalid dates gets `400`
+   (`OFFER_SCHEDULE_REQUIRED`, `OFFER_SCHEDULE_INVALID`, `OFFER_START_IN_PAST`,
+   `OFFER_END_BEFORE_START`, `OFFER_SCHEDULE_TOO_FAR`).
+3. Accept, shortlist, reject and withdraw on an offer of a closed or earlier
+   round answer `409 OFFER_ROUND_CLOSED`.
+4. Threads of a completed, cancelled or failed match are read-only: reads
+   return `mode: READ_ONLY` and a `closedReason`; send and mark-read answer
+   `403 THREAD_READ_ONLY`.
+5. The service issue feature is **off** after deploy
+   (`OperationsSettings.serviceIssueReportingEnabled = false`;
+   `POST /service-requests/:id/service-issue` answers `404` while off) and is
+   enabled separately.
+
+### Feature flag
+
+`serviceIssueReportingEnabled` defaults to `false` and stays off through the
+deploy. Enable it only once the deploy is stable, with separate approval and in
+a controlled environment first (runbook §4). Turning it off again hides the
+report and keeps every round, incident, exclusion and the `MATCH_REVIEW`
+recovery working.
+
+### Migrations and deploy
+
+- Five new migrations (M1–M5); **99** in total.
+- Schema first (`migrate deploy`), then API, web and admin **in one
+  coordinated release** — the new code does not run on the old schema, and the
+  web offer form and the API's date rule depend on each other.
+- After deploy: preflight and consistency checks 0, flag still `false`, smoke
+  test (runbook §3).
+
+### Rollback boundary
+
+- `scripts/ops/rel-002-m2…m5-rollback.sql` work only while their phase has no
+  data, and refuse otherwise.
+- Once a real Round 2, an incident response or adjudication, or a staff round
+  opening exists, there is **no backward schema rollback**. Recovery is flag
+  OFF plus a forward fix; deploying the previous tag's code is not supported on
+  a REL-002 schema with such data.
+
+### Known limitations
+
+- Matches accepted before offer dates were required have no authoritative
+  schedule: the automatic report is unavailable for them and the customer is
+  sent to support (`SERVICE_ISSUE_REQUIRES_SUPPORT`); no dates are backfilled.
+- No provider-response reminder; no formal warning e-mail or action at the
+  reliability thresholds.
+- Customers do not see the provider's response or the decision.
+- No SLA or auto-close for `MATCH_REVIEW`; a staff round opening cannot be
+  undone (history is append-only).
+- Not yet deployed to staging or production.
+
 ### Added
 
 - REL-002 Faz 1: service request match rounds. Every request now has a
