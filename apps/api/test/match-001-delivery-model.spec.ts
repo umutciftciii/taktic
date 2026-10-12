@@ -599,7 +599,7 @@ describe('REL-002 rounds on a REMOTE request', () => {
       await postOffer(failed, live.requestId).expect(404);
     }
     expect(await sees(d, live.requestId)).toBe(true);
-    const r4 = (await availableNotices(live.requestId)).filter((notice) => notice.dedupeKey.endsWith(':r4'));
+    const r4 = (await availableNotices(live.requestId)).filter((notice) => notice.dedupeKey?.endsWith(':r4'));
     expect(r4.map((notice) => notice.providerId)).toEqual([d.provider.id]);
     await postOffer(d, live.requestId).expect(201);
   });
