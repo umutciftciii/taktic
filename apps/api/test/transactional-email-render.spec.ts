@@ -252,6 +252,15 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     requestUrl: `${WEB}/requests/r1/offers`,
     accountUrl: `${WEB}/account/profile`,
   },
+  'request-manually-reopened': {
+    fullName: 'Deniz Yılmaz',
+    requestNumber: '#T-90412',
+    categoryName: 'Kombi Servisi',
+    roundNumber: '4',
+    awaitingReview: '',
+    requestUrl: `${WEB}/requests/r1/offers`,
+    accountUrl: `${WEB}/account/profile`,
+  },
   'request-match-review': {
     fullName: 'Deniz Yılmaz',
     incidentNumber: 'INC-2026-000003',
@@ -706,7 +715,7 @@ describe('transactional e-mail rendering', () => {
     // refused revision of a live card (API-HARDENING-001), then the five of a
     // customer service issue (REL-002 Faz 3).
     // REL-002 Faz 4 adds the four incident decision / staff follow-up notices.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(60);
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(61);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -943,6 +952,7 @@ describe('transactional e-mail rendering', () => {
       'request-cancelled-offer': 'Teklif verdiğiniz talep iptal edildi — #T-90412',
       'service-issue-recorded': 'Hizmet aksaklığı bildiriminiz alındı — #T-90412',
       'request-reopened': 'Talebiniz yeniden teklif almaya açıldı — #T-90412',
+      'request-manually-reopened': 'Talebiniz yeniden teklif almaya açıldı — #T-90412',
       'request-match-review': 'Talebiniz ekibimiz tarafından inceleniyor — #T-90412',
       'provider-incident-opened': 'Müşteri hizmet aksaklığı bildirdi — #T-90412',
       'provider-incident-new': 'Yeni hizmet aksaklığı bildirimi — INC-2026-000001',

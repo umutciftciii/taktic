@@ -9,6 +9,7 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
+import { logRel002Event } from '../../common/rel-002-events';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -136,6 +137,19 @@ export class ServiceIssueService {
       if (result.outcome === 'REOPENED') {
         this.publishOutbox.deliverSoon();
       }
+      logRel002Event(this.logger, 'service_issue_reported', {
+        requestId,
+        incidentId: result.incidentId,
+        round: result.failedRoundNumber,
+        reason: payload.reason,
+      });
+      logRel002Event(this.logger, result.outcome === 'REOPENED' ? 'round_reopened_automatically' : 'match_review_entered', {
+        requestId,
+        incidentId: result.incidentId,
+        failedRound: result.failedRoundNumber,
+        currentRound: result.currentRound.roundNumber,
+        requestStatus: result.requestStatus,
+      });
     }
     return result;
   }

@@ -77,8 +77,8 @@ export class ServiceRequestsController {
   @Get(':id/rounds')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
   @RequiresPermission(AdminPermission.REQUESTS_READ)
-  listMatchRounds(@Param('id') id: string) {
-    return this.serviceRequestsService.listMatchRoundsForAdmin(id);
+  listMatchRounds(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    return this.serviceRequestsService.listMatchRoundsForAdmin(id, user);
   }
 
   @Get(':id/offers')

@@ -1737,7 +1737,8 @@ export class TransactionalMailService {
         };
       }
 
-      case 'request-reopened': {
+      case 'request-reopened':
+      case 'request-manually-reopened': {
         const round = await this.prisma.serviceRequestMatchRound.findUnique({
           where: { id: source.ids[0] },
           select: {
@@ -1749,7 +1750,11 @@ export class TransactionalMailService {
             requestId: true,
           },
         });
-        if (!round || round.openedBy !== MatchRoundOpenedBy.SERVICE_ISSUE) {
+        // Each template names the opener it is about: the automatic reopen a
+        // service issue made, or the round staff opened from MATCH_REVIEW.
+        const expectedOpener =
+          source.template === 'request-reopened' ? MatchRoundOpenedBy.SERVICE_ISSUE : MatchRoundOpenedBy.ADMIN;
+        if (!round || round.openedBy !== expectedOpener) {
           return null;
         }
         const request = await this.prisma.serviceRequest.findUnique({
@@ -3504,6 +3509,8 @@ const RETRY_DEDUPE_PREFIXES = {
   'service-incident-dismissed': 'service-incident-dismissed',
   'service-incident-provider-responded': 'service-incident-provider-responded',
   'provider-reliability-review-opened': 'provider-reliability-review-opened',
+  // REL-002 Faz 5. Keyed on the round staff opened from MATCH_REVIEW.
+  'request-manually-reopened': 'request-manually-reopened',
 } as const satisfies Partial<Record<TransactionalEmailTemplate, string>>;
 
 export type RetryableTransactionalTemplate = keyof typeof RETRY_DEDUPE_PREFIXES;
@@ -3603,6 +3610,8 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'service-incident-provider-responded': 1,
   /** The review. */
   'provider-reliability-review-opened': 1,
+  /** The round staff opened (its id already names the request). */
+  'request-manually-reopened': 1,
 };
 
 /**

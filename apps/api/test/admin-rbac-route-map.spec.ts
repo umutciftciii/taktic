@@ -254,7 +254,9 @@ describe('PR-0 route/permission map', () => {
      * REL-002 Faz 4 moved it to 93: SERVICE_INCIDENTS_READ / _ADJUDICATE /
      * _CORRECT (the last reserved for SUPER_ADMIN) and PROVIDER_RELIABILITY_READ
      * / _MANAGE.
+     * REL-002 Faz 5 moved it to 94: MATCH_REVIEW_OPEN_ROUND, opening Round 4+
+     * from MATCH_REVIEW (reserved for SUPER_ADMIN).
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(93);
+    expect(Object.keys(AdminPermission)).toHaveLength(94);
   });
 });

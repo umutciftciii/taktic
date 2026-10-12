@@ -236,6 +236,10 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/admin/providers/:providerId/reliability', permission: AdminPermission.PROVIDER_RELIABILITY_READ },
   { method: 'POST', path: '/admin/provider-reliability-reviews/:id/acknowledge', permission: AdminPermission.PROVIDER_RELIABILITY_MANAGE },
   { method: 'POST', path: '/admin/provider-reliability-reviews/:id/resolve', permission: AdminPermission.PROVIDER_RELIABILITY_MANAGE },
+  // REL-002 Faz 5: MATCH_REVIEW recovery. Reading the queue is any request
+  // reader's; opening Round 4+ is reserved for SUPER_ADMIN.
+  { method: 'GET', path: '/admin/service-requests/match-review', permission: AdminPermission.REQUESTS_READ },
+  { method: 'POST', path: '/admin/service-requests/:id/open-next-round', permission: AdminPermission.MATCH_REVIEW_OPEN_ROUND },
   // SEO-004: the SEO screens. Reads need SEO_READ; content and redirects have
   // their own write permissions. A slug change is a category edit
   // (CATEGORIES_WRITE): its 301 is that edit's consequence, written in the

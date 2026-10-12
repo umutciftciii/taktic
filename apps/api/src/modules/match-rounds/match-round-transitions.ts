@@ -23,7 +23,8 @@ import { REQUEST_EXPIRY_DAYS } from '../request-lifecycle/request-lifecycle.cons
  * Round 1 is born with its request in the database
  * (`ServiceRequest_round_one_at_birth`, M2). Round N+1 is opened by
  * {@link openNextRound}, which only the service-issue transaction calls
- * (Faz 3), and never past {@link MAX_AUTO_MATCH_ROUNDS}.
+ * (Faz 3), and never past {@link MAX_AUTO_MATCH_ROUNDS}; past it only staff
+ * open a round, from MATCH_REVIEW, through {@link openAdminRound} (Faz 5).
  *
  * A transition that matches nothing throws {@link roundStateChangedException}.
  * Callers run inside a transaction whose own guard (the request's conditional
@@ -337,6 +338,43 @@ export async function openNextRound(
     select: { id: true, roundNumber: true },
   });
   return round;
+}
+
+/**
+ * Opens Round N+1 (N ≥ {@link MAX_AUTO_MATCH_ROUNDS}) after Round N failed and
+ * the request went to MATCH_REVIEW (REL-002 Faz 5): a staff decision, so
+ * `openedBy = ADMIN` and no hard cap — Round 4, 5, 6… The caller has proved
+ * Round N is the request's current, FAILED round.
+ *
+ * Always a marketplace round, opened unpublished: `publishedAt` stays NULL
+ * until the canonical publish gate (`publishRequestInTransaction`, in the
+ * same transaction when auto-publish is on) or a moderation approval stamps
+ * it — exactly as a fresh marketplace request. Inserted, not upserted: the
+ * `(requestId, roundNumber)` unique, the deterministic id and the
+ * one-active-round partial unique refuse a second Round N+1.
+ */
+export async function openAdminRound(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; failedRoundNumber: number; openedAt: Date },
+): Promise<{ id: string; roundNumber: number }> {
+  const roundNumber = input.failedRoundNumber + 1;
+  if (roundNumber <= MAX_AUTO_MATCH_ROUNDS) {
+    throw new Error(`Round ${roundNumber} is within the automatic limit (${MAX_AUTO_MATCH_ROUNDS}); staff open Round 4+ only`);
+  }
+  return tx.serviceRequestMatchRound.create({
+    data: {
+      id: nextRoundId(input.requestId, roundNumber),
+      requestId: input.requestId,
+      roundNumber,
+      status: MatchRoundStatus.OPEN,
+      source: MatchRoundSource.MARKETPLACE,
+      openedBy: MatchRoundOpenedBy.ADMIN,
+      openedAt: input.openedAt,
+      publishedAt: null,
+      expiresAt: null,
+    },
+    select: { id: true, roundNumber: true },
+  });
 }
 
 /** OPEN (with no winner) → EXPIRED. */

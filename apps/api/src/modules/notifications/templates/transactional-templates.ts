@@ -242,6 +242,10 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'service-incident-dismissed',
   'service-incident-provider-responded',
   'provider-reliability-review-opened',
+  // REL-002 Faz 5: staff opened a new round on a request that waited for the
+  // team after three failed matches. The customer is told it is open for
+  // offers again (or will be after a short review); never the staff note.
+  'request-manually-reopened',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -336,6 +340,7 @@ export function transactionalSubject(
     case 'service-issue-recorded':
       return withSuffix('Hizmet aksaklığı bildiriminiz alındı', text(data.requestNumber));
     case 'request-reopened':
+    case 'request-manually-reopened':
       return withSuffix('Talebiniz yeniden teklif almaya açıldı', text(data.requestNumber));
     case 'request-match-review':
       return withSuffix('Talebiniz ekibimiz tarafından inceleniyor', text(data.requestNumber));
@@ -507,6 +512,8 @@ export function buildDocument(
       return serviceIssueRecorded(subject, fullName, data);
     case 'request-reopened':
       return requestReopened(subject, fullName, data);
+    case 'request-manually-reopened':
+      return requestManuallyReopened(subject, fullName, data);
     case 'request-match-review':
       return requestMatchReview(subject, fullName, data);
     case 'provider-incident-opened':
@@ -3214,6 +3221,43 @@ function requestReopened(subject: string, fullName: string, data: Data): EmailDo
             ? 'kısa bir incelemeden sonra bölgenizdeki hizmet verenlere yeniden açılacak.'
             : 'bölgenizdeki hizmet verenlere yeniden açıldı; yeni teklifler bu talebe gelecek.') +
           ' Eşleşmesi kapatılan hizmet veren bu talebi göremez.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Talep', joinNonEmpty([requestNumber, text(data.categoryName)], ' · ')),
+        row('Eşleşme turu', text(data.roundNumber)),
+      ]),
+      spacer(24),
+      cta('Talebinizi görüntüleyin', text(data.requestUrl), 'primary'),
+    ]),
+  };
+}
+
+/**
+ * Staff reviewed a request that waited after three failed matches and opened
+ * a new round on it (REL-002 Faz 5). Fresh offers only; every business whose
+ * match on it was closed stays out. Nothing from the staff note.
+ */
+function requestManuallyReopened(subject: string, fullName: string, data: Data): EmailDocument {
+  const requestNumber = text(data.requestNumber);
+  const awaitingReview = text(data.awaitingReview) === '1';
+  return {
+    subject,
+    preheader: awaitingReview
+      ? 'Ekibimiz talebinizi inceledi; talebiniz kısa bir kontrolden sonra yeniden yayınlanacak.'
+      : 'Ekibimiz talebinizi inceledi ve yeniden hizmet verenlere açtı.',
+    audience: 'HİZMET ALAN',
+    kicker: 'Yeniden açıldı',
+    heading: 'Talebiniz yeniden teklif almaya açıldı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        `Ekibimiz ${requestNumber ? `${requestNumber} numaralı talebinizi` : 'talebinizi'} inceledi. ` +
+          (awaitingReview
+            ? 'Talebiniz kısa bir kontrolden sonra bölgenizdeki hizmet verenlere yeniden açılacak.'
+            : 'Talebiniz bölgenizdeki hizmet verenlere yeniden açıldı; yeni teklifler bu talebe gelecek.') +
+          ' Daha önce eşleşmesi kapatılan hizmet verenler bu talebi göremez.',
       ),
       spacer(4),
       dataTable([
