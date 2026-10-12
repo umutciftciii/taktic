@@ -2115,9 +2115,9 @@ Kontrol listesi:
 - [x] Geri dönüş sınırları: Faz 3 (gerçek Round 2), Faz 4 (karar/yanıt), Faz 5 (personel açılışı) — sonrası ileri-düzeltme (runbook §5).
 - [x] Bilinen borçlar (§34.24).
 - [ ] Staging kabul planı (ayrı onayla): (1) preflight + yedek + restore provası; (2) 99'a deploy, API+web+admin; (3) bayrak kapalı duman testi; (4) bayrak staging'de açılır → R1→R2→R3→MATCH_REVIEW→R4 kabul turu (iki test sağlayıcı + bir yeni), kredi ve bildirim kontrolü; (5) Faz 4 karar/düzeltme turu; (6) tutarlılık 0; (7) karar: production'da bayrak.
-- [ ] Bump: root `package.json` `0.2.0`, `Unreleased` → `## 0.2.0 - <tarih>`, `pnpm version:check`; tag merge commit'inde (docs/release.md).
+- [x] Bump: root `package.json` `0.2.0`, `Unreleased` → `## 0.2.0 - 2026-10-12`, `pnpm version:check` (release PR „Release v0.2.0"). Tag ve GitHub Release merge commit'inde, ayrı adımda (docs/release.md); release notu = CHANGELOG `0.2.0` bölümü (Highlights, etki, kırıcı API, bayrak, migration/deploy, geri dönüş sınırı, bilinen sınırlar).
 
-v0.2.0 notu taslağı (CHANGELOG'a taşınacak özet): „Eşleşme turları ve hizmet güvencesi: her talep turlarla eşleşir; müşteri teslim edilmeyen hizmeti bildirerek talebini yeniden açabilir (bayrak arkasında, varsayılan kapalı); başarısız sağlayıcı talepten kalıcı dışlanır ve iade almaz; ekip aksaklıkları karara bağlar (yalnız süper yönetici düzeltir), sağlayıcı güvenilirliği 90 günlük doğrulanmış aksaklıktan hesaplanır; üç başarısız turdan sonra talep ekip incelemesine düşer ve süper yönetici notla yeni tur açar. API için kırıcı: teklif oluştururken başlangıç ve bitiş günü zorunlu."
+v0.2.0 notu taslağı (CHANGELOG `0.2.0` bölümünün girişi olarak finalize edildi): „Eşleşme turları ve hizmet güvencesi: her talep turlarla eşleşir; müşteri teslim edilmeyen hizmeti bildirerek talebini yeniden açabilir (bayrak arkasında, varsayılan kapalı); başarısız sağlayıcı talepten kalıcı dışlanır ve iade almaz; ekip aksaklıkları karara bağlar (yalnız süper yönetici düzeltir), sağlayıcı güvenilirliği 90 günlük doğrulanmış aksaklıktan hesaplanır; üç başarısız turdan sonra talep ekip incelemesine düşer ve süper yönetici notla yeni tur açar. API için kırıcı: teklif oluştururken başlangıç ve bitiş günü zorunlu."
 
 ### 34.24 Kalan borçlar
 

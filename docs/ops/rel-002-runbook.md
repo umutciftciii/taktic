@@ -10,6 +10,11 @@ Tasarımın ve her fazın gerçek sonucunun kaynağı
 > `serviceIssueReportingEnabled` bayrağını açmadı. Aşağıdaki adımlar planlı bir
 > pencerede, ayrı onayla uygulanır.
 
+> **Release:** REL-002 **v0.2.0** ile çıkar (root `package.json` `0.2.0`,
+> [CHANGELOG](../../CHANGELOG.md) `0.2.0` bölümü). Deploy edilen commit, `v0.2.0`
+> tag'inin işaret ettiği merge commit'idir; tag ve GitHub Release
+> [docs/release.md](../release.md) adımlarıyla merge sonrası atılır.
+
 ## 0. Neyin nesi
 
 | Şey | Ne |

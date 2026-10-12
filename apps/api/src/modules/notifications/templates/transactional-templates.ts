@@ -237,7 +237,7 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   // told a provider answered and that a provider needs a reliability review.
   // The customer is not written to (their request reopened already; the
   // decision changes nothing for them, and the provider's response is not
-  // theirs to read in v0.2.0).
+  // theirs to read — REL-002 decision 6).
   'service-incident-confirmed',
   'service-incident-dismissed',
   'service-incident-provider-responded',
