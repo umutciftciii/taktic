@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
+import { CATEGORY_DELIVERY_MODEL_LABELS } from '@taktic/shared';
 import type { CategoryStatus } from '../../lib/api';
 import { ConfirmGate, type ConfirmGateDecision } from '../../components/confirm-gate';
 import {
@@ -92,7 +93,8 @@ export function CategoryCreateSubmit() {
  * "Kategoriyi kaydet" on the category's own screen: asks when the save moves
  * the type or the parent (`category.structure-update`), the offer
  * price (`category.offer-credit-update`), switches unlimited-package
- * eligibility on (`category.unlimited-enable`) or moves "Durum"
+ * eligibility on (`category.unlimited-enable`), changes a service's delivery
+ * model (`category.delivery-model-update`, MATCH-001) or moves "Durum"
  * (`category.activate` / `category.deactivate`) — one dialog, one proof per
  * change. A save of the name, description, pictures or order goes straight
  * through.
@@ -293,6 +295,26 @@ export function CategoryChangeConsequence({
         paketlerin kapsamına girebilir; böyle bir paket alan hizmet verenler bu kategoride paketin kurallarıyla teklif
         verir. Regüle veya yüksek değerli kategorilerde kapalı bırakın. Kapatmak onay istemez.
       </p>,
+    );
+  }
+
+  if (changes.deliveryModel) {
+    sections.push(
+      <div key="delivery" data-testid="category-delivery-model-change">
+        <dl className="confirm-dialog-facts">
+          <div>
+            <dt>Hizmet şekli</dt>
+            <dd>
+              {CATEGORY_DELIVERY_MODEL_LABELS[changes.deliveryModel.from]} →{' '}
+              <strong>{CATEGORY_DELIVERY_MODEL_LABELS[changes.deliveryModel.to]}</strong>
+            </dd>
+          </div>
+        </dl>
+        <p>
+          Bundan sonra oluşturulan talepler bu hizmet şekliyle açılır ve buna göre başka hizmet verenlere
+          ulaşabilir. <strong>Mevcut talepler oluşturuldukları hizmet şeklini korur.</strong>
+        </p>
+      </div>,
     );
   }
 

@@ -1,4 +1,4 @@
-import type { ServiceAreaScope } from '@taktic/shared';
+import type { CategoryDeliveryModel, RequestDeliveryMode, ServiceAreaScope } from '@taktic/shared';
 import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
 import { cookies } from 'next/headers';
 import { notFound, redirect } from 'next/navigation';
@@ -81,6 +81,14 @@ export type Category = {
   providerEnrollmentOpen: boolean;
   /** Whether this category may be sold inside a CATEGORY_UNLIMITED package. */
   unlimitedPackageEligible: boolean;
+  /**
+   * MATCH-001: how this service is delivered — on site, remotely, or the
+   * customer's choice. Read when a request is created and copied onto it
+   * (`ServiceRequest.deliveryMode`); changing it never moves an open request.
+   * Only a service (LEAF) receives requests, so on a group or router it is
+   * stored but unused.
+   */
+  deliveryModel: CategoryDeliveryModel;
   /** Present on the operator view only. See CategorySupplyStatus. */
   supplyStatus?: CategorySupplyStatus | null;
   _count?: {
@@ -267,6 +275,13 @@ export type ServiceRequest = {
   district: string;
   neighborhood: string | null;
   addressNote: string | null;
+  /**
+   * MATCH-001: the delivery mode this request was created with — a snapshot,
+   * never changed afterwards, and the one that decides whether the location
+   * is used for matching. It may differ from `category.deliveryModel` when the
+   * category was changed later; that is expected, and the snapshot wins.
+   */
+  deliveryMode: RequestDeliveryMode;
   budgetMin: number | null;
   budgetMax: number | null;
   preferredDate: string | null;
@@ -301,6 +316,8 @@ export type ServiceRequest = {
     id: string;
     name: string;
     slug: string;
+    /** Only on the detail read: the category's model today, not the request's. */
+    deliveryModel?: CategoryDeliveryModel;
   };
   /** CUSTOMERS_READ only: the account behind `customerId`. */
   customer?: {

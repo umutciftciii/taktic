@@ -1,3 +1,4 @@
+import { isCategoryDeliveryModel, type CategoryDeliveryModel } from '@taktic/shared';
 import type { Category, CategoryKind, CategoryStatus } from '../../lib/api';
 import type { ConfirmationProofKey } from '../../lib/confirmation-proof-keys';
 
@@ -34,6 +35,7 @@ export type CategoryPayload = {
   offerCreditCost?: number;
   providerEnrollmentOpen?: boolean;
   unlimitedPackageEligible?: boolean;
+  deliveryModel?: CategoryDeliveryModel;
 };
 
 export function categoryPayload(formData: FormData): CategoryPayload {
@@ -80,13 +82,16 @@ export function categoryPayload(formData: FormData): CategoryPayload {
       : {
           unlimitedPackageEligible: readFormString(formData, 'unlimitedPackageEligible') === 'on',
         }),
+    // MATCH-001. Sent only when the form carried a known model; an absent or
+    // unknown value leaves the stored one alone rather than resetting it.
+    ...readDeliveryModel(formData),
   };
 }
 
 /** The stored fields a save is judged against. */
 export type CategoryStored = Pick<
   Category,
-  'id' | 'name' | 'slug' | 'kind' | 'status' | 'parentId' | 'offerCreditCost' | 'unlimitedPackageEligible'
+  'id' | 'name' | 'slug' | 'kind' | 'status' | 'parentId' | 'offerCreditCost' | 'unlimitedPackageEligible' | 'deliveryModel'
 >;
 
 export type CategoryChanges = {
@@ -96,6 +101,11 @@ export type CategoryChanges = {
   offerCreditCost: { from: number | null; to: number } | null;
   /** Only the switch going on asks; switching it off goes straight through. */
   unlimitedEnable: boolean;
+  /**
+   * A new delivery model on a service: which providers the *next* requests
+   * reach. Null on a group or router, where the model reaches no request.
+   */
+  deliveryModel: { from: CategoryDeliveryModel; to: CategoryDeliveryModel } | null;
 };
 
 /**
@@ -117,6 +127,14 @@ export function categoryChanges(stored: CategoryStored, payload: CategoryPayload
         ? { from: stored.offerCreditCost, to: payload.offerCreditCost }
         : null,
     unlimitedEnable: payload.unlimitedPackageEligible === true && !stored.unlimitedPackageEligible,
+    // A stored row without the field (an API older than MATCH-001) is ON_SITE,
+    // as the API's column default has it.
+    deliveryModel:
+      payload.kind === 'LEAF' &&
+      payload.deliveryModel !== undefined &&
+      payload.deliveryModel !== (stored.deliveryModel ?? 'ON_SITE')
+        ? { from: stored.deliveryModel ?? 'ON_SITE', to: payload.deliveryModel }
+        : null,
   };
 }
 
@@ -131,6 +149,7 @@ export function categoryProofKeys(changes: CategoryChanges): ConfirmationProofKe
   if (changes.kind || changes.parent) keys.push('category.structure-update');
   if (changes.offerCreditCost) keys.push('category.offer-credit-update');
   if (changes.unlimitedEnable) keys.push('category.unlimited-enable');
+  if (changes.deliveryModel) keys.push('category.delivery-model-update');
   if (changes.status) keys.push(categoryStatusProofKey(changes.status.to));
   return keys;
 }
@@ -193,6 +212,11 @@ export function routerRuleChanges(
     if (!seen.has(optionKey)) changes.push({ optionKey, from, to: null });
   }
   return changes;
+}
+
+function readDeliveryModel(formData: FormData): { deliveryModel?: CategoryDeliveryModel } {
+  const value = formData.has('deliveryModel') ? readFormString(formData, 'deliveryModel') : null;
+  return isCategoryDeliveryModel(value) ? { deliveryModel: value } : {};
 }
 
 function readFormString(formData: FormData, key: string) {

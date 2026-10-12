@@ -21,6 +21,11 @@ type ProviderApplicationFieldsProps = {
    * to derive and not the applicant's to choose.
    */
   serviceScope: ReactNode;
+  /**
+   * MATCH-001: the sentence about remote services beside the area picker, or
+   * nothing. Built by the caller, which knows which services it offers.
+   */
+  serviceAreaNote?: ReactNode;
 };
 
 /**
@@ -45,6 +50,7 @@ export function ProviderApplicationFields({
   provinces,
   emailRequired,
   serviceScope,
+  serviceAreaNote = null,
 }: ProviderApplicationFieldsProps) {
   return (
     <>
@@ -195,9 +201,10 @@ export function ProviderApplicationFields({
           </h2>
           <p className="provider-apply-card-subtitle">
             Hizmet vermek istediğiniz bölgeleri ekleyin. İl geneli, ilçe geneli veya tek bir
-            mahalle seçebilirsiniz; en az bir bölge gerekir.
+            mahalle seçebilirsiniz; yerinde verdiğiniz hizmetler için en az bir bölge gerekir.
           </p>
         </div>
+        {serviceAreaNote}
         {/*
           The district stays optional, and so does the neighbourhood under it: a
           service area with no district means the whole province, and one with

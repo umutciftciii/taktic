@@ -250,7 +250,8 @@ export function ServiceAreaFields({
       >
         {areas.length === 0 ? (
           <li className="service-areas-empty">
-            Henüz bölge eklemediniz. En az bir hizmet bölgesi gerekir.
+            Henüz bölge eklemediniz. Yerinde verdiğiniz hizmetler için en az bir hizmet bölgesi
+            gerekir.
           </li>
         ) : (
           areas.map((area, index) => (

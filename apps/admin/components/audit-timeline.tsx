@@ -1,3 +1,4 @@
+import { CATEGORY_DELIVERY_MODEL_LABELS, isCategoryDeliveryModel } from '@taktic/shared';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
@@ -44,6 +45,7 @@ const FIELD_LABELS: Record<string, string> = {
   offerCreditCost: 'Teklif kredisi',
   unlimitedPackageEligible: 'Limitsiz pakete uygun',
   providerEnrollmentOpen: 'Hizmet veren seçimine açık',
+  deliveryModel: 'Hizmet şekli',
   description: 'Açıklama',
   sortOrder: 'Sıra',
   iconKey: 'İkon',
@@ -109,6 +111,7 @@ export function formatAuditValue(domain: AdminAuditEntry['domain'], field: strin
     return domain === 'CATEGORY' ? (CATEGORY_STATUS[value] ?? value) : statusLabel(value);
   }
   if (field === 'kind') return CATEGORY_KIND[value] ?? value;
+  if (field === 'deliveryModel') return isCategoryDeliveryModel(value) ? CATEGORY_DELIVERY_MODEL_LABELS[value] : value;
   if (field === 'type') return PACKAGE_TYPE[value] ?? value;
   if (field === 'allowedCardKind') return CARD_KIND[value] ?? value;
   return value;

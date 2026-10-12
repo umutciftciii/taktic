@@ -17,6 +17,8 @@ export type RequestDraftPayload = {
   district?: string;
   neighborhood?: string;
   addressNote?: string;
+  /** MATCH-001: a HYBRID category's choice, kept across sign-in like the rest. */
+  deliveryMode?: string;
   urgency?: string;
   urgencyBucket?: string;
   preferredDate?: string;
@@ -181,6 +183,7 @@ export async function draftPayloadFromForm(formData: FormData): Promise<RequestD
     district: opt('district'),
     neighborhood: opt('neighborhood'),
     addressNote: opt('addressNote'),
+    deliveryMode: opt('deliveryMode'),
     urgency: opt('urgency'),
     urgencyBucket: opt('urgencyBucket'),
     preferredDate: opt('preferredDate'),

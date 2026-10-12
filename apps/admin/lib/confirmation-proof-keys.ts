@@ -31,6 +31,8 @@ export const CONFIRMATION_PROOF_KEYS = [
   'category.structure-update',
   'category.offer-credit-update',
   'category.unlimited-enable',
+  // MATCH-001: a service's delivery model, which decides who new requests reach.
+  'category.delivery-model-update',
   'category.router-rules-update',
   'company-settings.update',
   'credit-package.create-active',

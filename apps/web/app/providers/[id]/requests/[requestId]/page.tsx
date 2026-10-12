@@ -27,6 +27,7 @@ import { createOfferAction } from './actions';
 import { OfferPriceField } from '../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
 import { ReportDialog } from './report-dialog';
+import { DeliveryModeBadge } from '../../../../request-fields/delivery-mode-badge';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
@@ -141,6 +142,7 @@ export default async function ProviderRequestDetailPage({
             {request.district ? ` · ${request.district}` : ''}
           </h1>
           <p className="pdash-page-sub">
+            <DeliveryModeBadge request={request} />{' '}
             {request.city}/{request.district}
             {request.neighborhood ? `/${request.neighborhood}` : ''} ·{' '}
             {formatDateTime(request.submittedAt)}

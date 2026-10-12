@@ -1,7 +1,7 @@
 import { RequestDraftFormType } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
-  Allow, ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString,
+  Allow, ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsOptional, IsString,
   MaxLength, ValidateNested,
 } from 'class-validator';
 import { RequestIdentityCheckDto } from '../../auth/dto/request-identity.dto';
@@ -25,6 +25,8 @@ export class RequestDraftPayloadDto {
   @IsOptional() @IsString() @MaxLength(100) district?: string;
   @IsOptional() @IsString() @MaxLength(100) neighborhood?: string;
   @IsOptional() @IsString() @MaxLength(2000) addressNote?: string;
+  /** MATCH-001: a HYBRID category's choice; re-validated when the request is created. */
+  @IsOptional() @IsIn(['ON_SITE', 'REMOTE']) deliveryMode?: string;
   @IsOptional() @IsString() @MaxLength(32) urgency?: string;
   @IsOptional() @IsString() @MaxLength(16) urgencyBucket?: string;
   @IsOptional() @IsString() @MaxLength(32) preferredDate?: string;

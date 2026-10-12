@@ -488,6 +488,8 @@ export async function createCategory(
      * subject.
      */
     description?: string | null;
+    /** MATCH-001. Defaults to ON_SITE, exactly as the column does. */
+    deliveryModel?: 'ON_SITE' | 'REMOTE' | 'HYBRID';
   } = {},
 ): Promise<SeededCategory> {
   const suffix = uniqueSuffix();
@@ -509,6 +511,7 @@ export async function createCategory(
       providerEnrollmentOpen: options.providerEnrollmentOpen ?? false,
       unlimitedPackageEligible: options.unlimitedPackageEligible ?? false,
       parentId: options.parentId ?? null,
+      ...(options.deliveryModel ? { deliveryModel: options.deliveryModel } : {}),
     },
     select: { id: true, name: true, slug: true },
   });
@@ -585,6 +588,11 @@ export async function createProvider(options: {
   credits: number;
   /** The public "about" text. The default is too short to be index-eligible (SEO-003). */
   description?: string;
+  /**
+   * MATCH-001: false writes no service area at all — the profile a provider
+   * whose every service is REMOTE may have. Defaults to the location's district.
+   */
+  serviceArea?: boolean;
 }): Promise<SeededProvider> {
   const suffix = uniqueSuffix();
   const email = `e2e-provider-${suffix}@example.test`;
@@ -617,15 +625,19 @@ export async function createProvider(options: {
       description: options.description ?? 'Uçtan uca test işletmesi',
       status: 'APPROVED',
       serviceCategories: { create: { categoryId: options.categoryId } },
-      serviceAreas: {
-        // DISTRICT scope: the pair names a district, and the CHECK on the table
-        // refuses a scope that disagrees with the levels beside it.
-        create: {
-          scope: 'DISTRICT',
-          city: options.location.city,
-          district: options.location.district,
-        },
-      },
+      ...(options.serviceArea === false
+        ? {}
+        : {
+            serviceAreas: {
+              // DISTRICT scope: the pair names a district, and the CHECK on the table
+              // refuses a scope that disagrees with the levels beside it.
+              create: {
+                scope: 'DISTRICT',
+                city: options.location.city,
+                district: options.location.district,
+              },
+            },
+          }),
     },
     select: { id: true },
   });

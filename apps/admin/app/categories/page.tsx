@@ -1,3 +1,4 @@
+import { CATEGORY_DELIVERY_MODEL_LABELS } from '@taktic/shared';
 import Link from 'next/link';
 import { apiFetch, Category, CategoryStatus, requireAdmin } from '../../lib/api';
 import { buildHref } from '../../lib/list-query';
@@ -358,7 +359,16 @@ export default async function AdminCategoriesPage({ searchParams }: AdminCategor
                   <td>
                     <code className="cell-break">{category.slug}</code>
                   </td>
-                  <td>{KIND_LABELS[category.kind]}</td>
+                  <td>
+                    {KIND_LABELS[category.kind]}
+                    {/* MATCH-001: only the exception is named; a service on site is the default. */}
+                    {isLeaf && category.deliveryModel && category.deliveryModel !== 'ON_SITE' ? (
+                      <span className="cell-muted" data-testid="category-delivery-model-note">
+                        {' '}
+                        · {CATEGORY_DELIVERY_MODEL_LABELS[category.deliveryModel]}
+                      </span>
+                    ) : null}
+                  </td>
                   <td>
                     <span className={statusBadgeClass(category.status)}>{STATUS_LABELS[category.status]}</span>
                   </td>

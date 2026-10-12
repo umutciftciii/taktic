@@ -34,6 +34,11 @@ export type ServiceRequestPayload = {
   district: string;
   neighborhood: string | null;
   addressNote: string | null;
+  /**
+   * MATCH-001: posted only when the form asked (a HYBRID category); otherwise
+   * left out and the API derives it from the category.
+   */
+  deliveryMode?: 'ON_SITE' | 'REMOTE';
   budgetMin: number | null;
   budgetMax: number | null;
   /** `YYYY-MM-DD`, both ends or neither — the API refuses a half range. */
@@ -68,6 +73,7 @@ export function buildServiceRequestPayload(formData: FormData): ServiceRequestPa
     district: readFormString(formData, 'district'),
     neighborhood: readOptionalFormString(formData, 'neighborhood'),
     addressNote: readOptionalFormString(formData, 'addressNote'),
+    ...deliveryModeField(formData),
     // The budget fields post what the customer sees — Turkish lira, grouped
     // and with a comma before the kuruş ("5.000,00"). parseLiraToMinor is the
     // one place that text becomes a number: the minor-unit integer (kuruş for
@@ -115,6 +121,17 @@ function contactFields(formData: FormData) {
     customerPhone: readFormString(formData, 'customerPhone'),
     customerEmail: readFormString(formData, 'customerEmail'),
   };
+}
+
+/**
+ * MATCH-001: the customer's choice on a HYBRID category's form, and nothing
+ * otherwise — an ON_SITE or REMOTE form renders no control, and the API
+ * decides from the category. An unchecked radio group posts nothing, which
+ * the API answers with DELIVERY_MODE_REQUIRED.
+ */
+function deliveryModeField(formData: FormData): { deliveryMode?: 'ON_SITE' | 'REMOTE' } {
+  const value = readFormString(formData, 'deliveryMode');
+  return value === 'ON_SITE' || value === 'REMOTE' ? { deliveryMode: value } : {};
 }
 
 function parseQuestionMeta(value: string): QuestionMeta[] {

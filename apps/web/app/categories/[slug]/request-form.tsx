@@ -2,6 +2,12 @@
 
 import { useRouter } from 'next/navigation';
 import {
+  fixedDeliveryMode,
+  isRequestDeliveryMode,
+  type CategoryDeliveryModel,
+  type RequestDeliveryMode,
+} from '@taktic/shared';
+import {
   useCallback,
   useEffect,
   useMemo,
@@ -45,6 +51,7 @@ import {
   type TurnstileWebConfig,
 } from '../../../lib/turnstile';
 import { IdentityNotice } from '../../request-fields/identity-notice';
+import { DeliveryModeField } from '../../request-fields/delivery-mode-field';
 import { LocationFields } from '../../request-fields/location-fields';
 import { RequestField, encodeQuestionMeta, readAnswers } from '../../request-fields/question-field';
 import { TimingFields } from '../../request-fields/timing-fields';
@@ -127,6 +134,12 @@ type RequestFormProps = {
    * posted. Absent means off, which is the sentence shown on any doubt.
    */
   autoPublishEnabled?: boolean;
+  /**
+   * MATCH-001: how the leaf's service is delivered. HYBRID asks the customer;
+   * REMOTE says the place fields do not limit who sees the request. Absent
+   * (an API older than the field) is ON_SITE — the form as it always was.
+   */
+  deliveryModel?: CategoryDeliveryModel | null;
 };
 
 const STEPS = [
@@ -173,6 +186,7 @@ export function RequestForm({
   wrongAccount = false,
   formPath,
   autoPublishEnabled = false,
+  deliveryModel = null,
 }: RequestFormProps) {
   const router = useRouter();
   const [step, setStep] = useState(0);
@@ -217,6 +231,16 @@ export function RequestForm({
    * read it out of the DOM during a change event without seeing a dependent
    * select React has not cleared yet.
    */
+  /*
+   * MATCH-001: the HYBRID choice (a restored draft repeats it). The mode the
+   * request will carry is the category's own when it fixes one.
+   */
+  const [deliveryChoice, setDeliveryChoice] = useState<RequestDeliveryMode | null>(
+    isRequestDeliveryMode(initialDraft?.deliveryMode) ? initialDraft.deliveryMode : null,
+  );
+  const deliveryMode = fixedDeliveryMode(deliveryModel) ?? deliveryChoice;
+  const remote = deliveryMode === 'REMOTE';
+
   const [place, setPlace] = useState({
     city: initialDraft?.city ?? '',
     district: initialDraft?.district ?? '',
@@ -843,7 +867,12 @@ export function RequestForm({
             hidden={step !== 2}
           >
             <section className="form-section">
-              <h2>Konum</h2>
+              <h2>{remote ? 'Konumunuz' : 'Konum'}</h2>
+              <DeliveryModeField
+                model={deliveryModel}
+                value={deliveryChoice}
+                onChange={setDeliveryChoice}
+              />
               <LocationFields
                 provinces={provinces}
                 initialValue={initialDraft ?? undefined}
@@ -851,7 +880,9 @@ export function RequestForm({
                   setPlace(value);
                   refreshSignals();
                 }}
-                neighborhoodRequired={addressQuestion?.isRequired ?? false}
+                // A REMOTE job happens nowhere in particular: the API does
+                // not hold it to a required ADDRESS, so neither does the form.
+                neighborhoodRequired={(addressQuestion?.isRequired ?? false) && !remote}
                 neighborhoodHelpText={addressQuestion?.helpText}
               />
               <label className="form-row">

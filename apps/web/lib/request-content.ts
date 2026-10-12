@@ -10,6 +10,7 @@
  * here: the block is about the job, and the phone has its own card.
  */
 
+import { REQUEST_DELIVERY_MODE_LABELS, requestDeliveryMode } from '@taktic/shared';
 import type { CustomerServiceRequestDetail } from './api';
 import { formatDateRange, formatPrice, urgencyLabel as sharedUrgencyLabel } from './formatters';
 
@@ -38,6 +39,7 @@ export type RequestContentView = Pick<CustomerServiceRequestDetail, 'city' | 'di
       | 'preferredDateEnd'
       | 'urgency'
       | 'answers'
+      | 'deliveryMode'
     >
   >;
 
@@ -59,6 +61,11 @@ export function requestContentRows(request: RequestContentView): RequestContentR
         multiline: answer.questionType === 'TEXTAREA',
       });
     }
+  }
+
+  // MATCH-001: only a REMOTE request says so; an ON_SITE one reads exactly as before.
+  if (requestDeliveryMode(request) === 'REMOTE') {
+    rows.push({ key: 'delivery-mode', label: 'Hizmet şekli', value: REQUEST_DELIVERY_MODE_LABELS.REMOTE });
   }
 
   rows.push({

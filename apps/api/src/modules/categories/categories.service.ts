@@ -10,6 +10,7 @@ import {
 import {
   AdminPermission,
   CatalogAuditEntity,
+  CategoryDeliveryModel,
   Prisma,
   ProviderStatus,
   ServiceCategory,
@@ -319,6 +320,12 @@ export type ProviderEnrollmentCategory = {
   illustrationKey: string | null;
   parent: { id: string; name: string; slug: string } | null;
   availability: 'LIVE' | 'UPCOMING';
+  /**
+   * MATCH-001: whether choosing this service asks for a service area at all —
+   * a provider whose every service is REMOTE needs none. Public already (the
+   * category page carries it); the form says it next to the area picker.
+   */
+  deliveryModel: CategoryDeliveryModel;
 };
 
 @Injectable()
@@ -429,6 +436,7 @@ export class CategoriesService {
         imageUrl: true,
         illustrationKey: true,
         status: true,
+        deliveryModel: true,
         parent: { select: { id: true, name: true, slug: true } },
       },
     });

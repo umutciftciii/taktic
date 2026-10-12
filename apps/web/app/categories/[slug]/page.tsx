@@ -261,6 +261,7 @@ export default async function CategoryPage({ params, searchParams }: CategoryPag
             wrongAccount={draft.kind === 'wrong-account'}
             formPath={formPath}
             autoPublishEnabled={autoPublishEnabled}
+            deliveryModel={category.deliveryModel}
           />
         )}
         <CategoryEditorial category={category} />

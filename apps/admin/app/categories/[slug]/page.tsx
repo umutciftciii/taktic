@@ -1,3 +1,4 @@
+import { CATEGORY_DELIVERY_MODEL_LABELS } from '@taktic/shared';
 import {
   createQuestionAction,
   replaceQuestionConditionsAction,
@@ -246,6 +247,12 @@ export default async function CategoryDetailPage({ params, searchParams }: Categ
               {STATUS_LABELS[category.status]}
             </span>
             <span className="badge badge-muted">{KIND_LABELS[category.kind]}</span>
+            {/* MATCH-001: in words, beside the kind; only a service receives requests. */}
+            {category.kind === 'LEAF' ? (
+              <span className="badge badge-muted" data-testid="category-delivery-model-badge">
+                {CATEGORY_DELIVERY_MODEL_LABELS[category.deliveryModel ?? 'ON_SITE']}
+              </span>
+            ) : null}
             {/*
               The supply reading, beside the publishing one and never instead
               of it. A LIVE service says "Yayında" in both, which is the point:

@@ -18,6 +18,7 @@ import { CategoryVisual } from '../../category-visual';
 import { IconArrowRight } from '../../landing-icons';
 import { ProviderShell } from '../provider-shell';
 import { providerOfferStatusLabel, providerStatusBadgeClass } from '../provider-ui';
+import { DeliveryModeBadge } from '../../request-fields/delivery-mode-badge';
 
 export default async function MyProviderPage() {
   const user = await getCurrentUser();
@@ -201,6 +202,7 @@ export default async function MyProviderPage() {
                       <span className="tag tag-accent">Kalite {request.qualityScore}</span>
                     </h3>
                     <p className="datarow-meta">
+                      <DeliveryModeBadge request={request} />
                       <span>
                         {request.city}/{request.district}
                       </span>

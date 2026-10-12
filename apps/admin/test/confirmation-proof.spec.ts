@@ -260,6 +260,7 @@ const STORED_CATEGORY = {
   parentId: null,
   offerCreditCost: 3,
   unlimitedPackageEligible: false,
+  deliveryModel: 'ON_SITE',
   providerEnrollmentOpen: false,
   sortOrder: 0,
 };
@@ -871,6 +872,16 @@ const CASES: Case[] = [
     refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
   },
   {
+    name: 'categories: hizmet şekli değişimi (MATCH-001)',
+    key: 'category.delivery-model-update',
+    read: [STORED_CATEGORY],
+    run: async (proof) => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      return updateCategoryAction(form({ ...CATEGORY_FIELDS, deliveryModel: 'REMOTE' }, proof));
+    },
+    refused: refusedRedirect('/categories/klima?error=CONFIRMATION_REQUIRED'),
+  },
+  {
     name: 'categories: formdan yayına alma',
     key: 'category.activate',
     read: [{ ...STORED_CATEGORY, status: 'DRAFT' }],
@@ -1128,6 +1139,15 @@ describe('guarded server actions refuse a submission without a good proof, and w
       expect(saved.redirect).toBe('/categories/klima');
       expect(writes()).toHaveLength(1);
       expect(JSON.parse((writes()[0]![1] as { body: string }).body)).not.toHaveProperty('slug');
+    });
+
+    it('MATCH-001: the delivery model sent back unchanged asks nothing, and still reaches the PATCH', async () => {
+      const { updateCategoryAction } = await import('../app/categories/actions');
+      primeReads([STORED_CATEGORY]);
+      const saved = await outcome(() => updateCategoryAction(form({ ...CATEGORY_FIELDS, deliveryModel: 'ON_SITE' })));
+      expect(saved.redirect).toBe('/categories/klima');
+      expect(writes()).toHaveLength(1);
+      expect(JSON.parse((writes()[0]![1] as { body: string }).body)).toMatchObject({ deliveryModel: 'ON_SITE' });
     });
 
     it('switching unlimited eligibility off, and a save without the status permission', async () => {
