@@ -126,6 +126,13 @@ const QUEUE_DEFINITIONS: readonly QueueDefinition[] = [
     title: 'Onay bekleyen vitrin kartı',
     description: 'İncelemeye gönderilmiş, karar bekleyen kart sürümleri. Liste en eski gönderim başta açılır.',
   },
+  {
+    metricKey: 'matchReviewRequests',
+    kicker: 'Eşleşme',
+    title: 'İnceleme bekleyen eşleşmeler',
+    description:
+      'Üç otomatik eşleşme turu da hizmet aksaklığıyla biten talepler. Liste en eski başta açılır; yeni turu süper yönetici açar.',
+  },
 ];
 
 /**

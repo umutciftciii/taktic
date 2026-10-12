@@ -9420,3 +9420,45 @@ a.dashboard-kpi-note {
 .seo-modal-form .locked-field {
   flex-wrap: wrap;
 }
+
+/* REL-002 Faz 5 — "Eşleşme turları": one labelled card per round, oldest first. */
+.round-timeline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.round-timeline {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  counter-reset: none;
+}
+
+.round-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.round-timeline-item.is-current .round-card {
+  border-width: 2px;
+}
+
+.round-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.round-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}

@@ -289,6 +289,28 @@ describe('guards', () => {
     expect(await ctx.prisma.serviceRequestMatchRound.count({ where: { requestId: s.requestId } })).toBe(3);
   });
 
+  it('MATCH_REVIEW leaves only through a staff opening or a cancel: moderation, rejection, completion and stale accepts are refused', async () => {
+    const s = await matchReviewRequest();
+    for (const status of [ServiceRequestStatus.APPROVED, ServiceRequestStatus.IN_REVIEW]) {
+      await request(ctx.server)
+        .patch(`/service-requests/${s.requestId}/status`)
+        .set('Cookie', s.sa.cookie)
+        .send({ status })
+        .expect(409);
+    }
+    await request(ctx.server)
+      .patch(`/service-requests/${s.requestId}/status`)
+      .set('Cookie', s.sa.cookie)
+      .send({ status: ServiceRequestStatus.REJECTED, rejectionReason: 'Uygunsuz içerik bulunmadı.' })
+      .expect((res) => expect([400, 409]).toContain(res.status));
+    await request(ctx.server).post(`/service-requests/${s.requestId}/complete`).set('Cookie', s.customerCookie).send({}).expect(409);
+    await accept(s.requestId, s.offerC, s.customerCookie).expect(409);
+    await accept(s.requestId, s.offerE, s.customerCookie).expect(409);
+    await postOffer(s.d, s.requestId).expect(404);
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId }, select: { status: true, currentRoundId: true } });
+    expect(row).toEqual({ status: ServiceRequestStatus.MATCH_REVIEW, currentRoundId: s.failedRoundId });
+  });
+
   it('the customer cannot open a round themselves, and may still cancel from MATCH_REVIEW', async () => {
     const s = await matchReviewRequest();
     await openNextRound(s.requestId, s.customerCookie, openBody(s.failedRoundId)).expect(403);

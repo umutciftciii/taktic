@@ -6,6 +6,7 @@ import { ApiError, apiFetch, readConflict, ServiceRequest, ServiceRequestStatus 
 import { isCreditBalanceLimitError, requestModerationErrorKey, type RequestStatusErrorKey } from '../../lib/status-conflicts';
 import { hasConfirmationProof } from '../../lib/confirmation-proof-server';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { readApiErrorCode } from '../../lib/service-incidents';
 
 export async function updateRequestStatusAction(formData: FormData) {
   const id = readFormString(formData, 'id');
@@ -337,4 +338,47 @@ function readFormString(formData: FormData, key: string) {
 function readOptionalFormString(formData: FormData, key: string) {
   const value = readFormString(formData, key).trim();
   return value ? value : null;
+}
+
+/**
+ * REL-002 Faz 5 — "Yeni tur aç": staff open Round 4+ on a request in
+ * MATCH_REVIEW. Confirmed in a dialog first and refused here without its
+ * single-use proof. The form carries the failed round the operator was
+ * looking at and an idempotency key minted when the page was rendered, so a
+ * double submit or a retry is the same opening (the API replays it). The API
+ * re-checks the role (SUPER_ADMIN), the state and the note in its own
+ * transaction; a refusal comes back as its stable `code` on the rounds tab.
+ * Nothing here touches credit: an opening never does.
+ */
+export async function openNextRoundAction(formData: FormData) {
+  const id = readFormString(formData, 'id');
+  if (!id) {
+    redirect('/requests');
+  }
+  const tab = `/requests/${encodeURIComponent(id)}?tab=turlar`;
+  if (!(await hasConfirmationProof(formData, 'request.open-next-round'))) {
+    redirect(`${tab}&roundError=confirmation`);
+  }
+
+  let failure: string | null = null;
+  try {
+    await apiFetch<unknown>(`/admin/service-requests/${encodeURIComponent(id)}/open-next-round`, {
+      method: 'POST',
+      body: JSON.stringify({
+        expectedCurrentRoundId: readFormString(formData, 'expectedCurrentRoundId'),
+        note: readFormString(formData, 'note'),
+        idempotencyKey: readFormString(formData, 'idempotencyKey'),
+      }),
+    });
+  } catch (error) {
+    rethrowNextControlFlow(error);
+    failure =
+      error instanceof ApiError
+        ? (readApiErrorCode(error.body) ?? (error.status === 404 ? 'NOT_FOUND' : 'error'))
+        : 'error';
+  }
+
+  revalidatePath('/requests');
+  revalidatePath(`/requests/${id}`);
+  redirect(failure ? `${tab}&roundError=${encodeURIComponent(failure)}` : `${tab}&roundOpened=1`);
 }

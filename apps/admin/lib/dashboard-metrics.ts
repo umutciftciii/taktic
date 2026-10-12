@@ -20,6 +20,8 @@ export const SHOWCASE_REVIEWS_HREF = '/showcase/reviews';
 export const PENDING_PROVIDERS_HREF = '/providers?status=PENDING_REVIEW';
 export const PENDING_REQUESTS_HREF = '/requests?status=SUBMITTED';
 export const IN_REVIEW_REQUESTS_HREF = '/requests?status=IN_REVIEW';
+/** REL-002 Faz 5: requests whose three automatic rounds failed (the MATCH_REVIEW queue). */
+export const MATCH_REVIEW_REQUESTS_HREF = '/requests?status=MATCH_REVIEW';
 
 /**
  * The dashboard's metric cards, decided in one place.
@@ -145,6 +147,14 @@ const ADMIN_DASHBOARD_METRICS: readonly AdminMetricDefinition[] = [
     label: 'Onay bekleyen vitrin kartı',
     href: SHOWCASE_REVIEWS_HREF,
     read: (s) => s.pendingShowcaseReviews,
+    actionTone: 'warning',
+    permissioned: true,
+  },
+  {
+    key: 'matchReviewRequests',
+    label: 'İnceleme bekleyen eşleşmeler',
+    href: MATCH_REVIEW_REQUESTS_HREF,
+    read: (s) => s.matchReviewRequests,
     actionTone: 'warning',
     permissioned: true,
   },

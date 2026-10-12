@@ -302,50 +302,83 @@ export class MatchReviewService {
    * request has. Customer contact is not part of a queue row.
    */
   async queue() {
-    const where: Prisma.ServiceRequestWhereInput = { status: ServiceRequestStatus.MATCH_REVIEW };
-    const [total, rows] = await Promise.all([
-      this.prisma.serviceRequest.count({ where }),
-      this.prisma.serviceRequest.findMany({
-        where,
-        // The failed current round's failure time is when the request entered
-        // MATCH_REVIEW; the request id breaks ties deterministically.
-        orderBy: [{ currentRound: { failedAt: 'asc' } }, { id: 'asc' }],
-        take: MATCH_REVIEW_QUEUE_LIMIT,
-        select: {
-          id: true,
-          requestNumber: true,
-          city: true,
-          district: true,
-          submittedAt: true,
-          category: { select: { id: true, name: true } },
-          currentRound: {
-            select: {
-              id: true,
-              roundNumber: true,
-              failedAt: true,
-              failureIncident: {
-                select: {
-                  id: true,
-                  incidentNumber: true,
-                  status: true,
-                  reason: true,
-                  providerId: true,
-                  provider: { select: { businessName: true } },
-                },
+    // Read in three index-bound steps rather than one ORDER BY over the
+    // relation: Prisma joins the round table for a relation sort, and the
+    // planner hash-joins (seq-scans) every round to sort a queue of a few
+    // rows — linear in rounds ever opened. Here: the waiting requests and
+    // their current round ids (status index), those rounds' failure times
+    // (primary-key probes), then the page's details (primary-key probes).
+    const waiting = await this.prisma.serviceRequest.findMany({
+      where: { status: ServiceRequestStatus.MATCH_REVIEW },
+      select: { id: true, currentRoundId: true },
+    });
+    const failures = await this.prisma.serviceRequestMatchRound.findMany({
+      where: { id: { in: waiting.map((row) => row.currentRoundId) } },
+      select: { requestId: true, failedAt: true },
+    });
+    // The failed current round's failure time is when the request entered
+    // MATCH_REVIEW; the request id breaks ties deterministically.
+    const pageIds = failures
+      .sort(
+        (a, b) =>
+          (a.failedAt?.getTime() ?? 0) - (b.failedAt?.getTime() ?? 0) || (a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0),
+      )
+      .slice(0, MATCH_REVIEW_QUEUE_LIMIT)
+      .map((row) => row.requestId);
+
+    const rows = await this.prisma.serviceRequest.findMany({
+      where: { id: { in: pageIds }, status: ServiceRequestStatus.MATCH_REVIEW },
+      select: {
+        id: true,
+        requestNumber: true,
+        city: true,
+        district: true,
+        submittedAt: true,
+        category: { select: { id: true, name: true } },
+        currentRound: {
+          select: {
+            id: true,
+            roundNumber: true,
+            failedAt: true,
+            failureIncident: {
+              select: {
+                id: true,
+                incidentNumber: true,
+                status: true,
+                reason: true,
+                providerId: true,
+                provider: { select: { businessName: true } },
               },
             },
           },
-          _count: { select: { providerExclusions: true, roundOpenings: true } },
         },
+      },
+    });
+    // Counted per page through each table's own requestId index (a relation
+    // `_count` would hash-join the whole table).
+    const [exclusions, openings] = await Promise.all([
+      this.prisma.serviceRequestProviderExclusion.groupBy({
+        by: ['requestId'],
+        where: { requestId: { in: pageIds } },
+        _count: { _all: true },
+      }),
+      this.prisma.serviceRequestRoundOpening.groupBy({
+        by: ['requestId'],
+        where: { requestId: { in: pageIds } },
+        _count: { _all: true },
       }),
     ]);
+    const exclusionCount = new Map(exclusions.map((row) => [row.requestId, row._count._all]));
+    const openingCount = new Map(openings.map((row) => [row.requestId, row._count._all]));
+    const position = new Map(pageIds.map((id, index) => [id, index]));
+    rows.sort((a, b) => (position.get(a.id) ?? 0) - (position.get(b.id) ?? 0));
 
     return {
-      total,
-      items: rows.map(({ _count, ...row }) => ({
+      total: waiting.length,
+      items: rows.map((row) => ({
         ...row,
-        exclusionCount: _count.providerExclusions,
-        manualOpeningCount: _count.roundOpenings,
+        exclusionCount: exclusionCount.get(row.id) ?? 0,
+        manualOpeningCount: openingCount.get(row.id) ?? 0,
       })),
     };
   }

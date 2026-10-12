@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import Link from 'next/link';
 import {
   ApiError,
@@ -55,12 +56,15 @@ import {
 import { requestStatusErrorMessage } from '../../../lib/status-conflicts';
 import {
   completeRequestAction,
+  openNextRoundAction,
   recalculateRequestQualityAction,
   reopenRequestAction,
   resolveReportsAction,
   updateRequestStatusAction,
 } from '../actions';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../lib/confirmation-proof-keys';
+import type { AdminRoundTimeline } from '../../../lib/match-rounds';
+import { RoundTimelinePanel } from './round-timeline';
 import {
   REQUEST_PUBLISH_DAYS,
   reportDismissConsequence,
@@ -98,10 +102,17 @@ import {
 
 type RequestDetailPageProps = {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; statusError?: string; reportError?: string; cancelled?: string }>;
+  searchParams: Promise<{
+    tab?: string;
+    statusError?: string;
+    reportError?: string;
+    cancelled?: string;
+    roundError?: string;
+    roundOpened?: string;
+  }>;
 };
 
-type TabKey = '' | 'teklifler' | 'sikayet' | 'gecmis';
+type TabKey = '' | 'turlar' | 'teklifler' | 'sikayet' | 'gecmis';
 
 const REPORT_ERROR_MESSAGES: Record<string, string> = {
   confirmation: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
@@ -156,7 +167,14 @@ function plannedExpiry(request: ServiceRequest): Date | null {
 export default async function RequestDetailPage({ params, searchParams }: RequestDetailPageProps) {
   const { can, isSuperAdmin } = await requireAdmin('REQUESTS_READ');
   const { id } = await params;
-  const { tab: rawTab, statusError, reportError, cancelled: justCancelled } = await searchParams;
+  const {
+    tab: rawTab,
+    statusError,
+    reportError,
+    cancelled: justCancelled,
+    roundError,
+    roundOpened,
+  } = await searchParams;
   const request = await fetchOrNotFound(() => apiFetch<ServiceRequest>(`/service-requests/${id}`));
 
   // Each secondary block belongs to another permission. It is read only when
@@ -183,6 +201,9 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
   const canCancel = can('REQUESTS_CANCEL');
   const canWithholdRefund = can('REQUESTS_CANCEL', 'REQUESTS_CANCEL_WITHOUT_REFUND');
   const canReadReview = isSuperAdmin;
+  // REL-002 Faz 5: Round 4+ from MATCH_REVIEW — the permission is reserved
+  // for a super admin; every request reader sees the round timeline.
+  const canOpenRound = can('MATCH_REVIEW_OPEN_ROUND');
 
   const [offers, reportsResult, reviewState, contactReveal] = await Promise.all([
     canReadOffers ? listRequestOffers(id) : Promise.resolve(null),
@@ -238,13 +259,18 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
   // `?tab=` pointing at it falls back to the first tab.
   const tabKeys: TabKey[] = [
     '',
+    'turlar',
     ...(canReadOffers ? (['teklifler'] as const) : []),
     ...(canReadReports ? (['sikayet'] as const) : []),
     'gecmis',
   ];
   const activeTab = resolveTab<TabKey>(rawTab, tabKeys, '');
+  // The round timeline is read only for its own tab (REQUESTS_READ).
+  const roundTimeline =
+    activeTab === 'turlar' ? await apiFetch<AdminRoundTimeline>(`/service-requests/${id}/rounds`) : null;
   const tabs: TabItem[] = [
     { key: '', label: 'Talep bilgileri', testId: 'request-tab-bilgiler' },
+    { key: 'turlar', label: 'Eşleşme turları', testId: 'request-tab-turlar' },
     ...(canReadOffers
       ? [{ key: 'teklifler', label: 'Teklifler', count: offers?.length ?? null, testId: 'request-tab-teklifler' }]
       : []),
@@ -413,6 +439,16 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               removalBlockedReason={removalBlockedReason}
               offers={offers}
             />
+            {request.status === 'MATCH_REVIEW' ? (
+              <div className="notice-warning detail-notice is-wide" role="note" data-testid="request-match-review-note">
+                Bu talepte üç otomatik eşleşme turu da hizmet aksaklığıyla sona erdi; talep ekibin incelemesini bekliyor.
+                Turların tam geçmişi ve “Yeni tur aç” işlemi{' '}
+                <Link className="cell-link" href={`${path}?tab=turlar`}>
+                  Eşleşme turları
+                </Link>{' '}
+                sekmesinde.
+              </div>
+            ) : null}
             <MatchCard
               request={request}
               matchedOffer={matchedOffer}
@@ -606,6 +642,30 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
               <ReviewCard reviewState={reviewState} canOpenProviders={canOpenProviders} canOpenReviews={canOpenReviews} />
             ) : null}
           </div>
+        </div>
+      ) : null}
+
+      {activeTab === 'turlar' && roundTimeline ? (
+        <div className="detail-panel">
+          <SectionCard
+            title="Eşleşme turları"
+            subtitle="Talebin her turu, en eskiden en yeniye: kaynak, yayın, eşleşme, sonuç, hizmet aksaklığı ve dışlama. Geçmiş turlar değiştirilemez."
+          >
+            <RoundTimelinePanel
+              timeline={roundTimeline}
+              can={{
+                openRound: canOpenRound,
+                openIncidents: can('SERVICE_INCIDENTS_READ'),
+                openProviders: canOpenProviders,
+                openReliability: can('PROVIDER_RELIABILITY_READ') && canOpenProviders,
+                openOffers: canReadOffers,
+              }}
+              action={openNextRoundAction}
+              idempotencyKey={randomUUID()}
+              roundError={roundError}
+              roundOpened={roundOpened === '1'}
+            />
+          </SectionCard>
         </div>
       ) : null}
 
