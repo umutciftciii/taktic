@@ -15,6 +15,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { ForbiddenException } from '@nestjs/common';
+import { isLocationBound, resolveRequestDeliveryMode } from '../../common/delivery-mode';
 import { runSerializable } from '../../common/serializable-transaction';
 import { showcaseCandidateAreaKeys } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -176,7 +177,17 @@ export class ShowcaseLeadService {
      * write to, and checking anything else would let a lead through for an area
      * that has since come off.
      */
-    await this.assertPlacementServesRequest(live.placementId, dto);
+    //
+    // MATCH-001: unless the job is REMOTE. The delivery mode is resolved here
+    // with the same rule the request path applies (and it applies it again,
+    // so the two cannot disagree): the card's category is the request's
+    // category. A remote job happens nowhere in particular, so the customer's
+    // place is not a reason to refuse the lead — and an ON_SITE one (or a
+    // HYBRID one the customer wants on site) is held to the shelf as before.
+    const deliveryMode = resolveRequestDeliveryMode(live.categoryDeliveryModel, dto.deliveryMode);
+    if (isLocationBound({ deliveryMode })) {
+      await this.assertPlacementServesRequest(live.placementId, dto);
+    }
 
     /*
      * The number the proof is for: resolved by the same rule that decides the
@@ -615,7 +626,7 @@ export class ShowcaseLeadService {
         cardId: true,
         providerId: true,
         kindSnapshot: true,
-        card: { select: { categoryId: true } },
+        card: { select: { categoryId: true, category: { select: { deliveryModel: true } } } },
         pinnedVersion: {
           select: {
             id: true,
@@ -636,6 +647,7 @@ export class ShowcaseLeadService {
       cardId: placement.cardId,
       providerId: placement.providerId,
       categoryId: placement.card.categoryId,
+      categoryDeliveryModel: placement.card.category.deliveryModel,
       kind: placement.kindSnapshot,
       versionId: placement.pinnedVersion.id,
       responseSlaUrgentHours: placement.pinnedVersion.responseSlaUrgentHours,

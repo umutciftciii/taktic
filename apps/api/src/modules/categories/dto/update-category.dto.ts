@@ -1,4 +1,4 @@
-import { ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
+import { CategoryDeliveryModel, ServiceCategoryKind, ServiceCategoryStatus } from '@prisma/client';
 import {
   IsBoolean,
   IsEnum,
@@ -95,6 +95,15 @@ export class UpdateCategoryDto {
   @IsOptional()
   @IsBoolean()
   unlimitedPackageEligible?: boolean;
+
+  /**
+   * MATCH-001: how the service is delivered — see CategoryDeliveryModel. ON_SITE
+   * when omitted (the column default). A change applies to requests created
+   * after it; every existing request keeps the mode it was created with.
+   */
+  @IsOptional()
+  @IsEnum(CategoryDeliveryModel)
+  deliveryModel?: CategoryDeliveryModel;
 
   @IsOptional()
   @IsInt()

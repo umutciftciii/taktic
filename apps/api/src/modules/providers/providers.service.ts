@@ -46,7 +46,7 @@ import {
   isRequestVisibleToDirectGate,
   isProviderExcluded,
   isRequestVisibleToProviders,
-  matchesProviderArea,
+  matchesRequestLocation,
   notExcludedFromRequestFilter,
   phoneVerifiedRequestFilter,
   type ProviderServiceAreaLike,
@@ -59,6 +59,7 @@ import {
   auditPaging,
   toAuditActor,
 } from '../../common/admin-audit';
+import { providerNeedsServiceArea } from '../../common/delivery-mode';
 import { runSerializable } from '../../common/serializable-transaction';
 import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
@@ -1342,7 +1343,7 @@ export class ProvidersService implements OnModuleInit {
     });
 
     return requests
-      .filter((request) => matchesProviderArea(provider.serviceAreas, request))
+      .filter((request) => matchesRequestLocation(provider.serviceAreas, request))
       .map(toProviderRequestListItem)
       .filter((request) =>
         normalizedFilters.qualityLabel ? request.qualityLabel === normalizedFilters.qualityLabel : true,
@@ -1427,7 +1428,7 @@ export class ProvidersService implements OnModuleInit {
       // a competitor.
       !isRequestVisibleToDirectGate(request, providerId) ||
       !provider.serviceCategories.some((item) => item.categoryId === request.categoryId) ||
-      !matchesProviderArea(provider.serviceAreas, request)
+      !matchesRequestLocation(provider.serviceAreas, request)
     ) {
       throw new NotFoundException('Request not found');
     }
@@ -2024,7 +2025,16 @@ export class ProvidersService implements OnModuleInit {
     alreadyStoredAreas: readonly ScopedArea[] = [],
   ): Promise<NormalizedProviderPayload> {
     const categoryIds = normalizeCategoryIds(serverChosenCategoryIds ?? dto.categoryIds ?? []);
-    const serviceAreas = normalizeServiceAreas(dto.serviceAreas ?? [], alreadyStoredAreas);
+    // MATCH-001: whether any chosen category is matched on location at all.
+    const categoryModels = await this.prisma.serviceCategory.findMany({
+      where: { id: { in: categoryIds } },
+      select: { deliveryModel: true },
+    });
+    const serviceAreas = normalizeServiceAreas(
+      dto.serviceAreas ?? [],
+      alreadyStoredAreas,
+      providerNeedsServiceArea(categoryModels),
+    );
     const address = normalizeBusinessAddress(dto);
 
     if (!serverChosenCategoryIds) {
@@ -2249,6 +2259,8 @@ const providerVisibilityRequestSelect = {
   city: true,
   district: true,
   neighborhood: true,
+  // MATCH-001: whether the area step applies at all.
+  deliveryMode: true,
   phoneVerifiedAt: true,
   directShowcaseProviderId: true,
 } satisfies Prisma.ServiceRequestSelect;
@@ -2275,7 +2287,7 @@ function canProviderActOnRequest(
     (request.status === ServiceRequestStatus.APPROVED ||
       (isOwnDirectLead && request.status === ServiceRequestStatus.SUBMITTED)) &&
     provider.serviceCategories.some((item) => item.categoryId === request.categoryId) &&
-    matchesProviderArea(provider.serviceAreas, request)
+    matchesRequestLocation(provider.serviceAreas, request)
   );
 }
 
@@ -2762,9 +2774,21 @@ function normalizeBusinessAddress(dto: Pick<CreateProviderDto, 'city' | 'distric
 function normalizeServiceAreas(
   serviceAreas: ProviderServiceAreaDto[],
   alreadyStored: readonly ScopedArea[] = [],
+  /**
+   * MATCH-001: false only for a provider whose every category is REMOTE —
+   * no request they can match reads an area, so none is demanded. Any
+   * ON_SITE or HYBRID category keeps the rule exactly as it was.
+   */
+  required = true,
 ) {
-  if (!Array.isArray(serviceAreas) || serviceAreas.length === 0) {
+  if (!Array.isArray(serviceAreas)) {
     throw new BadRequestException('En az bir hizmet bölgesi eklemelisiniz.');
+  }
+  if (serviceAreas.length === 0) {
+    if (required) {
+      throw new BadRequestException('En az bir hizmet bölgesi eklemelisiniz.');
+    }
+    return [];
   }
 
   const normalized = serviceAreas.map((area) => {
@@ -2954,6 +2978,8 @@ function toProviderRequestListItem(
     city: request.city,
     district: request.district,
     neighborhood: request.neighborhood,
+    // MATCH-001: REMOTE requests are shown as "Uzaktan" next to the place.
+    deliveryMode: request.deliveryMode,
     budgetMin: request.budgetMin,
     budgetMax: request.budgetMax,
     preferredDate: request.preferredDate,
@@ -3015,6 +3041,7 @@ function toProviderRequestDetail(
     district: request.district,
     neighborhood: request.neighborhood,
     addressNote: request.addressNote,
+    deliveryMode: request.deliveryMode,
     budgetMin: request.budgetMin,
     budgetMax: request.budgetMax,
     preferredDate: request.preferredDate,

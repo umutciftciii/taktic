@@ -74,6 +74,34 @@ enum ServiceCategoryStatus {
   INACTIVE
 }
 
+/// MATCH-001: how a category's service is delivered — whether the customer's
+/// location is a matching criterion at all.
+///
+/// ON_SITE — physical, location-bound work. Provider service areas decide who
+///           sees a request, exactly as before this enum existed; the default,
+///           and what every category that predates it carries.
+/// REMOTE  — delivered at a distance. An eligible provider's service areas are
+///           not consulted: every APPROVED provider bound to the category sees
+///           the request, wherever its customer is.
+/// HYBRID  — either. The customer chooses per request (ServiceRequest.deliveryMode).
+///
+/// Read only when a request is created. What decides matching afterwards is
+/// the request's own snapshot, so changing this never moves an existing request.
+enum CategoryDeliveryModel {
+  ON_SITE
+  REMOTE
+  HYBRID
+}
+
+/// MATCH-001: the delivery mode a request was created with — the authority
+/// for location matching on that request, for the rest of its life (every
+/// round included). Resolved from the category at creation (HYBRID: the
+/// customer's choice) and immutable afterwards; a database trigger enforces both.
+enum RequestDeliveryMode {
+  ON_SITE
+  REMOTE
+}
+
 /// How a conditional question reads a multi-answer source.
 ///
 /// ANY — the default, and the only behaviour that existed before this enum —
@@ -951,6 +979,10 @@ model ServiceCategory {
   /// renamed slug lost its picture; this key does not move when the slug does.
   /// NULL draws the icon set, as an unlisted slug always did.
   illustrationKey          String?
+  /// MATCH-001: see CategoryDeliveryModel. ON_SITE for every category that
+  /// existed before the column (constant default, no rewrite). Only new
+  /// requests read it; an existing request keeps its own `deliveryMode`.
+  deliveryModel            CategoryDeliveryModel @default(ON_SITE)
   createdAt                DateTime              @default(now())
   updatedAt                DateTime              @updatedAt
 
@@ -1204,6 +1236,13 @@ model ServiceRequest {
   /// own. Left out of every default read (PrismaService omit); readers select
   /// it explicitly.
   currentRoundId              String               @unique @default(dbgenerated())
+  /// MATCH-001: the request's delivery mode, snapshotted from its category at
+  /// creation — see RequestDeliveryMode. REMOTE means provider service areas are
+  /// not a matching criterion; city/district stay as the customer's context and
+  /// are never read by matching. ON_SITE for every request that predates it.
+  /// `ServiceRequest_delivery_mode_guard` refuses an INSERT that disagrees with
+  /// the category and any UPDATE that changes it.
+  deliveryMode                RequestDeliveryMode  @default(ON_SITE)
   submittedAt                 DateTime             @default(now())
   createdAt                   DateTime             @default(now())
   updatedAt                   DateTime             @updatedAt

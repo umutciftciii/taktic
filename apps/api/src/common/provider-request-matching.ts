@@ -1,4 +1,5 @@
-import { MatchRoundStatus, Prisma } from '@prisma/client';
+import { MatchRoundStatus, Prisma, RequestDeliveryMode } from '@prisma/client';
+import { isLocationBound } from './delivery-mode';
 import { isPhoneVerificationRequired } from '../modules/phone-verification/phone-verification.constants';
 
 /**
@@ -25,6 +26,37 @@ export type MatchableRequestLocation = {
   district: string;
   neighborhood: string | null;
 };
+
+/**
+ * A request as location matching reads it. `deliveryMode` is part of the type
+ * on purpose (MATCH-001): a caller that forgot to select it does not compile,
+ * so no surface can quietly apply area filtering to a remote request.
+ */
+export type MatchableRequest = MatchableRequestLocation & {
+  deliveryMode: RequestDeliveryMode;
+};
+
+/**
+ * MATCH-001 — the location step of "may this provider see this request", the
+ * one every provider-facing surface asks (discovery list, request detail, the
+ * offer fast check and its in-transaction authority, the publish fan-out and
+ * its send-time re-check).
+ *
+ * An ON_SITE request matches on the provider's service areas exactly as it
+ * always did. A REMOTE request skips them — a provider with areas elsewhere,
+ * or with none at all, is not refused by location. Nothing else is skipped:
+ * approval, category binding, the verification and vitrin gates, the round
+ * and the exclusion are separate predicates the callers still apply.
+ */
+export function matchesRequestLocation(
+  areas: readonly ProviderServiceAreaLike[],
+  request: MatchableRequest,
+): boolean {
+  if (!isLocationBound(request)) {
+    return true;
+  }
+  return matchesProviderArea(areas, request);
+}
 
 /**
  * An area row matches when every level it names matches the request. A row with

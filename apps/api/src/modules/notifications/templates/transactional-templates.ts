@@ -298,7 +298,7 @@ export function transactionalSubject(
       return 'Eşleşme tamam — iletişim bilgileri';
     case 'request-available':
       return withSuffix(
-        'Bölgenizde yeni talep',
+        data.deliveryMode === 'REMOTE' ? 'Uzaktan yeni talep' : 'Bölgenizde yeni talep',
         joinNonEmpty([text(data.categoryName), text(data.district)], ', '),
       );
     case 'offer-accepted':
@@ -980,6 +980,8 @@ function matchCustomer(subject: string, fullName: string, data: Data): EmailDocu
 
 function requestAvailable(subject: string, fullName: string, data: Data): EmailDocument {
   const district = text(data.district);
+  // MATCH-001: absent on an intent composed before the field existed — ON_SITE.
+  const remote = data.deliveryMode === 'REMOTE';
   const creditCost = int(data.creditCost);
   const balance = int(data.creditBalance);
   const qualityScore = int(data.qualityScore);
@@ -1000,9 +1002,12 @@ function requestAvailable(subject: string, fullName: string, data: Data): EmailD
     accountUrl: text(data.accountUrl),
     blocks: compact([
       paragraph(
-        district
-          ? `${district} bölgesinde, aktif kategorilerinizden birinde yeni bir talep yayınlandı.`
-          : 'Hizmet bölgenizde, aktif kategorilerinizden birinde yeni bir talep yayınlandı.',
+        remote
+          ? 'Aktif kategorilerinizden birinde uzaktan verilebilecek yeni bir talep yayınlandı. ' +
+              'Uzaktan taleplerde hizmet bölgeniz eşleşmeyi sınırlamaz.'
+          : district
+            ? `${district} bölgesinde, aktif kategorilerinizden birinde yeni bir talep yayınlandı.`
+            : 'Hizmet bölgenizde, aktif kategorilerinizden birinde yeni bir talep yayınlandı.',
       ),
       spacer(4),
       dataTable([
@@ -1011,6 +1016,7 @@ function requestAvailable(subject: string, fullName: string, data: Data): EmailD
         // City and district only. The neighbourhood, the address note and every
         // customer contact field stay out of a message that goes to everybody
         // who matched — the same line the accepted-work brief draws.
+        row('Hizmet şekli', remote ? 'Uzaktan hizmet' : null),
         row('Konum', formatLocation(text(data.city), district)),
         row('Kalite puanı', qualityScore === null ? null : `${qualityScore} / 100`),
         // The real per-category price, never a fixed figure.

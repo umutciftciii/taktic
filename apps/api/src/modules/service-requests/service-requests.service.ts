@@ -19,7 +19,8 @@ import { matchesAdminSearch, parseAdminSearch } from '../../common/admin-search'
 import { assertNoContactDetails } from '../../common/contact-guard';
 import { isPhoneVerificationRequired } from '../phone-verification/phone-verification.constants';
 import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
-import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, MatchRoundStatus, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, ServiceRequestQuestion, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, MatchRoundStatus, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, RequestDeliveryMode, ServiceRequestQuestion, ServiceRequestQuestionSystemField, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
+import { resolveRequestDeliveryMode } from '../../common/delivery-mode';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -474,6 +475,11 @@ export class ServiceRequestsService {
       },
     });
 
+    // MATCH-001: the request's delivery mode, decided once from the category
+    // the request really lands on (the routed leaf) and stored as its
+    // snapshot. A HYBRID category without a choice is refused here.
+    const deliveryMode = resolveRequestDeliveryMode(category.deliveryModel, dto.deliveryMode);
+
     // One clock for the whole creation: the range rule's "today" and every
     // timestamp written below read the same instant.
     const now = new Date();
@@ -527,7 +533,7 @@ export class ServiceRequestsService {
     // requires a neighbourhood", "this one requires a budget". The bound
     // question never produces an answer row — the value stays in the column
     // provider matching and pricing already read.
-    const answers = validateAnswers(category.questions, dto.answers ?? [], requestData);
+    const answers = validateAnswers(category.questions, dto.answers ?? [], requestData, deliveryMode);
 
     const quality = calculateQualityScore({
       ...requestData,
@@ -646,6 +652,7 @@ export class ServiceRequestsService {
           submittedAt: now,
           ...(publishAtCreate ? { status: ServiceRequestStatus.APPROVED, approvedAt: now } : {}),
           ...requestData,
+          deliveryMode,
           ...disclosure,
           // The visibility gate. NULL on every request from the public form,
           // which is what keeps the marketplace's behaviour exactly as it was:
@@ -1243,7 +1250,9 @@ export class ServiceRequestsService {
       where: { id },
       include: {
         category: {
-          select: { id: true, name: true, slug: true },
+          // MATCH-001: the category's model today, beside the request's own
+          // `deliveryMode` snapshot — they may differ, and the snapshot wins.
+          select: { id: true, name: true, slug: true, deliveryModel: true },
         },
         ...(customerAccount
           ? { customer: { select: { id: true, email: true, phone: true, name: true } } }
@@ -2598,6 +2607,7 @@ function validateAnswers(
   questions: QuestionForValidation[],
   rawAnswers: CreateServiceRequestAnswerDto[],
   requestValues: SystemFieldRequestValues,
+  deliveryMode: RequestDeliveryMode,
 ): ValidatedAnswer[] {
   const questionsByKey = new Map(questions.map((question) => [question.key, question]));
   const answersByKey = new Map<string, unknown>();
@@ -2653,7 +2663,17 @@ function validateAnswers(
     // built-in field it names has to carry a value — that is the only thing it
     // checks, and the value itself stays where it already is.
     if (question.systemField) {
-      if (question.isRequired && !hasSystemFieldValue(question.systemField, requestValues)) {
+      // MATCH-001: a required ADDRESS asks for the place the work happens. A
+      // REMOTE job happens nowhere in particular, so the requirement does not
+      // apply — the customer's city and district are still on the request.
+      const addressNotNeeded =
+        question.systemField === ServiceRequestQuestionSystemField.ADDRESS &&
+        deliveryMode === RequestDeliveryMode.REMOTE;
+      if (
+        question.isRequired &&
+        !addressNotNeeded &&
+        !hasSystemFieldValue(question.systemField, requestValues)
+      ) {
         throw new BadRequestException(
           `${question.label} zorunlu: talebin ${systemFieldLabel(question.systemField)} alanı doldurulmalı.`,
         );

@@ -4,6 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsEnum,
   IsInt,
   IsNotEmpty,
   IsOptional,
@@ -12,6 +13,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { RequestDeliveryMode } from '@prisma/client';
 import { MaxCodeUnitLength } from '../../../common/max-code-unit-length.validator';
 import { SERVICE_REQUEST_DESCRIPTION_MAX_LENGTH } from '../../../common/service-request-limits';
 import { IsKnownTurkishLocation } from '../../locations/turkish-location.validator';
@@ -132,6 +134,21 @@ export class CreateServiceRequestDto {
   @IsOptional()
   @IsString()
   neighborhood?: string | null;
+
+  /**
+   * MATCH-001: how this job is delivered — required for a HYBRID category,
+   * where the customer chooses, and optional otherwise (the category decides;
+   * a value it cannot take is refused). Omitted by every client written before
+   * the field existed, which is what keeps an ON_SITE category's form
+   * unchanged. See `resolveRequestDeliveryMode`.
+   *
+   * `city` and `district` stay required for a REMOTE request: they are the
+   * customer's own place — what the request, its mails and its reports have
+   * always carried — and matching does not read them for REMOTE.
+   */
+  @IsOptional()
+  @IsEnum(RequestDeliveryMode)
+  deliveryMode?: RequestDeliveryMode | null;
 
   @IsOptional()
   @IsString()
