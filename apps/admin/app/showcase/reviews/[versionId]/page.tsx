@@ -193,6 +193,7 @@ export default async function ShowcaseReviewPage({
             {version.entitlement ? (
               <p data-testid="review-entitlement">
                 {version.entitlement.packageName} · {version.entitlement.durationDays} gün yayın ·{' '}
+                {version.entitlement.freeOfferCount} ücretsiz teklif hakkı ·{' '}
                 {version.entitlement.pausedForReview
                   ? 'inceleme süresince geçerliliği durduruldu'
                   : `${formatDateTime(version.entitlement.expiresAt)} tarihine kadar geçerli`}

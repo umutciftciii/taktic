@@ -133,7 +133,7 @@ export default async function NewShowcaseCardPage({
           <div className="vitrin-form-group">
             <div className="pdash-notice" role="status" data-testid="showcase-entitlement-in-use">
               {choices.length === 1
-                ? `Bu kart ${first.packageName} hakkınızla oluşturulacak · ${first.durationDays} gün yayın`
+                ? `Bu kart ${first.packageName} hakkınızla oluşturulacak · ${first.durationDays} gün yayın · ${first.freeOfferCount} ücretsiz teklif hakkı`
                 : 'Kullanılacak hakkı seçin:'}
             </div>
             {choices.length > 1 ? (
@@ -148,7 +148,7 @@ export default async function NewShowcaseCardPage({
                       required
                     />
                     <span>
-                      {right.packageName} · {right.durationDays} gün
+                      {right.packageName} · {right.durationDays} gün · {right.freeOfferCount} ücretsiz teklif
                       {right.allowedCardKind
                         ? ` · yalnız ${SHOWCASE_CARD_KIND_LABELS[right.allowedCardKind].toLocaleLowerCase('tr-TR')}`
                         : ''}
@@ -188,7 +188,7 @@ function distinctPackages(rights: ShowcaseEntitlementSummary[]): ShowcaseEntitle
   const seen = new Set<string>();
   const out: ShowcaseEntitlementSummary[] = [];
   for (const right of rights) {
-    const key = `${right.packageName}|${right.durationDays}|${right.allowedCardKind ?? ''}`;
+    const key = `${right.packageName}|${right.durationDays}|${right.freeOfferCount}|${right.allowedCardKind ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(right);

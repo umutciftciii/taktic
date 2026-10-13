@@ -76,8 +76,19 @@ describe('the bounded copy', () => {
       const source = read(path);
       expect(source, path).not.toMatch(/kredi harcanmaz|kredisi harcanmadı/);
     }
-    expect(read('app/providers/[id]/vitrin/talepler/page.tsx')).toContain('3 ücretsiz teklif hakkınız bulunur');
-    expect(read('app/providers/[id]/vitrin/paketler/page.tsx')).toContain('3 ücretsiz teklif hakkı');
+    // SHOWCASE-ALLOWANCE-001: the count is the package's, never a fixed 3.
+    for (const path of [
+      'app/providers/[id]/vitrin/talepler/page.tsx',
+      'app/providers/[id]/vitrin/talepler/[leadId]/page.tsx',
+      'app/providers/[id]/vitrin/paketler/page.tsx',
+    ]) {
+      expect(read(path), path).not.toMatch(/\b3 ücretsiz teklif/);
+    }
+    expect(read('app/providers/[id]/vitrin/talepler/page.tsx')).toContain('paketin içerdiği sayıda ücretsiz teklif hakkı');
+    expect(read('app/providers/[id]/vitrin/talepler/[leadId]/page.tsx')).toContain(
+      '${costPreview.allowance.quotaTotal} ücretsiz teklif hakkınız bulunur',
+    );
+    expect(read('app/providers/[id]/vitrin/paketler/page.tsx')).toContain('kaç hak kazanacağınız her paketin üzerinde yazar');
   });
 
   it('the lead action posts the previewed cost and maps the 402', () => {

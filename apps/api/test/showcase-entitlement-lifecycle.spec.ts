@@ -41,7 +41,7 @@ async function paidPackagePurchase(providerId: string, userId: string, pkgId: st
   const purchase = await ctx.prisma.packagePurchase.create({
     data: {
       providerId, kind: 'SHOWCASE_PACKAGE', showcasePackageId: pkg.id,
-      durationDaysSnapshot: pkg.durationDays, creditAmountSnapshot: 0,
+      durationDaysSnapshot: pkg.durationDays, freeOfferCountSnapshot: pkg.freeOfferCount, creditAmountSnapshot: 0,
       priceAmountSnapshot: pkg.priceAmount, currencySnapshot: pkg.currency,
       packageNameSnapshot: pkg.name, showcasePackageTermsAcceptanceId: acceptance.id,
       status: 'PAID', paidAt: new Date(), paymentProvider: 'mock',
@@ -55,6 +55,7 @@ async function paidPackagePurchase(providerId: string, userId: string, pkgId: st
     showcasePackageId: string;
     showcasePackageTermsAcceptanceId: string;
     durationDaysSnapshot: number;
+    freeOfferCountSnapshot: number;
   };
 }
 

@@ -38,6 +38,8 @@ export const SHOWCASE_ERROR_MESSAGES: Record<string, string> = {
   // a configuration gap, so the sentence names nothing the provider could fix.
   PACKAGE_NOT_MAPPED: 'Bu paket şu an satın alınamıyor.',
   SHOWCASE_PACKAGE_NOT_FOUND: 'Bu paket şu an satın alınamıyor.',
+  SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED:
+    'Bu paketin ücretsiz teklif hakkı sayısı az önce değişti. Güncel paketi inceleyip yeniden seçin.',
   SHOWCASE_CARD_ALREADY_PLACED:
     'Bu kartın yayında olan bir vitrin süresi zaten var. Süre bitince yenileyebilir ya da başka bir kartınız için paket alabilirsiniz.',
   SHOWCASE_PROVIDER_NOT_APPROVED:

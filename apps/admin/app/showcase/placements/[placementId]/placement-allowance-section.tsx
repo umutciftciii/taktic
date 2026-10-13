@@ -22,9 +22,15 @@ const ALLOWANCE_USAGE_COLUMNS: DataColumn[] = [
 export function PlacementAllowanceSection({
   allowance,
   canOpenOffer,
+  packageFreeOfferCount,
 }: {
   allowance: ShowcaseOfferAllowance | null;
   canOpenOffer: boolean;
+  /**
+   * SHOWCASE-ALLOWANCE-001 — the package's free offer count as this run was
+   * sold, never the package's current value.
+   */
+  packageFreeOfferCount: number;
 }) {
   return (
     <SectionCard
@@ -46,6 +52,14 @@ export function PlacementAllowanceSection({
                   ),
                 },
                 { label: 'Kalan', value: String(allowance.remaining) },
+                {
+                  label: 'Paketten gelen',
+                  value: (
+                    <span data-testid="placement-allowance-package-count">
+                      {packageFreeOfferCount} teklif (satın alma anındaki paket değeri)
+                    </span>
+                  ),
+                },
                 {
                   label: 'Sübvanse edilen kredi',
                   value: `${allowance.subsidyCredits} kredi (normal kategori bedeli)`,

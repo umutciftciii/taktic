@@ -9,11 +9,14 @@ import {
 /**
  * CAMPAIGN-ENTITLEMENT-001 — bounded vitrin offer allowances.
  *
- * Every vitrin placement carries one grant of {@link SHOWCASE_FREE_OFFER_QUOTA}
- * free offers, spendable only on the direct leads that arrived through that
- * very placement. The placement is the scope: a renewal is a new placement and
- * a new grant; nothing transfers, nothing rolls over, and nothing is given back
- * once spent.
+ * Every vitrin placement carries one grant of free offers, spendable only on
+ * the direct leads that arrived through that very placement. The placement is
+ * the scope: a renewal is a new placement and a new grant; nothing transfers,
+ * nothing rolls over, and nothing is given back once spent.
+ *
+ * SHOWCASE-ALLOWANCE-001 — how many free offers a grant carries is the
+ * package's `freeOfferCount`, snapshotted along the sale (purchase → right /
+ * placement → grant), never re-read from the catalogue.
  *
  * Everything here runs inside the caller's transaction — the placement's birth
  * for {@link grantShowcasePlacementAllowance}, the offer's own Serializable
@@ -22,25 +25,44 @@ import {
  */
 
 /**
- * How many free offers one vitrin placement carries. Snapshotted onto the grant
- * as `quotaTotal`, so changing this number governs the next placement and never
- * one already on the air. There is deliberately no package-level setting in v1.
+ * The free offers every run carried before the count became a package setting
+ * (CAMPAIGN-ENTITLEMENT-001), and therefore what a sale recorded without a
+ * snapshot was sold with: the default of `ShowcasePackage.freeOfferCount` and
+ * of the entitlement / placement snapshots, and the reading of a vitrin
+ * purchase whose checkout an older application version opened.
  */
-export const SHOWCASE_FREE_OFFER_QUOTA = 3;
+export const LEGACY_SHOWCASE_FREE_OFFER_COUNT = 3;
+
+/**
+ * The free offers a vitrin purchase was sold with: its snapshot, or the legacy
+ * figure for a checkout opened before the snapshot existed. Never the package's
+ * current value — that may have been edited since the buyer saw it.
+ */
+export function purchaseFreeOfferCount(purchase: {
+  freeOfferCountSnapshot: number | null;
+}): number {
+  return purchase.freeOfferCountSnapshot ?? LEGACY_SHOWCASE_FREE_OFFER_COUNT;
+}
 
 /**
  * Opens the grant a newly born placement carries, in the transaction that
- * births it.
+ * births it, with the placement's own `freeOfferCountSnapshot` as its quota.
  *
  * Idempotent on the database's own guard: `showcasePlacementId` is unique and
  * the insert is `ON CONFLICT DO NOTHING`, so a replayed birth cannot produce a
  * second grant — and, unlike a caught P2002, it never aborts the caller's
- * transaction.
+ * transaction. The returned quota is the stored grant's, so a replay reports
+ * what was actually granted.
  */
 export async function grantShowcasePlacementAllowance(
   tx: Prisma.TransactionClient,
-  input: { placementId: string; providerId: string; startAt: Date },
+  input: { placementId: string; providerId: string; startAt: Date; quotaTotal: number },
 ): Promise<{ grantId: string; quotaTotal: number }> {
+  if (!Number.isInteger(input.quotaTotal) || input.quotaTotal < 1) {
+    // The CHECK would refuse it too; failing here names the cause.
+    throw new Error(`Invalid showcase allowance quota ${input.quotaTotal} for placement ${input.placementId}`);
+  }
+
   await tx.offerAllowanceGrant.createMany({
     data: [
       {
@@ -48,7 +70,7 @@ export async function grantShowcasePlacementAllowance(
         source: OfferAllowanceSource.SHOWCASE_PLACEMENT,
         benefit: OfferAllowanceBenefit.FREE_OFFER,
         showcasePlacementId: input.placementId,
-        quotaTotal: SHOWCASE_FREE_OFFER_QUOTA,
+        quotaTotal: input.quotaTotal,
         quotaUsed: 0,
         validFrom: input.startAt,
       },

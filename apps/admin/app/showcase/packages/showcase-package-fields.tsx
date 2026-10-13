@@ -66,6 +66,36 @@ export function PriceField({
 }
 
 /**
+ * SHOWCASE-ALLOWANCE-001 — how many free vitrin offers one run bought with
+ * the package carries. 1–50, the API's and the database's range. Stated as
+ * "later purchases only" where it is set, because every sale snapshots it: a
+ * right or a run already sold keeps the number its buyer was shown.
+ */
+export const FREE_OFFER_COUNT_MIN = 1;
+export const FREE_OFFER_COUNT_MAX = 50;
+export const FREE_OFFER_COUNT_HELP =
+  'Bu paketle alınan her yayın döneminde, karttan gelen doğrudan taleplere verilebilecek ücretsiz teklif sayısı (1–50). Haklar bitince teklifler kategori kredi maliyetiyle ücretlendirilir. Değişiklik yalnız sonraki satın almaları etkiler; satılmış hak ve yayınlar kendi sayısını korur.';
+
+export function FreeOfferCountField({ defaultValue, className }: { defaultValue: number; className?: string }) {
+  return (
+    <label className={className}>
+      <span>Ücretsiz teklif hakkı *</span>
+      <input
+        name="freeOfferCount"
+        type="number"
+        min={FREE_OFFER_COUNT_MIN}
+        max={FREE_OFFER_COUNT_MAX}
+        step={1}
+        defaultValue={defaultValue}
+        required
+        data-testid="showcase-package-free-offer-count"
+      />
+      <small className="help-text">{FREE_OFFER_COUNT_HELP}</small>
+    </label>
+  );
+}
+
+/**
  * The catalogue's own listing order, and nothing else: it says where this
  * package sits in the shop's list, and nothing about where any card sits on
  * the home page. The vitrin shelf is ordered by the feed — one round of every

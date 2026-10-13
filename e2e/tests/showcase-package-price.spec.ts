@@ -80,6 +80,8 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       const created = await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } });
       expect(created.priceAmount).toBe(1050);
       expect(created.currency).toBe('TRY');
+      // SHOWCASE-ALLOWANCE-001: the form's default is the legacy 3.
+      expect(created.freeOfferCount).toBe(3);
 
       // The list: Turkish money format, with the sign.
       const row = admin.page.locator('tr').filter({ hasText: name });
@@ -131,6 +133,24 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
       await expect(
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-price-cell'),
       ).toHaveText('₺10,00');
+
+      // ── The free offer count is a commercial term (SHOWCASE-ALLOWANCE-001) ──
+      await admin.gotoAdmin(screen);
+      await expect(admin.page.getByTestId('showcase-package-fact-free-offers')).toContainText('3 teklif');
+      await editForm.getByTestId('showcase-package-free-offer-count').fill('6');
+      await settleActionRedirect(admin.page, () =>
+        confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (dialog) => {
+          await expect(dialog.getByTestId('showcase-package-commercial-changes')).toContainText('3 teklif → 6 teklif');
+        }),
+      );
+      await expect(admin.page).toHaveURL(/saved=1/);
+      await assertNoErrorScreen(admin.page);
+      expect((await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).freeOfferCount).toBe(6);
+      await expect(admin.page.getByTestId('showcase-package-fact-free-offers')).toContainText('6 teklif');
+      await admin.gotoAdmin('/showcase/packages');
+      await expect(
+        admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-free-offers-cell'),
+      ).toHaveText('6');
 
       // ── Zero is refused by the server action, with a sentence ──────────
       await admin.gotoAdmin(screen);

@@ -69,6 +69,12 @@ export default async function ShowcasePaymentReturnPage({ params, searchParams }
         <section className="vitrin-return" data-testid="showcase-payment-paid">
           <span className="kicker">{purchase.packageNameSnapshot}</span>
           <h1>Vitrin hakkınız hazır</h1>
+          {purchase.freeOfferCountSnapshot !== null ? (
+            <p data-testid="showcase-payment-free-offers">
+              Bu hak, yayın dönemi boyunca vitrin taleplerinize vereceğiniz{' '}
+              <strong>{purchase.freeOfferCountSnapshot} ücretsiz teklif hakkı</strong> içerir.
+            </p>
+          ) : null}
           <p>
             {cardHref
               ? 'Hakkınızı bu karta bağlayıp yayına alabilirsiniz.'

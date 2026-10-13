@@ -6,7 +6,7 @@ Baz: main `274d47a2`. Migration: 100 → 101 (`20261015090000_add_offer_allowanc
 ## 1. Ürün kuralı
 
 Vitrin yerleşimi (placement) ücretli bir görünürlük ürünüdür. Her yayın dönemi
-(`ShowcasePlacement`) sağlayıcıya **3 ücretsiz vitrin kaynaklı teklif** hakkı verir.
+(`ShowcasePlacement`) sağlayıcıya, paketin `freeOfferCount` değeri kadar (varsayılan **3**; SHOWCASE-ALLOWANCE-001) **ücretsiz vitrin kaynaklı teklif** hakkı verir.
 
 - Hak yalnızca **o placement üzerinden gelen** doğrudan lead'lerde kullanılır.
 - Yenileme ya da yeni satın alma yeni bir placement doğurur ve taze 3 hak getirir. Eski hak devretmez, kullanılmayan hak bir sonraki döneme aktarılmaz.
@@ -49,7 +49,7 @@ Veritabanı değişmezleri:
 
 `Offer` tablosu değişmedi. Ücretsiz bir hak teklifi yine `entitlementSource = SHOWCASE_PLACEMENT` ve `creditCost = 0` yazar. Usage satırı **varsa** teklif sınırlı haktan ödenmiştir, **yoksa** eski (sınırsız) dönemden kalan bir tekliftir.
 
-Kota v1'de sabittir: `SHOWCASE_FREE_OFFER_QUOTA = 3` (`offer-allowances/offer-allowance-ledger.ts`), grant üzerinde snapshot'lanır. Paket bazında ayarlanabilir kota yoktur.
+Kota grant üzerinde snapshot'lanır. v1'de sabit 3'tü; SHOWCASE-ALLOWANCE-001 ile paket bazında ayarlanır (`ShowcasePackage.freeOfferCount`, satın alma → hak/yerleşim → grant zinciriyle snapshot'lanır). Ayrıntı: `docs/showcase-allowance-001-package-free-offers.md`.
 
 ## 4. Resolver sırası
 
@@ -194,6 +194,6 @@ Her yeni kaynak kendi kapsam kolonunu ve CHECK'ini getirir. Mevcut değerler yen
 
 ## 16. Bilinen borçlar
 
-- Paket bazında ayarlanabilir kota (`ShowcasePackage.includedFreeOffers` + satın alma snapshot'ı) yok.
+- ~~Paket bazında ayarlanabilir kota~~ — SHOWCASE-ALLOWANCE-001 ile kapandı (`ShowcasePackage.freeOfferCount`).
 - Cezai VOID için admin aksiyonu yok.
 - Finans analitiğinde toplam sübvansiyon kartı yok; veri `OfferAllowanceUsage.listCreditCostSnapshot` üzerinden hazır.

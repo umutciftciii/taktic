@@ -1,4 +1,8 @@
-import { IsBoolean, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength, ValidateIf } from 'class-validator';
+import {
+  SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT,
+  SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT,
+} from '../showcase.constants';
 
 /**
  * What a provider names when they buy a publication right: a package from the
@@ -30,4 +34,18 @@ export class CreateShowcasePackageCheckoutDto {
   @MinLength(1)
   @MaxLength(40)
   priceTermsVersion?: string;
+
+  /**
+   * SHOWCASE-ALLOWANCE-001 — the free offer count the buying screen showed.
+   * Optional for older clients; when sent, a package edited since the screen
+   * was rendered refuses with 409 SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED instead
+   * of selling a different number than the one promised.
+   */
+  // Omitted is allowed; null is not a count, so it is refused rather than
+  // read as "omitted" the way `@IsOptional` would.
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt()
+  @Min(SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT)
+  @Max(SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT)
+  expectedFreeOfferCount?: number;
 }

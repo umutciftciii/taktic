@@ -14,7 +14,10 @@ import {
   CreateShowcasePackageDto,
   UpdateShowcasePackageDto,
 } from './dto/showcase-package.dto';
-import { SHOWCASE_PACKAGE_SLUG_PREFIX } from './showcase.constants';
+import {
+  SHOWCASE_PACKAGE_DEFAULT_FREE_OFFER_COUNT,
+  SHOWCASE_PACKAGE_SLUG_PREFIX,
+} from './showcase.constants';
 import { showcasePackageSlugInvalid } from './showcase.errors';
 
 /**
@@ -127,6 +130,7 @@ export class ShowcasePackagesService {
             isActive: dto.isActive ?? true,
             sortOrder: dto.sortOrder ?? 0,
             activationWindowDays: dto.activationWindowDays ?? 90,
+            freeOfferCount: dto.freeOfferCount ?? SHOWCASE_PACKAGE_DEFAULT_FREE_OFFER_COUNT,
           },
           select: adminPackageSelect,
         });
@@ -187,6 +191,7 @@ export class ShowcasePackagesService {
             ...(dto.activationWindowDays !== undefined
               ? { activationWindowDays: dto.activationWindowDays }
               : {}),
+            ...(dto.freeOfferCount !== undefined ? { freeOfferCount: dto.freeOfferCount } : {}),
           },
           select: adminPackageSelect,
         });
@@ -235,6 +240,7 @@ const providerPackageSelect = {
   description: true,
   sortOrder: true,
   activationWindowDays: true,
+  freeOfferCount: true,
 } satisfies Prisma.ShowcasePackageSelect;
 
 const adminPackageSelect = {

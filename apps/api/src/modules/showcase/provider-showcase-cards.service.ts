@@ -734,6 +734,7 @@ export class ProviderShowcaseCardsService {
     await this.loadOwnedCard(providerId, cardId);
     const now = new Date();
     let activatedPlacementId: string | null = null;
+    let activatedQuotaTotal = 0;
 
     try {
       await runSerializable(
@@ -810,7 +811,7 @@ export class ProviderShowcaseCardsService {
           }
 
           if (publishNow) {
-            const { placementId } = await this.entitlements.consumeForCard(tx, {
+            const { placementId, quotaTotal } = await this.entitlements.consumeForCard(tx, {
               cardId: card.id,
               versionId: card.liveVersionId!,
               providerId,
@@ -819,6 +820,7 @@ export class ProviderShowcaseCardsService {
               now,
             });
             activatedPlacementId = placementId;
+            activatedQuotaTotal = quotaTotal;
           }
         },
         { label: 'showcase.useEntitlement' },
@@ -839,7 +841,7 @@ export class ProviderShowcaseCardsService {
     // After the commit, and only for a run this call actually started: a mail
     // about a placement that was rolled back would announce nothing.
     if (activatedPlacementId) {
-      logShowcaseAllowanceGranted(activatedPlacementId);
+      logShowcaseAllowanceGranted(activatedPlacementId, activatedQuotaTotal);
       await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
     }
 

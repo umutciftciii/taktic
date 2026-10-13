@@ -10,13 +10,20 @@ import type { ShowcaseCardKind, ShowcasePackage } from '../../../lib/api';
  * package it has just read from the API.
  *
  * Commercial: the price, the run length, how long an unused right stays
- * valid, the card kind and the area cap — what a purchase buys. Not
+ * valid, the card kind, the area cap and the free offer count
+ * (SHOWCASE-ALLOWANCE-001) — what a purchase buys. Not
  * commercial: the name, the description and the listing order.
  */
 
 export type ShowcasePackageTerms = Pick<
   ShowcasePackage,
-  'priceAmount' | 'currency' | 'durationDays' | 'activationWindowDays' | 'allowedCardKind' | 'maxAreas'
+  | 'priceAmount'
+  | 'currency'
+  | 'durationDays'
+  | 'activationWindowDays'
+  | 'allowedCardKind'
+  | 'maxAreas'
+  | 'freeOfferCount'
 >;
 
 export type ShowcaseTermsChange = { key: string; label: string; from: string; to: string };
@@ -62,6 +69,14 @@ export function showcasePackageTermsChanges(stored: ShowcasePackageTerms, next: 
   if ((stored.maxAreas ?? null) !== (next.maxAreas ?? null)) {
     changes.push({ key: 'areas', label: 'Bölge', from: areasLabel(stored.maxAreas), to: areasLabel(next.maxAreas) });
   }
+  if (stored.freeOfferCount !== next.freeOfferCount) {
+    changes.push({
+      key: 'freeOffers',
+      label: 'Ücretsiz teklif hakkı',
+      from: `${stored.freeOfferCount} teklif`,
+      to: `${next.freeOfferCount} teklif`,
+    });
+  }
   return changes;
 }
 
@@ -86,6 +101,7 @@ export function readShowcaseTerms(data: FormData, currency: string): ShowcasePac
     activationWindowDays: Number.parseInt(formText(data, 'activationWindowDays'), 10),
     allowedCardKind: (formText(data, 'allowedCardKind') || null) as ShowcaseCardKind | null,
     maxAreas: optionalInt(data, 'maxAreas'),
+    freeOfferCount: Number.parseInt(formText(data, 'freeOfferCount'), 10),
   };
 }
 

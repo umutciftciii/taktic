@@ -1052,6 +1052,7 @@ export async function createShowcasePackage(
     maxAreas?: number | null;
     isActive?: boolean;
     name?: string;
+    freeOfferCount?: number;
   } = {},
 ) {
   const suffix = uniqueSuffix();
@@ -1066,6 +1067,7 @@ export async function createShowcasePackage(
       allowedCardKind: options.allowedCardKind ?? null,
       maxAreas: options.maxAreas ?? null,
       isActive: options.isActive ?? true,
+      ...(options.freeOfferCount !== undefined ? { freeOfferCount: options.freeOfferCount } : {}),
     },
   });
 }
@@ -1247,6 +1249,7 @@ export async function createLiveShowcasePlacement(
       showcaseCardId: options.cardId,
       showcaseCardVersionId: options.versionId,
       durationDaysSnapshot: options.durationDays ?? pkg.durationDays,
+      freeOfferCountSnapshot: pkg.freeOfferCount,
       creditAmountSnapshot: 0,
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: pkg.currency,
@@ -1268,6 +1271,7 @@ export async function createLiveShowcasePlacement(
         showcasePackageId: pkg.id,
         showcaseCardId: options.cardId,
         showcaseCardVersionId: options.versionId,
+        freeOfferCountSnapshot: pkg.freeOfferCount,
         durationDaysSnapshot: purchase.durationDaysSnapshot ?? pkg.durationDays,
         packageNameSnapshot: purchase.packageNameSnapshot,
         priceAmountSnapshot: purchase.priceAmountSnapshot,
@@ -1371,6 +1375,7 @@ export async function createShowcaseEntitlement(
       kind: 'SHOWCASE_PACKAGE',
       showcasePackageId: pkg.id,
       durationDaysSnapshot: pkg.durationDays,
+      freeOfferCountSnapshot: pkg.freeOfferCount,
       creditAmountSnapshot: 0,
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: pkg.currency,
@@ -1391,6 +1396,7 @@ export async function createShowcaseEntitlement(
         providerId: purchase.providerId,
         showcasePackageId: pkg.id,
         durationDaysSnapshot: pkg.durationDays,
+        freeOfferCountSnapshot: pkg.freeOfferCount,
         packageNameSnapshot: purchase.packageNameSnapshot,
         priceAmountSnapshot: purchase.priceAmountSnapshot,
         currencySnapshot: purchase.currencySnapshot,

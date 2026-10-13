@@ -36,6 +36,23 @@ are in [docs/release.md](docs/release.md).
   Rollback only while no usage exists. See
   `docs/campaign-entitlement-001-offer-allowance.md`.
 
+- SHOWCASE-ALLOWANCE-001: per-package free vitrin offer count. Vitrin packages
+  get an operator-managed `freeOfferCount` (1–50, default 3 — every existing
+  package keeps 3). The count is snapshotted along the sale (checkout purchase
+  → right / placement → the placement's grant `quotaTotal`), so editing a
+  package changes the next checkout only; a pending checkout opened under the
+  old count is not continued under the new one, and a checkout that sends the
+  count it showed (`expectedFreeOfferCount`) is refused with 409
+  `SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED` if it moved. Admin package list,
+  create/edit (a commercial change behind the confirmation dialog), detail,
+  history, placement and review screens show it; the provider's package
+  picker, payment result, card status, new-card right picker and lead screens
+  show the package's / run's own count instead of a fixed 3. Consumption
+  order, the ledger and refunds are unchanged. Migration 101 → 102 (additive;
+  existing vitrin purchases backfilled to 3). Consistency check:
+  `scripts/ops/showcase-allowance-001-consistency.sql`. See
+  `docs/showcase-allowance-001-package-free-offers.md`.
+
 ### Changed
 
 - CAMPAIGN-ENTITLEMENT-001: answering a direct vitrin lead is no longer

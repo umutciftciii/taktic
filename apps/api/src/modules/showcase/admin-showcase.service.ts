@@ -155,6 +155,7 @@ export class AdminShowcaseService {
       select: {
         packageNameSnapshot: true,
         durationDaysSnapshot: true,
+        freeOfferCountSnapshot: true,
         expiresAt: true,
         reviewPausedAt: true,
       },
@@ -170,6 +171,7 @@ export class AdminShowcaseService {
         ? {
             packageName: reserved.packageNameSnapshot,
             durationDays: reserved.durationDaysSnapshot,
+            freeOfferCount: reserved.freeOfferCountSnapshot,
             expiresAt: reserved.expiresAt.toISOString(),
             pausedForReview: reserved.reviewPausedAt !== null,
             valid: reserved.reviewPausedAt !== null || reserved.expiresAt > now,
@@ -243,6 +245,7 @@ export class AdminShowcaseService {
    */
   async approveVersion(versionId: string, user: AuthUser) {
     let activatedPlacementId: string | null = null;
+    let activatedQuotaTotal = 0;
 
     await runSerializable(this.prisma, async (tx) => {
       const version = await tx.showcaseCardVersion.findUnique({
@@ -329,7 +332,7 @@ export class AdminShowcaseService {
         // was just approved. `consumeForCard` re-reads the right under the
         // transaction, so a right that vanished between the check above and
         // this line still refuses rather than publishing on nothing.
-        const { placementId } = await this.entitlements.consumeForCard(tx, {
+        const { placementId, quotaTotal } = await this.entitlements.consumeForCard(tx, {
           cardId: version.cardId,
           versionId,
           providerId: version.card.providerId,
@@ -338,6 +341,7 @@ export class AdminShowcaseService {
           now,
         });
         activatedPlacementId = placementId;
+        activatedQuotaTotal = quotaTotal;
       } else {
         /*
          * Every paid run of this card moves to the text that was just
@@ -367,7 +371,7 @@ export class AdminShowcaseService {
     // what is on the air and sends "approved and live" as a single message
     // when the run was born here, or "approved" alone when nothing is.
     if (activatedPlacementId) {
-      logShowcaseAllowanceGranted(activatedPlacementId);
+      logShowcaseAllowanceGranted(activatedPlacementId, activatedQuotaTotal);
     }
     await this.mail.sendShowcaseCardApprovalOutcome(versionId);
 

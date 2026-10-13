@@ -43,6 +43,7 @@ import {
 } from './lemon-squeezy.webhook';
 import { resolvePaymentProviderKind } from './payment-provider.config';
 import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
+import { purchaseFreeOfferCount } from '../offer-allowances/offer-allowance-ledger';
 
 /**
  * The only path in this application that may load credits from a payment.
@@ -593,6 +594,7 @@ export class PaymentsWebhookService implements OnModuleInit {
             showcaseCardId: purchase.showcaseCardId,
             showcaseCardVersionId: purchase.showcaseCardVersionId,
             durationDaysSnapshot: purchase.durationDaysSnapshot,
+            freeOfferCountSnapshot: purchaseFreeOfferCount(purchase),
             packageNameSnapshot: purchase.packageNameSnapshot,
             priceAmountSnapshot: purchase.priceAmountSnapshot,
             currencySnapshot: purchase.currencySnapshot,
@@ -614,6 +616,7 @@ export class PaymentsWebhookService implements OnModuleInit {
             providerId: purchase.providerId,
             showcasePackageId: purchase.showcasePackageId,
             durationDaysSnapshot: purchase.durationDaysSnapshot,
+            freeOfferCountSnapshot: purchaseFreeOfferCount(purchase),
             packageNameSnapshot: purchase.packageNameSnapshot,
             priceAmountSnapshot: purchase.priceAmountSnapshot,
             currencySnapshot: purchase.currencySnapshot,
@@ -786,11 +789,13 @@ export class PaymentsWebhookService implements OnModuleInit {
      */
     const placement = await this.prisma.showcasePlacement.findUnique({
       where: { purchaseId },
-      select: { id: true },
+      select: { id: true, offerAllowanceGrant: { select: { quotaTotal: true } } },
     });
 
     if (placement) {
-      logShowcaseAllowanceGranted(placement.id);
+      if (placement.offerAllowanceGrant) {
+        logShowcaseAllowanceGranted(placement.id, placement.offerAllowanceGrant.quotaTotal);
+      }
       await this.mail.sendShowcasePlacementActivated(placement.id);
       return;
     }

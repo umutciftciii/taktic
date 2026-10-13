@@ -65,6 +65,7 @@ const FIELD_LABELS: Record<string, string> = {
   maxAreas: 'En çok bölge',
   requiresAdminApproval: 'Yönetici onayı',
   activationWindowDays: 'Aktivasyon süresi (gün)',
+  freeOfferCount: 'Ücretsiz teklif hakkı',
   legalName: 'Yasal unvan',
   supportEmail: 'Destek e-postası',
   postalAddress: 'Posta adresi',

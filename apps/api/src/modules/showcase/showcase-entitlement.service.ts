@@ -55,6 +55,8 @@ export type SettledEntitlementPurchase = {
   providerId: string;
   showcasePackageId: string;
   durationDaysSnapshot: number;
+  /** Resolved by the caller with `purchaseFreeOfferCount` (SHOWCASE-ALLOWANCE-001). */
+  freeOfferCountSnapshot: number;
   packageNameSnapshot: string;
   priceAmountSnapshot: number;
   currencySnapshot: string;
@@ -65,6 +67,8 @@ export type ProviderEntitlementSummary = {
   id: string;
   packageName: string;
   durationDays: number;
+  /** SHOWCASE-ALLOWANCE-001 — the free offers the run this right becomes will carry. */
+  freeOfferCount: number;
   allowedCardKind: ShowcaseCardKind | null;
   expiresAt: string;
 };
@@ -111,6 +115,9 @@ export class ShowcaseEntitlementService {
         showcasePackageId: purchase.showcasePackageId,
         packageNameSnapshot: purchase.packageNameSnapshot,
         durationDaysSnapshot: purchase.durationDaysSnapshot,
+        // The count the buyer was shown at checkout, never the package's
+        // current value (SHOWCASE-ALLOWANCE-001).
+        freeOfferCountSnapshot: purchase.freeOfferCountSnapshot,
         priceAmountSnapshot: purchase.priceAmountSnapshot,
         currencySnapshot: purchase.currencySnapshot,
         allowedCardKindSnapshot: pkg.allowedCardKind,
@@ -324,7 +331,7 @@ export class ShowcaseEntitlementService {
       kind: ShowcaseCardKind;
       now: Date;
     },
-  ): Promise<{ placementId: string; entitlementId: string }> {
+  ): Promise<{ placementId: string; entitlementId: string; quotaTotal: number }> {
     const reserved = await tx.showcaseEntitlement.findFirst({
       where: reservedEntitlementWhere(input.cardId, input.now),
     });
@@ -340,7 +347,7 @@ export class ShowcaseEntitlementService {
       await this.closePause(tx, reserved.id, ShowcaseEntitlementPauseEnd.CONSUMED, input.now);
     }
 
-    const { placementId } = await this.placements.createForEntitlement(tx, {
+    const { placementId, quotaTotal } = await this.placements.createForEntitlement(tx, {
       entitlement: reserved,
       providerId: input.providerId,
       cardId: input.cardId,
@@ -363,7 +370,7 @@ export class ShowcaseEntitlementService {
       throw showcaseEntitlementMissing();
     }
 
-    return { placementId, entitlementId: reserved.id };
+    return { placementId, entitlementId: reserved.id, quotaTotal };
   }
 
   /**
@@ -406,7 +413,8 @@ export class ShowcaseEntitlementService {
       orderBy: [{ expiresAt: 'asc' }, { id: 'asc' }],
       select: {
         id: true, status: true, cardId: true, packageNameSnapshot: true,
-        durationDaysSnapshot: true, allowedCardKindSnapshot: true, expiresAt: true, reviewPausedAt: true,
+        durationDaysSnapshot: true, freeOfferCountSnapshot: true, allowedCardKindSnapshot: true,
+        expiresAt: true, reviewPausedAt: true,
       },
     });
 
@@ -414,6 +422,7 @@ export class ShowcaseEntitlementService {
       id: row.id,
       packageName: row.packageNameSnapshot,
       durationDays: row.durationDaysSnapshot,
+      freeOfferCount: row.freeOfferCountSnapshot,
       allowedCardKind: row.allowedCardKindSnapshot,
       expiresAt: row.expiresAt.toISOString(),
     });

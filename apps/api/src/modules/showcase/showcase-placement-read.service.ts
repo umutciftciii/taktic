@@ -146,6 +146,10 @@ const placementSelect = {
   priceAmountSnapshot: true,
   currencySnapshot: true,
   durationDaysSnapshot: true,
+  freeOfferCountSnapshot: true,
+  // The run's own allowance counts — the provider's own facts about their own
+  // run, unlike the usage list, which is the offers domain's (admin only).
+  offerAllowanceGrant: { select: { quotaTotal: true, quotaUsed: true, status: true } },
   startAt: true,
   endAt: true,
   suspendedAt: true,
@@ -211,6 +215,21 @@ function toPlacement(placement: PlacementRow) {
     priceAmount: placement.priceAmountSnapshot,
     currency: placement.currencySnapshot,
     durationDays: placement.durationDaysSnapshot,
+    /** SHOWCASE-ALLOWANCE-001 — the free offers this run was sold with. */
+    freeOfferCount: placement.freeOfferCountSnapshot,
+    /**
+     * The run's grant as it stands. `total` may exceed `freeOfferCount` on a run
+     * that was live at the CAMPAIGN-ENTITLEMENT-001 rollout (legacy answers
+     * counted as used); null for a run that ended before allowances existed.
+     */
+    freeOffers: placement.offerAllowanceGrant
+      ? {
+          total: placement.offerAllowanceGrant.quotaTotal,
+          used: placement.offerAllowanceGrant.quotaUsed,
+          remaining: placement.offerAllowanceGrant.quotaTotal - placement.offerAllowanceGrant.quotaUsed,
+          status: placement.offerAllowanceGrant.status,
+        }
+      : null,
     startAt: placement.startAt,
     endAt: placement.endAt,
     suspendedAt: placement.suspendedAt,

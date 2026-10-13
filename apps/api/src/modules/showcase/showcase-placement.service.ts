@@ -100,7 +100,7 @@ export class ShowcasePlacementService {
     tx: Prisma.TransactionClient,
     purchase: SettledShowcasePurchase,
     paidAt: Date,
-  ): Promise<{ placementId: string }> {
+  ): Promise<{ placementId: string; quotaTotal: number }> {
     const card = await tx.showcaseCard.findUnique({
       where: { id: purchase.showcaseCardId },
       select: {
@@ -179,6 +179,7 @@ export class ShowcasePlacementService {
         priceAmountSnapshot: purchase.priceAmountSnapshot,
         currencySnapshot: purchase.currencySnapshot,
         durationDaysSnapshot: purchase.durationDaysSnapshot,
+        freeOfferCountSnapshot: purchase.freeOfferCountSnapshot,
         priceTermsVersionSnapshot: acceptance.termsVersion,
         priceTermsTextSnapshot: acceptance.termsTextSnapshot,
         startAt,
@@ -202,6 +203,7 @@ export class ShowcasePlacementService {
       placementId: placement.id,
       providerId: purchase.providerId,
       startAt,
+      quotaTotal: purchase.freeOfferCountSnapshot,
     });
   }
 
@@ -225,7 +227,7 @@ export class ShowcasePlacementService {
       versionId: string;
       startAt: Date;
     },
-  ): Promise<{ placementId: string }> {
+  ): Promise<{ placementId: string; quotaTotal: number }> {
     const endAt = showcasePlacementEndAt(input.startAt, input.entitlement.durationDaysSnapshot);
 
     const placement = await tx.showcasePlacement.create({
@@ -241,6 +243,7 @@ export class ShowcasePlacementService {
         priceAmountSnapshot: input.entitlement.priceAmountSnapshot,
         currencySnapshot: input.entitlement.currencySnapshot,
         durationDaysSnapshot: input.entitlement.durationDaysSnapshot,
+        freeOfferCountSnapshot: input.entitlement.freeOfferCountSnapshot,
         priceTermsVersionSnapshot: input.entitlement.priceTermsVersionSnapshot,
         priceTermsTextSnapshot: input.entitlement.priceTermsTextSnapshot,
         startAt: input.startAt,
@@ -264,6 +267,7 @@ export class ShowcasePlacementService {
       placementId: placement.id,
       providerId: input.providerId,
       startAt: input.startAt,
+      quotaTotal: input.entitlement.freeOfferCountSnapshot,
     });
   }
 
@@ -272,20 +276,22 @@ export class ShowcasePlacementService {
    * free-offer allowance is granted, in the same transaction
    * (CAMPAIGN-ENTITLEMENT-001). A placement without its grant — or with two —
    * is therefore unrepresentable whichever path paid for it; the grant's
-   * unique `showcasePlacementId` is the database half of that.
+   * unique `showcasePlacementId` is the database half of that. The grant's
+   * quota is the run's own `freeOfferCountSnapshot` (SHOWCASE-ALLOWANCE-001),
+   * and the quota actually granted is returned for the post-commit event.
    */
   private async completeBirth(
     tx: Prisma.TransactionClient,
-    input: { placementId: string; providerId: string; startAt: Date },
-  ): Promise<{ placementId: string }> {
+    input: { placementId: string; providerId: string; startAt: Date; quotaTotal: number },
+  ): Promise<{ placementId: string; quotaTotal: number }> {
     await tx.showcasePlacement.update({
       where: { id: input.placementId },
       data: { status: ShowcasePlacementStatus.ACTIVE },
     });
 
-    await grantShowcasePlacementAllowance(tx, input);
+    const grant = await grantShowcasePlacementAllowance(tx, input);
 
-    return { placementId: input.placementId };
+    return { placementId: input.placementId, quotaTotal: grant.quotaTotal };
   }
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -730,6 +736,11 @@ export type SettledShowcasePurchase = {
   showcaseCardId: string;
   showcaseCardVersionId: string;
   durationDaysSnapshot: number;
+  /**
+   * The free offers the run carries (SHOWCASE-ALLOWANCE-001). The caller
+   * resolves a NULL column to the legacy figure with `purchaseFreeOfferCount`.
+   */
+  freeOfferCountSnapshot: number;
   packageNameSnapshot: string;
   priceAmountSnapshot: number;
   currencySnapshot: string;
@@ -787,6 +798,7 @@ export type EntitlementSnapshot = {
   showcasePackageId: string;
   packageNameSnapshot: string;
   durationDaysSnapshot: number;
+  freeOfferCountSnapshot: number;
   priceAmountSnapshot: number;
   currencySnapshot: string;
   maxAreasSnapshot: number | null;

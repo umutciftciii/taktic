@@ -15,7 +15,7 @@ import { addIsoDays, isoDayToStoredDate, todayIsoDay } from '../src/common/date-
 import { ServiceIssueOutbox } from '../src/modules/notifications/service-issue-outbox.service';
 import {
   readShowcaseAllowance,
-  SHOWCASE_FREE_OFFER_QUOTA,
+  LEGACY_SHOWCASE_FREE_OFFER_COUNT,
 } from '../src/modules/offer-allowances/offer-allowance-ledger';
 import { formatOfferAllowanceEvent } from '../src/modules/offer-allowances/offer-allowance-events';
 import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-entitlement.service';
@@ -49,7 +49,7 @@ import { roundInconsistencies } from './match-round-consistency';
 /**
  * CAMPAIGN-ENTITLEMENT-001 — bounded vitrin offer allowances.
  *
- * Every placement carries {@link SHOWCASE_FREE_OFFER_QUOTA} free offers,
+ * Every placement carries {@link LEGACY_SHOWCASE_FREE_OFFER_COUNT} free offers,
  * spendable only on the direct leads that came through it. The fourth answer
  * is an ordinary paid offer — and still a direct answer: the lead is ANSWERED
  * and the request leaves SUBMITTED exactly as a free answer does. Nothing is
@@ -187,12 +187,12 @@ describe('grants', () => {
       providerId: owner.id,
       source: 'SHOWCASE_PLACEMENT',
       benefit: 'FREE_OFFER',
-      quotaTotal: SHOWCASE_FREE_OFFER_QUOTA,
+      quotaTotal: LEGACY_SHOWCASE_FREE_OFFER_COUNT,
       quotaUsed: 0,
       status: 'ACTIVE',
       voidedAt: null,
     });
-    expect(SHOWCASE_FREE_OFFER_QUOTA).toBe(3);
+    expect(LEGACY_SHOWCASE_FREE_OFFER_COUNT).toBe(3);
     expect(grant.validFrom).toEqual(placement.startAt);
   });
 

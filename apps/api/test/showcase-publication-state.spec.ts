@@ -269,6 +269,7 @@ describe('the state one card is in', () => {
         'cardId',
         'endAt',
         'entitlement',
+        'freeOffers',
         'hasPendingRevision',
         'hasRunBefore',
         'leadCount',
@@ -279,7 +280,7 @@ describe('the state one card is in', () => {
     );
     if (entry.entitlement !== null) {
       expect(Object.keys(entry.entitlement).sort()).toEqual(
-        ['durationDays', 'expiresAt', 'packageName', 'pausedForReview'].sort(),
+        ['durationDays', 'expiresAt', 'freeOfferCount', 'packageName', 'pausedForReview'].sort(),
       );
     }
     expect(Object.keys(list).sort()).toEqual(
@@ -288,7 +289,7 @@ describe('the state one card is in', () => {
     expect(list.availableEntitlements).toHaveLength(1);
     for (const available of list.availableEntitlements) {
       expect(Object.keys(available).sort()).toEqual(
-        ['allowedCardKind', 'durationDays', 'expiresAt', 'id', 'packageName'].sort(),
+        ['allowedCardKind', 'durationDays', 'expiresAt', 'freeOfferCount', 'id', 'packageName'].sort(),
       );
     }
   });
