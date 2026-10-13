@@ -1,5 +1,6 @@
 import { ConflictException, HttpException, HttpStatus, Injectable } from '@nestjs/common';
 import {
+  MatchRoundSource,
   OfferEntitlementSource,
   OfferPackageType,
   Prisma,
@@ -11,6 +12,12 @@ import {
   readUnsweptExpiredPromoCredits,
   WalletDebitRefused,
 } from '../credits/promo-credit-ledger';
+import {
+  claimAllowanceSlot,
+  readShowcaseAllowance,
+  recordAllowanceUsage,
+  type ShowcaseAllowanceState,
+} from '../offer-allowances/offer-allowance-ledger';
 import { istanbulDayStart } from './entitlement-period';
 
 /** The 402 the offer flow has always answered with when nothing could pay. */
@@ -40,9 +47,41 @@ export type EntitlementDecision =
   | {
       source: typeof OfferEntitlementSource.SHOWCASE_PLACEMENT;
       entitlementId: null;
-      /** Always zero. The placement was already paid for. */
+      /**
+       * Always zero: one of the placement's bounded free offers pays
+       * (CAMPAIGN-ENTITLEMENT-001). Not "the placement makes every answer
+       * free" any more — that unconditional branch is gone.
+       */
       creditCost: 0;
+      /** The grant a slot will be claimed from, as read in this transaction. */
+      allowance: ShowcaseAllowanceState;
     };
+
+/**
+ * The slot a free offer was paid from, returned by {@link EntitlementResolverService.consume}
+ * so the caller can report it after the commit.
+ */
+export type AllowanceUsageReceipt = {
+  grantId: string;
+  placementId: string;
+  ordinal: number;
+  quotaTotal: number;
+};
+
+/**
+ * The slot the resolver chose had gone by the time the offer tried to spend it.
+ *
+ * Under the offer's Serializable transaction a concurrent claim normally
+ * surfaces as a serialization failure and a replay instead; this is the same
+ * fact reached without one. The caller answers it as a changed price — never
+ * by quietly charging an offer the provider was shown as free.
+ */
+export class ShowcaseAllowanceUnavailable extends Error {
+  constructor() {
+    super('The vitrin allowance slot was claimed concurrently');
+    this.name = 'ShowcaseAllowanceUnavailable';
+  }
+}
 
 export type ResolveInput = {
   providerId: string;
@@ -57,18 +96,56 @@ export type ResolveInput = {
    * which is what keeps the four existing branches exactly as they were.
    */
   directShowcaseProviderId?: string | null;
+  /**
+   * `ServiceRequest.showcaseLeadId` and the current round's source. Together
+   * with the gate above they are what binds an answer to one placement's
+   * allowance (CAMPAIGN-ENTITLEMENT-001). Absent on every marketplace request.
+   */
+  showcaseLeadId?: string | null;
+  roundSource?: MatchRoundSource | null;
+};
+
+/**
+ * What the provider's next offer on a request would cost, without spending
+ * anything — the figure a direct-lead offer form shows and sends back as its
+ * expected cost.
+ */
+export type OfferCostPreview = {
+  /** Which right would pay, or why nothing would. */
+  kind:
+    | 'SHOWCASE_ALLOWANCE'
+    | 'UNLIMITED'
+    | 'MONTHLY_QUOTA'
+    | 'CREDITS'
+    | 'INSUFFICIENT_CREDITS'
+    | 'DAILY_LIMIT';
+  /** The cost the offer would record — the value to send as `expectedCreditCost`. */
+  creditCost: number;
+  /** The category's own price, for the "normally X kredi" line. */
+  categoryCreditCost: number;
+  /** The bound vitrin allowance, when this is the provider's own direct lead. */
+  allowance: { quotaTotal: number; quotaUsed: number; remaining: number } | null;
 };
 
 /**
  * The one place that decides what a provider's next offer is paid for with.
  *
- * The order is fixed and total:
+ * The order is fixed and total (CAMPAIGN-ENTITLEMENT-001):
  *
  *   1. an active CATEGORY_UNLIMITED period whose snapshotted scope covers this
- *      request's category,
- *   2. an active MONTHLY_QUOTA period with enough quota left,
- *   3. the one-time credit balance — unchanged, including its 402,
- *   4. nothing, which is the same 402 this flow has always answered with.
+ *      request's category — first, so an unmetered period never burns one of
+ *      a placement's three finite free offers,
+ *   2. a free slot of the vitrin allowance this direct lead is bound to (the
+ *      provider's own gated lead, its placement's ACTIVE grant, a slot left),
+ *   3. an active MONTHLY_QUOTA period with enough quota left,
+ *   4. the one-time credit balance — unchanged, including its 402,
+ *   5. nothing, which is the same 402 this flow has always answered with.
+ *
+ * One exception keeps a direct lead answerable: when the unlimited period that
+ * covers the category has hit its daily cap and a free vitrin slot is bound to
+ * this lead, the slot pays instead of the cap refusing — the cap exists to
+ * meter unlimited offering, not to stop a business answering somebody who
+ * wrote to them through a placement they paid for.
  *
  * Two things it deliberately does *not* do:
  *
@@ -80,6 +157,7 @@ export type ResolveInput = {
  * - It never falls through after refusing. If the unlimited period that covers
  *   this category has hit its daily cap, the answer is that cap — not a silent
  *   charge against a balance the provider believed they were not spending.
+ *   (The vitrin slot above is not a fall-through to a charge: it is free.)
  *
  * Both halves run inside the caller's Serializable transaction, so the read
  * that chose a right and the write that spent it cannot be separated by
@@ -99,46 +177,29 @@ export class EntitlementResolverService {
    */
   async resolve(tx: Prisma.TransactionClient, input: ResolveInput): Promise<EntitlementDecision> {
     /*
-     * The vitrin card owner answering their own direct lead. Free, and first.
+     * The vitrin allowance this answer is bound to, if it is the provider's
+     * own gated direct lead (CAMPAIGN-ENTITLEMENT-001).
      *
-     * ## Why free
-     *
-     * They already paid for the placement this lead arrived through. Charging
-     * an offer credit on top would be taking money twice for one introduction,
-     * which is the double charge this product's "provider-friendly lead
-     * economics" promise exists to refuse.
-     *
-     * ## Why the condition is exactly this one column
-     *
-     * The rule reads one field and is one sentence with no exceptions: **the
-     * provider this request is reserved for offers for nothing.** The moment a
-     * fallback clears `directShowcaseProviderId` — the only thing that ever
-     * clears it — this branch stops matching, and from then on everybody,
-     * including the card's own owner, pays the ordinary category price. A rule
-     * that instead looked up "does this provider have a placement" would keep
-     * paying out after the request had become an ordinary one.
-     *
-     * ## Why it is first
-     *
-     * So that holding an unlimited period cannot silently consume a daily cap
-     * on an offer that costs nothing, and so that a provider with no balance at
-     * all can still answer the lead they paid to receive. The 402 below is for
-     * the marketplace; it must never refuse a business the right to reply to
-     * somebody who wrote to them directly.
+     * Before this change the gate alone made every answer free, for ever. Now
+     * the placement carries a bounded number of free offers and the gate only
+     * says *which* placement's allowance may pay: the lead names it, so a slot
+     * can never be spent on another card's lead, another run's lead, or after
+     * a fallback has cleared the gate (RELEASE, REL-002 R2+), when the request
+     * is an ordinary marketplace one and everybody pays the category price.
      */
-    if (
-      input.directShowcaseProviderId &&
-      input.directShowcaseProviderId === input.providerId
-    ) {
-      return {
-        source: OfferEntitlementSource.SHOWCASE_PLACEMENT,
-        entitlementId: null,
-        creditCost: 0,
-      };
-    }
+    const allowance = await readShowcaseAllowance(tx, {
+      providerId: input.providerId,
+      directShowcaseProviderId: input.directShowcaseProviderId,
+      showcaseLeadId: input.showcaseLeadId,
+      roundSource: input.roundSource,
+    });
+    const claimable = allowance && allowance.remaining > 0 ? allowance : null;
 
     const unlimited = await this.findUnlimited(tx, input);
     if (unlimited) {
+      if (claimable && (await this.dailyLimitReached(tx, unlimited, input.now))) {
+        return showcaseDecision(claimable);
+      }
       await this.assertDailyLimit(tx, unlimited, input.now);
 
       return {
@@ -146,6 +207,10 @@ export class EntitlementResolverService {
         entitlementId: unlimited.id,
         creditCost: input.creditCost,
       };
+    }
+
+    if (claimable) {
+      return showcaseDecision(claimable);
     }
 
     const quota = await this.findQuota(tx, input);
@@ -177,6 +242,50 @@ export class EntitlementResolverService {
   }
 
   /**
+   * What {@link resolve} would choose right now, without spending anything and
+   * without refusing: the two refusals become states a form can render.
+   *
+   * Reads only, in the caller's transaction. The offer itself re-resolves
+   * under its own Serializable transaction and compares against the figure
+   * this returned (`expectedCreditCost`), so a preview that went stale — the
+   * last free slot taken by a concurrent offer — is answered with a 409, never
+   * a silent charge.
+   */
+  async preview(tx: Prisma.TransactionClient, input: ResolveInput): Promise<OfferCostPreview> {
+    const allowance = await readShowcaseAllowance(tx, {
+      providerId: input.providerId,
+      directShowcaseProviderId: input.directShowcaseProviderId,
+      showcaseLeadId: input.showcaseLeadId,
+      roundSource: input.roundSource,
+    });
+    const allowanceView = allowance
+      ? { quotaTotal: allowance.quotaTotal, quotaUsed: allowance.quotaUsed, remaining: allowance.remaining }
+      : null;
+    const base = { categoryCreditCost: input.creditCost, allowance: allowanceView };
+
+    try {
+      const decision = await this.resolve(tx, input);
+      const kind =
+        decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT
+          ? 'SHOWCASE_ALLOWANCE'
+          : decision.source === OfferEntitlementSource.UNLIMITED
+            ? 'UNLIMITED'
+            : decision.source === OfferEntitlementSource.MONTHLY_QUOTA
+              ? 'MONTHLY_QUOTA'
+              : 'CREDITS';
+      return { ...base, kind, creditCost: decision.creditCost };
+    } catch (error) {
+      if (error instanceof HttpException && error.getStatus() === HttpStatus.PAYMENT_REQUIRED) {
+        return { ...base, kind: 'INSUFFICIENT_CREDITS', creditCost: input.creditCost };
+      }
+      if (error instanceof ConflictException) {
+        return { ...base, kind: 'DAILY_LIMIT', creditCost: input.creditCost };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Spends what {@link resolve} chose, and returns the ledger row when there
    * was one.
    *
@@ -190,14 +299,48 @@ export class EntitlementResolverService {
   async consume(
     tx: Prisma.TransactionClient,
     decision: EntitlementDecision,
-    context: { providerId: string; offerId: string; reason: string; now: Date },
-  ): Promise<{ creditTransactionId: string | null }> {
+    context: {
+      providerId: string;
+      offerId: string;
+      reason: string;
+      now: Date;
+      /** What the usage row of a free vitrin offer records. */
+      offer?: { requestId: string; matchRoundId: string; categoryId: string; listCreditCost: number };
+    },
+  ): Promise<{ creditTransactionId: string | null; allowanceUsage?: AllowanceUsageReceipt }> {
     if (decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT) {
-      // Nothing is spent, nothing is decremented and no ledger row is written.
-      // The offer's own `entitlementSource` is the whole record that a paid
-      // placement covered it — there is no quota to count against and no
-      // balance that moved.
-      return { creditTransactionId: null };
+      // One slot of the placement's allowance, claimed by a conditional
+      // increment and recorded by an append-only usage row. No ledger row, no
+      // balance movement, no promo lot: the usage row is the whole record, and
+      // its `listCreditCostSnapshot` is the subsidy finance reads.
+      if (!context.offer) {
+        throw new Error('A free vitrin offer needs its request, round and category to be recorded');
+      }
+      const ordinal = await claimAllowanceSlot(tx, decision.allowance.grantId);
+      if (ordinal === null) {
+        throw new ShowcaseAllowanceUnavailable();
+      }
+      await recordAllowanceUsage(tx, {
+        grantId: decision.allowance.grantId,
+        ordinal,
+        offerId: context.offerId,
+        providerId: context.providerId,
+        requestId: context.offer.requestId,
+        matchRoundId: context.offer.matchRoundId,
+        showcaseLeadId: decision.allowance.showcaseLeadId,
+        categoryId: context.offer.categoryId,
+        listCreditCost: context.offer.listCreditCost,
+        now: context.now,
+      });
+      return {
+        creditTransactionId: null,
+        allowanceUsage: {
+          grantId: decision.allowance.grantId,
+          placementId: decision.allowance.placementId,
+          ordinal,
+          quotaTotal: decision.allowance.quotaTotal,
+        },
+      };
     }
 
     if (decision.source === OfferEntitlementSource.UNLIMITED) {
@@ -313,13 +456,13 @@ export class EntitlementResolverService {
    * the provider is living in and the day every other timestamp on their screen
    * is rendered in.
    */
-  private async assertDailyLimit(
+  private async dailyLimitReached(
     tx: Prisma.TransactionClient,
     entitlement: { id: string; dailyOfferLimitSnapshot: number | null },
     now: Date,
-  ) {
+  ): Promise<boolean> {
     if (entitlement.dailyOfferLimitSnapshot === null) {
-      return;
+      return false;
     }
 
     const usedToday = await tx.offer.count({
@@ -329,7 +472,15 @@ export class EntitlementResolverService {
       },
     });
 
-    if (usedToday >= entitlement.dailyOfferLimitSnapshot) {
+    return usedToday >= entitlement.dailyOfferLimitSnapshot;
+  }
+
+  private async assertDailyLimit(
+    tx: Prisma.TransactionClient,
+    entitlement: { id: string; dailyOfferLimitSnapshot: number | null },
+    now: Date,
+  ) {
+    if (await this.dailyLimitReached(tx, entitlement, now)) {
       throw new ConflictException({
         statusCode: HttpStatus.CONFLICT,
         code: DAILY_OFFER_LIMIT_CODE,
@@ -352,4 +503,13 @@ async function readCreditBalance(tx: Prisma.TransactionClient, providerId: strin
   });
 
   return latest?.balanceAfter ?? 0;
+}
+
+function showcaseDecision(allowance: ShowcaseAllowanceState): EntitlementDecision {
+  return {
+    source: OfferEntitlementSource.SHOWCASE_PLACEMENT,
+    entitlementId: null,
+    creditCost: 0,
+    allowance,
+  };
 }

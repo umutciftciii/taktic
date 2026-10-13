@@ -36,9 +36,9 @@ import {
  * 2. **No fan-out.** An ordinary approved request mails every matching
  *    business; this one mails one, and the difference is read off the gate
  *    column rather than off where the request came from.
- * 3. **Answering it is free.** The provider already paid for the placement the
- *    lead arrived through, and charging again would be taking money twice for
- *    one introduction.
+ * 3. **Answering it starts free.** The placement carries three free offers
+ *    (CAMPAIGN-ENTITLEMENT-001); this file's first answer is one of them. What
+ *    happens after the third is `offer-allowance.spec.ts`'s subject.
  * 4. **The deadline is the card's own promise**, read from the version an
  *    operator approved and frozen — never sent by the client.
  *
@@ -647,7 +647,7 @@ describe('who can see a direct lead', () => {
 });
 
 describe('answering a direct lead', () => {
-  it('costs nothing, approves the request, and keeps the gate closed', async () => {
+  it('spends one of the placement’s free offers, approves the request, and keeps the gate closed', async () => {
     const { card, category, owner, ownerCookie, rival, rivalCookie } = await published();
     await grantCredits(ctx.prisma, owner.id, 10);
     await openLead(card.id, category.slug);
@@ -667,6 +667,9 @@ describe('answering a direct lead', () => {
     expect(offer.creditCost).toBe(0);
     expect(offer.creditSpentTransactionId).toBeNull();
     expect(await currentCreditBalance(ctx.prisma, owner.id)).toBe(balanceBefore);
+    // The slot it spent: the first of the placement's three.
+    const usage = await ctx.prisma.offerAllowanceUsage.findUniqueOrThrow({ where: { offerId: offer.id } });
+    expect(usage).toMatchObject({ ordinal: 1, showcaseLeadId: lead.id, listCreditCostSnapshot: 2 });
 
     const settled = await ctx.prisma.serviceRequest.findUniqueOrThrow({
       where: { id: lead.requestId },

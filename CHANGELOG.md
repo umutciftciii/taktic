@@ -20,8 +20,29 @@ are in [docs/release.md](docs/release.md).
   show the mode. Migration 99 → 100; rollback only before the feature is used.
   See `docs/match-001-delivery-model.md`.
 
+- CAMPAIGN-ENTITLEMENT-001: bounded vitrin offer allowances. Each vitrin
+  placement now carries 3 free direct-lead offers (`OfferAllowanceGrant`,
+  one per placement, granted in the placement's birth transaction); each free
+  answer writes an append-only `OfferAllowanceUsage` row (no ledger row, no
+  balance movement) and is never given back. After the three, answers cost
+  the category's credits like any paid offer — still marking the lead
+  ANSWERED. Resolver order: category-unlimited → vitrin allowance → monthly
+  quota → credits. The direct-lead offer form previews the effective cost
+  (`GET /providers/:id/requests/:requestId/offer-cost`) and sends it as
+  `expectedCreditCost`; a changed cost is a 409 `CREDIT_COST_CHANGED`, never a
+  silent charge. Admin placement and offer details show quota, usage and
+  subsidy. Migration 100 → 101 backfills grants for live placements as
+  `legacy free offers + 3`; historical zero-credit offers are untouched.
+  Rollback only while no usage exists. See
+  `docs/campaign-entitlement-001-offer-allowance.md`.
+
 ### Changed
 
+- CAMPAIGN-ENTITLEMENT-001: answering a direct vitrin lead is no longer
+  unconditionally free (`SHOWCASE_PLACEMENT ⇒ creditCost 0` removed); the
+  direct-lead identity is read from the request's gate rather than from what
+  paid, and a paid direct answer carries the ordinary unviewed-offer refund
+  policy. `expectedCreditCost` accepts 0.
 - MOBILE-UX-HARDENING-001: public and auth mobile layouts. Auth screens
   (login, register, verification, recovery, reset) put the form or result
   first and the "TakTick hesabı" poster after it as a compact band — form-first

@@ -173,6 +173,21 @@ export async function seedLiveShowcasePlacement(options: {
     },
   });
 
+  // CAMPAIGN-ENTITLEMENT-001: a run is born with its 3 free direct-lead
+  // offers, in the same transaction as the placement — the seed writes the
+  // grant the production birth (`completeBirth`) writes.
+  await db.offerAllowanceGrant.create({
+    data: {
+      providerId: options.providerId,
+      source: 'SHOWCASE_PLACEMENT',
+      benefit: 'FREE_OFFER',
+      showcasePlacementId: placement.id,
+      quotaTotal: 3,
+      quotaUsed: 0,
+      validFrom: now,
+    },
+  });
+
   return { pkg, purchase, placement };
 }
 

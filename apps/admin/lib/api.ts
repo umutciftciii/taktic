@@ -601,6 +601,20 @@ export type Offer = {
   creditRechargedAt: string | null;
   creditRechargeRefundedTransactionId: string | null;
   creditRechargeRefundedAt: string | null;
+  /** Which right paid. SHOWCASE_PLACEMENT + `offerAllowance` = a vitrin free-offer slot. */
+  entitlementSource?: 'UNLIMITED' | 'MONTHLY_QUOTA' | 'ONE_TIME_CREDIT' | 'SHOWCASE_PLACEMENT' | null;
+  /**
+   * CAMPAIGN-ENTITLEMENT-001: the vitrin slot that paid for this offer. Detail
+   * read only; null for every paid offer and for legacy zero-credit vitrin
+   * offers that predate allowances.
+   */
+  offerAllowance?: {
+    ordinal: number;
+    quotaTotal: number;
+    listCreditCostSnapshot: number;
+    consumedAt: string;
+    placementId: string | null;
+  } | null;
   refundEligibility: RefundEligibility;
   submittedAt: string;
   viewedAt: string | null;
@@ -3658,6 +3672,37 @@ export type ShowcasePlacement = {
     note: string | null;
     cancelledAt: string;
   } | null;
+  /**
+   * CAMPAIGN-ENTITLEMENT-001: the run's free-offer allowance. Detail read only;
+   * null for a run that ended before allowances and was not live at rollout.
+   * `usages` is absent without OFFERS_READ.
+   */
+  offerAllowance?: ShowcaseOfferAllowance | null;
+};
+
+export type ShowcaseOfferAllowance = {
+  id: string;
+  status: 'ACTIVE' | 'VOID';
+  quotaTotal: number;
+  quotaUsed: number;
+  remaining: number;
+  /** Slots counted at rollout for answers given under the old unlimited rule. */
+  legacyFreeOffers: number;
+  /** Category credits the free answers would have cost. */
+  subsidyCredits: number;
+  validFrom: string;
+  grantedAt: string;
+  voidedAt: string | null;
+  voidReason: string | null;
+  usages?: Array<{
+    ordinal: number;
+    offerId: string;
+    offerNumber: string | null;
+    offerStatus: OfferStatus;
+    requestId: string;
+    listCreditCostSnapshot: number;
+    consumedAt: string;
+  }>;
 };
 
 /**

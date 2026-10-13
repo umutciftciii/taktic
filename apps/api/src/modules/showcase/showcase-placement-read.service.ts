@@ -1,7 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AdminPermission, Prisma } from '@prisma/client';
 import { describeArea } from '../../common/provider-service-area-scope';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { AuthUser } from '../auth/auth.types';
+import { mayEmbed } from '../auth/embedded-permissions';
+import { adminAllowanceGrantSelect, toAdminOfferAllowance } from '../offer-allowances/offer-allowance-read';
 import { showcasePlacementNotFound } from './showcase.errors';
 
 /**
@@ -77,7 +80,7 @@ export class ShowcasePlacementReadService {
     };
   }
 
-  async getForAdmin(placementId: string) {
+  async getForAdmin(placementId: string, viewer: AuthUser | null = null) {
     const placement = await this.prisma.showcasePlacement.findUnique({
       where: { id: placementId },
       select: {
@@ -91,6 +94,7 @@ export class ShowcasePlacementReadService {
             actor: { select: { id: true, name: true } },
           },
         },
+        offerAllowanceGrant: adminAllowanceGrantSelect,
         versionChanges: {
           orderBy: [{ createdAt: 'desc' }],
           select: {
@@ -112,6 +116,11 @@ export class ShowcasePlacementReadService {
       ...toPlacementDetail(placement),
       provider: placement.provider,
       versionChanges: placement.versionChanges,
+      // CAMPAIGN-ENTITLEMENT-001: the run's free-offer allowance — counts and
+      // subsidy always; which offers spent it only with OFFERS_READ.
+      offerAllowance: toAdminOfferAllowance(placement.offerAllowanceGrant, {
+        offers: mayEmbed(viewer, AdminPermission.OFFERS_READ),
+      }),
       // Null for a run that is not cancelled, and also for one cancelled
       // before API-HARDENING-001: that operator was never recorded, and the
       // screen says so rather than naming somebody.

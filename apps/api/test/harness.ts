@@ -319,6 +319,10 @@ const TRUNCATED_TABLES = [
   // Phase two, listed before the version and card rows they reference. The
   // TRUNCATE … CASCADE handles the order regardless; it is kept readable as a
   // dependency graph, exactly as the phase-one block above is.
+  // CAMPAIGN-ENTITLEMENT-001: allowance usages (append-only; TRUNCATE does
+  // not fire the trigger) and the grants they spend.
+  'OfferAllowanceUsage',
+  'OfferAllowanceGrant',
   'ShowcaseLead',
   'ShowcaseCardPriceTermsAcceptance',
   'ShowcasePlacementVersionChange',

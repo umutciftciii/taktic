@@ -42,6 +42,7 @@ import {
   verifyLemonSqueezySignature,
 } from './lemon-squeezy.webhook';
 import { resolvePaymentProviderKind } from './payment-provider.config';
+import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
 
 /**
  * The only path in this application that may load credits from a payment.
@@ -789,6 +790,7 @@ export class PaymentsWebhookService implements OnModuleInit {
     });
 
     if (placement) {
+      logShowcaseAllowanceGranted(placement.id);
       await this.mail.sendShowcasePlacementActivated(placement.id);
       return;
     }

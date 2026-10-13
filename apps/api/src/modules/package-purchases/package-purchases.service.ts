@@ -50,6 +50,7 @@ import { ShowcasePlacementService } from '../showcase/showcase-placement.service
 import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
+import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
 
 export type AdminPurchaseFilters = {
   status?: PackagePurchaseStatus;
@@ -485,6 +486,7 @@ export class PackagePurchasesService implements OnModuleInit {
         });
 
         if (placement) {
+          logShowcaseAllowanceGranted(placement.id);
           await this.mail.sendShowcasePlacementActivated(placement.id);
         } else {
           // Package-first: the right's own notice. The method re-reads the

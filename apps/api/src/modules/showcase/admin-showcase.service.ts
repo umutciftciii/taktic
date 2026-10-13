@@ -33,6 +33,7 @@ import {
   toShowcaseCard,
   toShowcaseVersion,
 } from './showcase.projection';
+import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
 
 /**
  * The operator's side of vitrin: the queue, one version at a time, and the two
@@ -365,7 +366,9 @@ export class AdminShowcaseService {
     // announce nothing. One call for both outcomes — the service reads back
     // what is on the air and sends "approved and live" as a single message
     // when the run was born here, or "approved" alone when nothing is.
-    void activatedPlacementId;
+    if (activatedPlacementId) {
+      logShowcaseAllowanceGranted(activatedPlacementId);
+    }
     await this.mail.sendShowcaseCardApprovalOutcome(versionId);
 
     return this.getVersion(versionId, user);

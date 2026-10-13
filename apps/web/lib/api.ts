@@ -2065,6 +2065,27 @@ export type ShowcasePublicationList = {
  * will not be: contact opens through the accepted-offer path, and a direct lead
  * is not an exception to that rule.
  */
+/**
+ * CAMPAIGN-ENTITLEMENT-001 — what the provider's next offer on a request would
+ * cost, read without spending (`GET /providers/:id/requests/:requestId/offer-cost`).
+ *
+ * `creditCost` is the figure the form posts back as `expectedCreditCost`; the
+ * API refuses a mismatch with 409 CREDIT_COST_CHANGED rather than charging an
+ * answer the provider was shown at another price.
+ */
+export type OfferCostPreview = {
+  kind:
+    | 'SHOWCASE_ALLOWANCE'
+    | 'UNLIMITED'
+    | 'MONTHLY_QUOTA'
+    | 'CREDITS'
+    | 'INSUFFICIENT_CREDITS'
+    | 'DAILY_LIMIT';
+  creditCost: number;
+  categoryCreditCost: number;
+  allowance: { quotaTotal: number; quotaUsed: number; remaining: number } | null;
+};
+
 export type ShowcaseProviderLead = {
   id: string;
   status: ShowcaseLeadStatus;
