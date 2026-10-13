@@ -110,6 +110,13 @@ export class ProvidersController {
     return this.providersService.getMatchingRequest(providerId, requestId);
   }
 
+  /** CAMPAIGN-ENTITLEMENT-001: the effective cost of the next offer, read-only. */
+  @Get(':providerId/requests/:requestId/offer-cost')
+  @UseGuards(AuthGuard, ProviderAccessGuard)
+  previewOfferCost(@Param('providerId') providerId: string, @Param('requestId') requestId: string) {
+    return this.providersService.previewOfferCost(providerId, requestId);
+  }
+
   @Post(':providerId/requests/:requestId/offers')
   @UseGuards(AuthGuard, ProviderAccessGuard)
   createOffer(

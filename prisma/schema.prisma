@@ -596,6 +596,8 @@ model User {
   reliabilityReviewsResolved      ProviderReliabilityReview[]          @relation("ReliabilityReviewResolvedBy")
   /// REL-002 Faz 5: the Round 4+ openings this staff member made.
   matchRoundOpenings              ServiceRequestRoundOpening[]         @relation("RoundOpeningAdmin")
+  /// CAMPAIGN-ENTITLEMENT-001: offer allowance grants this operator voided (no endpoint in v1).
+  offerAllowanceGrantsVoided      OfferAllowanceGrant[]                @relation("OfferAllowanceGrantVoidedBy")
 
   @@index([role])
   @@index([isActive])
@@ -990,18 +992,20 @@ model ServiceCategory {
   /// category tree loses a whole branch without anybody being told. A parent
   /// with children cannot be deleted — the API says so with a 409, and the
   /// database says so even if something bypasses the API.
-  parent             ServiceCategory?                  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
-  children           ServiceCategory[]                 @relation("ServiceCategoryTree")
-  questions          ServiceRequestQuestion[]
-  requests           ServiceRequest[]
-  entryRequests      ServiceRequest[]                  @relation("ServiceRequestEntryCategory")
-  providers          ProviderServiceCategory[]
-  routerRulesIn      ServiceCategoryRouterRule[]       @relation("ServiceCategoryRouterTarget")
-  providerInvites    ProviderInviteToken[]
-  packageScopes      OfferPackageScopeCategory[]
-  entitlementScopes  ProviderPackageEntitlementScope[]
-  showcaseCards      ShowcaseCard[]
-  showcasePlacements ShowcasePlacement[]
+  parent               ServiceCategory?                  @relation("ServiceCategoryTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children             ServiceCategory[]                 @relation("ServiceCategoryTree")
+  questions            ServiceRequestQuestion[]
+  requests             ServiceRequest[]
+  entryRequests        ServiceRequest[]                  @relation("ServiceRequestEntryCategory")
+  providers            ProviderServiceCategory[]
+  routerRulesIn        ServiceCategoryRouterRule[]       @relation("ServiceCategoryRouterTarget")
+  providerInvites      ProviderInviteToken[]
+  packageScopes        OfferPackageScopeCategory[]
+  entitlementScopes    ProviderPackageEntitlementScope[]
+  showcaseCards        ShowcaseCard[]
+  showcasePlacements   ShowcasePlacement[]
+  /// CAMPAIGN-ENTITLEMENT-001: the free-offer allowance usages written in this category.
+  offerAllowanceUsages OfferAllowanceUsage[]
 
   @@index([parentId])
   @@index([isActive, sortOrder])
@@ -1281,6 +1285,8 @@ model ServiceRequest {
   serviceIncidents       ProviderServiceIncident[]
   /// REL-002 Faz 5: every staff opening of Round 4+ from MATCH_REVIEW.
   roundOpenings          ServiceRequestRoundOpening[]
+  /// CAMPAIGN-ENTITLEMENT-001: the free-offer allowance usages written on this request.
+  offerAllowanceUsages   OfferAllowanceUsage[]
 
   @@index([categoryId])
   @@index([entryCategoryId])
@@ -1454,29 +1460,31 @@ model ServiceRequestMatchRound {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
 
-  request           ServiceRequest                    @relation("ServiceRequestMatchRounds", fields: [requestId], references: [id], onDelete: Restrict)
+  request              ServiceRequest                    @relation("ServiceRequestMatchRounds", fields: [requestId], references: [id], onDelete: Restrict)
   /// A list only because the relation is a composite FK (Prisma's one-to-one
   /// would need a redundant unique over it); `currentRoundId @unique` keeps it
   /// to at most one request.
-  currentForRequest ServiceRequest[]                  @relation("ServiceRequestCurrentRound")
+  currentForRequest    ServiceRequest[]                  @relation("ServiceRequestCurrentRound")
   /// Composite FK (matchedOfferId, id) → offer (id, matchRoundId): a round's
   /// winner is always an offer made in that round.
-  matchedOffer      Offer?                            @relation("MatchRoundMatchedOffer", fields: [matchedOfferId, id], references: [id, matchRoundId], onDelete: Restrict)
-  matchedProvider   ProviderProfile?                  @relation("MatchRoundMatchedProvider", fields: [matchedProviderId], references: [id], onDelete: Restrict)
-  offers            Offer[]                           @relation("OfferMatchRound")
-  contactReveal     ContactRevealEvent?
-  messageThread     MessageThread?
+  matchedOffer         Offer?                            @relation("MatchRoundMatchedOffer", fields: [matchedOfferId, id], references: [id, matchRoundId], onDelete: Restrict)
+  matchedProvider      ProviderProfile?                  @relation("MatchRoundMatchedProvider", fields: [matchedProviderId], references: [id], onDelete: Restrict)
+  offers               Offer[]                           @relation("OfferMatchRound")
+  contactReveal        ContactRevealEvent?
+  messageThread        MessageThread?
   /// The service issue reported on this round. A list only because the
   /// relation is a composite FK; `incident.roundId @unique` keeps it to one.
-  incidents         ProviderServiceIncident[]         @relation("IncidentRound")
-  failureIncident   ProviderServiceIncident?          @relation("MatchRoundFailureIncident", fields: [failureIncidentId, id], references: [id, roundId], onDelete: Restrict)
-  exclusionsSourced ServiceRequestProviderExclusion[]
+  incidents            ProviderServiceIncident[]         @relation("IncidentRound")
+  failureIncident      ProviderServiceIncident?          @relation("MatchRoundFailureIncident", fields: [failureIncidentId, id], references: [id, roundId], onDelete: Restrict)
+  exclusionsSourced    ServiceRequestProviderExclusion[]
   /// REL-002 Faz 5: the staff opening that recovered from this round (it
   /// failed and an admin opened the next). At most one (`fromRoundId` is
   /// unique); a list only because the relation is a composite FK.
-  reopenedFrom      ServiceRequestRoundOpening[]      @relation("RoundOpeningFrom")
+  reopenedFrom         ServiceRequestRoundOpening[]      @relation("RoundOpeningFrom")
   /// The staff opening that created this round (ADMIN rounds only).
-  openedByOpening   ServiceRequestRoundOpening[]      @relation("RoundOpeningOpened")
+  openedByOpening      ServiceRequestRoundOpening[]      @relation("RoundOpeningOpened")
+  /// CAMPAIGN-ENTITLEMENT-001: the free-offer allowance usages written in this round.
+  offerAllowanceUsages OfferAllowanceUsage[]
 
   @@unique([requestId, roundNumber])
   /// The target of the composite FKs that pin a request's current round, an
@@ -2047,6 +2055,9 @@ model ProviderProfile {
   serviceIncidents                ProviderServiceIncident[]
   /// REL-002 Faz 4: staff reliability follow-ups on this provider.
   reliabilityReviews              ProviderReliabilityReview[]
+  /// CAMPAIGN-ENTITLEMENT-001: free-offer allowances and their usages.
+  offerAllowanceGrants            OfferAllowanceGrant[]
+  offerAllowanceUsages            OfferAllowanceUsage[]
 
   /// ADMIN-ACTION-AUDIT-001: every admin status transition, append-only.
   statusChanges ProviderStatusChange[]
@@ -2236,28 +2247,32 @@ model Offer {
   createdAt                           DateTime                @default(now())
   updatedAt                           DateTime                @updatedAt
 
-  request            ServiceRequest              @relation(fields: [requestId], references: [id])
-  provider           ProviderProfile             @relation(fields: [providerId], references: [id])
-  matchRound         ServiceRequestMatchRound    @relation("OfferMatchRound", fields: [matchRoundId, requestId], references: [id, requestId], onDelete: Restrict)
+  request             ServiceRequest              @relation(fields: [requestId], references: [id])
+  provider            ProviderProfile             @relation(fields: [providerId], references: [id])
+  matchRound          ServiceRequestMatchRound    @relation("OfferMatchRound", fields: [matchRoundId, requestId], references: [id, requestId], onDelete: Restrict)
   /// The round this offer won, when it won one.
   /// A list only because the relation is a composite FK; the round's
   /// `matchedOfferId @unique` keeps it to at most one round.
-  matchedForRound    ServiceRequestMatchRound[]  @relation("MatchRoundMatchedOffer")
-  entitlement        ProviderPackageEntitlement? @relation(fields: [entitlementId], references: [id])
-  matchedForRequest  ServiceRequest?             @relation("ServiceRequestMatchedOffer")
-  contactRevealEvent ContactRevealEvent?
-  messageThread      MessageThread?
-  manualRefundAudit  ManualOfferRefundAudit?
+  matchedForRound     ServiceRequestMatchRound[]  @relation("MatchRoundMatchedOffer")
+  entitlement         ProviderPackageEntitlement? @relation(fields: [entitlementId], references: [id])
+  matchedForRequest   ServiceRequest?             @relation("ServiceRequestMatchedOffer")
+  contactRevealEvent  ContactRevealEvent?
+  messageThread       MessageThread?
+  manualRefundAudit   ManualOfferRefundAudit?
   /// The vitrin lead this offer answered, when it answered one. Unique on the
   /// lead's side: a lead has one response.
-  showcaseLead       ShowcaseLead?               @relation("ShowcaseLeadRespondedOffer")
+  showcaseLead        ShowcaseLead?               @relation("ShowcaseLeadRespondedOffer")
   /// The customer's rating of this offer's delivery. Unique on the review's
   /// side: one review per accepted offer.
-  review             ProviderReview?
+  review              ProviderReview?
   /// REL-002 Faz 3: the service issue reported on this (accepted) offer's
   /// match. A list only because the relation is a composite FK;
   /// `incident.offerId @unique` keeps it to one.
-  serviceIncidents   ProviderServiceIncident[]
+  serviceIncidents    ProviderServiceIncident[]
+  /// CAMPAIGN-ENTITLEMENT-001: the vitrin allowance slot that paid for this
+  /// offer, when one did. Absent on every paid offer and on every legacy
+  /// zero-credit SHOWCASE_PLACEMENT offer that predates allowances.
+  offerAllowanceUsage OfferAllowanceUsage?
   // A PostgreSQL partial unique index — "Offer_one_accepted_per_round",
   // UNIQUE ("matchRoundId") WHERE status = 'ACCEPTED' — is created by the REL-002
   // M2 migration (it replaced the per-request "Offer_one_accepted_per_request").
@@ -4341,12 +4356,15 @@ model ShowcasePlacement {
   pinnedVersion ShowcaseCardVersion @relation(fields: [pinnedVersionId], references: [id], onDelete: Restrict)
   category      ServiceCategory     @relation(fields: [categoryId], references: [id], onDelete: Restrict)
 
-  shelves        ShowcasePlacementShelf[]
-  suspensions    ShowcasePlacementSuspension[]
-  cancellation   ShowcasePlacementCancellation?
-  versionChanges ShowcasePlacementVersionChange[]
-  leads          ShowcaseLead[]
-  entitlement    ShowcaseEntitlement?
+  shelves             ShowcasePlacementShelf[]
+  suspensions         ShowcasePlacementSuspension[]
+  cancellation        ShowcasePlacementCancellation?
+  versionChanges      ShowcasePlacementVersionChange[]
+  leads               ShowcaseLead[]
+  entitlement         ShowcaseEntitlement?
+  /// CAMPAIGN-ENTITLEMENT-001: the free-offer allowance this run carries.
+  /// Granted in the transaction that births the placement; at most one.
+  offerAllowanceGrant OfferAllowanceGrant?
 
   // A PostgreSQL partial unique index — "ShowcasePlacement_one_live_per_card",
   // UNIQUE ("cardId") WHERE status IN ('PENDING_ACTIVATION','ACTIVE','SUSPENDED')
@@ -4765,18 +4783,132 @@ model ShowcaseLead {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  request        ServiceRequest      @relation("ShowcaseLeadRequest", fields: [requestId], references: [id], onDelete: Restrict)
-  requestGate    ServiceRequest?     @relation("ServiceRequestShowcaseLead")
-  placement      ShowcasePlacement   @relation(fields: [placementId], references: [id], onDelete: Restrict)
-  card           ShowcaseCard        @relation(fields: [cardId], references: [id], onDelete: Restrict)
-  cardVersion    ShowcaseCardVersion @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
-  provider       ProviderProfile     @relation(fields: [providerId], references: [id])
-  respondedOffer Offer?              @relation("ShowcaseLeadRespondedOffer", fields: [respondedOfferId], references: [id], onDelete: Restrict)
+  request             ServiceRequest       @relation("ShowcaseLeadRequest", fields: [requestId], references: [id], onDelete: Restrict)
+  requestGate         ServiceRequest?      @relation("ServiceRequestShowcaseLead")
+  placement           ShowcasePlacement    @relation(fields: [placementId], references: [id], onDelete: Restrict)
+  card                ShowcaseCard         @relation(fields: [cardId], references: [id], onDelete: Restrict)
+  cardVersion         ShowcaseCardVersion  @relation(fields: [cardVersionId], references: [id], onDelete: Restrict)
+  provider            ProviderProfile      @relation(fields: [providerId], references: [id])
+  respondedOffer      Offer?               @relation("ShowcaseLeadRespondedOffer", fields: [respondedOfferId], references: [id], onDelete: Restrict)
+  /// CAMPAIGN-ENTITLEMENT-001: the allowance slot this lead's answer used.
+  offerAllowanceUsage OfferAllowanceUsage?
 
   @@index([providerId, status, slaDueAt])
   @@index([status, slaDueAt])
   @@index([placementId, createdAt])
   @@index([status, breachedAt])
+}
+
+/// CAMPAIGN-ENTITLEMENT-001. What granted an offer allowance. One value today:
+/// a vitrin placement's own run. Future sources (a subscription, a campaign, a
+/// goodwill grant) are new values here plus their own scope column on the
+/// grant — never a reinterpretation of this one.
+enum OfferAllowanceSource {
+  SHOWCASE_PLACEMENT
+}
+
+/// CAMPAIGN-ENTITLEMENT-001. What one unit of an allowance buys. FREE_OFFER:
+/// one offer whose credit cost is zero. A percentage discount or a fixed
+/// subsidy would be new values, never a reading of `quotaTotal` as money.
+enum OfferAllowanceBenefit {
+  FREE_OFFER
+}
+
+/// CAMPAIGN-ENTITLEMENT-001. ACTIVE grants can pay; a VOID one never again.
+/// There is no EXPIRED: a vitrin grant is scoped to its placement's own leads,
+/// so "expired" is derived (the run ended and none of its leads is still
+/// gated), never written by a sweeper. Nothing writes VOID in v1 — the value
+/// exists so a later punitive admin action is a code change, not a migration.
+enum OfferAllowanceStatus {
+  ACTIVE
+  VOID
+}
+
+/// CAMPAIGN-ENTITLEMENT-001 — a bounded number of free offers, granted by one
+/// thing and spendable only inside that thing's scope.
+///
+/// Today exactly one kind exists: every vitrin placement carries one grant of
+/// `SHOWCASE_FREE_OFFER_QUOTA` (3) FREE_OFFER units, usable only on the direct
+/// leads that arrived through that very placement. Written in the transaction
+/// that births the placement (`showcasePlacementId` is unique), so a run
+/// without its grant, or with two, is unrepresentable.
+///
+/// `quotaUsed` moves only one way — up by one, by a conditional UPDATE whose
+/// WHERE carries `quotaUsed < quotaTotal` — and a CHECK holds it between 0 and
+/// `quotaTotal`. It is never decremented: a withdrawn, rejected, cancelled or
+/// failed offer keeps the slot it spent.
+///
+/// The grants the 101 migration backfilled for runs live at rollout carry
+/// `quotaTotal = legacy free offers + 3` and `quotaUsed = legacy free offers`:
+/// past use is counted without being rewritten, and every run still gets three.
+model OfferAllowanceGrant {
+  id                  String                @id @default(cuid())
+  providerId          String
+  source              OfferAllowanceSource
+  benefit             OfferAllowanceBenefit
+  /// The scope. NOT NULL exactly when `source = SHOWCASE_PLACEMENT` (CHECK).
+  showcasePlacementId String?               @unique
+  /// Snapshotted when granted; CHECK > 0.
+  quotaTotal          Int
+  /// CHECK 0 <= quotaUsed <= quotaTotal.
+  quotaUsed           Int                   @default(0)
+  /// The placement's `startAt`. For display and reporting only — eligibility
+  /// is the lead's binding to the placement, never a clock.
+  validFrom           DateTime
+  status              OfferAllowanceStatus  @default(ACTIVE)
+  /// All three set together or none (CHECK), and only with VOID.
+  voidedAt            DateTime?
+  voidReason          String?
+  voidedById          String?
+  grantedAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+
+  provider  ProviderProfile       @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  placement ShowcasePlacement?    @relation(fields: [showcasePlacementId], references: [id], onDelete: Restrict)
+  voidedBy  User?                 @relation("OfferAllowanceGrantVoidedBy", fields: [voidedById], references: [id], onDelete: Restrict)
+  usages    OfferAllowanceUsage[]
+
+  @@index([providerId, status])
+}
+
+/// CAMPAIGN-ENTITLEMENT-001 — one allowance unit spent on one offer.
+///
+/// Append-only: a trigger refuses UPDATE and DELETE. Written in the offer's own
+/// Serializable create transaction, right after the conditional increment that
+/// claimed the slot, so it exists exactly when that offer committed for free.
+///
+/// `ordinal` is the slot number the increment returned (1..quotaTotal);
+/// `(grantId, ordinal)` unique makes a double-spent slot unrepresentable and
+/// `offerId` unique a twice-paid offer. `listCreditCostSnapshot` is what the
+/// category would have charged — the subsidy figure finance reads, never a
+/// ledger amount (no ProviderCreditTransaction is written for a free offer).
+model OfferAllowanceUsage {
+  id                     String   @id @default(cuid())
+  grantId                String
+  ordinal                Int
+  offerId                String   @unique
+  providerId             String
+  requestId              String
+  matchRoundId           String
+  /// The direct lead answered. Unique: one lead, one answer, one slot.
+  showcaseLeadId         String?  @unique
+  categoryId             String
+  listCreditCostSnapshot Int
+  consumedAt             DateTime @default(now())
+
+  grant        OfferAllowanceGrant      @relation(fields: [grantId], references: [id], onDelete: Restrict)
+  offer        Offer                    @relation(fields: [offerId], references: [id], onDelete: Restrict)
+  provider     ProviderProfile          @relation(fields: [providerId], references: [id], onDelete: Restrict)
+  request      ServiceRequest           @relation(fields: [requestId], references: [id], onDelete: Restrict)
+  matchRound   ServiceRequestMatchRound @relation(fields: [matchRoundId], references: [id], onDelete: Restrict)
+  showcaseLead ShowcaseLead?            @relation(fields: [showcaseLeadId], references: [id], onDelete: Restrict)
+  category     ServiceCategory          @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+
+  @@unique([grantId, ordinal])
+  @@index([providerId, consumedAt])
+  @@index([requestId])
+  @@index([matchRoundId])
+  @@index([categoryId])
 }
 
 /// A provider telling an operator that a live request needs a look.

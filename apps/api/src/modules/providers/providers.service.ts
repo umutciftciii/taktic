@@ -61,7 +61,12 @@ import {
 } from '../../common/admin-audit';
 import { providerNeedsServiceArea } from '../../common/delivery-mode';
 import { runSerializable } from '../../common/serializable-transaction';
-import { EntitlementResolverService } from '../entitlements/entitlement-resolver.service';
+import {
+  type AllowanceUsageReceipt,
+  EntitlementResolverService,
+  ShowcaseAllowanceUnavailable,
+} from '../entitlements/entitlement-resolver.service';
+import { logOfferAllowanceEvent } from '../offer-allowances/offer-allowance-events';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -1439,8 +1444,79 @@ export class ProvidersService implements OnModuleInit {
     return toProviderRequestDetail({ ...rest, offers: currentRound.offers }, providerCreditBalance);
   }
 
+  /**
+   * What this provider's next offer on this request would cost, and which
+   * right would pay — read, never spent (CAMPAIGN-ENTITLEMENT-001).
+   *
+   * The direct-lead form renders it ("vitrin hakkınızdan düşecek — 0 kredi" or
+   * "X kredi", and the allowance left) and posts `creditCost` back as
+   * `expectedCreditCost`; `createOfferRecord` then re-resolves under its own
+   * Serializable transaction and refuses a mismatch with CREDIT_COST_CHANGED.
+   * Same visibility rule as the offer itself: a request this provider may not
+   * act on is a 404.
+   */
+  async previewOfferCost(providerId: string, requestId: string) {
+    await this.ensureProviderCanSeeRequest(providerId, requestId);
+
+    return this.prisma.$transaction(
+      async (tx) => {
+        const request = await tx.serviceRequest.findUnique({
+          where: { id: requestId },
+          select: {
+            directShowcaseProviderId: true,
+            showcaseLeadId: true,
+            currentRound: { select: { source: true } },
+            category: { select: { id: true, offerCreditCost: true } },
+          },
+        });
+        if (!request) {
+          throw new NotFoundException('Request not found');
+        }
+
+        const categoryCreditCost = request.category.offerCreditCost;
+        if (categoryCreditCost === null || categoryCreditCost <= 0) {
+          throw new ConflictException({
+            statusCode: HttpStatus.CONFLICT,
+            code: CATEGORY_PRICE_UNSET_CODE,
+            message: 'Bu kategori için teklif kredisi tanımlı değil.',
+          });
+        }
+
+        return this.entitlements.preview(tx, {
+          providerId,
+          categoryId: request.category.id,
+          creditCost: categoryCreditCost,
+          now: new Date(),
+          directShowcaseProviderId: request.directShowcaseProviderId,
+          showcaseLeadId: request.showcaseLeadId,
+          roundSource: request.currentRound?.source ?? null,
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
+  }
+
   async createOffer(providerId: string, requestId: string, dto: CreateOfferDto) {
-    const offer = await this.createOfferRecord(providerId, requestId, dto);
+    const { offer, allowanceOutcome } = await this.createOfferRecord(providerId, requestId, dto);
+
+    // CAMPAIGN-ENTITLEMENT-001 observability, after the commit: a replayed or
+    // refused attempt never counts, and an exhausted fallback is logged once
+    // per paid offer rather than once per retry.
+    if (allowanceOutcome?.kind === 'CONSUMED') {
+      logOfferAllowanceEvent(this.logger, 'offer_allowance_consumed', {
+        grantId: allowanceOutcome.usage.grantId,
+        placementId: allowanceOutcome.usage.placementId,
+        offerId: offer.id,
+        ordinal: allowanceOutcome.usage.ordinal,
+        quotaTotal: allowanceOutcome.usage.quotaTotal,
+      });
+    } else if (allowanceOutcome?.kind === 'PAID_FALLBACK') {
+      logOfferAllowanceEvent(this.logger, 'offer_allowance_exhausted_fallback', {
+        showcaseLeadId: allowanceOutcome.showcaseLeadId,
+        offerId: offer.id,
+        source: offer.entitlementSource ?? null,
+      });
+    }
 
     // Outside the transaction that charged the credit, so a mail failure can
     // never roll back an offer the provider has already paid for and delivered.
@@ -1487,7 +1563,7 @@ export class ProvidersService implements OnModuleInit {
               ...providerVisibilityRequestSelect,
               showcaseLeadId: true,
               currentRoundId: true,
-              currentRound: { select: { status: true } },
+              currentRound: { select: { status: true, source: true } },
               category: {
                 select: { id: true, slug: true, isActive: true, offerCreditCost: true },
               },
@@ -1546,20 +1622,30 @@ export class ProvidersService implements OnModuleInit {
             });
           }
 
+          /*
+           * The provider's own gated direct lead — the one authority for
+           * "this is a direct vitrin answer" (CAMPAIGN-ENTITLEMENT-001).
+           *
+           * Read off the gate, never off what paid: since allowances are
+           * bounded, a direct answer may be free (a slot of the placement's
+           * allowance) or paid (the slots are spent), and both must move the
+           * lead to ANSWERED and the request out of SUBMITTED. Deriving this
+           * from the payment source would leave a paid answer's lead OPEN and
+           * let the SLA sweeper breach a lead that was answered.
+           */
+          const isDirectLeadOffer = request.directShowcaseProviderId === providerId;
+
           // expectedCreditCost is an equality check only — it never decides the
           // charge. Otherwise a client could set its own price by editing the
-          // payload.
+          // payload. On a marketplace request it is compared with the
+          // category's price, here, exactly as before; on a direct lead it is
+          // compared with the effective cost the resolver decides, below.
           if (
+            !isDirectLeadOffer &&
             payload.expectedCreditCost !== null &&
             payload.expectedCreditCost !== actualCreditCost
           ) {
-            throw new ConflictException({
-              statusCode: HttpStatus.CONFLICT,
-              code: CREDIT_COST_CHANGED_CODE,
-              message: 'Bu kategorinin teklif maliyeti güncellendi.',
-              expectedCreditCost: payload.expectedCreditCost,
-              actualCreditCost,
-            });
+            throw creditCostChanged(payload.expectedCreditCost, actualCreditCost);
           }
 
           /*
@@ -1574,13 +1660,54 @@ export class ProvidersService implements OnModuleInit {
            * package. An unlimited period changes what an offer costs, never who
            * may send one.
            */
-          const decision = await this.entitlements.resolve(tx, {
-            providerId,
-            categoryId: category.id,
-            creditCost: actualCreditCost,
-            now: new Date(),
-            directShowcaseProviderId: request.directShowcaseProviderId,
-          });
+          let decision;
+          try {
+            decision = await this.entitlements.resolve(tx, {
+              providerId,
+              categoryId: category.id,
+              creditCost: actualCreditCost,
+              now: new Date(),
+              directShowcaseProviderId: request.directShowcaseProviderId,
+              showcaseLeadId: request.showcaseLeadId,
+              roundSource: request.currentRound?.source ?? null,
+            });
+          } catch (error) {
+            // A direct answer the form showed as free, now refused for want of
+            // credit: the price changed under the provider (the last free slot
+            // went to a concurrent offer). Say that first — the 402 is the
+            // answer to a confirmed paid attempt, not to one shown as free.
+            if (
+              isDirectLeadOffer &&
+              error instanceof HttpException &&
+              error.getStatus() === HttpStatus.PAYMENT_REQUIRED &&
+              payload.expectedCreditCost !== actualCreditCost
+            ) {
+              throw creditCostChanged(payload.expectedCreditCost, actualCreditCost, DIRECT_LEAD_COST_CHANGED_MESSAGE);
+            }
+            throw error;
+          }
+
+          /*
+           * The expected-cost contract on a direct lead: never charge an answer
+           * the provider was not shown the price of. The form sends the
+           * effective cost it rendered — 0 for a free slot, the category price
+           * otherwise. A mismatch, or a paid decision with no expectation at
+           * all, is the same 409 a repriced category has always produced; the
+           * provider sees the new price and submits again.
+           */
+          const freeAllowanceOffer = decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT;
+          if (
+            isDirectLeadOffer &&
+            (payload.expectedCreditCost === null
+              ? !freeAllowanceOffer
+              : payload.expectedCreditCost !== decision.creditCost)
+          ) {
+            throw creditCostChanged(
+              payload.expectedCreditCost,
+              decision.creditCost,
+              freeAllowanceOffer ? undefined : DIRECT_LEAD_COST_CHANGED_MESSAGE,
+            );
+          }
 
           const offerNumber = await this.numbering.generateDisplayNumber(
             tx,
@@ -1606,8 +1733,6 @@ export class ProvidersService implements OnModuleInit {
           const refundWindowHours =
             await this.operationsSettings.getUnviewedOfferRefundWindowHours(tx);
           const submittedAt = new Date();
-          const isDirectLeadOffer =
-            decision.source === OfferEntitlementSource.SHOWCASE_PLACEMENT;
           const refundEligibleAt = new Date(
             submittedAt.getTime() + refundWindowHours * 60 * 60 * 1000,
           );
@@ -1633,11 +1758,12 @@ export class ProvidersService implements OnModuleInit {
                *
                * For the three package sources this is the category's price,
                * exactly as it always was — an unlimited period records the
-               * price without being charged it, and that is unchanged. For a
-               * direct vitrin lead it is **zero**, because the provider already
-               * paid for the placement the lead arrived through and the row
-               * should say what actually happened rather than what an ordinary
-               * offer would have cost.
+               * price without being charged it, and that is unchanged. For an
+               * answer paid by a slot of the vitrin allowance it is **zero**,
+               * and the row says what actually happened; what an ordinary offer
+               * would have cost is on the usage row (`listCreditCostSnapshot`).
+               * A direct answer paid after the slots ran out records the
+               * category price like any other paid offer.
                *
                * An immutable snapshot either way: refunds read this and never
                * the live category price, so a later repricing cannot alter a
@@ -1654,14 +1780,15 @@ export class ProvidersService implements OnModuleInit {
               // every offer that predates this line keeps the column's false
               // default and is out of scope forever.
               //
-              // A direct-lead offer is deliberately outside the policy. The
+              // A free allowance offer is deliberately outside the policy. The
               // rule refunds a credit the customer never looked at; this offer
               // spent no credit, so there is nothing to give back and a policy
               // flag on it would put a refund promise on a screen that has no
-              // amount behind it.
-              unviewedRefundPolicy: !isDirectLeadOffer,
+              // amount behind it. A paid direct answer is an ordinary paid
+              // offer and carries the policy (CAMPAIGN-ENTITLEMENT-001).
+              unviewedRefundPolicy: !freeAllowanceOffer,
               submittedAt,
-              ...(isDirectLeadOffer
+              ...(freeAllowanceOffer
                 ? {}
                 : {
                     unviewedRefundWindowHours: refundWindowHours,
@@ -1674,12 +1801,29 @@ export class ProvidersService implements OnModuleInit {
           // for an unlimited period — nothing at all. A failure here throws, and
           // the whole transaction (offer included) rolls back, so a refused
           // offer can never have consumed anything.
-          const { creditTransactionId } = await this.entitlements.consume(tx, decision, {
-            providerId,
-            offerId: offer.id,
-            reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
-            now: new Date(),
-          });
+          let consumed;
+          try {
+            consumed = await this.entitlements.consume(tx, decision, {
+              providerId,
+              offerId: offer.id,
+              reason: `Offer submitted (${category.slug}, ${actualCreditCost} kredi)`,
+              now: new Date(),
+              offer: {
+                requestId,
+                matchRoundId: request.currentRoundId,
+                categoryId: category.id,
+                listCreditCost: actualCreditCost,
+              },
+            });
+          } catch (error) {
+            if (error instanceof ShowcaseAllowanceUnavailable) {
+              // The slot went between the read and the claim: never free and
+              // never quietly charged — the price changed.
+              throw creditCostChanged(payload.expectedCreditCost, actualCreditCost, DIRECT_LEAD_COST_CHANGED_MESSAGE);
+            }
+            throw error;
+          }
+          const { creditTransactionId } = consumed;
 
           /*
            * ── The direct lead's own transition ────────────────────────────
@@ -1730,7 +1874,13 @@ export class ProvidersService implements OnModuleInit {
             include: providerOfferInclude,
           });
 
-          return withRefundEligibility(updatedOffer);
+          const allowanceOutcome: AllowanceOutcome | null = consumed.allowanceUsage
+            ? { kind: 'CONSUMED', usage: consumed.allowanceUsage }
+            : isDirectLeadOffer && request.showcaseLeadId
+              ? { kind: 'PAID_FALLBACK', showcaseLeadId: request.showcaseLeadId }
+              : null;
+
+          return { offer: withRefundEligibility(updatedOffer), allowanceOutcome };
         },
         { label: 'providers.createOffer' },
       );
@@ -2290,6 +2440,30 @@ function canProviderActOnRequest(
     matchesRequestLocation(provider.serviceAreas, request)
   );
 }
+
+/** What a committed offer did with the vitrin allowance, for the post-commit event. */
+type AllowanceOutcome =
+  | { kind: 'CONSUMED'; usage: AllowanceUsageReceipt }
+  | { kind: 'PAID_FALLBACK'; showcaseLeadId: string };
+
+/** The repriced-offer 409, shared by the marketplace and direct-lead checks. */
+function creditCostChanged(
+  expectedCreditCost: number | null,
+  actualCreditCost: number,
+  message = 'Bu kategorinin teklif maliyeti güncellendi.',
+) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    code: CREDIT_COST_CHANGED_CODE,
+    message,
+    expectedCreditCost,
+    actualCreditCost,
+  });
+}
+
+/** The direct-lead wording of the same 409: the price moved because the free slots did. */
+const DIRECT_LEAD_COST_CHANGED_MESSAGE =
+  'Bu teklifin maliyeti değişti: ücretsiz vitrin teklif hakkınız kalmadı. Güncel maliyeti kontrol edip yeniden gönderin.';
 
 const providerInclude = {
   user: {

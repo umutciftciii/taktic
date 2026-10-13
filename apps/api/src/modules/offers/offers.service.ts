@@ -239,7 +239,31 @@ export class OffersService {
       throw new NotFoundException('Offer not found');
     }
 
-    return toAdminOffer(withRefundEligibility(offer), offerEmbedScope(viewer));
+    // CAMPAIGN-ENTITLEMENT-001: which vitrin slot paid for this offer, when one
+    // did. The offer's own payment fact, beside `entitlementSource`; read for
+    // the detail page only, so the list's projection is unchanged.
+    const allowanceUsage = await this.prisma.offerAllowanceUsage.findUnique({
+      where: { offerId: id },
+      select: {
+        ordinal: true,
+        listCreditCostSnapshot: true,
+        consumedAt: true,
+        grant: { select: { quotaTotal: true, showcasePlacementId: true } },
+      },
+    });
+
+    return {
+      ...toAdminOffer(withRefundEligibility(offer), offerEmbedScope(viewer)),
+      offerAllowance: allowanceUsage
+        ? {
+            ordinal: allowanceUsage.ordinal,
+            quotaTotal: allowanceUsage.grant.quotaTotal,
+            listCreditCostSnapshot: allowanceUsage.listCreditCostSnapshot,
+            consumedAt: allowanceUsage.consumedAt,
+            placementId: allowanceUsage.grant.showcasePlacementId,
+          }
+        : null,
+    };
   }
 
   /**

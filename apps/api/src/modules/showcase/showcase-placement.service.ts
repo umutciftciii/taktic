@@ -10,6 +10,7 @@ import {
   ShowcaseVersionReview,
 } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { grantShowcasePlacementAllowance } from '../offer-allowances/offer-allowance-ledger';
 import { showcasePlacementEndAt } from './showcase.constants';
 import {
   suspensionExtendsClock,
@@ -197,12 +198,11 @@ export class ShowcasePlacementService {
       active: true,
     });
 
-    await tx.showcasePlacement.update({
-      where: { id: placement.id },
-      data: { status: ShowcasePlacementStatus.ACTIVE },
+    return this.completeBirth(tx, {
+      placementId: placement.id,
+      providerId: purchase.providerId,
+      startAt,
     });
-
-    return { placementId: placement.id };
   }
 
   /**
@@ -260,12 +260,32 @@ export class ShowcasePlacementService {
       active: true,
     });
 
+    return this.completeBirth(tx, {
+      placementId: placement.id,
+      providerId: input.providerId,
+      startAt: input.startAt,
+    });
+  }
+
+  /**
+   * The last step both births share: the run goes ACTIVE and its bounded
+   * free-offer allowance is granted, in the same transaction
+   * (CAMPAIGN-ENTITLEMENT-001). A placement without its grant — or with two —
+   * is therefore unrepresentable whichever path paid for it; the grant's
+   * unique `showcasePlacementId` is the database half of that.
+   */
+  private async completeBirth(
+    tx: Prisma.TransactionClient,
+    input: { placementId: string; providerId: string; startAt: Date },
+  ): Promise<{ placementId: string }> {
     await tx.showcasePlacement.update({
-      where: { id: placement.id },
+      where: { id: input.placementId },
       data: { status: ShowcasePlacementStatus.ACTIVE },
     });
 
-    return { placementId: placement.id };
+    await grantShowcasePlacementAllowance(tx, input);
+
+    return { placementId: input.placementId };
   }
 
   // ──────────────────────────────────────────────────────────────────────────

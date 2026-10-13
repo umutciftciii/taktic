@@ -63,6 +63,7 @@ import { classifyShowcaseEdit, type ShowcaseVersionShape } from './showcase-vers
 import { ShowcaseEntitlementService } from './showcase-entitlement.service';
 import { ShowcasePlacementService } from './showcase-placement.service';
 import { assertCategoryStillOpen, assertVersionAreasCovered } from './showcase-publish-preflight';
+import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
 
 /**
  * A provider's own vitrin cards: creating them, editing them, and handing one to
@@ -838,6 +839,7 @@ export class ProviderShowcaseCardsService {
     // After the commit, and only for a run this call actually started: a mail
     // about a placement that was rolled back would announce nothing.
     if (activatedPlacementId) {
+      logShowcaseAllowanceGranted(activatedPlacementId);
       await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
     }
 

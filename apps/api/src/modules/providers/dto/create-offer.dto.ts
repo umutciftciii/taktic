@@ -16,10 +16,16 @@ export class CreateOfferDto {
    * charged. A mismatch means the price changed while the form was open, and
    * the request is rejected with 409 CREDIT_COST_CHANGED so nothing is billed
    * at a price the provider never saw.
+   *
+   * Zero is a valid expectation since CAMPAIGN-ENTITLEMENT-001: a direct vitrin
+   * answer shown as paid by one of the placement's free offers. On a direct
+   * lead it is compared with the resolver's effective cost instead of the
+   * category price, and a paid answer with no expectation at all is refused
+   * the same way.
    */
   @IsOptional()
   @IsInt()
-  @Min(1)
+  @Min(0)
   expectedCreditCost?: number;
 
   @IsOptional()

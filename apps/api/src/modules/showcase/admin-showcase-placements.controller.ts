@@ -121,8 +121,8 @@ export class AdminShowcasePlacementsController {
 
   @Get('placements/:placementId')
   @RequiresPermission(AdminPermission.SHOWCASE_PLACEMENTS_READ)
-  getPlacement(@Param('placementId') placementId: string) {
-    return this.placements.getForAdmin(placementId);
+  getPlacement(@Param('placementId') placementId: string, @CurrentUser() user: AuthUser) {
+    return this.placements.getForAdmin(placementId, user);
   }
 
   /**
