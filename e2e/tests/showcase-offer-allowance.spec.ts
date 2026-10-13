@@ -163,9 +163,17 @@ test.describe('vitrin free-offer allowance (CAMPAIGN-ENTITLEMENT-001)', () => {
       await expect(actor.page.getByTestId('lead-offer-allowance')).toContainText('3 / 3');
       await expect(actor.page.getByText('3 ücretsiz teklif hakkınız bulunur', { exact: false })).toBeVisible();
 
+      // The cost line on a phone: no horizontal overflow at 320px.
+      const viewport = actor.page.viewportSize();
+      await actor.page.setViewportSize({ width: 320, height: 800 });
+      await expect(cost).toBeVisible();
+      const overflow = await actor.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+      expect(overflow, 'lead page wider than a 320px phone').toBeLessThanOrEqual(0);
+      if (viewport) await actor.page.setViewportSize(viewport);
+
       await fillLeadOffer(actor);
       await submitLeadOffer(actor);
-      await expect(actor.page.getByTestId('lead-offer-sent')).toContainText('vitrin ücretsiz teklif hakkınızdan karşılandı');
+      await expect(actor.page.getByTestId('lead-offer-sent')).toContainText('Vitrin ücretsiz teklif hakkınızdan karşılandı');
 
       expect(await grant(run.placement.id)).toEqual({ quotaTotal: 3, quotaUsed: 1 });
       expect(await prisma().offerAllowanceUsage.count({ where: { showcaseLeadId: first.leadId } })).toBe(1);
