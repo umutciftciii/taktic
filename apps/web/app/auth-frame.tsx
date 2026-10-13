@@ -20,6 +20,18 @@ type AuthFrameProps = {
  * The shared sign-in / sign-up frame: an accent poster on the left, the form on
  * the right under a two-tab switch.
  *
+ * The form comes first in the document and the poster second (MOBILE-UX-
+ * HARDENING-001). On a phone the two stack, and the stack follows the source:
+ * the sign-in, the result of a verification link, the reset — whatever the
+ * person came to do — is the first thing under the header, and the poster is a
+ * short coda after it. It used to be the other way round, and a 380px red block
+ * pushed the form below the first screen on every phone. A screen reader reads
+ * the same order, which is also the right one: the page's <h1> is in the form,
+ * and the poster's <h2> no longer precedes it.
+ *
+ * The desktop picture is unchanged — poster left, form right — and is drawn by
+ * grid placement from 900px up, not by reordering the markup.
+ *
  * The tabs are links, not client state, because the two sides are separate
  * routes with their own server actions — swapping them in place would break the
  * redirect contract each action relies on.
@@ -31,20 +43,7 @@ export function AuthFrame({
   children,
 }: AuthFrameProps) {
   return (
-    <main className="auth-screen">
-      <section className="auth-poster">
-        <span className="kicker">TakTick hesabı</span>
-        <h2 className="auth-poster-title">Talepler, teklifler ve eşleşmeler tek yerde.</h2>
-        <p className="auth-poster-sub">
-          Bir hesapla talep aç, gelen teklifleri karşılaştır, kabul ettiğin ustayla iletişime geç.
-        </p>
-        <ul className="auth-poster-list">
-          {POSTER_POINTS.map((point) => (
-            <li key={point}>{point}</li>
-          ))}
-        </ul>
-      </section>
-
+    <main className="auth-screen auth-screen-split">
       <section className="auth-form-side">
         <div className="auth-screen-card">
           <div className="auth-tabs" role="tablist" aria-label="Hesap">
@@ -69,6 +68,19 @@ export function AuthFrame({
           {children}
         </div>
       </section>
+
+      <aside className="auth-poster" aria-label="TakTick hesabı">
+        <span className="kicker">TakTick hesabı</span>
+        <h2 className="auth-poster-title">Talepler, teklifler ve eşleşmeler tek yerde.</h2>
+        <p className="auth-poster-sub">
+          Bir hesapla talep aç, gelen teklifleri karşılaştır, kabul ettiğin ustayla iletişime geç.
+        </p>
+        <ul className="auth-poster-list">
+          {POSTER_POINTS.map((point) => (
+            <li key={point}>{point}</li>
+          ))}
+        </ul>
+      </aside>
     </main>
   );
 }

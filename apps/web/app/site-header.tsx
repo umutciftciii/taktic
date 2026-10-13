@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { AuthUser } from '../lib/api';
 import { IconChevronDown } from './landing-icons';
+import { SiteMenu } from './site-menu';
 import { StartChoiceModal } from './start-choice-modal';
 
 type SiteHeaderProps = {
@@ -8,7 +9,22 @@ type SiteHeaderProps = {
   providerId: string | null;
 };
 
+/**
+ * One row on every width.
+ *
+ * Desktop: logo, links, account actions — unchanged. Below 900px the links fold
+ * behind `SiteMenu`'s toggle instead of wrapping the header into three rows,
+ * and the account action that matters for who is looking stays in the bar: the
+ * request CTA for a visitor, the account menu for anyone signed in. A visitor's
+ * "Giriş" moves into the menu below 640px, where the bar has room for one
+ * button beside the logo and the toggle (see globals.css, "Public shell").
+ *
+ * A staff account has no public links at all, so it gets no toggle either — a
+ * button that opens an empty panel is worse than none.
+ */
 export function SiteHeader({ user, providerId }: SiteHeaderProps) {
+  const hasNav = !user || user.role === 'CUSTOMER' || user.role === 'PROVIDER';
+
   return (
     <header className="lp-header" id="site-header">
       <div className="lp-container lp-header-inner">
@@ -16,7 +32,18 @@ export function SiteHeader({ user, providerId }: SiteHeaderProps) {
           <img className="brand-logo" src="/brand/logo.png" alt="TakTick" />
         </Link>
 
-        <HeaderNav user={user} providerId={providerId} />
+        {hasNav ? (
+          <SiteMenu>
+            <HeaderNav user={user} providerId={providerId} />
+            {!user ? (
+              <Link className="btn btn-secondary lp-menu-signin" href="/login">
+                Giriş yap
+              </Link>
+            ) : null}
+          </SiteMenu>
+        ) : (
+          <HeaderNav user={user} providerId={providerId} />
+        )}
         <HeaderCta user={user} />
       </div>
     </header>
@@ -62,7 +89,7 @@ function HeaderCta({ user }: { user: AuthUser | null }) {
   if (!user) {
     return (
       <div className="lp-header-cta">
-        <Link className="btn btn-secondary" href="/login">
+        <Link className="btn btn-secondary lp-header-signin" href="/login">
           Giriş
         </Link>
         <StartChoiceModal user={user} label="Talep Oluştur" className="btn btn-primary" />
