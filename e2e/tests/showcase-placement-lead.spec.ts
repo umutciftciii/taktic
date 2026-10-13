@@ -248,6 +248,21 @@ async function seedLivePlacement(options: {
     },
   });
 
+
+  // CAMPAIGN-ENTITLEMENT-001: a run is born with its 3 free direct-lead
+  // offers, in the same transaction as the placement — the seed writes the
+  // grant the production birth (`completeBirth`) writes.
+  await db.offerAllowanceGrant.create({
+    data: {
+      providerId: options.providerId,
+      source: 'SHOWCASE_PLACEMENT',
+      benefit: 'FREE_OFFER',
+      showcasePlacementId: placement.id,
+      quotaTotal: 3,
+      quotaUsed: 0,
+      validFrom: now,
+    },
+  });
   return { pkg, purchase, placement };
 }
 
@@ -531,10 +546,16 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await inboxRow.getByRole('link').first().click();
       await assertNoErrorScreen(providerActor.page);
 
-      // The sentence that matters most on this screen: answering costs nothing.
+      // The sentence that matters most on this screen: what answering costs —
+      // the run's free offers first, the category price after them
+      // (CAMPAIGN-ENTITLEMENT-001).
       await expect(
-        providerActor.page.getByText('teklif kredisi harcanmaz', { exact: false }).first(),
+        providerActor.page.getByText('3 ücretsiz teklif hakkınız bulunur', { exact: false }).first(),
       ).toBeVisible();
+      await expect(providerActor.page.getByTestId('lead-offer-cost')).toHaveAttribute(
+        'data-cost-kind',
+        'SHOWCASE_ALLOWANCE',
+      );
       // And the customer's telephone number is not on it. Contact opens through
       // the accepted-offer path and through nothing else.
       await expect(providerActor.page.getByText(customerPhone)).toHaveCount(0);

@@ -24,6 +24,7 @@ import {
 } from '../actions';
 import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH, PLACEMENT_SUSPEND_NOTE_MIN_LENGTH } from '../placement-cancel';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
+import { PlacementAllowanceSection } from './placement-allowance-section';
 
 type PlacementPageProps = {
   params: Promise<{ placementId: string }>;
@@ -81,6 +82,7 @@ export default async function ShowcasePlacementPage({
   const canCancel = can('SHOWCASE_PLACEMENT_CANCEL');
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const canOpenReview = can('SHOWCASE_REVIEW_READ');
+  const canOpenOffer = can('OFFERS_READ');
 
   const { placementId } = await params;
   const { error, suspended, resumed, cancelled } = await searchParams;
@@ -258,6 +260,10 @@ export default async function ShowcasePlacementPage({
             ]}
           />
         </SectionCard>
+
+        {placement.offerAllowance !== undefined ? (
+          <PlacementAllowanceSection allowance={placement.offerAllowance} canOpenOffer={canOpenOffer} />
+        ) : null}
 
         {placement.suspensions && placement.suspensions.length > 0 ? (
           <SectionCard

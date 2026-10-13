@@ -70,8 +70,9 @@ export default async function ShowcaseLeadInboxPage({ params }: LeadInboxPagePro
         <span className="kicker">Vitrin</span>
         <h1 className="pdash-page-title">Vitrin talepleri</h1>
         <p className="pdash-page-sub">
-          Bu talepler doğrudan vitrin kartlarınızdan geldi ve yalnız size iletildi. Teklif
-          vermek için kredi harcanmaz — yerleşim bedelini zaten ödediniz.
+          Bu talepler doğrudan vitrin kartlarınızdan geldi ve yalnız size iletildi. Bu vitrin yayın
+          döneminde 3 ücretsiz teklif hakkınız bulunur. Haklarınız bittiğinde teklifler kategori
+          kredi maliyetinden ücretlendirilir.
         </p>
       </header>
 

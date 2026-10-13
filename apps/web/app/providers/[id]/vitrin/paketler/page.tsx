@@ -69,6 +69,11 @@ export default async function ShowcasePackagesPage({ params, searchParams }: Pro
           Ödeme tamamlanınca bir vitrin hakkı kazanırsınız; kartınızı bu hakla oluşturur, onaylandığında otomatik
           yayına girer.
         </p>
+        <p className="pdash-page-sub" data-testid="showcase-package-offer-allowance">
+          Vitrin paketi ücretli bir görünürlük ürünüdür. Her yayın dönemi, kartınızdan gelen taleplere
+          vereceğiniz 3 ücretsiz teklif hakkı içerir; sonraki teklifler normal kategori kredi maliyetiyle
+          ücretlendirilir.
+        </p>
       </header>
 
       {error ? (

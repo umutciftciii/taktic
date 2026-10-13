@@ -181,7 +181,11 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
     {
       label: 'Harcanan kredi',
       value: String(offer.creditCost),
-      note: offer.creditSpentTransactionId ? 'Teklif verildiğinde düşüldü' : 'Kredi harcaması yok',
+      note: offer.offerAllowance
+        ? `Vitrin ücretsiz teklif hakkı (${offer.offerAllowance.ordinal} / ${offer.offerAllowance.quotaTotal})`
+        : offer.creditSpentTransactionId
+          ? 'Teklif verildiğinde düşüldü'
+          : 'Kredi harcaması yok',
     },
     {
       label: 'Müşteri gördü mü',
@@ -520,6 +524,22 @@ export default async function OfferDetailPage({ params, searchParams }: OfferDet
               <KeyValueList
                 items={[
                   { label: 'Kredi maliyeti', value: String(offer.creditCost) },
+                  {
+                    label: 'Ödeme kaynağı',
+                    value: offer.offerAllowance ? (
+                      <span data-testid="offer-allowance-source">
+                        Vitrin ücretsiz teklif hakkı · {offer.offerAllowance.ordinal} / {offer.offerAllowance.quotaTotal}
+                        <div className="muted" style={{ fontSize: 12 }}>
+                          Normal kategori bedeli {offer.offerAllowance.listCreditCostSnapshot} kredi; kredi hareketi
+                          yazılmadı.
+                        </div>
+                      </span>
+                    ) : offer.entitlementSource === 'SHOWCASE_PLACEMENT' ? (
+                      'Eski sınırsız vitrin hakkı (ücretsiz hak sisteminden önce)'
+                    ) : offer.entitlementSource ? (
+                      ENTITLEMENT_SOURCE_LABELS[offer.entitlementSource]
+                    ) : null,
+                  },
                   {
                     label: 'Harcama işlemi',
                     value: offer.creditSpentTransactionId ? <code>{offer.creditSpentTransactionId}</code> : null,
@@ -991,3 +1011,10 @@ function OfferHistory({ offer }: { offer: Offer }) {
     </div>
   );
 }
+
+/** Which right paid for a paid offer, in the operator's words. */
+const ENTITLEMENT_SOURCE_LABELS: Record<'UNLIMITED' | 'MONTHLY_QUOTA' | 'ONE_TIME_CREDIT', string> = {
+  UNLIMITED: 'Limitsiz kategori paketi',
+  MONTHLY_QUOTA: 'Aylık kota paketi',
+  ONE_TIME_CREDIT: 'Kredi bakiyesi',
+};

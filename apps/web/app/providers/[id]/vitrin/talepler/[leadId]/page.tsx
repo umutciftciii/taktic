@@ -6,6 +6,7 @@ import {
   formatDateTime,
   formatPrice,
   getCurrentUser,
+  type OfferCostPreview,
   SHOWCASE_LEAD_CLOSE_REASON_LABELS,
   SHOWCASE_LEAD_STATUS_LABELS,
   SHOWCASE_LEAD_URGENCY_LABELS,
@@ -17,6 +18,7 @@ import { readCreditBalance } from '../../../../provider-data';
 import { leadDeadlineLabel, leadIsAnswerable, showcaseLeadBadgeClass } from '../../showcase-lead-ui';
 import { ReportDialog } from '../../../requests/[requestId]/report-dialog';
 import { createShowcaseLeadOfferAction } from './actions';
+import { OfferCostPanel } from './offer-cost-panel';
 import { OfferPriceField } from '../../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../../offer-schedule-fields';
 import { isOfferScheduleErrorCode } from '@taktic/shared';
@@ -36,9 +38,11 @@ type LeadPageProps = {
  *
  * ## The two things this screen says that no other provider screen does
  *
- * 1. **This costs nothing.** The provider paid for the placement; the offer is
- *    free, and the sentence saying so sits next to the button rather than in a
- *    help page. Every other offer screen shows a credit cost here.
+ * 1. **What this answer costs, before it is sent.** Each placement carries
+ *    three free offers (CAMPAIGN-ENTITLEMENT-001); after them an answer costs
+ *    the category's credits like any other offer. The API's own preview says
+ *    which, next to the button, with the allowance left — and the form posts
+ *    that figure back so a price that moved meanwhile is a 409, never a charge.
  * 2. **There is a deadline.** It is in the header, in the table and next to the
  *    form, because it is the thing the business is actually being measured on.
  *
@@ -66,6 +70,7 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
   ]);
 
   const answerable = leadIsAnswerable(lead);
+  const costPreview = answerable && !lead.respondedOfferId ? await readOfferCost(id, lead.request.id) : null;
 
   return (
     <ProviderShell
@@ -105,14 +110,27 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
 
       {error && isOfferScheduleErrorCode(error) ? (
         <OfferScheduleNotice code={error} />
+      ) : error === 'CREDIT_COST_CHANGED' ? (
+        <div className="pdash-notice pdash-notice-error" role="alert" id="lead-offer-error" data-testid="lead-offer-cost-changed">
+          Teklif gönderilmedi: bu teklifin maliyeti değişti (ücretsiz vitrin hakkınız başka bir teklifte
+          kullanıldı). Güncel maliyet aşağıda yazıyor; kontrol edip yeniden gönderin. Bakiyenizden kredi
+          düşülmedi.
+        </div>
+      ) : error === 'INSUFFICIENT_CREDIT' ? (
+        <div className="pdash-notice pdash-notice-error" role="alert" id="lead-offer-error" data-testid="lead-offer-insufficient">
+          Teklif gönderilmedi: kredi bakiyeniz bu teklif için yetersiz.{' '}
+          <Link href={`/providers/${id}/credits`}>Kredi yükleyin</Link> ve tekrar deneyin.
+        </div>
       ) : error ? (
         <div className="pdash-notice pdash-notice-error" role="alert">
           Teklif gönderilemedi. Bilgileri kontrol edip tekrar deneyin.
         </div>
       ) : null}
       {offered ? (
-        <div className="pdash-notice" role="status">
-          Teklifiniz iletildi. Bu talep için teklif kredisi harcanmadı.
+        <div className="pdash-notice" role="status" data-testid="lead-offer-sent">
+          {offered === 'free'
+            ? 'Teklifiniz iletildi. Vitrin ücretsiz teklif hakkınızdan karşılandı.'
+            : 'Teklifiniz iletildi.'}
         </div>
       ) : null}
       {reported === '1' ? (
@@ -276,15 +294,21 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
             <h2 className="pdash-section-title">Teklif ver</h2>
           </header>
 
-          {/*
-            No `expectedCreditCost` field, and no cost line. There is nothing to
-            agree on: the placement is already paid for, and the resolver charges
-            nothing for the provider this request is reserved for.
-          */}
           <p className="pdash-form-hint">
-            Bu talep vitrin kartınızdan geldi ve yalnız size iletildi. Teklif vermek için
-            teklif kredisi harcanmaz.
+            Bu talep vitrin kartınızdan geldi ve yalnız size iletildi. Her vitrin yayın döneminde 3
+            ücretsiz teklif hakkınız bulunur; haklarınız bittiğinde teklifler kategori kredi
+            maliyetinden ücretlendirilir.
           </p>
+
+          {/*
+            The cost the API previewed, shown and posted back. A missing preview
+            posts nothing, which the API treats as "not shown a price": it then
+            refuses any paid answer with a 409 instead of charging it.
+          */}
+          <OfferCostPanel preview={costPreview} />
+          {costPreview ? (
+            <input type="hidden" name="expectedCreditCost" value={costPreview.creditCost} />
+          ) : null}
 
           <OfferPriceField />
 
@@ -314,14 +338,35 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
           </label>
 
           <div className="pdash-form-foot">
-            <button className="pdash-btn pdash-btn-primary" type="submit">
-              Teklifi gönder
+            <button
+              className="pdash-btn pdash-btn-primary"
+              type="submit"
+              aria-describedby={error ? 'lead-offer-error' : undefined}
+            >
+              {costPreview?.kind === 'SHOWCASE_ALLOWANCE'
+                ? 'Teklifi gönder (ücretsiz hak)'
+                : costPreview && costPreview.kind !== 'UNLIMITED'
+                  ? `Teklifi gönder (${costPreview.creditCost} kredi)`
+                  : 'Teklifi gönder'}
             </button>
           </div>
         </form>
       ) : null}
     </ProviderShell>
   );
+}
+
+/**
+ * The API's preview of this answer's cost. Null when it cannot be read — the
+ * form then posts no expectation and the API refuses a paid answer rather than
+ * charging one nobody was shown.
+ */
+async function readOfferCost(providerId: string, requestId: string): Promise<OfferCostPreview | null> {
+  try {
+    return await apiFetch<OfferCostPreview>(`/providers/${providerId}/requests/${requestId}/offer-cost`);
+  } catch {
+    return null;
+  }
 }
 
 /** A stored answer, printed without inventing structure the value does not have. */

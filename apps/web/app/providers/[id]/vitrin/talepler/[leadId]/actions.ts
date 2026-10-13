@@ -10,12 +10,12 @@ import { validateOfferSchedule } from '@taktic/shared';
  * Offering on a direct vitrin lead.
  *
  * Almost the same shape as `createOfferAction`, and deliberately **not** the
- * same function: this one sends no `expectedCreditCost`, because there is no
- * cost to agree on. The API resolves the payer before it charges anything, and
- * for a request reserved for this provider the answer is a paid placement and
- * zero credits. A form that carried a cost here would be a form asserting a
- * price for something that has none, and the equality check it exists for would
- * be comparing two numbers that both mean nothing.
+ * same function. Since CAMPAIGN-ENTITLEMENT-001 it sends the *effective* cost
+ * the page previewed — 0 for one of the placement's free offers, the category
+ * price after them — and the API compares it with what it resolves under its
+ * own transaction. A mismatch (the last free slot went to another answer) is
+ * a 409 CREDIT_COST_CHANGED that lands back here as a sentence, and a paid
+ * answer the balance cannot cover is a 402 shown the same way.
  *
  * The endpoint is the ordinary offer endpoint. There is no vitrin-specific
  * offer route, and there must not be: an offer on a direct lead is an ordinary
@@ -39,6 +39,8 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
     redirect(`${target}?error=${schedule.code}`);
   }
 
+  const expectedCreditCost = readOptionalNumber(formData, 'expectedCreditCost');
+
   try {
     await apiFetch(`/providers/${providerId}/requests/${requestId}/offers`, {
       method: 'POST',
@@ -46,6 +48,9 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
         // The same lira field as the marketplace offer: grouped text in,
         // kuruş integer out, no floating point on the way.
         priceAmount: parseLiraToMinor(readString(formData, 'priceAmount')),
+        // The cost the page showed. Compared for equality server-side; it
+        // never decides what is charged.
+        expectedCreditCost,
         currency: readOptional(formData, 'currency'),
         estimatedStartDate,
         estimatedCompletionDate,
@@ -60,12 +65,19 @@ export async function createShowcaseLeadOfferAction(formData: FormData) {
 
   revalidatePath(target);
   revalidatePath(`/providers/${providerId}/vitrin/talepler`);
-  redirect(`${target}?offered=1`);
+  redirect(`${target}?offered=${expectedCreditCost === 0 ? 'free' : '1'}`);
 }
 
 function readString(formData: FormData, key: string): string {
   const value = formData.get(key);
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function readOptionalNumber(formData: FormData, key: string): number | null {
+  const value = readString(formData, key);
+  if (value.length === 0) return null;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function readOptional(formData: FormData, key: string): string | null {
@@ -81,6 +93,10 @@ function readOptional(formData: FormData, key: string): string | null {
  * use.
  */
 function errorCode(error: unknown): string {
+  // A paid answer the balance cannot cover: the API's 402 carries no code.
+  if (error instanceof ApiError && error.status === 402) {
+    return 'INSUFFICIENT_CREDIT';
+  }
   if (error instanceof ApiError) {
     try {
       const parsed = JSON.parse(error.body) as { code?: unknown };
