@@ -77,7 +77,38 @@ describe('what is recorded', () => {
         'updatedAt',
       ].sort(),
     );
-    expect(JSON.stringify(stored)).not.toMatch(/utm|0555|phone/);
+    // Every column that is not generated (id, timestamps) holds exactly what is
+    // expected — nothing from the query string. The generated columns are left
+    // out on purpose: a random cuid may itself contain "utm" or "0555".
+    expect(
+      stored.map((row) => ({
+        path: row.path,
+        routeFamily: row.routeFamily,
+        occurrenceCount: row.occurrenceCount,
+        seenDays: row.seenDays,
+        status: row.status,
+        candidateTargetPath: row.candidateTargetPath,
+        decidedById: row.decidedById,
+        decidedAt: row.decidedAt,
+        redirectId: row.redirectId,
+      })),
+    ).toEqual(
+      [
+        ['/categories/olmayan-hizmet', SeoNotFoundRouteFamily.CATEGORY],
+        ['/isletme/cmissingprovider00000xyz', SeoNotFoundRouteFamily.PROVIDER],
+        ['/vitrin/cmissingcard00abcxyz', SeoNotFoundRouteFamily.SHOWCASE_CARD],
+      ].map(([path, routeFamily]) => ({
+        path,
+        routeFamily,
+        occurrenceCount: 1,
+        seenDays: 1,
+        status: SeoNotFoundStatus.OPEN,
+        candidateTargetPath: null,
+        decidedById: null,
+        decidedAt: null,
+        redirectId: null,
+      })),
+    );
   });
 
   it('records a draft category’s address too (it is a 404 to the public), but not an operator’s 404', async () => {
