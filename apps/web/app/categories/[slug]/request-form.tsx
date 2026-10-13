@@ -760,7 +760,13 @@ export function RequestForm({
                 className={`step-tab${index === step ? ' is-active' : ''}`}
                 onClick={() => goTo(index)}
               >
-                <span className="step-tab-index">Adım 0{index + 1}</span>
+                {/*
+                  "Adım" is dropped on a phone, where three tabs share one row
+                  and the number alone says which step it is (globals.css).
+                */}
+                <span className="step-tab-index">
+                  <span className="step-tab-index-word">Adım </span>0{index + 1}
+                </span>
                 <span className="step-tab-label">{entry.label}</span>
               </button>
             ))}

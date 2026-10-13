@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { FooterGroup } from './footer-group';
 import { ReleaseVersion } from './release-version';
 
 const cols: Array<{ title: string; links: Array<{ label: string; href: string }> }> = [
@@ -69,16 +70,7 @@ export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
           </div>
 
           {visibleCols.map((c) => (
-            <div className="lp-footer-col" key={c.title}>
-              <h4>{c.title}</h4>
-              <ul>
-                {c.links.map((l) => (
-                  <li key={l.label}>
-                    <Link href={l.href}>{l.label}</Link>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <FooterGroup key={c.title} title={c.title} links={c.links} />
           ))}
         </div>
 
@@ -86,11 +78,11 @@ export function SiteFooter({ isAuthenticated = false }: SiteFooterProps = {}) {
           <div>
             © {new Date().getFullYear()} TakTic. Tüm hakları saklıdır. <ReleaseVersion />
           </div>
-          <div className="lp-footer-legal">
+          <nav className="lp-footer-legal" aria-label="Yasal">
             <Link href="#">Kullanım Şartları</Link>
             <Link href="#">Gizlilik</Link>
             <Link href="#">KVKK</Link>
-          </div>
+          </nav>
         </div>
       </div>
     </footer>

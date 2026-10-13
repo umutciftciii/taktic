@@ -20,6 +20,18 @@ are in [docs/release.md](docs/release.md).
   show the mode. Migration 99 → 100; rollback only before the feature is used.
   See `docs/match-001-delivery-model.md`.
 
+### Changed
+
+- MOBILE-UX-HARDENING-001: public and auth mobile layouts. Auth screens
+  (login, register, verification, recovery, reset) put the form or result
+  first and the "TakTick hesabı" poster after it as a compact band — form-first
+  DOM order, desktop two columns unchanged via grid placement. The public
+  header stays one row below 900px with its links behind a "Menü" disclosure
+  (Escape, outside click, focus return); the footer folds its link groups below
+  640px while the legal links stay visible; the request form's step tabs share
+  one row and its back/next buttons sit side by side. No business logic, API or
+  migration change. See `docs/mobile-ux-hardening-001.md`.
+
 ## 0.2.0 - 2026-10-12
 
 Match rounds and service assurance (REL-002 Faz 1–5). A request is now matched
