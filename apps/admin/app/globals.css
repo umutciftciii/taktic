@@ -83,11 +83,13 @@
 
   /*
    * Type. The design's face is Archivo. It is not loaded here: the build may
-   * not fetch fonts from the network (next/font/google broke CI once), and no
-   * licensed Archivo file is in this repository yet. Until one is, the stack is
-   * the platform's own sans — deterministic, and with no "Archivo" in it, so a
-   * machine that happens to have the font installed does not render a
-   * different panel from one that does not.
+   * not fetch fonts from the network (next/font/google broke CI once). The
+   * public site now serves Archivo from its own files (apps/web/app/fonts.ts,
+   * CI-FONTS-001); bringing it to the panel is a visible change of its own and
+   * has not been made. Until it is, the stack is the platform's own sans —
+   * deterministic, and with no "Archivo" in it, so a machine that happens to
+   * have the font installed does not render a different panel from one that
+   * does not.
    */
   --font-body: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-heading: var(--font-body);

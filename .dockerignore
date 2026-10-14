@@ -28,6 +28,8 @@
 !apps/web/app/
 !apps/web/lib/
 !apps/web/public/
+# The site's font files (app/fonts.ts reads them at build time; CI-FONTS-001).
+!apps/web/assets/
 
 !apps/admin/package.json
 !apps/admin/tsconfig.json

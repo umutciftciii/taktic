@@ -179,6 +179,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # CI-FONTS-001: the build must not need a font service. Every font host
+      # is unreachable from here on, so a build that still fetches one fails.
+      - name: Block font services
+        run: .github/scripts/block-font-services.sh
+
       - name: Build
         run: pnpm build
 
@@ -267,6 +272,12 @@ jobs:
       # engine would double the runtime of every PR to re-test the same API.
       - name: Install Chromium
         run: pnpm e2e:install
+
+      # CI-FONTS-001: the build must not need a font service. Every font host
+      # is unreachable from here on, so a build that still fetches one fails
+      # (`pnpm e2e` builds web and admin first).
+      - name: Block font services
+        run: .github/scripts/block-font-services.sh
 
       - name: End-to-end tests
         run: pnpm e2e
@@ -370,6 +381,12 @@ jobs:
       - name: Install WebKit
         run: pnpm e2e:install:webkit
 
+      # CI-FONTS-001: the build must not need a font service. Every font host
+      # is unreachable from here on, so a build that still fetches one fails
+      # (`pnpm e2e:webkit` builds web and admin first).
+      - name: Block font services
+        run: .github/scripts/block-font-services.sh
+
       - name: Sign-in screens and mobile shells (WebKit)
         run: pnpm e2e:webkit
 
@@ -425,9 +442,10 @@ jobs:
 
       - name: Shell scripts
         run: |
-          for f in scripts/ops/*.sh; do bash -n "$f"; done
+          for f in scripts/ops/*.sh .github/scripts/*.sh; do bash -n "$f"; done
           shellcheck --version | head -n 2
           shellcheck -S warning -x -P scripts/ops scripts/ops/*.sh
+          shellcheck -S warning .github/scripts/*.sh
 
       - name: Compose security
         run: |
