@@ -830,6 +830,9 @@ const providerLeadSelect = {
   listedPriceSnapshot: true,
   cardId: true,
   cardVersion: { select: { id: true, title: true, versionNumber: true } },
+  // SHOWCASE-ALLOWANCE-003: the run's own free offer count — the provider's
+  // own fact about their own run — so a run sold with 0 can say so.
+  placement: { select: { freeOfferCountSnapshot: true } },
   request: {
     select: {
       id: true,
@@ -889,6 +892,8 @@ function toProviderLead(lead: ProviderLeadRow) {
     closeReason: lead.closeReason,
     createdAt: lead.createdAt,
     card: { id: lead.cardId, versionId: lead.cardVersion.id, title: lead.cardVersion.title },
+    /** The free offers the run this lead arrived through was sold with; 0 = none. */
+    freeOfferCount: lead.placement.freeOfferCountSnapshot,
     kind: lead.kindSnapshot,
     ...(lead.kindSnapshot === ShowcaseCardKind.SERVICE
       ? { listedServicePriceAmount: lead.listedPriceSnapshot }

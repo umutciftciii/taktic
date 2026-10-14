@@ -17,6 +17,7 @@ import { ServiceAreaFields } from '../../../service-area-fields';
 import { createShowcaseCardAction } from '../actions';
 import { NewShowcaseCardForm } from './new-card-form';
 import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
+import { freeOfferCountText } from '../../../../../lib/showcase-free-offers';
 
 type NewShowcaseCardPageProps = {
   params: Promise<{ id: string }>;
@@ -133,7 +134,7 @@ export default async function NewShowcaseCardPage({
           <div className="vitrin-form-group">
             <div className="pdash-notice" role="status" data-testid="showcase-entitlement-in-use">
               {choices.length === 1
-                ? `Bu kart ${first.packageName} hakkınızla oluşturulacak · ${first.durationDays} gün yayın · ${first.freeOfferCount} ücretsiz teklif hakkı`
+                ? `Bu kart ${first.packageName} hakkınızla oluşturulacak · ${first.durationDays} gün yayın · ${freeOfferCountText(first.freeOfferCount)}`
                 : 'Kullanılacak hakkı seçin:'}
             </div>
             {choices.length > 1 ? (
@@ -148,7 +149,7 @@ export default async function NewShowcaseCardPage({
                       required
                     />
                     <span>
-                      {right.packageName} · {right.durationDays} gün · {right.freeOfferCount} ücretsiz teklif
+                      {right.packageName} · {right.durationDays} gün · {freeOfferCountText(right.freeOfferCount)}
                       {right.allowedCardKind
                         ? ` · yalnız ${SHOWCASE_CARD_KIND_LABELS[right.allowedCardKind].toLocaleLowerCase('tr-TR')}`
                         : ''}

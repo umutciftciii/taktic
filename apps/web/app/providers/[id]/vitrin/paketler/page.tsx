@@ -70,8 +70,9 @@ export default async function ShowcasePackagesPage({ params, searchParams }: Pro
           yayına girer.
         </p>
         <p className="pdash-page-sub" data-testid="showcase-package-offer-allowance">
-          Vitrin paketi ücretli bir görünürlük ürünüdür. Her yayın dönemi, kartınızdan gelen taleplere
-          vereceğiniz ücretsiz teklif hakkı içerir; kaç hak kazanacağınız her paketin üzerinde yazar.
+          Vitrin paketi ücretli bir görünürlük ürünüdür. Paketlerin çoğu, kartınızdan gelen taleplere
+          vereceğiniz ücretsiz teklif hakkı içerir; kaç hak kazanacağınız (ya da hiç hak olmadığı) her
+          paketin üzerinde yazar.
           Haklar bittikten sonraki teklifler normal kategori kredi maliyetiyle ücretlendirilir.
         </p>
       </header>

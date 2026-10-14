@@ -6,7 +6,8 @@
 --
 -- The API integration tests run this exact file after every allowance case
 -- (apps/api/test/offer-allowance.spec.ts), so it must stay a single SELECT
--- with no psql meta-commands. Needs migration 101.
+-- with no psql meta-commands. Needs migration 102 (check 8 reads
+-- ShowcasePlacement."freeOfferCountSnapshot").
 --
 -- Checks:
 --   1 GRANT_USED_BELOW_USAGES      a grant counts fewer used slots than it has usage rows
@@ -17,7 +18,9 @@
 --   5 USAGE_OFFER_MISMATCH         usage and offer disagree on provider, request or round
 --   6 USAGE_CROSS_PLACEMENT        the usage's lead came through another placement
 --   7 USAGE_OFFER_HAS_LEDGER       an OFFER_SPEND ledger row exists for a free allowance offer
---   8 LIVE_PLACEMENT_WITHOUT_GRANT a running (or suspended) placement has no grant
+--   8 LIVE_PLACEMENT_WITHOUT_GRANT a running (or suspended) placement sold with free
+--                                  offers has no grant (a run sold with 0 —
+--                                  SHOWCASE-ALLOWANCE-003 — is born without one)
 --   9 LEDGER_CHAIN_BREAK           a provider's credit ledger running balance does not
 --                                  follow from the previous row (no balance drift)
 SELECT 'GRANT_USED_BELOW_USAGES' AS "check", g."id" AS "subject"
@@ -67,6 +70,7 @@ SELECT 'LIVE_PLACEMENT_WITHOUT_GRANT', p."id"
   FROM "ShowcasePlacement" p
  WHERE ((p."status" IN ('PENDING_ACTIVATION', 'ACTIVE') AND p."endAt" > (CURRENT_TIMESTAMP AT TIME ZONE 'UTC'))
         OR p."status" = 'SUSPENDED')
+   AND p."freeOfferCountSnapshot" > 0
    AND NOT EXISTS (SELECT 1 FROM "OfferAllowanceGrant" g WHERE g."showcasePlacementId" = p."id")
 UNION ALL
 SELECT 'LEDGER_CHAIN_BREAK', chain."id"

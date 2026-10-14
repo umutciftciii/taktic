@@ -4263,7 +4263,8 @@ model ShowcasePackage {
   /// `expiresAt`, so reshaping the package cannot shorten a right already sold.
   activationWindowDays  Int               @default(90)
   /// SHOWCASE-ALLOWANCE-001 — how many free vitrin offers one run bought with
-  /// this package carries. CHECK 1..50. Snapshotted onto the purchase when the
+  /// this package carries. CHECK 0..50 (SHOWCASE-ALLOWANCE-003: 0 = no free
+  /// offer, and no grant is born for the run). Snapshotted onto the purchase when the
   /// checkout opens, and from there onto the entitlement, the placement and the
   /// placement's OfferAllowanceGrant (`quotaTotal`), so editing it governs the
   /// next checkout only and never a right or a run already sold. 3 is the
@@ -4331,6 +4332,7 @@ model ShowcasePlacement {
   /// from the purchase (card-bound) or the entitlement (package-first) and
   /// granted as the run's OfferAllowanceGrant `quotaTotal` at birth. The
   /// default is the legacy 3 (backfill, and any writer predating the column).
+  /// CHECK >= 0; 0 (SHOWCASE-ALLOWANCE-003) means the run has no grant.
   freeOfferCountSnapshot Int @default(3)
 
   /// The price-responsibility terms this run was sold under: the version the

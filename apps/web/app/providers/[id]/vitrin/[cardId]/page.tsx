@@ -25,6 +25,7 @@ import { SHOWCASE_ERROR_MESSAGES } from '../showcase-errors';
 import { showcaseStage } from '../showcase-stage';
 import { lastRejection, rejectedRevision, shownVersion } from '../showcase-ui';
 import { StageAction } from '../stage-action';
+import { NO_FREE_OFFERS_TEXT } from '../../../../../lib/showcase-free-offers';
 
 type ShowcaseCardPageProps = {
   params: Promise<{ id: string; cardId: string }>;
@@ -238,10 +239,14 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
               Ücretsiz teklif hakkı: <strong>{entry.freeOffers.remaining} / {entry.freeOffers.total}</strong> kaldı
             </p>
           ) : null}
+          {entry?.state === 'LIVE' && !entry.freeOffers && entry.liveFreeOfferCount === 0 ? (
+            <p data-testid="showcase-free-offers-remaining">{NO_FREE_OFFERS_TEXT}</p>
+          ) : null}
           {entry?.state !== 'LIVE' && entry?.entitlement ? (
             <p data-testid="showcase-entitlement-free-offers">
-              {entry.entitlement.packageName} hakkınız yayına girdiğinde {entry.entitlement.freeOfferCount} ücretsiz
-              teklif hakkı içerir.
+              {entry.entitlement.freeOfferCount === 0
+                ? `${entry.entitlement.packageName} hakkınızda ücretsiz teklif hakkı yok.`
+                : `${entry.entitlement.packageName} hakkınız yayına girdiğinde ${entry.entitlement.freeOfferCount} ücretsiz teklif hakkı içerir.`}
             </p>
           ) : null}
           {stage.detail && entry?.state !== 'LIVE' ? <p>{stage.detail}</p> : null}

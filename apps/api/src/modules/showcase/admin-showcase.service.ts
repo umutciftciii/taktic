@@ -370,7 +370,9 @@ export class AdminShowcaseService {
     // announce nothing. One call for both outcomes — the service reads back
     // what is on the air and sends "approved and live" as a single message
     // when the run was born here, or "approved" alone when nothing is.
-    if (activatedPlacementId) {
+    // A run sold with 0 free offers was born without a grant
+    // (SHOWCASE-ALLOWANCE-003): there is nothing to announce.
+    if (activatedPlacementId && activatedQuotaTotal > 0) {
       logShowcaseAllowanceGranted(activatedPlacementId, activatedQuotaTotal);
     }
     await this.mail.sendShowcaseCardApprovalOutcome(versionId);

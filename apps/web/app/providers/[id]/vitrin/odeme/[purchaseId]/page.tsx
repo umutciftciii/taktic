@@ -9,6 +9,7 @@ import {
 } from '../../../../../../lib/api';
 import { ProviderShell } from '../../../../provider-shell';
 import { readCreditBalance } from '../../../../provider-data';
+import { NO_FREE_OFFERS_TEXT } from '../../../../../../lib/showcase-free-offers';
 
 type Props = {
   params: Promise<{ id: string; purchaseId: string }>;
@@ -69,7 +70,12 @@ export default async function ShowcasePaymentReturnPage({ params, searchParams }
         <section className="vitrin-return" data-testid="showcase-payment-paid">
           <span className="kicker">{purchase.packageNameSnapshot}</span>
           <h1>Vitrin hakkınız hazır</h1>
-          {purchase.freeOfferCountSnapshot !== null ? (
+          {purchase.freeOfferCountSnapshot === 0 ? (
+            <p data-testid="showcase-payment-free-offers">
+              {NO_FREE_OFFERS_TEXT}: bu hakla yayına giren kartın taleplerine vereceğiniz teklifler kategori kredi
+              maliyetinden ücretlendirilir.
+            </p>
+          ) : purchase.freeOfferCountSnapshot !== null ? (
             <p data-testid="showcase-payment-free-offers">
               Bu hak, yayın dönemi boyunca vitrin taleplerinize vereceğiniz{' '}
               <strong>{purchase.freeOfferCountSnapshot} ücretsiz teklif hakkı</strong> içerir.

@@ -21,6 +21,8 @@
 --                                     does not carry its run's count
 --   5 GRANT_QUOTA_BELOW_SNAPSHOT      any grant carries fewer slots than its run was sold
 --   6 OFFER_PACKAGE_WITH_SNAPSHOT     a credit package purchase carries a free offer count
+--   7 ZERO_SNAPSHOT_WITH_GRANT        a run sold with 0 free offers (SHOWCASE-ALLOWANCE-003)
+--                                     carries a grant; such a run is born without one
 SELECT 'ENTITLEMENT_SNAPSHOT_MISMATCH' AS "check", e."id" AS "subject"
   FROM "ShowcaseEntitlement" e
   JOIN "PackagePurchase" pp ON pp."id" = e."purchaseId"
@@ -51,4 +53,9 @@ UNION ALL
 SELECT 'OFFER_PACKAGE_WITH_SNAPSHOT', pp."id"
   FROM "PackagePurchase" pp
  WHERE pp."kind" = 'OFFER_PACKAGE'
-   AND pp."freeOfferCountSnapshot" IS NOT NULL;
+   AND pp."freeOfferCountSnapshot" IS NOT NULL
+UNION ALL
+SELECT 'ZERO_SNAPSHOT_WITH_GRANT', g."id"
+  FROM "OfferAllowanceGrant" g
+  JOIN "ShowcasePlacement" p ON p."id" = g."showcasePlacementId"
+ WHERE p."freeOfferCountSnapshot" = 0;

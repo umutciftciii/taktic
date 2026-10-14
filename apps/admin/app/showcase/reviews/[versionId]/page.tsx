@@ -28,6 +28,7 @@ import {
   RevisionApprovalConsequence,
   type RevisionPlacementImpact,
 } from './revision-approval-consequence';
+import { NO_FREE_OFFERS_TEXT } from '../../../../lib/showcase-free-offers';
 
 type ShowcaseReviewPageProps = {
   params: Promise<{ versionId: string }>;
@@ -193,7 +194,10 @@ export default async function ShowcaseReviewPage({
             {version.entitlement ? (
               <p data-testid="review-entitlement">
                 {version.entitlement.packageName} · {version.entitlement.durationDays} gün yayın ·{' '}
-                {version.entitlement.freeOfferCount} ücretsiz teklif hakkı ·{' '}
+                {version.entitlement.freeOfferCount === 0
+                  ? NO_FREE_OFFERS_TEXT
+                  : `${version.entitlement.freeOfferCount} ücretsiz teklif hakkı`}{' '}
+                ·{' '}
                 {version.entitlement.pausedForReview
                   ? 'inceleme süresince geçerliliği durduruldu'
                   : `${formatDateTime(version.entitlement.expiresAt)} tarihine kadar geçerli`}

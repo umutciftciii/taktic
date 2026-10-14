@@ -2053,6 +2053,8 @@ export type ShowcaseCardPublication = {
   leadCount: number;
   /** The live run's free offer allowance (SHOWCASE-ALLOWANCE-001); null when nothing is on the air. */
   freeOffers: { total: number; used: number; remaining: number } | null;
+  /** SHOWCASE-ALLOWANCE-003 — the live run's sold free offer count; 0 = none, null when nothing is on the air. */
+  liveFreeOfferCount: number | null;
   hasPendingRevision: boolean;
   /** Whether the card has ever been on the air — an expired first run reads differently from a lapsed right. */
   hasRunBefore: boolean;
@@ -2115,6 +2117,8 @@ export type ShowcaseProviderLead = {
   closeReason: ShowcaseLeadCloseReason | null;
   createdAt: string;
   card: { id: string; versionId: string; title: string };
+  /** SHOWCASE-ALLOWANCE-003 — free offers the lead's run was sold with; 0 = none. */
+  freeOfferCount: number;
   kind: ShowcaseCardKind;
   listedServicePriceAmount?: number | null;
   request: {

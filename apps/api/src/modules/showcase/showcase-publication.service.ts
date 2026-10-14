@@ -98,6 +98,11 @@ export type ShowcaseCardPublication = {
    */
   freeOffers: { total: number; used: number; remaining: number } | null;
   /**
+   * SHOWCASE-ALLOWANCE-003 — the free offers the current run was sold with;
+   * 0 is a run with no free offer (and no grant). Null when nothing is on the air.
+   */
+  liveFreeOfferCount: number | null;
+  /**
    * A card that is live *and* has a replacement with an operator. The pair is
    * the one situation a single state genuinely cannot express, so it travels as
    * a flag rather than as a twelfth state nobody could act on.
@@ -174,6 +179,7 @@ export class ShowcasePublicationService {
           status: true,
           endAt: true,
           packageNameSnapshot: true,
+          freeOfferCountSnapshot: true,
           offerAllowanceGrant: { select: { quotaTotal: true, quotaUsed: true, status: true } },
           shelves: {
             where: { active: true },
@@ -224,6 +230,7 @@ export class ShowcasePublicationService {
                 remaining: live.offerAllowanceGrant.quotaTotal - live.offerAllowanceGrant.quotaUsed,
               }
             : null,
+        liveFreeOfferCount: live ? live.freeOfferCountSnapshot : null,
         hasPendingRevision,
         hasRunBefore: runs.length > 0,
         needsPackage: false,

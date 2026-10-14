@@ -22,6 +22,7 @@ import { OfferCostPanel } from './offer-cost-panel';
 import { OfferPriceField } from '../../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../../offer-schedule-fields';
 import { isOfferScheduleErrorCode } from '@taktic/shared';
+import { NO_FREE_OFFERS_TEXT } from '../../../../../../lib/showcase-free-offers';
 
 type LeadPageProps = {
   params: Promise<{ id: string; leadId: string }>;
@@ -296,10 +297,13 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
 
           <p className="pdash-form-hint" data-testid="lead-offer-allowance-hint">
             Bu talep vitrin kartınızdan geldi ve yalnız size iletildi.{' '}
-            {costPreview?.allowance
-              ? `Bu vitrin yayın döneminde ${costPreview.allowance.quotaTotal} ücretsiz teklif hakkınız bulunur;`
-              : 'Her vitrin yayın dönemi, paketinizin içerdiği sayıda ücretsiz teklif hakkıyla gelir;'}{' '}
-            haklarınız bittiğinde teklifler kategori kredi maliyetinden ücretlendirilir.
+            {lead.freeOfferCount === 0 && !costPreview?.allowance
+              ? `${NO_FREE_OFFERS_TEXT}: bu vitrin yayın dönemi ücretsiz teklif içermez; teklifler kategori kredi maliyetinden ücretlendirilir.`
+              : `${
+                  costPreview?.allowance
+                    ? `Bu vitrin yayın döneminde ${costPreview.allowance.quotaTotal} ücretsiz teklif hakkınız bulunur;`
+                    : 'Her vitrin yayın dönemi, paketinizin içerdiği sayıda ücretsiz teklif hakkıyla gelir;'
+                } haklarınız bittiğinde teklifler kategori kredi maliyetinden ücretlendirilir.`}
           </p>
 
           {/*

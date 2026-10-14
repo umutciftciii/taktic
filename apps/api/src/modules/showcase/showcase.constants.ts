@@ -144,11 +144,12 @@ export const SHOWCASE_PACKAGE_SLUG_MAX_LENGTH = 80;
 export const SHOWCASE_PACKAGE_DESCRIPTION_MAX_LENGTH = 600;
 /**
  * SHOWCASE-ALLOWANCE-001 — the range of `ShowcasePackage.freeOfferCount`; the
- * migration's CHECK says the same. At least one, because every run carries a
- * grant and a grant's quota is positive; the ceiling keeps a typo from giving
- * a package's buyers an effectively unlimited subsidy.
+ * migration's CHECK says the same. 0 (SHOWCASE-ALLOWANCE-003) is a package
+ * with no free offer: its runs are born without a grant and every offer on
+ * their leads is paid the normal way. The ceiling keeps a typo from giving a
+ * package's buyers an effectively unlimited subsidy.
  */
-export const SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT = 1;
+export const SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT = 0;
 export const SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT = 50;
 export const SHOWCASE_PACKAGE_DEFAULT_FREE_OFFER_COUNT = 3;
 

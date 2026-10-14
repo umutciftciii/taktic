@@ -1,5 +1,6 @@
 import { formatMinorAsTurkishLira, parseTurkishLiraToMinor } from '@taktic/shared';
 import type { ShowcaseCardKind, ShowcasePackage } from '../../../lib/api';
+import { freeOfferCountText } from '../../../lib/showcase-free-offers';
 
 /**
  * What a vitrin-package save changes that a business pays for
@@ -73,8 +74,8 @@ export function showcasePackageTermsChanges(stored: ShowcasePackageTerms, next: 
     changes.push({
       key: 'freeOffers',
       label: 'Ücretsiz teklif hakkı',
-      from: `${stored.freeOfferCount} teklif`,
-      to: `${next.freeOfferCount} teklif`,
+      from: freeOfferCountText(stored.freeOfferCount),
+      to: freeOfferCountText(next.freeOfferCount),
     });
   }
   return changes;

@@ -274,11 +274,17 @@ export class ShowcasePlacementService {
   /**
    * The last step both births share: the run goes ACTIVE and its bounded
    * free-offer allowance is granted, in the same transaction
-   * (CAMPAIGN-ENTITLEMENT-001). A placement without its grant — or with two —
-   * is therefore unrepresentable whichever path paid for it; the grant's
-   * unique `showcasePlacementId` is the database half of that. The grant's
-   * quota is the run's own `freeOfferCountSnapshot` (SHOWCASE-ALLOWANCE-001),
-   * and the quota actually granted is returned for the post-commit event.
+   * (CAMPAIGN-ENTITLEMENT-001). A placement sold with free offers but without
+   * its grant — or with two — is therefore unrepresentable whichever path paid
+   * for it; the grant's unique `showcasePlacementId` is the database half of
+   * that. The grant's quota is the run's own `freeOfferCountSnapshot`
+   * (SHOWCASE-ALLOWANCE-001), and the quota actually granted is returned for
+   * the post-commit event.
+   *
+   * A run sold with 0 free offers (SHOWCASE-ALLOWANCE-003) is born without a
+   * grant at all — a grant's quota is positive by CHECK, and "no grant" is
+   * already what the offer path reads as "pay the normal way". 0 is returned,
+   * and the post-commit sites announce no grant for it.
    */
   private async completeBirth(
     tx: Prisma.TransactionClient,
@@ -288,6 +294,10 @@ export class ShowcasePlacementService {
       where: { id: input.placementId },
       data: { status: ShowcasePlacementStatus.ACTIVE },
     });
+
+    if (input.quotaTotal === 0) {
+      return { placementId: input.placementId, quotaTotal: 0 };
+    }
 
     const grant = await grantShowcasePlacementAllowance(tx, input);
 

@@ -42,6 +42,7 @@ import {
   SORT_ORDER_HELP,
 } from '../showcase-package-fields';
 import { showcasePackageSalesFacts, showcasePackageSalesQuery } from '../showcase-package-sales';
+import { freeOfferCountText, NO_FREE_OFFERS_TEXT } from '../../../../lib/showcase-free-offers';
 
 /**
  * One vitrin package (#21), on the design's tabbed detail screen
@@ -159,8 +160,8 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
     { label: 'Geçerlilik', value: `${pkg.activationWindowDays} gün`, note: 'ödemeden itibaren' },
     {
       label: 'Ücretsiz teklif',
-      value: `${pkg.freeOfferCount} teklif`,
-      note: 'yayın dönemi başına',
+      value: freeOfferCountText(pkg.freeOfferCount),
+      note: pkg.freeOfferCount === 0 ? 'tüm teklifler ücretli' : 'yayın dönemi başına',
       testId: 'showcase-package-fact-free-offers',
     },
     {
@@ -435,7 +436,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                     { label: 'Yayın bedeli', value: formatMinorAsTurkishLira(pkg.priceAmount, pkg.currency) },
                     { label: 'Yayın süresi', value: `${pkg.durationDays} gün` },
                     { label: 'Geçerlilik', value: `${pkg.activationWindowDays} gün` },
-                    { label: 'Ücretsiz teklif hakkı', value: `${pkg.freeOfferCount} teklif / yayın dönemi` },
+                    { label: 'Ücretsiz teklif hakkı', value: pkg.freeOfferCount === 0 ? NO_FREE_OFFERS_TEXT : `${pkg.freeOfferCount} teklif / yayın dönemi` },
                     { label: 'Kart tipi', value: kindText },
                     { label: 'Bölge', value: areaText(pkg) },
                     { label: 'Listeleme sırası', value: String(pkg.sortOrder) },
@@ -459,13 +460,23 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                 <h3>Verir</h3>
                 <p>Müşterinin karttan doğrudan bu işletmeye talep göndermesi.</p>
               </li>
-              <li className="is-positive">
-                <h3>Verir</h3>
-                <p data-testid="showcase-package-promise-free-offers">
-                  Her yayın döneminde, karttan gelen doğrudan taleplere {pkg.freeOfferCount} ücretsiz teklif. Haklar
-                  bitince teklifler kategori kredi maliyetiyle ücretlendirilir.
-                </p>
-              </li>
+              {pkg.freeOfferCount === 0 ? (
+                <li>
+                  <h3>Vermez</h3>
+                  <p data-testid="showcase-package-promise-free-offers">
+                    {NO_FREE_OFFERS_TEXT}: karttan gelen doğrudan taleplere verilen her teklif kategori kredi
+                    maliyetiyle ücretlendirilir.
+                  </p>
+                </li>
+              ) : (
+                <li className="is-positive">
+                  <h3>Verir</h3>
+                  <p data-testid="showcase-package-promise-free-offers">
+                    Her yayın döneminde, karttan gelen doğrudan taleplere {pkg.freeOfferCount} ücretsiz teklif. Haklar
+                    bitince teklifler kategori kredi maliyetiyle ücretlendirilir.
+                  </p>
+                </li>
+              )}
               <li>
                 <h3>Vermez</h3>
                 <p>
