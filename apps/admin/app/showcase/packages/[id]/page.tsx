@@ -36,6 +36,7 @@ import { ShowcasePackageEditSubmit } from '../showcase-package-gates';
 import {
   areaText,
   cardKindText,
+  FreeOfferCountField,
   PriceField,
   showcasePackageErrorText,
   SORT_ORDER_HELP,
@@ -156,6 +157,12 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
     },
     { label: 'Yayın süresi', value: `${pkg.durationDays} gün`, note: 'kart yayına girince başlar' },
     { label: 'Geçerlilik', value: `${pkg.activationWindowDays} gün`, note: 'ödemeden itibaren' },
+    {
+      label: 'Ücretsiz teklif',
+      value: `${pkg.freeOfferCount} teklif`,
+      note: 'yayın dönemi başına',
+      testId: 'showcase-package-fact-free-offers',
+    },
     {
       label: 'Kart tipi',
       value: kindText,
@@ -341,6 +348,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                       Ödemeden itibaren kartın onaylanıp yayına girmesi için tanınan süre. İnceleme süresi sayılmaz.
                     </span>
                   </label>
+                  <FreeOfferCountField className="field field-4" defaultValue={pkg.freeOfferCount} />
                   <label className="field field-4">
                     <span>Kart tipi</span>
                     <select name="allowedCardKind" defaultValue={pkg.allowedCardKind ?? ''}>
@@ -402,6 +410,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                       activationWindowDays: pkg.activationWindowDays,
                       allowedCardKind: pkg.allowedCardKind,
                       maxAreas: pkg.maxAreas,
+                      freeOfferCount: pkg.freeOfferCount,
                     }}
                   />
                 </DetailFormFooter>
@@ -426,6 +435,7 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                     { label: 'Yayın bedeli', value: formatMinorAsTurkishLira(pkg.priceAmount, pkg.currency) },
                     { label: 'Yayın süresi', value: `${pkg.durationDays} gün` },
                     { label: 'Geçerlilik', value: `${pkg.activationWindowDays} gün` },
+                    { label: 'Ücretsiz teklif hakkı', value: `${pkg.freeOfferCount} teklif / yayın dönemi` },
                     { label: 'Kart tipi', value: kindText },
                     { label: 'Bölge', value: areaText(pkg) },
                     { label: 'Listeleme sırası', value: String(pkg.sortOrder) },
@@ -449,6 +459,13 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
                 <h3>Verir</h3>
                 <p>Müşterinin karttan doğrudan bu işletmeye talep göndermesi.</p>
               </li>
+              <li className="is-positive">
+                <h3>Verir</h3>
+                <p data-testid="showcase-package-promise-free-offers">
+                  Her yayın döneminde, karttan gelen doğrudan taleplere {pkg.freeOfferCount} ücretsiz teklif. Haklar
+                  bitince teklifler kategori kredi maliyetiyle ücretlendirilir.
+                </p>
+              </li>
               <li>
                 <h3>Vermez</h3>
                 <p>
@@ -458,7 +475,10 @@ export default async function ShowcasePackageDetailPage({ params, searchParams }
               </li>
               <li>
                 <h3>Vermez</h3>
-                <p>Teklif hakkı. Vitrin paketi kredi yüklemez; teklif vermek için kredi paketi gerekir.</p>
+                <p>
+                  Kredi. Vitrin paketi kredi yüklemez; ücretsiz haklar bittikten sonra ve pazaryeri talepleri için
+                  teklif vermek kredi gerektirir.
+                </p>
               </li>
             </ul>
           </SectionCard>

@@ -17,6 +17,7 @@ import {
  */
 
 export const SHOWCASE_CARD_NOT_FOUND_CODE = 'SHOWCASE_CARD_NOT_FOUND';
+export const SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED_CODE = 'SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED';
 export const SHOWCASE_VERSION_NOT_FOUND_CODE = 'SHOWCASE_VERSION_NOT_FOUND';
 export const SHOWCASE_VERSION_UNDER_REVIEW_CODE = 'SHOWCASE_VERSION_UNDER_REVIEW';
 export const SHOWCASE_VERSION_NOT_PENDING_CODE = 'SHOWCASE_VERSION_NOT_PENDING';
@@ -286,6 +287,24 @@ export function showcasePackageNotFound() {
     error: 'Not Found',
     code: SHOWCASE_PACKAGE_NOT_FOUND_CODE,
     message: 'Etkin bir vitrin paketi bulunamadı.',
+  });
+}
+
+/**
+ * SHOWCASE-ALLOWANCE-001 — the free offer count the provider was shown is no
+ * longer what the package grants: an operator edited it between the screen and
+ * the click. Refused rather than sold, because the snapshot taken here is the
+ * promise; the provider reloads and buys what is now on offer.
+ */
+export function showcasePackageFreeOffersChanged(expected: number, actual: number) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: SHOWCASE_PACKAGE_FREE_OFFERS_CHANGED_CODE,
+    message:
+      'Bu paketin ücretsiz teklif hakkı sayısı değişti. Sayfayı yenileyip güncel paketi inceleyin.',
+    expectedFreeOfferCount: expected,
+    actualFreeOfferCount: actual,
   });
 }
 

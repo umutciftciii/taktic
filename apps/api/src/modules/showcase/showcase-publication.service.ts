@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { ShowcaseCardStatus, ShowcasePlacementStatus, ShowcaseVersionReview } from '@prisma/client';
+import {
+  OfferAllowanceStatus,
+  ShowcaseCardStatus,
+  ShowcasePlacementStatus,
+  ShowcaseVersionReview,
+} from '@prisma/client';
 import { describeArea } from '../../common/provider-service-area-scope';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ShowcaseEntitlementService } from './showcase-entitlement.service';
@@ -88,6 +93,11 @@ export type ShowcaseCardPublication = {
   /** Leads this run has produced. */
   leadCount: number;
   /**
+   * SHOWCASE-ALLOWANCE-001 — the current run's free offer allowance, counts
+   * only. Null when nothing is on the air or the run carries no grant.
+   */
+  freeOffers: { total: number; used: number; remaining: number } | null;
+  /**
    * A card that is live *and* has a replacement with an operator. The pair is
    * the one situation a single state genuinely cannot express, so it travels as
    * a flag rather than as a twelfth state nobody could act on.
@@ -101,6 +111,8 @@ export type ShowcaseCardPublication = {
   entitlement: {
     packageName: string;
     durationDays: number;
+    /** Free offers the run this right becomes will carry. */
+    freeOfferCount: number;
     expiresAt: string;
     pausedForReview: boolean;
   } | null;
@@ -112,6 +124,7 @@ export type ShowcasePublicationList = {
     id: string;
     packageName: string;
     durationDays: number;
+    freeOfferCount: number;
     allowedCardKind: 'SERVICE' | 'PROMOTION' | null;
     expiresAt: string;
   }>;
@@ -161,6 +174,7 @@ export class ShowcasePublicationService {
           status: true,
           endAt: true,
           packageNameSnapshot: true,
+          offerAllowanceGrant: { select: { quotaTotal: true, quotaUsed: true, status: true } },
           shelves: {
             where: { active: true },
             select: { city: true, district: true, neighborhood: true },
@@ -202,6 +216,14 @@ export class ShowcasePublicationService {
         packageName: live?.packageNameSnapshot ?? validRight?.packageName ?? null,
         areaLabels: (live?.shelves ?? []).map((shelf) => describeArea(shelf)),
         leadCount: live?._count.leads ?? 0,
+        freeOffers:
+          live?.offerAllowanceGrant && live.offerAllowanceGrant.status === OfferAllowanceStatus.ACTIVE
+            ? {
+                total: live.offerAllowanceGrant.quotaTotal,
+                used: live.offerAllowanceGrant.quotaUsed,
+                remaining: live.offerAllowanceGrant.quotaTotal - live.offerAllowanceGrant.quotaUsed,
+              }
+            : null,
         hasPendingRevision,
         hasRunBefore: runs.length > 0,
         needsPackage: false,
@@ -209,6 +231,7 @@ export class ShowcasePublicationService {
           ? {
               packageName: validRight.packageName,
               durationDays: validRight.durationDays,
+              freeOfferCount: validRight.freeOfferCount,
               expiresAt: validRight.expiresAt,
               pausedForReview: validRight.pausedForReview,
             }

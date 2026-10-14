@@ -218,6 +218,7 @@ const SHOWCASE_PACKAGE_FIELDS = {
   priceAmount: '499,90',
   durationDays: '30',
   activationWindowDays: '90',
+  freeOfferCount: '3',
   allowedCardKind: '',
   maxAreas: '',
   description: 'Açıklama',
@@ -232,6 +233,7 @@ const STORED_SHOWCASE_PACKAGE = {
   currency: 'TRY',
   durationDays: 30,
   activationWindowDays: 90,
+  freeOfferCount: 3,
   allowedCardKind: null,
   maxAreas: null,
   description: 'Açıklama',
@@ -1587,7 +1589,7 @@ describe('guarded server actions refuse a submission without a good proof, and w
       );
       expect(cosmetic.redirect).toBe('/showcase/packages/sp-1?saved=1');
       expect(writes()).toHaveLength(1);
-      for (const fields of [{ durationDays: '45' }, { activationWindowDays: '60' }, { allowedCardKind: 'SERVICE' }, { maxAreas: '3' }]) {
+      for (const fields of [{ durationDays: '45' }, { activationWindowDays: '60' }, { allowedCardKind: 'SERVICE' }, { maxAreas: '3' }, { freeOfferCount: '5' }]) {
         refusedRedirect('error=CONFIRMATION_REQUIRED')(
           await outcome(() => updateShowcasePackageAction(form({ ...SHOWCASE_PACKAGE_FIELDS, packageId: 'sp-1', ...fields }))),
         );

@@ -33,6 +33,8 @@ import { primaryRuntime } from '../src/runtime';
  *      402 lands back as a sentence.
  *   E. REL-002: the failed direct match's slot stays spent; Round 2 is the
  *      marketplace and a market provider pays the ordinary price.
+ *   F. SHOWCASE-ALLOWANCE-001: a package sold with 5 free offers — the shop,
+ *      the lead screen and the card screen all say 5, never a fixed 3.
  *
  * Leads are seeded straight into the tables (the phone-verified lead journey
  * is showcase-placement-lead.spec.ts's subject); the cost line, the submit and
@@ -43,7 +45,12 @@ const CATEGORY_COST = 2;
 
 type Run = Awaited<ReturnType<typeof seedRun>>;
 
-async function seedRun(owner: SeededProvider, category: SeededCategory, location: ReturnType<typeof uniqueLocation>) {
+async function seedRun(
+  owner: SeededProvider,
+  category: SeededCategory,
+  location: ReturnType<typeof uniqueLocation>,
+  freeOfferCount?: number,
+) {
   const { card, version } = await seedApprovedShowcaseCard({
     providerId: owner.id,
     categoryId: category.id,
@@ -58,6 +65,7 @@ async function seedRun(owner: SeededProvider, category: SeededCategory, location
     categoryId: category.id,
     city: location.city,
     district: location.district,
+    freeOfferCount,
   });
   return { card, version, placement };
 }
@@ -375,6 +383,56 @@ test.describe('vitrin free-offer allowance (CAMPAIGN-ENTITLEMENT-001)', () => {
         where: { id: 'singleton' },
         data: { serviceIssueReportingEnabled: false },
       });
+    }
+  });
+
+  test('F: a package with 5 free offers says 5 in the shop, on the lead and on the card', async ({ browser }) => {
+    const location = uniqueLocation();
+    const category = await createCategory(CATEGORY_COST);
+    const owner = await createProvider({ categoryId: category.id, location, credits: 0 });
+    const run = await seedRun(owner, category, location, 5);
+    const lead = await seedLead({ owner, category, location, run });
+    const shopPackage = await prisma().showcasePackage.create({
+      data: {
+        name: `E2E Yedi Haklı ${uniqueSuffix()}`,
+        slug: `vitrin-e2e-yedi-${uniqueSuffix()}`.toLowerCase(),
+        priceAmount: 59_900,
+        currency: 'TRY',
+        durationDays: 30,
+        freeOfferCount: 7,
+      },
+    });
+
+    const actor = await Actor.open(browser, 'provider', primaryRuntime);
+    try {
+      await actor.loginToWeb(owner.email, owner.password);
+
+      // The shop: each package states its own count.
+      await actor.gotoWeb(`/providers/${owner.id}/vitrin/paketler`);
+      await assertNoErrorScreen(actor.page);
+      const option = actor.page.getByTestId('showcase-package-option').filter({ hasText: shopPackage.name });
+      await expect(option.getByTestId('showcase-package-free-offers')).toContainText('7 ücretsiz teklif hakkı');
+      await expect(actor.page.getByTestId('showcase-package-offer-allowance')).not.toContainText('3 ücretsiz');
+
+      // The lead: the run's own count.
+      await openLead(actor, owner, lead.leadId);
+      await expect(actor.page.getByTestId('lead-offer-allowance')).toContainText('5 / 5');
+      await expect(actor.page.getByTestId('lead-offer-allowance-hint')).toContainText('5 ücretsiz teklif hakkınız bulunur');
+
+      await fillLeadOffer(actor);
+      await submitLeadOffer(actor);
+      await expect(actor.page.getByTestId('lead-offer-sent')).toContainText('Vitrin ücretsiz teklif hakkınızdan karşılandı');
+      expect(await grant(run.placement.id)).toEqual({ quotaTotal: 5, quotaUsed: 1 });
+      expect(await creditBalance(owner.id)).toBe(0);
+
+      // The card: what is left of this run's count.
+      await actor.gotoWeb(`/providers/${owner.id}/vitrin/${run.card.id}`);
+      await assertNoErrorScreen(actor.page);
+      await expect(actor.page.getByTestId('showcase-free-offers-remaining')).toContainText('4 / 5');
+    } finally {
+      await actor.close();
+      await retireShowcasePlacements([run.placement.id]);
+      await prisma().showcasePackage.update({ where: { id: shopPackage.id }, data: { isActive: false } });
     }
   });
 });

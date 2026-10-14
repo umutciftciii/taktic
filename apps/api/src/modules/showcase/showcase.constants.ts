@@ -142,6 +142,15 @@ export const SHOWCASE_PACKAGE_MAX_PRICE_MINOR = 1_000_000_00;
 export const SHOWCASE_PACKAGE_NAME_MAX_LENGTH = 120;
 export const SHOWCASE_PACKAGE_SLUG_MAX_LENGTH = 80;
 export const SHOWCASE_PACKAGE_DESCRIPTION_MAX_LENGTH = 600;
+/**
+ * SHOWCASE-ALLOWANCE-001 — the range of `ShowcasePackage.freeOfferCount`; the
+ * migration's CHECK says the same. At least one, because every run carries a
+ * grant and a grant's quota is positive; the ceiling keeps a typo from giving
+ * a package's buyers an effectively unlimited subsidy.
+ */
+export const SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT = 1;
+export const SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT = 50;
+export const SHOWCASE_PACKAGE_DEFAULT_FREE_OFFER_COUNT = 3;
 
 /** How many cards one feed page returns, and the ceiling a client may ask for. */
 export const SHOWCASE_FEED_DEFAULT_LIMIT = 12;

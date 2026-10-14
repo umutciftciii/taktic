@@ -10,9 +10,12 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   SHOWCASE_PACKAGE_DESCRIPTION_MAX_LENGTH,
+  SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT,
+  SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT,
   SHOWCASE_PACKAGE_MAX_DURATION_DAYS,
   SHOWCASE_PACKAGE_MAX_PRICE_MINOR,
   SHOWCASE_PACKAGE_MIN_DURATION_DAYS,
@@ -100,6 +103,19 @@ export class CreateShowcasePackageDto {
   @Min(1)
   @Max(365)
   activationWindowDays?: number;
+
+  /**
+   * SHOWCASE-ALLOWANCE-001 — free vitrin offers one run bought with this
+   * package carries. Defaults to 3 when omitted, the database default and the
+   * figure every run carried before this was a setting.
+   */
+  // Omitted is allowed; null is not a count, so it is refused rather than
+  // read as "omitted" the way `@IsOptional` would.
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt()
+  @Min(SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT)
+  @Max(SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT)
+  freeOfferCount?: number;
 }
 
 /**
@@ -163,4 +179,16 @@ export class UpdateShowcasePackageDto {
   @Min(1)
   @Max(365)
   activationWindowDays?: number;
+
+  /**
+   * Affects only checkouts opened after the edit: every sale snapshots it
+   * (purchase → right / run → grant), so no right or run already sold changes.
+   */
+  // Omitted is allowed; null is not a count, so it is refused rather than
+  // read as "omitted" the way `@IsOptional` would.
+  @ValidateIf((_, value) => value !== undefined)
+  @IsInt()
+  @Min(SHOWCASE_PACKAGE_MIN_FREE_OFFER_COUNT)
+  @Max(SHOWCASE_PACKAGE_MAX_FREE_OFFER_COUNT)
+  freeOfferCount?: number;
 }

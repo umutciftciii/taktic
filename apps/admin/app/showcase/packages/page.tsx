@@ -15,7 +15,7 @@ import { WholeListFooter } from '../../../components/pagination';
 import { RouteDialog } from '../../../components/route-dialog';
 import { createShowcasePackageAction } from './actions';
 import { ShowcasePackageCreateSubmit } from './showcase-package-gates';
-import { PriceField, showcasePackageErrorText, SORT_ORDER_HELP } from './showcase-package-fields';
+import { FreeOfferCountField, PriceField, showcasePackageErrorText, SORT_ORDER_HELP } from './showcase-package-fields';
 
 type PackagesPageProps = {
   searchParams: Promise<{ paket?: string; error?: string; created?: string }>;
@@ -77,7 +77,7 @@ const NEW_PACKAGE_KEY = 'yeni';
 
 /** The design's ⓘ; each sentence checked against showcase-packages.service.ts. */
 const SCREEN_INFO =
-  'İşletmelerin kartlarını yayına almak için satın aldığı süreli paketler. Buradaki "yayın bedeli" TakTick\'in aldığı yerleşim ücretidir; işletmenin müşterisinden aldığı hizmet bedeliyle ilgisi yoktur. "Geçerlilik", ödemeden sonra kartın onaylanıp yayına girmesi için tanınan süredir; inceleme süresi bu süreden sayılmaz. Fiyat ve süre değişikliği yalnız sonraki satın almaları etkiler, satılmış her yayın kendi anlık kopyasını taşır. Kısa ad sonradan değiştirilemez. Hiçbir paket bir karta sıralama önceliği vermez.';
+  'İşletmelerin kartlarını yayına almak için satın aldığı süreli paketler. Buradaki "yayın bedeli" TakTick\'in aldığı yerleşim ücretidir; işletmenin müşterisinden aldığı hizmet bedeliyle ilgisi yoktur. "Geçerlilik", ödemeden sonra kartın onaylanıp yayına girmesi için tanınan süredir; inceleme süresi bu süreden sayılmaz. "Ücretsiz teklif", paketle alınan her yayın döneminin vitrin taleplerine verilebilecek ücretsiz teklif sayısıdır; sonrası kategori kredi maliyetiyle ücretlendirilir. Fiyat, süre ve ücretsiz teklif değişikliği yalnız sonraki satın almaları etkiler, satılmış her yayın kendi anlık kopyasını taşır. Kısa ad sonradan değiştirilemez. Hiçbir paket bir karta sıralama önceliği vermez.';
 
 const COLUMNS: DataColumn[] = [
   { key: 'name', label: 'Paket' },
@@ -85,6 +85,7 @@ const COLUMNS: DataColumn[] = [
   { key: 'price', label: 'Yayın bedeli', align: 'end' },
   { key: 'duration', label: 'Süre' },
   { key: 'window', label: 'Geçerlilik' },
+  { key: 'freeOffers', label: 'Ücretsiz teklif', align: 'end' },
   { key: 'kind', label: 'Kart tipi' },
   { key: 'areas', label: 'Bölge' },
   { key: 'status', label: 'Durum' },
@@ -192,6 +193,9 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 </td>
                 <td>{pkg.durationDays} gün</td>
                 <td>{pkg.activationWindowDays} gün</td>
+                <td className="is-num" data-testid="showcase-package-free-offers-cell">
+                  {pkg.freeOfferCount}
+                </td>
                 <td>{pkg.allowedCardKind ? SHOWCASE_CARD_KIND_LABELS[pkg.allowedCardKind] : 'Her ikisi'}</td>
                 <td>{pkg.maxAreas === null ? 'Tümü' : `En fazla ${pkg.maxAreas}`}</td>
                 <td>
@@ -274,6 +278,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 süresi sayılmaz.
               </small>
             </label>
+            <FreeOfferCountField defaultValue={3} />
             <label>
               <span>Kart tipi</span>
               <select name="allowedCardKind" defaultValue="">

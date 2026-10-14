@@ -20,6 +20,7 @@ import { CheckoutSessionError, PaymentProviderPort } from '../payments/payment-p
 import { CreateShowcasePackageCheckoutDto } from './dto/showcase-package-checkout.dto';
 import { resolveShowcasePriceTerms } from './showcase.constants';
 import {
+  showcasePackageFreeOffersChanged,
   showcasePackageNotFound,
   showcasePriceTermsReacceptRequired,
   showcaseProviderNotApproved,
@@ -129,10 +130,17 @@ export class ShowcasePackageCheckoutService {
             priceAmount: true,
             currency: true,
             durationDays: true,
+            freeOfferCount: true,
           },
         });
         if (!pkg) {
           throw showcasePackageNotFound();
+        }
+        if (
+          dto.expectedFreeOfferCount !== undefined &&
+          dto.expectedFreeOfferCount !== pkg.freeOfferCount
+        ) {
+          throw showcasePackageFreeOffersChanged(dto.expectedFreeOfferCount, pkg.freeOfferCount);
         }
 
         /*
@@ -169,7 +177,7 @@ export class ShowcasePackageCheckoutService {
           select: { id: true },
         });
 
-        const reusable = await this.findReusableCheckout(tx, providerId, pkg.id, kind);
+        const reusable = await this.findReusableCheckout(tx, providerId, pkg.id, pkg.freeOfferCount, kind);
         if (reusable) {
           return { purchase: reusable, pkg, reused: true as const };
         }
@@ -189,6 +197,10 @@ export class ShowcasePackageCheckoutService {
             // transaction, so the two facts cannot come apart.
             showcasePackageTermsAcceptanceId: acceptance.id,
             durationDaysSnapshot: pkg.durationDays,
+            // SHOWCASE-ALLOWANCE-001: the free offers this sale promises,
+            // carried to the right, the run and its grant. A later edit of the
+            // package never reaches it.
+            freeOfferCountSnapshot: pkg.freeOfferCount,
             // Zero, and a CHECK constraint agrees: a vitrin purchase sells
             // visibility and may never load an offer-credit balance.
             creditAmountSnapshot: 0,
@@ -292,6 +304,7 @@ export class ShowcasePackageCheckoutService {
     db: Prisma.TransactionClient,
     providerId: string,
     showcasePackageId: string,
+    freeOfferCount: number,
     kind: PaymentProviderKind,
   ) {
     return db.packagePurchase.findFirst({
@@ -299,6 +312,10 @@ export class ShowcasePackageCheckoutService {
         providerId,
         kind: 'SHOWCASE_PACKAGE',
         showcasePackageId,
+        // A checkout opened before the package's free offer count was edited
+        // promised the old number; it is not continued under the new one
+        // (SHOWCASE-ALLOWANCE-001) — a fresh checkout snapshots what is shown now.
+        freeOfferCountSnapshot: freeOfferCount,
         showcaseCardId: null,
         status: PackagePurchaseStatus.PENDING,
         paymentProvider: kind,

@@ -71,9 +71,9 @@ describe('credit package: what is commercial', () => {
 });
 
 describe('vitrin package: what is commercial', () => {
-  const stored = { priceAmount: 49_990, currency: 'TRY', durationDays: 30, activationWindowDays: 90, allowedCardKind: null, maxAreas: null };
+  const stored = { priceAmount: 49_990, currency: 'TRY', durationDays: 30, activationWindowDays: 90, allowedCardKind: null, maxAreas: null, freeOfferCount: 3 };
 
-  it('the price, the run, the right\'s validity, the card kind and the area cap', () => {
+  it('the price, the run, the right\'s validity, the card kind, the area cap and the free offers', () => {
     expect(showcasePackageTermsChanges(stored, stored)).toEqual([]);
     expect(
       showcasePackageTermsChanges(stored, {
@@ -83,6 +83,7 @@ describe('vitrin package: what is commercial', () => {
         activationWindowDays: 60,
         allowedCardKind: 'SERVICE',
         maxAreas: 3,
+        freeOfferCount: 5,
       }),
     ).toEqual([
       { key: 'price', label: 'Yayın bedeli', from: '₺499,90', to: '₺600,00' },
@@ -90,6 +91,11 @@ describe('vitrin package: what is commercial', () => {
       { key: 'window', label: 'Kullanılmamış hakkın geçerliliği', from: '90 gün', to: '60 gün' },
       { key: 'kind', label: 'Kart tipi', from: 'Her ikisi', to: 'Hizmet vitrini' },
       { key: 'areas', label: 'Bölge', from: 'tüm bölgeler', to: 'en fazla 3 bölge' },
+      { key: 'freeOffers', label: 'Ücretsiz teklif hakkı', from: '3 teklif', to: '5 teklif' },
+    ]);
+    // SHOWCASE-ALLOWANCE-001: the free offer count alone is a commercial change.
+    expect(showcasePackageTermsChanges(stored, { ...stored, freeOfferCount: 1 })).toEqual([
+      { key: 'freeOffers', label: 'Ücretsiz teklif hakkı', from: '3 teklif', to: '1 teklif' },
     ]);
   });
 
@@ -101,6 +107,7 @@ describe('vitrin package: what is commercial', () => {
       activationWindowDays: '90',
       allowedCardKind: '',
       maxAreas: '',
+      freeOfferCount: '3',
     })) {
       data.set(name, value);
     }

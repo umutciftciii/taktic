@@ -294,10 +294,12 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
             <h2 className="pdash-section-title">Teklif ver</h2>
           </header>
 
-          <p className="pdash-form-hint">
-            Bu talep vitrin kartınızdan geldi ve yalnız size iletildi. Her vitrin yayın döneminde 3
-            ücretsiz teklif hakkınız bulunur; haklarınız bittiğinde teklifler kategori kredi
-            maliyetinden ücretlendirilir.
+          <p className="pdash-form-hint" data-testid="lead-offer-allowance-hint">
+            Bu talep vitrin kartınızdan geldi ve yalnız size iletildi.{' '}
+            {costPreview?.allowance
+              ? `Bu vitrin yayın döneminde ${costPreview.allowance.quotaTotal} ücretsiz teklif hakkınız bulunur;`
+              : 'Her vitrin yayın dönemi, paketinizin içerdiği sayıda ücretsiz teklif hakkıyla gelir;'}{' '}
+            haklarınız bittiğinde teklifler kategori kredi maliyetinden ücretlendirilir.
           </p>
 
           {/*

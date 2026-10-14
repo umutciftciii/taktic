@@ -3497,6 +3497,8 @@ export type ShowcaseVersionDetail = ShowcaseCardVersion & {
   entitlement: {
     packageName: string;
     durationDays: number;
+    /** SHOWCASE-ALLOWANCE-001 — free offers the run this right becomes will carry. */
+    freeOfferCount: number;
     expiresAt: string;
     pausedForReview: boolean;
     valid: boolean;
@@ -3609,6 +3611,12 @@ export type ShowcasePackage = {
    * would.
    */
   activationWindowDays: number;
+  /**
+   * SHOWCASE-ALLOWANCE-001 — free vitrin offers one run bought with this
+   * package carries (1–50). Snapshotted at checkout, so an edit governs later
+   * purchases only.
+   */
+  freeOfferCount: number;
   allowedCardKind: ShowcaseCardKind | null;
   maxAreas: number | null;
   requiresAdminApproval: boolean;
@@ -3643,6 +3651,9 @@ export type ShowcasePlacement = {
   priceAmount: number;
   currency: string;
   durationDays: number;
+  /** SHOWCASE-ALLOWANCE-001 — free offers this run was sold with (package snapshot). */
+  freeOfferCount: number;
+  freeOffers: { total: number; used: number; remaining: number; status: 'ACTIVE' | 'VOID' } | null;
   startAt: string;
   endAt: string;
   suspendedAt: string | null;

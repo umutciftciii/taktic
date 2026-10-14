@@ -233,6 +233,17 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </p>
           ) : null}
           {entry?.state === 'LIVE' ? <p>Bu yayından gelen talep: {entry.leadCount}</p> : null}
+          {entry?.state === 'LIVE' && entry.freeOffers ? (
+            <p data-testid="showcase-free-offers-remaining">
+              Ücretsiz teklif hakkı: <strong>{entry.freeOffers.remaining} / {entry.freeOffers.total}</strong> kaldı
+            </p>
+          ) : null}
+          {entry?.state !== 'LIVE' && entry?.entitlement ? (
+            <p data-testid="showcase-entitlement-free-offers">
+              {entry.entitlement.packageName} hakkınız yayına girdiğinde {entry.entitlement.freeOfferCount} ücretsiz
+              teklif hakkı içerir.
+            </p>
+          ) : null}
           {stage.detail && entry?.state !== 'LIVE' ? <p>{stage.detail}</p> : null}
           {rejection && entry?.state === 'REJECTED' ? (
             <p className="vitrin-status-note" data-testid="showcase-review-note">

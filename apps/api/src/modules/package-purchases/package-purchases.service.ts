@@ -51,6 +51,7 @@ import { CreatePackagePurchaseDto } from './dto/create-package-purchase.dto';
 import { MockPackagePaymentDto } from './dto/mock-package-payment.dto';
 import { UpdatePackagePurchaseStatusDto } from './dto/update-package-purchase-status.dto';
 import { logShowcaseAllowanceGranted } from '../offer-allowances/offer-allowance-events';
+import { purchaseFreeOfferCount } from '../offer-allowances/offer-allowance-ledger';
 
 export type AdminPurchaseFilters = {
   status?: PackagePurchaseStatus;
@@ -355,6 +356,7 @@ export class PackagePurchasesService implements OnModuleInit {
                 showcaseCardId: purchase.showcaseCardId,
                 showcaseCardVersionId: purchase.showcaseCardVersionId,
                 durationDaysSnapshot: purchase.durationDaysSnapshot,
+                freeOfferCountSnapshot: purchaseFreeOfferCount(purchase),
                 packageNameSnapshot: purchase.packageNameSnapshot,
                 priceAmountSnapshot: purchase.priceAmountSnapshot,
                 currencySnapshot: purchase.currencySnapshot,
@@ -376,6 +378,7 @@ export class PackagePurchasesService implements OnModuleInit {
                 providerId: purchase.providerId,
                 showcasePackageId: purchase.showcasePackageId,
                 durationDaysSnapshot: purchase.durationDaysSnapshot,
+                freeOfferCountSnapshot: purchaseFreeOfferCount(purchase),
                 packageNameSnapshot: purchase.packageNameSnapshot,
                 priceAmountSnapshot: purchase.priceAmountSnapshot,
                 currencySnapshot: purchase.currencySnapshot,
@@ -482,11 +485,13 @@ export class PackagePurchasesService implements OnModuleInit {
       if (settled.kind === PackagePurchaseKind.SHOWCASE_PACKAGE) {
         const placement = await this.prisma.showcasePlacement.findUnique({
           where: { purchaseId: settled.id },
-          select: { id: true },
+          select: { id: true, offerAllowanceGrant: { select: { quotaTotal: true } } },
         });
 
         if (placement) {
-          logShowcaseAllowanceGranted(placement.id);
+          if (placement.offerAllowanceGrant) {
+            logShowcaseAllowanceGranted(placement.id, placement.offerAllowanceGrant.quotaTotal);
+          }
           await this.mail.sendShowcasePlacementActivated(placement.id);
         } else {
           // Package-first: the right's own notice. The method re-reads the

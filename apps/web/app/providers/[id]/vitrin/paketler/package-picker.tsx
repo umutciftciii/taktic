@@ -30,6 +30,7 @@ export function PackagePicker({
   const only = packages.length === 1 ? packages[0] : undefined;
   const [selected, setSelected] = useState<string | null>(only?.id ?? null);
   const [accepted, setAccepted] = useState(false);
+  const chosen = packages.find((pkg) => pkg.id === selected) ?? null;
   const needsConsent = terms !== null && !terms.accepted;
   const canPay = selected !== null && (!needsConsent || accepted) && terms !== null;
 
@@ -37,6 +38,12 @@ export function PackagePicker({
     <form action={startShowcasePackageCheckoutAction} className="vitrin-form" data-testid="showcase-package-picker">
       <input type="hidden" name="providerId" value={providerId} />
       {returnCard ? <input type="hidden" name="returnCard" value={returnCard} /> : null}
+      {/*
+        SHOWCASE-ALLOWANCE-001: the count this screen promised. The API refuses
+        the checkout with a 409 if an operator changed it since the page loaded,
+        rather than selling a different number than the one shown here.
+      */}
+      {chosen ? <input type="hidden" name="expectedFreeOfferCount" value={chosen.freeOfferCount} /> : null}
 
       <fieldset className="vitrin-form-group" style={{ border: 0, margin: 0, minWidth: 0 }}>
         {/* The group's name for assistive tech; the visible heading is plain flow content, because a <legend> cannot hold a <p>. */}
@@ -60,6 +67,9 @@ export function PackagePicker({
               <p className="vitrin-pkg-price">{formatPrice(pkg.priceAmount, pkg.currency)}</p>
               <p className="vitrin-pkg-meta">
                 {pkg.durationDays} gün yayın{pkg.description ? ` · ${pkg.description}` : ''}
+              </p>
+              <p className="vitrin-pkg-meta" data-testid="showcase-package-free-offers">
+                <strong>{pkg.freeOfferCount} ücretsiz teklif hakkı</strong> · yayın dönemi boyunca vitrin talepleriniz için
               </p>
             </label>
           ))}

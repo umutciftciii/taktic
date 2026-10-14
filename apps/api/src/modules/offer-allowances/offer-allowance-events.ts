@@ -1,5 +1,4 @@
 import { Logger } from '@nestjs/common';
-import { SHOWCASE_FREE_OFFER_QUOTA } from './offer-allowance-ledger';
 
 /**
  * CAMPAIGN-ENTITLEMENT-001 — the allowance's operational events, one greppable
@@ -43,13 +42,14 @@ const grantLogger = new Logger('OfferAllowance');
  * Called by the four post-commit sites that already announce a newly born run
  * (webhook settlement, mock settlement, the provider spending a right on an
  * approved card, an operator's first approval) — never from inside the birth
- * transaction, which a serialization replay could roll back. A grant born in
- * the transaction always carries the current {@link SHOWCASE_FREE_OFFER_QUOTA}.
+ * transaction, which a serialization replay could roll back. `quotaTotal` is
+ * the grant's own, as the birth returned it (SHOWCASE-ALLOWANCE-001: the
+ * package's snapshotted free offer count).
  */
-export function logShowcaseAllowanceGranted(placementId: string): void {
+export function logShowcaseAllowanceGranted(placementId: string, quotaTotal: number): void {
   logOfferAllowanceEvent(grantLogger, 'offer_allowance_granted', {
     placementId,
     source: 'SHOWCASE_PLACEMENT',
-    quotaTotal: SHOWCASE_FREE_OFFER_QUOTA,
+    quotaTotal,
   });
 }

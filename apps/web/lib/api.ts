@@ -1091,6 +1091,8 @@ export type PackagePurchase = {
   priceAmountSnapshot: number;
   currencySnapshot: string;
   packageNameSnapshot: string;
+  /** SHOWCASE-ALLOWANCE-001 — free offers a vitrin purchase was sold with; null on a credit package. */
+  freeOfferCountSnapshot: number | null;
   providerNote: string | null;
   adminNote: string | null;
   mockPaymentReference: string | null;
@@ -1868,6 +1870,11 @@ export type ShowcasePackage = {
   durationDays: number;
   /** How many days a bought right stays usable before it lapses unused. */
   activationWindowDays: number;
+  /**
+   * SHOWCASE-ALLOWANCE-001 — free vitrin offers a run bought with this package
+   * carries. Posted back as `expectedFreeOfferCount` at checkout.
+   */
+  freeOfferCount: number;
   allowedCardKind: ShowcaseCardKind | null;
   maxAreas: number | null;
   requiresAdminApproval: boolean;
@@ -1912,6 +1919,10 @@ export type ShowcasePlacement = {
   priceAmount: number;
   currency: string;
   durationDays: number;
+  /** SHOWCASE-ALLOWANCE-001 — free offers this run was sold with. */
+  freeOfferCount: number;
+  /** The run's allowance as it stands; null for a run that ended before allowances existed. */
+  freeOffers: { total: number; used: number; remaining: number; status: 'ACTIVE' | 'VOID' } | null;
   startAt: string;
   endAt: string;
   suspendedAt: string | null;
@@ -2027,6 +2038,8 @@ export type ShowcaseEntitlementSummary = {
   id: string;
   packageName: string;
   durationDays: number;
+  /** Free vitrin offers the run this right becomes will carry. */
+  freeOfferCount: number;
   allowedCardKind: ShowcaseCardKind | null;
   expiresAt: string;
 };
@@ -2038,6 +2051,8 @@ export type ShowcaseCardPublication = {
   packageName: string | null;
   areaLabels: string[];
   leadCount: number;
+  /** The live run's free offer allowance (SHOWCASE-ALLOWANCE-001); null when nothing is on the air. */
+  freeOffers: { total: number; used: number; remaining: number } | null;
   hasPendingRevision: boolean;
   /** Whether the card has ever been on the air — an expired first run reads differently from a lapsed right. */
   hasRunBefore: boolean;
@@ -2047,6 +2062,7 @@ export type ShowcaseCardPublication = {
   entitlement: {
     packageName: string;
     durationDays: number;
+    freeOfferCount: number;
     expiresAt: string;
     pausedForReview: boolean;
   } | null;

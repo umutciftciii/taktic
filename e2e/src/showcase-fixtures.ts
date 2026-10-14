@@ -86,10 +86,13 @@ export async function seedLiveShowcasePlacement(options: {
   categoryId: string;
   city: string;
   district: string;
+  /** SHOWCASE-ALLOWANCE-001 — the package's free offer count; 3 when omitted. */
+  freeOfferCount?: number;
 }) {
   const db = prisma();
   const now = new Date();
   const endAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+  const freeOfferCount = options.freeOfferCount ?? 3;
 
   const pkg = await db.showcasePackage.create({
     data: {
@@ -98,6 +101,7 @@ export async function seedLiveShowcasePlacement(options: {
       priceAmount: 49_900,
       currency: 'TRY',
       durationDays: 30,
+      freeOfferCount,
     },
   });
 
@@ -126,6 +130,7 @@ export async function seedLiveShowcasePlacement(options: {
       showcaseCardId: options.cardId,
       showcaseCardVersionId: options.versionId,
       durationDaysSnapshot: 30,
+      freeOfferCountSnapshot: freeOfferCount,
       creditAmountSnapshot: 0,
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: 'TRY',
@@ -150,6 +155,7 @@ export async function seedLiveShowcasePlacement(options: {
       priceAmountSnapshot: pkg.priceAmount,
       currencySnapshot: 'TRY',
       durationDaysSnapshot: 30,
+      freeOfferCountSnapshot: freeOfferCount,
       priceTermsVersionSnapshot: acceptance.termsVersion,
       priceTermsTextSnapshot: acceptance.termsTextSnapshot,
       startAt: now,
@@ -173,16 +179,17 @@ export async function seedLiveShowcasePlacement(options: {
     },
   });
 
-  // CAMPAIGN-ENTITLEMENT-001: a run is born with its 3 free direct-lead
-  // offers, in the same transaction as the placement — the seed writes the
-  // grant the production birth (`completeBirth`) writes.
+  // CAMPAIGN-ENTITLEMENT-001: a run is born with its free direct-lead offers
+  // (the package's snapshotted count, SHOWCASE-ALLOWANCE-001), in the same
+  // transaction as the placement — the seed writes the grant the production
+  // birth (`completeBirth`) writes.
   await db.offerAllowanceGrant.create({
     data: {
       providerId: options.providerId,
       source: 'SHOWCASE_PLACEMENT',
       benefit: 'FREE_OFFER',
       showcasePlacementId: placement.id,
-      quotaTotal: 3,
+      quotaTotal: freeOfferCount,
       quotaUsed: 0,
       validFrom: now,
     },

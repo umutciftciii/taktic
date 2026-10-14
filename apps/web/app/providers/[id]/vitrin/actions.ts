@@ -221,6 +221,7 @@ export async function startShowcasePackageCheckoutAction(formData: FormData) {
   const returnCard = readOptionalString(formData, 'returnCard');
   const base = `/providers/${providerId}/vitrin/paketler${returnCard ? `?card=${encodeURIComponent(returnCard)}` : ''}`;
   const priceTermsVersion = readOptionalString(formData, 'priceTermsVersion');
+  const expectedFreeOfferCount = Number.parseInt(readOptionalString(formData, 'expectedFreeOfferCount') ?? '', 10);
 
   let outcome: ShowcaseCheckoutResult;
   try {
@@ -228,6 +229,7 @@ export async function startShowcasePackageCheckoutAction(formData: FormData) {
       method: 'POST',
       body: JSON.stringify({
         showcasePackageId: readString(formData, 'showcasePackageId'),
+        ...(Number.isInteger(expectedFreeOfferCount) ? { expectedFreeOfferCount } : {}),
         ...(priceTermsVersion
           ? { priceTermsVersion, priceTermsAccepted: formData.get('priceTermsAccepted') === 'on' }
           : {}),

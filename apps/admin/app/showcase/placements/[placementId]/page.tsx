@@ -262,7 +262,11 @@ export default async function ShowcasePlacementPage({
         </SectionCard>
 
         {placement.offerAllowance !== undefined ? (
-          <PlacementAllowanceSection allowance={placement.offerAllowance} canOpenOffer={canOpenOffer} />
+          <PlacementAllowanceSection
+            allowance={placement.offerAllowance}
+            canOpenOffer={canOpenOffer}
+            packageFreeOfferCount={placement.freeOfferCount}
+          />
         ) : null}
 
         {placement.suspensions && placement.suspensions.length > 0 ? (
