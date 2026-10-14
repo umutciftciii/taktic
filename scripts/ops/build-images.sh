@@ -89,6 +89,13 @@ for target in $targets; do
         --build-arg "NEXT_PUBLIC_WEB_URL=$web_url" \
         --label "taktic.next-public-api-url=$api_url" \
         --label "taktic.next-public-web-url=$web_url"
+      # CI-FONTS-001: next build must not fetch a font. The font services are
+      # unroutable inside the build, so one that does fails here rather than
+      # on a builder that happens to be offline. The same hosts as
+      # .github/scripts/block-font-services.sh.
+      for font_host in fonts.googleapis.com fonts.gstatic.com use.typekit.net p.typekit.net fonts.bunny.net; do
+        set -- "$@" --add-host "$font_host:0.0.0.0"
+      done
       ;;
   esac
   docker build "$@" - <"$work/context.tar"

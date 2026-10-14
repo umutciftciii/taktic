@@ -1,24 +1,14 @@
 import type { Metadata } from 'next';
-import { Archivo } from 'next/font/google';
 import type { ReactNode } from 'react';
+// Before globals.css, as the next/font/google import was: the font CSS keeps
+// its place in the cascade.
+import { archivo } from './fonts';
 import './globals.css';
 import { apiFetch, getCurrentUser, type ProviderDashboard } from '../lib/api';
 import { rootMetadata } from '../lib/seo-metadata';
 import { PublicChrome } from './public-chrome';
 import { SiteFooter } from './site-footer';
 import { SiteHeader } from './site-header';
-
-/**
- * Archivo is the system's only family — 400 for body, 600 for labels, 800 for
- * headings and button labels. Self-hosted through next/font so the design does
- * not depend on a third-party stylesheet at runtime.
- */
-const archivo = Archivo({
-  subsets: ['latin', 'latin-ext'],
-  weight: ['400', '600', '800'],
-  display: 'swap',
-  variable: '--font-archivo',
-});
 
 /**
  * The default every page inherits: the site's title and description, and

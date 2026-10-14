@@ -17,6 +17,22 @@
    Tokens
    ══════════════════════════════════════════════════════════════════════ */
 
+/*
+ * The face that stands in for Archivo until its file arrives (font-display:
+ * swap): Arial, scaled so a line of it takes the room a line of Archivo will.
+ * These are the overrides next/font/google generated for Archivo; app/fonts.ts
+ * names this family after Archivo in `--font-archivo` and generates none of
+ * its own. Keep the values unless the font files change.
+ */
+@font-face {
+  font-family: "Archivo Fallback";
+  src: local("Arial");
+  ascent-override: 88.96%;
+  descent-override: 21.28%;
+  line-gap-override: 0%;
+  size-adjust: 98.7%;
+}
+
 :root {
   --color-bg: #f3f2f2;
   --color-surface: #eae9e9;
@@ -45,7 +61,7 @@
   --color-accent-800: #7c1405;
   --color-accent-900: #4d170e;
 
-  /* `--font-archivo` is published by next/font in the root layout. */
+  /* `--font-archivo` is published by next/font/local in app/fonts.ts. */
   --font-heading: var(--font-archivo), system-ui, sans-serif;
   --font-heading-weight: 800;
   --font-body: var(--font-archivo), system-ui, sans-serif;
