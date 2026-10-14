@@ -88,7 +88,7 @@ describe('the bounded copy', () => {
     expect(read('app/providers/[id]/vitrin/talepler/[leadId]/page.tsx')).toContain(
       '${costPreview.allowance.quotaTotal} ücretsiz teklif hakkınız bulunur',
     );
-    expect(read('app/providers/[id]/vitrin/paketler/page.tsx')).toContain('kaç hak kazanacağınız her paketin üzerinde yazar');
+    expect(read('app/providers/[id]/vitrin/paketler/page.tsx')).toContain('kaç hak kazanacağınız (ya da hiç hak olmadığı)');
   });
 
   it('the lead action posts the previewed cost and maps the 402', () => {

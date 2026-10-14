@@ -67,14 +67,15 @@ export function PriceField({
 
 /**
  * SHOWCASE-ALLOWANCE-001 — how many free vitrin offers one run bought with
- * the package carries. 1–50, the API's and the database's range. Stated as
+ * the package carries. 0–50, the API's and the database's range; 0
+ * (SHOWCASE-ALLOWANCE-003) is a package with no free offer at all. Stated as
  * "later purchases only" where it is set, because every sale snapshots it: a
  * right or a run already sold keeps the number its buyer was shown.
  */
-export const FREE_OFFER_COUNT_MIN = 1;
+export const FREE_OFFER_COUNT_MIN = 0;
 export const FREE_OFFER_COUNT_MAX = 50;
 export const FREE_OFFER_COUNT_HELP =
-  'Bu paketle alınan her yayın döneminde, karttan gelen doğrudan taleplere verilebilecek ücretsiz teklif sayısı (1–50). Haklar bitince teklifler kategori kredi maliyetiyle ücretlendirilir. Değişiklik yalnız sonraki satın almaları etkiler; satılmış hak ve yayınlar kendi sayısını korur.';
+  'Bu paketle alınan her yayın döneminde, karttan gelen doğrudan taleplere verilebilecek ücretsiz teklif sayısı (0–50; 0 = ücretsiz teklif hakkı yok, tüm teklifler ücretli). Haklar bitince teklifler kategori kredi maliyetiyle ücretlendirilir. Değişiklik yalnız sonraki satın almaları etkiler; satılmış hak ve yayınlar kendi sayısını korur.';
 
 export function FreeOfferCountField({ defaultValue, className }: { defaultValue: number; className?: string }) {
   return (

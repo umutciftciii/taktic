@@ -3,6 +3,7 @@ import { formatDateTime, type ShowcaseOfferAllowance } from '../../../../lib/api
 import { DataTable, type DataColumn } from '../../../../components/data-table';
 import { KeyValueList } from '../../../../components/key-value-list';
 import { SectionCard } from '../../../../components/section-card';
+import { NO_FREE_OFFERS_TEXT } from '../../../../lib/showcase-free-offers';
 
 const ALLOWANCE_USAGE_COLUMNS: DataColumn[] = [
   { key: 'ordinal', label: 'Hak' },
@@ -102,6 +103,11 @@ export function PlacementAllowanceSection({
             </DataTable>
           ) : null}
         </>
+      ) : packageFreeOfferCount === 0 ? (
+        <p className="muted" style={{ padding: '12px 16px', margin: 0 }} data-testid="placement-allowance-none">
+          {NO_FREE_OFFERS_TEXT}: bu yayın dönemi 0 ücretsiz teklifle satıldı; hak tanımlanmadı ve karttan gelen
+          taleplere verilen teklifler kategori kredi maliyetiyle ücretlendirilir.
+        </p>
       ) : (
         <p className="muted" style={{ padding: '12px 16px', margin: 0 }} data-testid="placement-allowance-none">
           Bu yerleşim ücretsiz teklif hakkı sisteminden önce sona erdi; hak tanımlanmadı.

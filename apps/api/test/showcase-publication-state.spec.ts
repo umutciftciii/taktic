@@ -273,6 +273,7 @@ describe('the state one card is in', () => {
         'hasPendingRevision',
         'hasRunBefore',
         'leadCount',
+        'liveFreeOfferCount',
         'needsPackage',
         'packageName',
         'state',

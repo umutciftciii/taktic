@@ -53,6 +53,20 @@ are in [docs/release.md](docs/release.md).
   `scripts/ops/showcase-allowance-001-consistency.sql`. See
   `docs/showcase-allowance-001-package-free-offers.md`.
 
+- SHOWCASE-ALLOWANCE-003: a vitrin package can carry no free offer
+  (`freeOfferCount` 0–50, default still 3). A run sold with 0 is born without
+  an `OfferAllowanceGrant` (the grant's positive-quota CHECK is unchanged), so
+  every offer on its leads goes through the normal resolver and is charged the
+  category's credits. 0 travels the existing snapshot chain, so purchases,
+  rights, runs, grants and usages sold before an edit keep what they were
+  sold. Admin and provider screens say "Ücretsiz teklif hakkı yok"; the
+  provider lead and publication responses carry the run's sold count
+  (`freeOfferCount`, `liveFreeOfferCount`). Migration 102 → 103 (constraint
+  widening only, no row written). The CAMPAIGN-ENTITLEMENT-001 consistency
+  check no longer flags a live zero run as missing its grant, and the
+  SHOWCASE-ALLOWANCE-001 check flags a zero run that has one. See
+  `docs/showcase-allowance-003-zero-free-offers.md`.
+
 ### Changed
 
 - CAMPAIGN-ENTITLEMENT-001: answering a direct vitrin lead is no longer

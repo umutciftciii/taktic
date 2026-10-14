@@ -16,6 +16,7 @@ import { RouteDialog } from '../../../components/route-dialog';
 import { createShowcasePackageAction } from './actions';
 import { ShowcasePackageCreateSubmit } from './showcase-package-gates';
 import { FreeOfferCountField, PriceField, showcasePackageErrorText, SORT_ORDER_HELP } from './showcase-package-fields';
+import { NO_FREE_OFFERS_TEXT } from '../../../lib/showcase-free-offers';
 
 type PackagesPageProps = {
   searchParams: Promise<{ paket?: string; error?: string; created?: string }>;
@@ -194,7 +195,7 @@ export default async function ShowcasePackagesPage({ searchParams }: PackagesPag
                 <td>{pkg.durationDays} gün</td>
                 <td>{pkg.activationWindowDays} gün</td>
                 <td className="is-num" data-testid="showcase-package-free-offers-cell">
-                  {pkg.freeOfferCount}
+                  {pkg.freeOfferCount === 0 ? NO_FREE_OFFERS_TEXT : pkg.freeOfferCount}
                 </td>
                 <td>{pkg.allowedCardKind ? SHOWCASE_CARD_KIND_LABELS[pkg.allowedCardKind] : 'Her ikisi'}</td>
                 <td>{pkg.maxAreas === null ? 'Tümü' : `En fazla ${pkg.maxAreas}`}</td>

@@ -6,6 +6,7 @@ import type { ShowcasePackage, ShowcasePackageTerms } from '../../../../../lib/a
 // `lib/api` reads `next/headers`, which a client bundle cannot carry.
 import { formatPrice } from '../../../../../lib/formatters';
 import { startShowcasePackageCheckoutAction } from '../actions';
+import { freeOfferCountText, NO_FREE_OFFERS_TEXT } from '../../../../../lib/showcase-free-offers';
 
 /**
  * Pick a package, agree to the price responsibility, pay. One form.
@@ -69,7 +70,13 @@ export function PackagePicker({
                 {pkg.durationDays} gün yayın{pkg.description ? ` · ${pkg.description}` : ''}
               </p>
               <p className="vitrin-pkg-meta" data-testid="showcase-package-free-offers">
-                <strong>{pkg.freeOfferCount} ücretsiz teklif hakkı</strong> · yayın dönemi boyunca vitrin talepleriniz için
+                {pkg.freeOfferCount === 0 ? (
+                  <strong>{NO_FREE_OFFERS_TEXT}</strong>
+                ) : (
+                  <>
+                    <strong>{freeOfferCountText(pkg.freeOfferCount)}</strong> · yayın dönemi boyunca vitrin talepleriniz için
+                  </>
+                )}
               </p>
             </label>
           ))}

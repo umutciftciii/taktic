@@ -152,6 +152,26 @@ test.describe('vitrin: paket fiyatı Türk lirası olarak girilir', () => {
         admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-free-offers-cell'),
       ).toHaveText('6');
 
+      // ── 0 turns the free offers off (SHOWCASE-ALLOWANCE-003) ────────────
+      await admin.gotoAdmin(screen);
+      await editForm.getByTestId('showcase-package-free-offer-count').fill('0');
+      await settleActionRedirect(admin.page, () =>
+        confirmThrough(editForm.getByRole('button', { name: 'Kaydet', exact: true }), 'Evet, kaydet', async (dialog) => {
+          await expect(dialog.getByTestId('showcase-package-commercial-changes')).toContainText(
+            '6 teklif → Ücretsiz teklif hakkı yok',
+          );
+        }),
+      );
+      await expect(admin.page).toHaveURL(/saved=1/);
+      await assertNoErrorScreen(admin.page);
+      expect((await prisma().showcasePackage.findUniqueOrThrow({ where: { slug } })).freeOfferCount).toBe(0);
+      await expect(admin.page.getByTestId('showcase-package-fact-free-offers')).toContainText('Ücretsiz teklif hakkı yok');
+      await expect(admin.page.getByTestId('showcase-package-promise-free-offers')).toContainText('Ücretsiz teklif hakkı yok');
+      await admin.gotoAdmin('/showcase/packages');
+      await expect(
+        admin.page.locator('tr').filter({ hasText: name }).getByTestId('showcase-package-free-offers-cell'),
+      ).toHaveText('Ücretsiz teklif hakkı yok');
+
       // ── Zero is refused by the server action, with a sentence ──────────
       await admin.gotoAdmin(screen);
       // "0" passes the browser's pattern (it is digits) and fails the rule.

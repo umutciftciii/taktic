@@ -178,7 +178,7 @@ function offer(providerId: string, cookie: string, requestId: string, body: Reco
 // ── the catalogue ────────────────────────────────────────────────────────────
 
 describe('the package setting', () => {
-  it('defaults to 3, takes 1..50 on create and edit, and records the change in the audit trail', async () => {
+  it('defaults to 3, takes 0..50 on create and edit, and records the change in the audit trail', async () => {
     const cookie = await operator();
     const base = { priceAmount: 49_900, durationDays: 30 };
 
@@ -196,7 +196,7 @@ describe('the package setting', () => {
       .expect(201);
     expect(five.body.freeOfferCount).toBe(5);
 
-    for (const invalid of [0, -1, 51, 2.5, '4', null]) {
+    for (const invalid of [-1, 51, 2.5, '4', null]) {
       const refused = await request(ctx.server)
         .post('/admin/showcase/packages')
         .set('Cookie', cookie)
@@ -230,9 +230,9 @@ describe('the package setting', () => {
     ]);
   });
 
-  it('the database refuses a count outside 1..50 whatever the writer', async () => {
+  it('the database refuses a count outside 0..50 whatever the writer', async () => {
     const pkg = await createShowcasePackage(ctx.prisma);
-    for (const invalid of [0, 51]) {
+    for (const invalid of [-1, 51]) {
       await expect(
         ctx.prisma.showcasePackage.update({ where: { id: pkg.id }, data: { freeOfferCount: invalid } }),
       ).rejects.toThrow(/ShowcasePackage_free_offer_count_range/);
@@ -353,7 +353,7 @@ describe('the snapshot chain', () => {
     });
     expect(await ctx.prisma.packagePurchase.count()).toBe(0);
 
-    for (const invalid of [0, 51, '5', null]) {
+    for (const invalid of [-1, 51, '5', null]) {
       expect((await checkout(profile.id, cookie, { showcasePackageId: pkg.id, expectedFreeOfferCount: invalid })).status).toBe(400);
     }
 

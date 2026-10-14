@@ -97,6 +97,10 @@ describe('vitrin package: what is commercial', () => {
     expect(showcasePackageTermsChanges(stored, { ...stored, freeOfferCount: 1 })).toEqual([
       { key: 'freeOffers', label: 'Ücretsiz teklif hakkı', from: '3 teklif', to: '1 teklif' },
     ]);
+    // SHOWCASE-ALLOWANCE-003: 0 is named, never "0 teklif".
+    expect(showcasePackageTermsChanges(stored, { ...stored, freeOfferCount: 0 })).toEqual([
+      { key: 'freeOffers', label: 'Ücretsiz teklif hakkı', from: '3 teklif', to: 'Ücretsiz teklif hakkı yok' },
+    ]);
   });
 
   it('reads the form the way the action does', () => {

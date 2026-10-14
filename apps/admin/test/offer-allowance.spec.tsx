@@ -77,6 +77,12 @@ describe('placement allowance section', () => {
     expect(noLink).toContain('TK-3');
   });
 
+  it('a run sold with 0 free offers (SHOWCASE-ALLOWANCE-003) says there is none, not that it predates allowances', () => {
+    const html = renderToStaticMarkup(<PlacementAllowanceSection allowance={null} canOpenOffer packageFreeOfferCount={0} />);
+    expect(html).toContain('Ücretsiz teklif hakkı yok');
+    expect(html).not.toContain('sisteminden önce sona erdi');
+  });
+
   it('a run without a grant says so instead of inventing zeros', () => {
     const html = renderToStaticMarkup(<PlacementAllowanceSection allowance={null} canOpenOffer packageFreeOfferCount={3} />);
     expect(html).toContain('placement-allowance-none');

@@ -841,7 +841,11 @@ export class ProviderShowcaseCardsService {
     // After the commit, and only for a run this call actually started: a mail
     // about a placement that was rolled back would announce nothing.
     if (activatedPlacementId) {
-      logShowcaseAllowanceGranted(activatedPlacementId, activatedQuotaTotal);
+      // A run sold with 0 free offers was born without a grant
+      // (SHOWCASE-ALLOWANCE-003): there is nothing to announce.
+      if (activatedQuotaTotal > 0) {
+        logShowcaseAllowanceGranted(activatedPlacementId, activatedQuotaTotal);
+      }
       await this.mail.sendShowcasePlacementActivated(activatedPlacementId);
     }
 
