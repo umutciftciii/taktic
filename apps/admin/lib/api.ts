@@ -1896,6 +1896,7 @@ export function notificationTemplateLabel(template: string): string {
     'showcase-placement-ending-7d': 'Vitrin: yayına 7 gün kaldı',
     'showcase-placement-ending-3d': 'Vitrin: yayına 3 gün kaldı',
     'showcase-placement-expired': 'Vitrin: yayın sona erdi',
+    'showcase-allowance-voided': 'Vitrin: ücretsiz teklif hakkı iptal edildi',
     // Provider reviews: the invitation, the provider's copy, the support
     // notice for a report, and the customer's removal notice.
     'review-invitation': 'Değerlendirme daveti',
@@ -1968,6 +1969,8 @@ export type OfferAllowanceCohortFigures = {
   remainingUsable: number;
   remainingUsableViaOpenLeads: number;
   remainingUnusable: number;
+  /** SHOWCASE-ALLOWANCE-004 — the part of `remainingUnusable` a super admin voided. */
+  remainingVoided: number;
 };
 
 export type OfferAllowanceUsageFigures = {
@@ -3775,6 +3778,17 @@ export type ShowcasePlacement = {
   offerAllowance?: ShowcaseOfferAllowance | null;
 };
 
+/** SHOWCASE-ALLOWANCE-004 — `OfferAllowanceVoidReason`, the closed set of void reasons. */
+export type OfferAllowanceVoidReason = 'FRAUD' | 'ABUSE' | 'TERMS_VIOLATION' | 'OPERATOR_ERROR' | 'OTHER';
+
+export const OFFER_ALLOWANCE_VOID_REASON_LABELS: Record<OfferAllowanceVoidReason, string> = {
+  FRAUD: 'Sahte veya kurgu talep',
+  ABUSE: 'Kötüye kullanım',
+  TERMS_VIOLATION: 'Vitrin paket koşullarının ihlali',
+  OPERATOR_ERROR: 'Operatör veya sistem hatası',
+  OTHER: 'Diğer',
+};
+
 export type ShowcaseOfferAllowance = {
   id: string;
   status: 'ACTIVE' | 'VOID';
@@ -3787,8 +3801,19 @@ export type ShowcaseOfferAllowance = {
   subsidyCredits: number;
   validFrom: string;
   grantedAt: string;
+  /**
+   * SHOWCASE-ALLOWANCE-004 — the run's leads still waiting for their owner's
+   * free answer. The void dialog shows it and posts it back as an expectation.
+   */
+  openLeads: number;
+  /** SHOWCASE-ALLOWANCE-004 — the void, as recorded; all null on an ACTIVE grant. */
   voidedAt: string | null;
-  voidReason: string | null;
+  voidReason: OfferAllowanceVoidReason | null;
+  /** Internal note. Staff-only; never mailed and never shown to the provider. */
+  voidNote: string | null;
+  voidedBy: { id: string; name: string | null } | null;
+  /** The slots the void took away (0 on an ACTIVE grant). */
+  voidedRemaining: number;
   usages?: Array<{
     ordinal: number;
     offerId: string;
@@ -4428,6 +4453,10 @@ export function adminPermissionLabel(permission: AdminPermission): {
   // REL-002 Faz 5: Round 4+ from MATCH_REVIEW, reserved for a super admin.
   if (permission === 'MATCH_REVIEW_OPEN_ROUND') {
     return { area: 'Talepler', action: 'eşleşme incelemesinden yeni tur açma (yalnız süper yönetici)' };
+  }
+  // SHOWCASE-ALLOWANCE-004: voiding a run's free offers, reserved for a super admin.
+  if (permission === 'SHOWCASE_ALLOWANCE_VOID') {
+    return { area: 'Vitrin', action: 'ücretsiz teklif hakkını iptal etme (yalnız süper yönetici)' };
   }
 
   const parts = permission.split('_');

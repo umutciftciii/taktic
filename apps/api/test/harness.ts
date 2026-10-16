@@ -1442,6 +1442,25 @@ export const INDEX_ELIGIBLE_SCOPE = {
  * permission produces the other case the guards must handle — a staff account
  * that exists, can sign in, and cannot open the panel.
  */
+/**
+ * SHOWCASE-ALLOWANCE-004 — rewrites the quota facts of a grant that the
+ * `OfferAllowanceGrant_guard` trigger makes immutable, with triggers off for
+ * this one statement. A fixture for the shapes only the 101 migration's
+ * backfill could produce (a rollout-era grant counting legacy answers); no
+ * application path can do this, which is the point of the trigger.
+ */
+export async function rewriteGrantFixture(
+  prisma: PrismaClient,
+  placementId: string,
+  data: { quotaTotal: number; quotaUsed: number },
+) {
+  const [, grant] = await prisma.$transaction([
+    prisma.$executeRawUnsafe('SET LOCAL session_replication_role = replica'),
+    prisma.offerAllowanceGrant.update({ where: { showcasePlacementId: placementId }, data }),
+  ]);
+  return grant;
+}
+
 export async function createAdminWithPermissions(
   prisma: PrismaClient,
   permissions: AdminPermission[],

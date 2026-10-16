@@ -67,6 +67,7 @@ import {
   ShowcaseAllowanceUnavailable,
 } from '../entitlements/entitlement-resolver.service';
 import { logOfferAllowanceEvent } from '../offer-allowances/offer-allowance-events';
+import { isShowcaseAllowanceVoided } from '../offer-allowances/offer-allowance-ledger';
 import { OperationsSettingsService } from '../operations-settings/operations-settings.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -1660,6 +1661,23 @@ export class ProvidersService implements OnModuleInit {
            * package. An unlimited period changes what an offer costs, never who
            * may send one.
            */
+          /*
+           * SHOWCASE-ALLOWANCE-004: the words of a direct-lead 409. The same
+           * refusal either way — the price moved — but a provider whose free
+           * offers a super admin voided is told that, not that they ran out.
+           */
+          const directLeadCostChanged = async (expected: number | null, actual: number) => {
+            const voided = await isShowcaseAllowanceVoided(tx, {
+              providerId,
+              directShowcaseProviderId: request.directShowcaseProviderId,
+              showcaseLeadId: request.showcaseLeadId,
+              roundSource: request.currentRound?.source ?? null,
+            });
+            return voided
+              ? creditCostChanged(expected, actual, DIRECT_LEAD_ALLOWANCE_VOID_MESSAGE, { allowanceVoided: true })
+              : creditCostChanged(expected, actual, DIRECT_LEAD_COST_CHANGED_MESSAGE);
+          };
+
           let decision;
           try {
             decision = await this.entitlements.resolve(tx, {
@@ -1682,7 +1700,7 @@ export class ProvidersService implements OnModuleInit {
               error.getStatus() === HttpStatus.PAYMENT_REQUIRED &&
               payload.expectedCreditCost !== actualCreditCost
             ) {
-              throw creditCostChanged(payload.expectedCreditCost, actualCreditCost, DIRECT_LEAD_COST_CHANGED_MESSAGE);
+              throw await directLeadCostChanged(payload.expectedCreditCost, actualCreditCost);
             }
             throw error;
           }
@@ -1702,11 +1720,9 @@ export class ProvidersService implements OnModuleInit {
               ? !freeAllowanceOffer
               : payload.expectedCreditCost !== decision.creditCost)
           ) {
-            throw creditCostChanged(
-              payload.expectedCreditCost,
-              decision.creditCost,
-              freeAllowanceOffer ? undefined : DIRECT_LEAD_COST_CHANGED_MESSAGE,
-            );
+            throw freeAllowanceOffer
+              ? creditCostChanged(payload.expectedCreditCost, decision.creditCost)
+              : await directLeadCostChanged(payload.expectedCreditCost, decision.creditCost);
           }
 
           const offerNumber = await this.numbering.generateDisplayNumber(
@@ -1817,9 +1833,10 @@ export class ProvidersService implements OnModuleInit {
             });
           } catch (error) {
             if (error instanceof ShowcaseAllowanceUnavailable) {
-              // The slot went between the read and the claim: never free and
-              // never quietly charged — the price changed.
-              throw creditCostChanged(payload.expectedCreditCost, actualCreditCost, DIRECT_LEAD_COST_CHANGED_MESSAGE);
+              // The slot went between the read and the claim — spent by a
+              // concurrent offer, or the grant voided: never free and never
+              // quietly charged — the price changed.
+              throw await directLeadCostChanged(payload.expectedCreditCost, actualCreditCost);
             }
             throw error;
           }
@@ -2451,6 +2468,7 @@ function creditCostChanged(
   expectedCreditCost: number | null,
   actualCreditCost: number,
   message = 'Bu kategorinin teklif maliyeti güncellendi.',
+  extra: { allowanceVoided?: true } = {},
 ) {
   return new ConflictException({
     statusCode: HttpStatus.CONFLICT,
@@ -2458,12 +2476,20 @@ function creditCostChanged(
     message,
     expectedCreditCost,
     actualCreditCost,
+    ...extra,
   });
 }
 
 /** The direct-lead wording of the same 409: the price moved because the free slots did. */
 const DIRECT_LEAD_COST_CHANGED_MESSAGE =
   'Bu teklifin maliyeti değişti: ücretsiz vitrin teklif hakkınız kalmadı. Güncel maliyeti kontrol edip yeniden gönderin.';
+
+/**
+ * SHOWCASE-ALLOWANCE-004 — the same 409 when the run's free offers were voided
+ * by the platform rather than spent. Says what happened, never why.
+ */
+const DIRECT_LEAD_ALLOWANCE_VOID_MESSAGE =
+  'Bu teklifin maliyeti değişti: bu vitrin yayınının ücretsiz teklif hakkı iptal edildi. Güncel maliyeti kontrol edip yeniden gönderin.';
 
 const providerInclude = {
   user: {

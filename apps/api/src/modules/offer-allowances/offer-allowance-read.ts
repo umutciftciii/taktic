@@ -19,6 +19,8 @@ export const adminAllowanceGrantSelect = {
     grantedAt: true,
     voidedAt: true,
     voidReason: true,
+    voidNote: true,
+    voidedBy: { select: { id: true, name: true } },
     usages: {
       orderBy: { ordinal: 'asc' },
       select: {
@@ -35,7 +37,18 @@ export const adminAllowanceGrantSelect = {
 
 type AdminGrantRow = Prisma.OfferAllowanceGrantGetPayload<typeof adminAllowanceGrantSelect>;
 
-export function toAdminOfferAllowance(grant: AdminGrantRow | null, options: { offers: boolean }) {
+export function toAdminOfferAllowance(
+  grant: AdminGrantRow | null,
+  options: {
+    offers: boolean;
+    /**
+     * SHOWCASE-ALLOWANCE-004 — the run's leads still waiting for their owner's
+     * free answer ({@link import('./offer-allowance-ledger').countLeadsAwaitingFreeAnswer}),
+     * which the void dialog shows and posts back as an expectation.
+     */
+    openLeads: number;
+  },
+) {
   if (!grant) {
     // A run that ended before allowances existed and was not live at rollout.
     return null;
@@ -56,8 +69,18 @@ export function toAdminOfferAllowance(grant: AdminGrantRow | null, options: { of
     subsidyCredits: grant.usages.reduce((sum, usage) => sum + usage.listCreditCostSnapshot, 0),
     validFrom: grant.validFrom,
     grantedAt: grant.grantedAt,
+    openLeads: options.openLeads,
+    /**
+     * SHOWCASE-ALLOWANCE-004 — the void, as recorded: when, the reason code,
+     * the internal note and the super admin who did it. All null on an ACTIVE
+     * grant. Staff-only: no provider projection carries any of the four.
+     */
     voidedAt: grant.voidedAt,
     voidReason: grant.voidReason,
+    voidNote: grant.voidNote,
+    voidedBy: grant.voidedBy,
+    /** The slots the void took away: what was left when it was written (frozen since). */
+    voidedRemaining: grant.status === 'VOID' ? grant.quotaTotal - grant.quotaUsed : 0,
     ...(options.offers
       ? {
           usages: grant.usages.map((usage) => ({

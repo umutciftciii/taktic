@@ -96,7 +96,7 @@ export type ShowcaseCardPublication = {
    * SHOWCASE-ALLOWANCE-001 — the current run's free offer allowance, counts
    * only. Null when nothing is on the air or the run carries no grant.
    */
-  freeOffers: { total: number; used: number; remaining: number } | null;
+  freeOffers: { total: number; used: number; remaining: number; status: OfferAllowanceStatus } | null;
   /**
    * SHOWCASE-ALLOWANCE-003 — the free offers the current run was sold with;
    * 0 is a run with no free offer (and no grant). Null when nothing is on the air.
@@ -222,14 +222,24 @@ export class ShowcasePublicationService {
         packageName: live?.packageNameSnapshot ?? validRight?.packageName ?? null,
         areaLabels: (live?.shelves ?? []).map((shelf) => describeArea(shelf)),
         leadCount: live?._count.leads ?? 0,
-        freeOffers:
-          live?.offerAllowanceGrant && live.offerAllowanceGrant.status === OfferAllowanceStatus.ACTIVE
+        // SHOWCASE-ALLOWANCE-004: a VOID grant is reported as VOID with
+        // nothing remaining — the panel says the free offers were cancelled —
+        // never as "no allowance", and never with the reason or the note.
+        freeOffers: live?.offerAllowanceGrant
+          ? live.offerAllowanceGrant.status === OfferAllowanceStatus.ACTIVE
             ? {
                 total: live.offerAllowanceGrant.quotaTotal,
                 used: live.offerAllowanceGrant.quotaUsed,
                 remaining: live.offerAllowanceGrant.quotaTotal - live.offerAllowanceGrant.quotaUsed,
+                status: OfferAllowanceStatus.ACTIVE,
               }
-            : null,
+            : {
+                total: live.offerAllowanceGrant.quotaTotal,
+                used: live.offerAllowanceGrant.quotaUsed,
+                remaining: 0,
+                status: OfferAllowanceStatus.VOID,
+              }
+          : null,
         liveFreeOfferCount: live ? live.freeOfferCountSnapshot : null,
         hasPendingRevision,
         hasRunBefore: runs.length > 0,

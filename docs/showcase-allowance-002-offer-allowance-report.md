@@ -49,6 +49,7 @@ Her hak tam olarak şöyle bölünür:
     güncel round DIRECT_SHOWCASE olmalı. Bu, harcama yolunun kendi bağıdır. Bu ikinci parça
     `remainingUsableViaOpenLeads` olarak ayrıca verilir.
 - **remainingUnusable:** geri kalan; VOID hakkın kalanının tamamı da buraya girer.
+- **remainingVoided** (SHOWCASE-ALLOWANCE-004): `remainingUnusable`'ın süper yönetici tarafından iptal edilen kısmı; toplama ayrıca eklenmez.
 - **0 haklı yayın:** grant'siz doğar. `integrity.zeroAllowancePlacements` alanında beklenen
   durum olarak sayılır, eksik kayıt sayılmaz.
 - **Yerleşmemiş haklar:** tanımlanan toplama eklenmez. Kategori filtresinde `null` döner,

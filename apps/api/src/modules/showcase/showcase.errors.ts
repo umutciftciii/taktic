@@ -755,3 +755,82 @@ export function showcaseRevisionNeedsPublication() {
     message: 'Bu kartı düzenlemeden önce bir vitrin hakkıyla yayına almanız gerekir.',
   });
 }
+
+// ────────────────────────────────────────────────────────────────────────────
+// SHOWCASE-ALLOWANCE-004: voiding a run's remaining free offers
+// ────────────────────────────────────────────────────────────────────────────
+
+export const OFFER_ALLOWANCE_NOT_FOUND_CODE = 'OFFER_ALLOWANCE_NOT_FOUND';
+export const OFFER_ALLOWANCE_ZERO_PACKAGE_CODE = 'OFFER_ALLOWANCE_ZERO_PACKAGE';
+export const OFFER_ALLOWANCE_ALREADY_VOID_CODE = 'OFFER_ALLOWANCE_ALREADY_VOID';
+export const OFFER_ALLOWANCE_NOTHING_TO_VOID_CODE = 'OFFER_ALLOWANCE_NOTHING_TO_VOID';
+export const OFFER_ALLOWANCE_CHANGED_CODE = 'OFFER_ALLOWANCE_CHANGED';
+export const OFFER_ALLOWANCE_VOID_NOTE_REQUIRED_CODE = 'OFFER_ALLOWANCE_VOID_NOTE_REQUIRED';
+
+/**
+ * The run has no grant at all, and was not sold without one: it ended before
+ * allowances existed. Nothing to void, and nothing invented to void.
+ */
+export function offerAllowanceNotFound() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALLOWANCE_NOT_FOUND_CODE,
+    message: 'Bu yerleşimin ücretsiz teklif hakkı kaydı yok; iptal edilecek hak bulunmuyor.',
+  });
+}
+
+/** The run was sold with 0 free offers (SHOWCASE-ALLOWANCE-003): no grant was ever born. */
+export function offerAllowanceZeroPackage() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALLOWANCE_ZERO_PACKAGE_CODE,
+    message: 'Bu yerleşim 0 ücretsiz teklifle satıldı; iptal edilecek hak bulunmuyor.',
+  });
+}
+
+/** VOID is final: a second void changes nothing and says so. */
+export function offerAllowanceAlreadyVoid() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALLOWANCE_ALREADY_VOID_CODE,
+    message: 'Bu yerleşimin ücretsiz teklif hakkı zaten iptal edilmiş.',
+  });
+}
+
+/** Every slot was already spent: a void would take nothing away. */
+export function offerAllowanceNothingToVoid() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALLOWANCE_NOTHING_TO_VOID_CODE,
+    message: 'Bu yerleşimin kullanılmamış ücretsiz teklif hakkı kalmadı; iptal edilecek hak yok.',
+  });
+}
+
+/**
+ * What the operator confirmed is no longer what is true: a slot was spent, or
+ * a lead arrived or was resolved, between the dialog and the request. The
+ * current figures travel with the refusal so the screen can show them.
+ */
+export function offerAllowanceChanged(current: { quotaTotal: number; quotaUsed: number; openLeads: number }) {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALLOWANCE_CHANGED_CODE,
+    message: 'Ücretsiz teklif hakkı onaydan sonra değişti; güncel değerleri kontrol edip yeniden onaylayın.',
+    current,
+  });
+}
+
+/** The internal note is required, judged trimmed. */
+export function offerAllowanceVoidNoteRequired(minLength: number) {
+  return new BadRequestException({
+    statusCode: HttpStatus.BAD_REQUEST,
+    error: 'Bad Request',
+    code: OFFER_ALLOWANCE_VOID_NOTE_REQUIRED_CODE,
+    message: `İptal açıklaması zorunludur (en az ${minLength} karakter).`,
+  });
+}

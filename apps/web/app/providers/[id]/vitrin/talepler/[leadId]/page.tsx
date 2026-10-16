@@ -111,6 +111,11 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
 
       {error && isOfferScheduleErrorCode(error) ? (
         <OfferScheduleNotice code={error} />
+      ) : error === 'CREDIT_COST_CHANGED_ALLOWANCE_VOID' ? (
+        <div className="pdash-notice pdash-notice-error" role="alert" id="lead-offer-error" data-testid="lead-offer-cost-changed">
+          Teklif gönderilmedi: bu teklifin maliyeti değişti (bu vitrin yayınının ücretsiz teklif hakkı iptal
+          edildi). Güncel maliyet aşağıda yazıyor; kontrol edip yeniden gönderin. Bakiyenizden kredi düşülmedi.
+        </div>
       ) : error === 'CREDIT_COST_CHANGED' ? (
         <div className="pdash-notice pdash-notice-error" role="alert" id="lead-offer-error" data-testid="lead-offer-cost-changed">
           Teklif gönderilmedi: bu teklifin maliyeti değişti (ücretsiz vitrin hakkınız başka bir teklifte
@@ -297,7 +302,9 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
 
           <p className="pdash-form-hint" data-testid="lead-offer-allowance-hint">
             Bu talep vitrin kartınızdan geldi ve yalnız size iletildi.{' '}
-            {lead.freeOfferCount === 0 && !costPreview?.allowance
+            {costPreview?.allowanceVoided
+              ? 'Bu vitrin yayın döneminin kullanılmamış ücretsiz teklif hakları platform tarafından iptal edildi; teklifler kategori kredi maliyetinden ücretlendirilir.'
+              : lead.freeOfferCount === 0 && !costPreview?.allowance
               ? `${NO_FREE_OFFERS_TEXT}: bu vitrin yayın dönemi ücretsiz teklif içermez; teklifler kategori kredi maliyetinden ücretlendirilir.`
               : `${
                   costPreview?.allowance

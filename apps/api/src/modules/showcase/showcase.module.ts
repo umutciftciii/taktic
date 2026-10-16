@@ -13,6 +13,7 @@ import { UploadsModule } from '../uploads/uploads.module';
 import { AdminShowcaseController } from './admin-showcase.controller';
 import { AdminShowcasePlacementsController } from './admin-showcase-placements.controller';
 import { AdminShowcasePlacementsService } from './admin-showcase-placements.service';
+import { ShowcaseAllowanceVoidService } from './showcase-allowance-void.service';
 import { AdminShowcaseService } from './admin-showcase.service';
 import { ProviderShowcaseCardsController } from './provider-showcase-cards.controller';
 import { ProviderShowcaseCardsService } from './provider-showcase-cards.service';
@@ -128,6 +129,7 @@ import { ShowcaseUploadsController } from './showcase-uploads.controller';
     ProviderShowcaseCardsService,
     AdminShowcaseService,
     AdminShowcasePlacementsService,
+    ShowcaseAllowanceVoidService,
     ShowcasePackagesService,
     ShowcasePriceTermsService,
     ShowcasePlacementReadService,

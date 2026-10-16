@@ -27,6 +27,8 @@ import { isValidIsoDate, parseIstanbulDayEnd, parseIstanbulDayStart } from './fi
  *       current round DIRECT_SHOWCASE). `remainingUsableViaOpenLeads` is that
  *       second part;
  *     - `remainingUnusable`: the rest, and the whole remainder of a VOID grant.
+ *       `remainingVoided` is that last part on its own (SHOWCASE-ALLOWANCE-004):
+ *       a subset of `remainingUnusable`, never a fifth term of the sum.
  * - **usage** — the usage rows consumed in the window (`consumedAt`), their
  *   category credit (`listCreditCostSnapshot`, the price at the moment of use)
  *   and its indicative TL value.
@@ -78,6 +80,13 @@ export type CohortFigures = {
   remainingUsable: number;
   remainingUsableViaOpenLeads: number;
   remainingUnusable: number;
+  /**
+   * SHOWCASE-ALLOWANCE-004 — the part of `remainingUnusable` a super admin
+   * voided (the whole remainder of every VOID grant). Inside the sum, not
+   * beside it: `defined = usedTracked + usedLegacy + remainingUsable +
+   * remainingUnusable` still holds exactly.
+   */
+  remainingVoided: number;
 };
 
 export type UsageFigures = {
@@ -112,6 +121,7 @@ function toCohort(row: Row | undefined): CohortFigures {
     remainingUsable: num(row?.remainingUsable),
     remainingUsableViaOpenLeads: num(row?.remainingUsableViaOpenLeads),
     remainingUnusable: num(row?.remainingUnusable),
+    remainingVoided: num(row?.remainingVoided),
   };
 }
 
@@ -335,7 +345,8 @@ const COHORT_SUMS = Prisma.sql`
   coalesce(sum("legacy"), 0)::int AS "usedLegacy",
   coalesce(sum("usable"), 0)::int AS "remainingUsable",
   coalesce(sum("usableViaOpenLeads"), 0)::int AS "remainingUsableViaOpenLeads",
-  coalesce(sum("remaining" - "usable"), 0)::int AS "remainingUnusable"`;
+  coalesce(sum("remaining" - "usable"), 0)::int AS "remainingUnusable",
+  coalesce(sum("remaining") FILTER (WHERE "status" = 'VOID'), 0)::int AS "remainingVoided"`;
 
 const USAGE_SUMS = Prisma.sql`
   count(*)::int AS "usages",
@@ -517,7 +528,7 @@ function dimensionSql(key: 'packageId' | 'categoryId' | 'providerId', withUnplac
 SELECT k."key",
        ${DIMENSION_NAME[key]} AS "name",
        coalesce(c."grants", 0) AS "grants", c."defined", c."usedTracked", c."usedLegacy",
-       c."remainingUsable", c."remainingUsableViaOpenLeads", c."remainingUnusable",
+       c."remainingUsable", c."remainingUsableViaOpenLeads", c."remainingUnusable", c."remainingVoided",
        coalesce(us."usages", 0) AS "usages", us."credits", us."valuedCredits", us."valueMinor"
        ${unplacedColumns}
   FROM (SELECT ${column} AS "key" FROM grant_rows UNION SELECT ${column} FROM usage_valued ${unplacedKeys}) k

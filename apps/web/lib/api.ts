@@ -2051,8 +2051,12 @@ export type ShowcaseCardPublication = {
   packageName: string | null;
   areaLabels: string[];
   leadCount: number;
-  /** The live run's free offer allowance (SHOWCASE-ALLOWANCE-001); null when nothing is on the air. */
-  freeOffers: { total: number; used: number; remaining: number } | null;
+  /**
+   * The live run's free offer allowance (SHOWCASE-ALLOWANCE-001); null when
+   * nothing is on the air. SHOWCASE-ALLOWANCE-004: `status: 'VOID'` (with
+   * `remaining: 0`) when the platform cancelled what was left.
+   */
+  freeOffers: { total: number; used: number; remaining: number; status: 'ACTIVE' | 'VOID' } | null;
   /** SHOWCASE-ALLOWANCE-003 — the live run's sold free offer count; 0 = none, null when nothing is on the air. */
   liveFreeOfferCount: number | null;
   hasPendingRevision: boolean;
@@ -2102,6 +2106,12 @@ export type OfferCostPreview = {
   creditCost: number;
   categoryCreditCost: number;
   allowance: { quotaTotal: number; quotaUsed: number; remaining: number } | null;
+  /**
+   * SHOWCASE-ALLOWANCE-004 — the lead's run had free offers and the platform
+   * cancelled what was left; `allowance` is then null and the offer costs
+   * the category price.
+   */
+  allowanceVoided: boolean;
 };
 
 export type ShowcaseProviderLead = {

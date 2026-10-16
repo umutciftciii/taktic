@@ -4,6 +4,7 @@ import { warnIfLegacySchedulerFlagSet } from '../../common/legacy-scheduler-flag
 import { readSchedulerCron } from '../../common/scheduler-cron';
 import { RequestPublishOutbox } from '../notifications/request-publish-outbox.service';
 import { PackageRefundNotificationOutbox } from '../notifications/package-refund-notification-outbox.service';
+import { ShowcaseAllowanceVoidOutbox } from '../notifications/showcase-allowance-void-outbox.service';
 import { RequestCancellationOutbox } from '../notifications/request-cancellation-outbox.service';
 import { ServiceIssueOutbox } from '../notifications/service-issue-outbox.service';
 import { ReviewInvitationOutbox } from '../notifications/review-invitation-outbox.service';
@@ -55,6 +56,8 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
     private readonly cancellationNotices: RequestCancellationOutbox,
     @Inject(ServiceIssueOutbox)
     private readonly serviceIssueNotices: ServiceIssueOutbox,
+    @Inject(ShowcaseAllowanceVoidOutbox)
+    private readonly allowanceVoidNotices: ShowcaseAllowanceVoidOutbox,
   ) {}
 
   onModuleInit() {
@@ -107,13 +110,15 @@ export class RequestLifecycleSchedulerService implements OnModuleInit {
       const cancellationNotices = await this.cancellationNotices.deliverPending({ limit });
       // And the service-issue notices (REL-002 Faz 3), on the same terms.
       const serviceIssueNotices = await this.serviceIssueNotices.deliverPending({ limit });
+      // And the free-offer void notices (SHOWCASE-ALLOWANCE-004), on the same terms.
+      const allowanceVoidNotices = await this.allowanceVoidNotices.deliverPending({ limit });
       const summary =
         `processed=${result.processed} expired=${result.expired} ` +
         `skipped=${result.skipped} failed=${result.failed} ` +
         `enqueued=${result.enqueued} notified=${result.notified} ` +
         `publishSent=${publish.sent} reviewInvitationsSent=${invitations.sent} ` +
         `packageRefundNoticesSent=${refundNotices.sent} cancellationNoticesSent=${cancellationNotices.sent} ` +
-        `serviceIssueNoticesSent=${serviceIssueNotices.sent}`;
+        `serviceIssueNoticesSent=${serviceIssueNotices.sent} allowanceVoidNoticesSent=${allowanceVoidNotices.sent}`;
       this.logger.log(`Request expiry summary ${summary}`);
       await run.succeed(summary);
     } catch (error) {

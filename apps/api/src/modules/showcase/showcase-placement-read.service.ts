@@ -4,6 +4,7 @@ import { describeArea } from '../../common/provider-service-area-scope';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed } from '../auth/embedded-permissions';
+import { countLeadsAwaitingFreeAnswer } from '../offer-allowances/offer-allowance-ledger';
 import { adminAllowanceGrantSelect, toAdminOfferAllowance } from '../offer-allowances/offer-allowance-read';
 import { showcasePlacementNotFound } from './showcase.errors';
 
@@ -112,6 +113,13 @@ export class ShowcasePlacementReadService {
       throw showcasePlacementNotFound();
     }
 
+    const openLeads = placement.offerAllowanceGrant
+      ? await countLeadsAwaitingFreeAnswer(this.prisma, {
+          placementId: placement.id,
+          providerId: placement.provider.id,
+        })
+      : 0;
+
     return {
       ...toPlacementDetail(placement),
       provider: placement.provider,
@@ -120,6 +128,7 @@ export class ShowcasePlacementReadService {
       // subsidy always; which offers spent it only with OFFERS_READ.
       offerAllowance: toAdminOfferAllowance(placement.offerAllowanceGrant, {
         offers: mayEmbed(viewer, AdminPermission.OFFERS_READ),
+        openLeads,
       }),
       // Null for a run that is not cancelled, and also for one cancelled
       // before API-HARDENING-001: that operator was never recorded, and the
@@ -226,7 +235,13 @@ function toPlacement(placement: PlacementRow) {
       ? {
           total: placement.offerAllowanceGrant.quotaTotal,
           used: placement.offerAllowanceGrant.quotaUsed,
-          remaining: placement.offerAllowanceGrant.quotaTotal - placement.offerAllowanceGrant.quotaUsed,
+          // SHOWCASE-ALLOWANCE-004: a VOID grant has nothing left to spend,
+          // whatever it had when it was voided (the admin projection keeps
+          // that figure as `voidedRemaining`).
+          remaining:
+            placement.offerAllowanceGrant.status === 'VOID'
+              ? 0
+              : placement.offerAllowanceGrant.quotaTotal - placement.offerAllowanceGrant.quotaUsed,
           status: placement.offerAllowanceGrant.status,
         }
       : null,

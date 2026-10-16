@@ -99,7 +99,12 @@ function errorCode(error: unknown): string {
   }
   if (error instanceof ApiError) {
     try {
-      const parsed = JSON.parse(error.body) as { code?: unknown };
+      const parsed = JSON.parse(error.body) as { code?: unknown; allowanceVoided?: unknown };
+      // SHOWCASE-ALLOWANCE-004: the same 409, but the free offers were
+      // cancelled by the platform rather than spent — a different sentence.
+      if (parsed.code === 'CREDIT_COST_CHANGED' && parsed.allowanceVoided === true) {
+        return 'CREDIT_COST_CHANGED_ALLOWANCE_VOID';
+      }
       if (typeof parsed.code === 'string') {
         return encodeURIComponent(parsed.code);
       }

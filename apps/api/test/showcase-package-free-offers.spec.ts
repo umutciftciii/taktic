@@ -307,7 +307,7 @@ describe('the snapshot chain', () => {
       .get(`/providers/${profile.id}/showcase/publication`)
       .set('Cookie', cookie)
       .expect(200);
-    expect(publication.body.cards[0].freeOffers).toEqual({ total: 5, used: 0, remaining: 5 });
+    expect(publication.body.cards[0].freeOffers).toEqual({ total: 5, used: 0, remaining: 5, status: 'ACTIVE' });
   });
 
   it('a card-bound (legacy) sale snapshots the count onto its run and grant the same way', async () => {

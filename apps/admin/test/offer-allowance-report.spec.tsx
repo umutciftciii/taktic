@@ -31,6 +31,7 @@ const EMPTY_COHORT = {
   remainingUsable: 0,
   remainingUsableViaOpenLeads: 0,
   remainingUnusable: 0,
+  remainingVoided: 0,
 };
 
 function reportWith(overrides: Partial<OfferAllowanceReport> = {}): OfferAllowanceReport {

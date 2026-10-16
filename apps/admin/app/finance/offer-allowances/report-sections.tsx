@@ -62,6 +62,9 @@ export function CohortKpis({ cohort }: { cohort: OfferAllowanceCohortFigures }) 
     {
       label: 'Kalan · kullanılamaz',
       value: formatCount(cohort.remainingUnusable),
+      // SHOWCASE-ALLOWANCE-004: the voided part, always named — inside the
+      // unusable figure, never added to it.
+      delta: `${formatCount(cohort.remainingVoided)} tanesi süper yönetici tarafından iptal edildi`,
       deltaTone: 'warning',
       hint: 'Yayın bitti, iptal edildi ya da hak geçersiz',
       testId: 'allowance-kpi-unusable',
@@ -171,13 +174,14 @@ const FIGURE_COLUMNS: DataColumn[] = [
   { key: 'legacy', label: 'Eski kayıt', align: 'end' },
   { key: 'usable', label: 'Kalan · kullanılabilir', align: 'end' },
   { key: 'unusable', label: 'Kalan · kullanılamaz', align: 'end' },
+  { key: 'voided', label: 'İçinden iptal edilen', align: 'end' },
   { key: 'usages', label: 'Dönemde kullanım', align: 'end' },
   { key: 'credits', label: 'Kredi karşılığı', align: 'end' },
   { key: 'value', label: 'Gösterge TL', align: 'end' },
 ];
 
 export const BREAKDOWN_LEGEND =
-  'İlk beş sütun yayın başlangıcı pencerede olan haklara, son üç sütun pencerede yapılan kullanımlara aittir.';
+  'İlk altı sütun yayın başlangıcı pencerede olan haklara, son üç sütun pencerede yapılan kullanımlara aittir. “İçinden iptal edilen”, kullanılamaz kalanın süper yönetici tarafından iptal edilen kısmıdır; toplama ayrıca eklenmez.';
 
 function FigureCells({ cohort, usage }: { cohort: OfferAllowanceCohortFigures; usage: OfferAllowanceUsageFigures }) {
   const value = describeIndicativeValue(usage);
@@ -188,6 +192,7 @@ function FigureCells({ cohort, usage }: { cohort: OfferAllowanceCohortFigures; u
       <td className="is-num">{cohort.usedLegacy ? formatCount(cohort.usedLegacy) : <span className="cell-muted">0</span>}</td>
       <td className="is-num">{formatCount(cohort.remainingUsable)}</td>
       <td className="is-num">{formatCount(cohort.remainingUnusable)}</td>
+      <td className="is-num">{formatCount(cohort.remainingVoided)}</td>
       <td className="is-num">{formatCount(usage.usages)}</td>
       <td className="is-num">{formatCount(usage.credits)}</td>
       <td className="is-num cell-nowrap" title={value.note ?? undefined}>
@@ -232,7 +237,7 @@ export function BreakdownTable({
     { key: 'actions', label: 'İşlem', srOnly: true },
   ];
   return (
-    <DataTable caption={caption} columns={columns} minWidth={withUnplaced ? 1240 : 1120} testId={testId}>
+    <DataTable caption={caption} columns={columns} minWidth={withUnplaced ? 1360 : 1240} testId={testId}>
       {rows.map((row) => (
         <tr key={row.key} data-testid={`${testId}-row`}>
           <td>
@@ -265,6 +270,7 @@ const COHORT_PERIOD_COLUMNS: DataColumn[] = [
   { key: 'legacy', label: 'Eski kayıt', align: 'end' },
   { key: 'usable', label: 'Kalan · kullanılabilir', align: 'end' },
   { key: 'unusable', label: 'Kalan · kullanılamaz', align: 'end' },
+  { key: 'voided', label: 'İçinden iptal edilen', align: 'end' },
 ];
 
 const USAGE_PERIOD_COLUMNS: DataColumn[] = [
@@ -287,7 +293,7 @@ export function PeriodTables({ report }: { report: OfferAllowanceReport }) {
         {report.cohortByPeriod.length === 0 ? (
           <EmptyState title="Bu pencerede başlayan yayın yok." />
         ) : (
-          <DataTable caption="Yayın başlangıcına göre haklar" columns={COHORT_PERIOD_COLUMNS} minWidth={640}>
+          <DataTable caption="Yayın başlangıcına göre haklar" columns={COHORT_PERIOD_COLUMNS} minWidth={720}>
             {report.cohortByPeriod.map((row) => (
               <tr key={row.bucket}>
                 <td className="cell-nowrap">{formatBucket(row.bucket, groupBy)}</td>
@@ -297,6 +303,7 @@ export function PeriodTables({ report }: { report: OfferAllowanceReport }) {
                 <td className="is-num">{formatCount(row.usedLegacy)}</td>
                 <td className="is-num">{formatCount(row.remainingUsable)}</td>
                 <td className="is-num">{formatCount(row.remainingUnusable)}</td>
+                <td className="is-num">{formatCount(row.remainingVoided)}</td>
               </tr>
             ))}
           </DataTable>
@@ -374,7 +381,8 @@ export function MethodologySection({ report }: { report: OfferAllowanceReport })
           },
           {
             label: 'Geçersiz kılınmış hak',
-            value: `${formatCount(integrity.voidGrants)} hak kaydı geçersiz; kalanı kullanılamaz sayılır.`,
+            value: `${formatCount(integrity.voidGrants)} hak kaydı süper yönetici tarafından iptal edildi; kalanı kullanılamaz sayılır ve “İçinden iptal edilen” olarak ayrıca gösterilir. Kullanılmış haklar ve verilen teklifler iptalden etkilenmez.`,
+            testId: 'allowance-integrity-void',
           },
         ]}
       />

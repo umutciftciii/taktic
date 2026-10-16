@@ -256,7 +256,9 @@ describe('PR-0 route/permission map', () => {
      * / _MANAGE.
      * REL-002 Faz 5 moved it to 94: MATCH_REVIEW_OPEN_ROUND, opening Round 4+
      * from MATCH_REVIEW (reserved for SUPER_ADMIN).
+     * SHOWCASE-ALLOWANCE-004 moved it to 95: SHOWCASE_ALLOWANCE_VOID, voiding a
+     * vitrin run's remaining free offers (reserved for SUPER_ADMIN).
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(94);
+    expect(Object.keys(AdminPermission)).toHaveLength(95);
   });
 });

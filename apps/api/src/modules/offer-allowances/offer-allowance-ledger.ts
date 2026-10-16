@@ -4,6 +4,8 @@ import {
   OfferAllowanceSource,
   OfferAllowanceStatus,
   Prisma,
+  ServiceRequestStatus,
+  ShowcaseLeadStatus,
 } from '@prisma/client';
 
 /**
@@ -165,6 +167,74 @@ export async function readShowcaseAllowance(
     quotaUsed: grant.quotaUsed,
     remaining: grant.quotaTotal - grant.quotaUsed,
   };
+}
+
+/**
+ * SHOWCASE-ALLOWANCE-004 — whether this request's answer *would* have been
+ * bound to a grant that a super admin has since voided.
+ *
+ * The same binding as {@link readShowcaseAllowance}, clause for clause, read
+ * only to choose the words: a VOID grant pays for nothing either way, and the
+ * resolver never sees it. What changes is what the provider is told — "the
+ * free offers were cancelled", not "the free offers ran out".
+ */
+export async function isShowcaseAllowanceVoided(
+  tx: Prisma.TransactionClient,
+  facts: ShowcaseAllowanceRequestFacts,
+): Promise<boolean> {
+  if (
+    !facts.directShowcaseProviderId ||
+    facts.directShowcaseProviderId !== facts.providerId ||
+    !facts.showcaseLeadId ||
+    facts.roundSource !== MatchRoundSource.DIRECT_SHOWCASE
+  ) {
+    return false;
+  }
+
+  const lead = await tx.showcaseLead.findUnique({
+    where: { id: facts.showcaseLeadId },
+    select: { providerId: true, placementId: true },
+  });
+  if (!lead || lead.providerId !== facts.providerId) {
+    return false;
+  }
+
+  const grant = await tx.offerAllowanceGrant.findUnique({
+    where: { showcasePlacementId: lead.placementId },
+    select: { providerId: true, status: true },
+  });
+  return grant?.providerId === facts.providerId && grant.status === OfferAllowanceStatus.VOID;
+}
+
+/**
+ * SHOWCASE-ALLOWANCE-004 — the placement's leads still waiting for their
+ * owner's free answer: the spend path's own binding (lead OPEN / BREACHED,
+ * request gated to the owner and SUBMITTED / APPROVED, current round
+ * DIRECT_SHOWCASE), counted. The finance report's `openLeads` is the same
+ * predicate in SQL.
+ *
+ * A model query, not raw SQL: it runs inside the void's Serializable
+ * transaction, where a raw query's serialization failure (P2010) would not be
+ * retried by `runSerializable`.
+ */
+export function countLeadsAwaitingFreeAnswer(
+  tx: Prisma.TransactionClient,
+  input: { placementId: string; providerId: string },
+): Promise<number> {
+  return tx.showcaseLead.count({
+    where: {
+      placementId: input.placementId,
+      providerId: input.providerId,
+      status: { in: [ShowcaseLeadStatus.OPEN, ShowcaseLeadStatus.BREACHED] },
+      requestGate: {
+        is: {
+          directShowcaseProviderId: input.providerId,
+          status: { in: [ServiceRequestStatus.SUBMITTED, ServiceRequestStatus.APPROVED] },
+          currentRound: { source: MatchRoundSource.DIRECT_SHOWCASE },
+        },
+      },
+    },
+  });
 }
 
 /**

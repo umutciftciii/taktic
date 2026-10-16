@@ -18,6 +18,7 @@ import {
   proveShowcaseLeadPhone,
   resetAuthThrottle,
   resetDatabase,
+  rewriteGrantFixture,
   showcaseLeadPayload,
   type TestContext,
 } from './harness';
@@ -71,6 +72,7 @@ type Cohort = {
   remainingUsable: number;
   remainingUsableViaOpenLeads: number;
   remainingUnusable: number;
+  remainingVoided: number;
 };
 
 type Usage = {
@@ -236,6 +238,7 @@ function sumCohort(rows: Array<{ cohort: Cohort }>): Cohort {
     remainingUsable: 0,
     remainingUsableViaOpenLeads: 0,
     remainingUnusable: 0,
+    remainingVoided: 0,
   };
   for (const row of rows) {
     for (const key of Object.keys(total) as Array<keyof Cohort>) {
@@ -259,6 +262,8 @@ function sumUsage(rows: Array<{ usage: Usage }>) {
 
 function expectSplits(cohort: Cohort) {
   expect(cohort.usedTracked + cohort.usedLegacy + cohort.remainingUsable + cohort.remainingUnusable).toBe(cohort.defined);
+  // SHOWCASE-ALLOWANCE-004: the voided remainder is a part of the unusable one.
+  expect(cohort.remainingVoided).toBeLessThanOrEqual(cohort.remainingUnusable);
 }
 
 // ── access ───────────────────────────────────────────────────────────────────
@@ -352,6 +357,7 @@ describe('cohort', () => {
       remainingUsable: 1,
       remainingUsableViaOpenLeads: 0,
       remainingUnusable: 0,
+      remainingVoided: 0,
     });
     expect(body.usage).toMatchObject({ usages: 2, credits: 2 * CATEGORY_COST });
     expect(body.timeBases).toEqual({
@@ -379,10 +385,7 @@ describe('cohort', () => {
     await spendFree(owner, card.id, cat.slug, 1);
     // A rollout-era grant: two answers counted under the old unlimited rule,
     // with no usage row behind them (quotaUsed − usage rows).
-    const grant = await ctx.prisma.offerAllowanceGrant.update({
-      where: { showcasePlacementId: placement.id },
-      data: { quotaTotal: 6, quotaUsed: 3 },
-    });
+    const grant = await rewriteGrantFixture(ctx.prisma, placement.id, { quotaTotal: 6, quotaUsed: 3 });
     // A grant that is not a backfilled one cannot carry legacy slots: the ops
     // check names exactly this grant, twice, and nothing else.
     expect((await reportInconsistencies(ctx.prisma)).sort((a, b) => a.check.localeCompare(b.check))).toEqual([
@@ -402,7 +405,7 @@ describe('cohort', () => {
       indicativeValueMinor: CATEGORY_COST * 2_500,
     });
 
-    await ctx.prisma.offerAllowanceGrant.update({ where: { id: grant.id }, data: { quotaTotal: 3, quotaUsed: 1 } });
+    await rewriteGrantFixture(ctx.prisma, placement.id, { quotaTotal: 3, quotaUsed: 1 });
   });
 
   it('a run sold with 0 free offers has no grant and is reported as such, not as a gap', async () => {
@@ -433,6 +436,7 @@ describe('cohort', () => {
       remainingUsable: 2,
       remainingUsableViaOpenLeads: 2,
       remainingUnusable: 1,
+      remainingVoided: 0,
     });
 
     // The waiting leads are what keeps the slots usable: once they are gone,
@@ -454,13 +458,29 @@ describe('cohort', () => {
     await endRun(first.placement.id, 'CANCELLED');
 
     const second = await publish(owner, cat.id);
+    const superAdmin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     await ctx.prisma.offerAllowanceGrant.update({
       where: { showcasePlacementId: second.placement.id },
-      data: { status: 'VOID', voidedAt: new Date(), voidReason: 'test', voidedById: owner.userId },
+      data: {
+        status: 'VOID',
+        voidedAt: new Date(),
+        voidReason: 'OTHER',
+        voidNote: 'Test kurulumunda iptal edildi.',
+        voidedById: superAdmin.id,
+      },
     });
 
     const body = await report();
-    expect(body.cohort).toMatchObject({ grants: 2, defined: 6, usedTracked: 1, remainingUsable: 0, remainingUnusable: 5 });
+    // SHOWCASE-ALLOWANCE-004: the voided remainder (3) is inside the unusable
+    // part (5 = 2 expired + 3 voided), never a fifth term of the sum.
+    expect(body.cohort).toMatchObject({
+      grants: 2,
+      defined: 6,
+      usedTracked: 1,
+      remainingUsable: 0,
+      remainingUnusable: 5,
+      remainingVoided: 3,
+    });
     expect(body.integrity.voidGrants).toBe(1);
     expectSplits(body.cohort);
   });
