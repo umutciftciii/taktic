@@ -286,6 +286,7 @@ describe('consumption', () => {
       creditCost: 0,
       categoryCreditCost: CATEGORY_COST,
       allowance: { quotaTotal: 3, quotaUsed: 0, remaining: 3 },
+      allowanceVoided: false,
     });
     // Reading it spends nothing.
     await preview(owner, lead.requestId).expect(200);
@@ -460,9 +461,10 @@ describe('a spent slot is never given back', () => {
     await expect(
       ctx.prisma.offerAllowanceGrant.update({ where: { id: grant.id }, data: { quotaUsed: 4 } }),
     ).rejects.toThrow(/OfferAllowanceGrant_quota_used_bounded/);
+    // SHOWCASE-ALLOWANCE-004: the guard trigger refuses any decrease first.
     await expect(
       ctx.prisma.offerAllowanceGrant.update({ where: { id: grant.id }, data: { quotaUsed: -1 } }),
-    ).rejects.toThrow(/OfferAllowanceGrant_quota_used_bounded/);
+    ).rejects.toThrow(/quotaUsed never decreases/);
 
     const [offerId] = await spendFree(owner, card.id, category.slug, 1);
     const used = await ctx.prisma.offerAllowanceUsage.findFirstOrThrow({});
@@ -569,10 +571,20 @@ describe('scope', () => {
     const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN });
     await ctx.prisma.offerAllowanceGrant.update({
       where: { showcasePlacementId: placement.id },
-      data: { status: 'VOID', voidedAt: new Date(), voidReason: 'test', voidedById: admin.id },
+      data: {
+        status: 'VOID',
+        voidedAt: new Date(),
+        voidReason: 'OTHER',
+        voidNote: 'Test kurulumunda iptal edildi.',
+        voidedById: admin.id,
+      },
     });
     const { lead } = await openLead(card.id, category.slug);
-    expect((await preview(owner, lead.requestId).expect(200)).body).toMatchObject({ kind: 'CREDITS', allowance: null });
+    expect((await preview(owner, lead.requestId).expect(200)).body).toMatchObject({
+      kind: 'CREDITS',
+      allowance: null,
+      allowanceVoided: true,
+    });
   });
 });
 

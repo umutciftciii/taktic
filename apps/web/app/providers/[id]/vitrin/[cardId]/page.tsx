@@ -234,7 +234,13 @@ export default async function ShowcaseCardPage({ params, searchParams }: Showcas
             </p>
           ) : null}
           {entry?.state === 'LIVE' ? <p>Bu yayından gelen talep: {entry.leadCount}</p> : null}
-          {entry?.state === 'LIVE' && entry.freeOffers ? (
+          {entry?.state === 'LIVE' && entry.freeOffers?.status === 'VOID' ? (
+            <p data-testid="showcase-free-offers-voided">
+              <strong>Ücretsiz teklif hakkınız iptal edildi.</strong> Bu yayın döneminin kullanılmamış ücretsiz teklif
+              hakları platform tarafından iptal edildi; bu karttan gelen taleplere verdiğiniz teklifler kategori kredi
+              maliyetiyle ücretlendirilir. Yayınınız ve gelen talepler değişmedi.
+            </p>
+          ) : entry?.state === 'LIVE' && entry.freeOffers ? (
             <p data-testid="showcase-free-offers-remaining">
               Ücretsiz teklif hakkı: <strong>{entry.freeOffers.remaining} / {entry.freeOffers.total}</strong> kaldı
             </p>

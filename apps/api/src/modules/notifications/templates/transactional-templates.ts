@@ -246,6 +246,11 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   // team after three failed matches. The customer is told it is open for
   // offers again (or will be after a short review); never the staff note.
   'request-manually-reopened',
+  // SHOWCASE-ALLOWANCE-004: a super admin voided the remaining free offers of
+  // a vitrin run. The provider is told that it happened, how many free offers
+  // it took and what it does not touch (the run, the leads, the offers already
+  // given) — never the reason code, the operator's note or who did it.
+  'showcase-allowance-voided',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -382,6 +387,8 @@ export function transactionalSubject(
       return withSuffix('Vitrin yayınınız 3 gün içinde bitiyor', text(data.cardTitle));
     case 'showcase-placement-expired':
       return withSuffix('Vitrin yayınınız sona erdi', text(data.cardTitle));
+    case 'showcase-allowance-voided':
+      return withSuffix('Vitrin ücretsiz teklif hakkınız iptal edildi', text(data.cardTitle));
     case 'request-removed':
       return 'Talebiniz yayından kaldırıldı';
     case 'request-report-new-for-support':
@@ -573,6 +580,8 @@ export function buildDocument(
       return showcasePlacementEnding(subject, fullName, data, 3);
     case 'showcase-placement-expired':
       return showcasePlacementExpired(subject, fullName, data);
+    case 'showcase-allowance-voided':
+      return showcaseAllowanceVoided(subject, fullName, data);
     case 'request-removed':
       return requestRemoved(subject, fullName, data);
     case 'request-report-new-for-support':
@@ -2856,6 +2865,51 @@ function showcasePlacementExpired(subject: string, fullName: string, data: Data)
       cta('Vitrin merkezi', text(data.showcaseUrl), 'ghost'),
       spacer(20),
       note('Yeni bir paket seçtiğinizde onaylı kartınız yeniden incelenmeden yayına girer.'),
+    ]),
+  };
+}
+
+/**
+ * SHOWCASE-ALLOWANCE-004. What the void did and what it did not do, in fixed
+ * sentences. The reason code and the operator's note are internal records and
+ * are not in `data` at all, so no edit of this function can mail them.
+ */
+function showcaseAllowanceVoided(subject: string, fullName: string, data: Data): EmailDocument {
+  const cardTitle = text(data.cardTitle);
+  const voided = int(data.voidedCount);
+  const voidedText = voided === null ? null : `${voided} ücretsiz teklif`;
+
+  return {
+    subject,
+    preheader: cardTitle
+      ? `${cardTitle} yayınınızın kalan ücretsiz teklif hakkı iptal edildi.`
+      : 'Vitrin yayınınızın kalan ücretsiz teklif hakkı iptal edildi.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Vitrin',
+    heading: 'Ücretsiz teklif hakkınız iptal edildi',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        (cardTitle ? `${cardTitle} kartınızın` : 'Vitrin kartınızın') +
+          ' bu yayın dönemine ait kullanılmamış ücretsiz teklif hakkı iptal edildi. ' +
+          'Bundan sonra bu karttan gelen taleplere verdiğiniz teklifler, kategorinin normal kredi maliyetiyle ücretlendirilir.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Kart', cardTitle),
+        row('Paket', text(data.packageName)),
+        row('İptal edilen hak', voidedText),
+        row('İptal zamanı', formatDateTime(data.voidedAt)),
+      ]),
+      spacer(16),
+      paragraph(
+        'Vitrin yayınınız, kartınız ve size gelmiş talepler değişmedi. Daha önce ücretsiz hakla verdiğiniz teklifler geçerliliğini korur.',
+      ),
+      spacer(24),
+      cta('Vitrin merkezi', text(data.showcaseUrl), 'primary'),
+      spacer(20),
+      note('Hesabınızda otomatik bir para veya kredi hareketi yapılmadı. Sorularınız için destek ekibimize panelinizden ulaşabilirsiniz.'),
     ]),
   };
 }

@@ -111,6 +111,7 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PATCH', path: '/admin/showcase/packages/:packageId', permission: AdminPermission.SHOWCASE_PACKAGES_WRITE },
   { method: 'GET', path: '/admin/showcase/placements', permission: AdminPermission.SHOWCASE_PLACEMENTS_READ },
   { method: 'GET', path: '/admin/showcase/placements/:placementId', permission: AdminPermission.SHOWCASE_PLACEMENTS_READ },
+  { method: 'POST', path: '/admin/showcase/placements/:placementId/allowance/void', permission: AdminPermission.SHOWCASE_ALLOWANCE_VOID },
   { method: 'POST', path: '/admin/showcase/placements/:placementId/cancel', permission: AdminPermission.SHOWCASE_PLACEMENT_CANCEL },
   { method: 'POST', path: '/admin/showcase/placements/:placementId/resume', permission: AdminPermission.SHOWCASE_PLACEMENTS_MODERATE },
   { method: 'POST', path: '/admin/showcase/placements/:placementId/suspend', permission: AdminPermission.SHOWCASE_PLACEMENTS_MODERATE },

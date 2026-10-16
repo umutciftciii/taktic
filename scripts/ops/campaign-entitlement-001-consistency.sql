@@ -7,7 +7,8 @@
 -- The API integration tests run this exact file after every allowance case
 -- (apps/api/test/offer-allowance.spec.ts), so it must stay a single SELECT
 -- with no psql meta-commands. Needs migration 102 (check 8 reads
--- ShowcasePlacement."freeOfferCountSnapshot").
+-- ShowcasePlacement."freeOfferCountSnapshot"); checks 10–11 read only columns
+-- that exist since migration 101.
 --
 -- Checks:
 --   1 GRANT_USED_BELOW_USAGES      a grant counts fewer used slots than it has usage rows
@@ -23,6 +24,9 @@
 --                                  SHOWCASE-ALLOWANCE-003 — is born without one)
 --   9 LEDGER_CHAIN_BREAK           a provider's credit ledger running balance does not
 --                                  follow from the previous row (no balance drift)
+--  10 USAGE_AFTER_VOID             a slot was spent after its grant was voided
+--                                  (SHOWCASE-ALLOWANCE-004: a VOID grant pays for nothing)
+--  11 VOID_BY_NON_SUPER_ADMIN      a VOID grant names an actor who is not a SUPER_ADMIN
 SELECT 'GRANT_USED_BELOW_USAGES' AS "check", g."id" AS "subject"
   FROM "OfferAllowanceGrant" g
  WHERE g."quotaUsed" < (SELECT count(*) FROM "OfferAllowanceUsage" u WHERE u."grantId" = g."id")
@@ -81,4 +85,16 @@ SELECT 'LEDGER_CHAIN_BREAK', chain."id"
            lag(t."balanceAfter") OVER (PARTITION BY t."providerId" ORDER BY t."createdAt", t."id") AS "previous"
       FROM "ProviderCreditTransaction" t
   ) chain
- WHERE chain."balanceAfter" <> coalesce(chain."previous", 0) + chain."amount";
+ WHERE chain."balanceAfter" <> coalesce(chain."previous", 0) + chain."amount"
+UNION ALL
+SELECT 'USAGE_AFTER_VOID', u."id"
+  FROM "OfferAllowanceUsage" u
+  JOIN "OfferAllowanceGrant" g ON g."id" = u."grantId"
+ WHERE g."status" = 'VOID'
+   AND u."consumedAt" > g."voidedAt"
+UNION ALL
+SELECT 'VOID_BY_NON_SUPER_ADMIN', g."id"
+  FROM "OfferAllowanceGrant" g
+  LEFT JOIN "User" a ON a."id" = g."voidedById"
+ WHERE g."status" = 'VOID'
+   AND a."role" IS DISTINCT FROM 'SUPER_ADMIN';

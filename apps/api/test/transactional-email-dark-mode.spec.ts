@@ -140,6 +140,7 @@ const FAMILIES: Record<string, TransactionalEmailTemplate[]> = {
     'showcase-placement-activated',
     'showcase-lead-received',
     'package-refund-status',
+    'showcase-allowance-voided',
   ],
   destek: ['support-ticket-created', 'support-ticket-provider-admin-reply'],
 };

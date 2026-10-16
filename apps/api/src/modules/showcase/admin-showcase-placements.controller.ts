@@ -24,10 +24,12 @@ import {
   UpdateShowcasePackageDto,
 } from './dto/showcase-package.dto';
 import {
+  ShowcaseAllowanceVoidDto,
   ShowcasePlacementCancelDto,
   ShowcasePlacementSuspendDto,
 } from './dto/showcase-placement-admin.dto';
 import { AdminShowcasePlacementsService } from './admin-showcase-placements.service';
+import { ShowcaseAllowanceVoidService } from './showcase-allowance-void.service';
 import { ListShowcaseLeadsDto } from './dto/admin-showcase-list.dto';
 import { ShowcaseLeadAdminService } from './showcase-lead-admin.service';
 import { ShowcasePackagesService } from './showcase-packages.service';
@@ -67,6 +69,8 @@ export class AdminShowcasePlacementsController {
     @Inject(AdminShowcasePlacementsService)
     private readonly admin: AdminShowcasePlacementsService,
     @Inject(ShowcaseLeadAdminService) private readonly leads: ShowcaseLeadAdminService,
+    @Inject(ShowcaseAllowanceVoidService)
+    private readonly allowanceVoid: ShowcaseAllowanceVoidService,
   ) {}
 
   @Get('packages')
@@ -178,6 +182,26 @@ export class AdminShowcasePlacementsController {
     @Body() dto: ShowcasePlacementCancelDto,
   ) {
     return this.admin.cancel(placementId, user, dto.note);
+  }
+
+  /**
+   * SHOWCASE-ALLOWANCE-004 — voids everything left of the run's free offers.
+   * **Nothing else happens:** no refund, no credit, no cancellation of the
+   * run, no lead closed; the slots already spent stay spent.
+   *
+   * SHOWCASE_ALLOWANCE_VOID is reserved for SUPER_ADMIN: no role may carry it.
+   * The body carries a reason code, the internal note and the three figures
+   * the confirmation showed; any of them having moved is a 409.
+   */
+  @Post('placements/:placementId/allowance/void')
+  @RequiresPermission(AdminPermission.SHOWCASE_ALLOWANCE_VOID)
+  @HttpCode(HttpStatus.OK)
+  voidPlacementAllowance(
+    @Param('placementId') placementId: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ShowcaseAllowanceVoidDto,
+  ) {
+    return this.allowanceVoid.voidAllowance(placementId, user, dto);
   }
 
   @Get('leads')

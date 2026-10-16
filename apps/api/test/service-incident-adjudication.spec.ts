@@ -485,7 +485,11 @@ describe('correction (SUPER_ADMIN, append-only)', () => {
     expect(created.body.code).toBe('PERMISSION_RESERVED_FOR_SUPER_ADMIN');
     const catalogue = await request(ctx.server).get('/admin/permissions').set('Cookie', sa).expect(200);
     expect(catalogue.body.permissions).not.toContain('SERVICE_INCIDENTS_CORRECT');
-    expect(catalogue.body.reservedForSuperAdmin).toEqual(['SERVICE_INCIDENTS_CORRECT', 'MATCH_REVIEW_OPEN_ROUND']);
+    expect(catalogue.body.reservedForSuperAdmin).toEqual([
+      'SERVICE_INCIDENTS_CORRECT',
+      'MATCH_REVIEW_OPEN_ROUND',
+      'SHOWCASE_ALLOWANCE_VOID',
+    ]);
 
     expect(await ctx.prisma.providerIncidentAdjudication.count()).toBe(1);
   });

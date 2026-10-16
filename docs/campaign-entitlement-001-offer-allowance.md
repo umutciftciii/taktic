@@ -126,7 +126,7 @@ Hak tüketilmeyen durumlar: doğrulama hatası, 402, 409, rollback, kapalı tur,
 - Lead yalnızca placement canlıyken açılabilir. Dönem içinde gelmiş bir lead, placement'ın `endAt`'i geçmiş olsa bile çözülene kadar (gate kalkana kadar) o placement'ın hakkını kullanabilir.
 - Kullanılmayan hak başka bir placement'a ya da yenilemeye taşınmaz.
 - Askıya alma kotayı etkilemez.
-- Admin iptali mevcut meşru lead'lerin hakkını otomatik VOID etmez. VOID değeri ileride ayrı bir cezai admin özelliği için var; bu PR'da ona yazan bir endpoint yok.
+- Admin iptali mevcut meşru lead'lerin hakkını otomatik VOID etmez. VOID değeri ileride ayrı bir cezai admin özelliği için var; bu PR'da ona yazan bir endpoint yok. (SHOWCASE-ALLOWANCE-004 bu özelliği ekledi: yalnız SUPER_ADMIN, kalan hakların tamamı, geri alınamaz — bkz. `docs/showcase-allowance-004-void.md`.)
 
 ## 9. REL-002 ve MATCH-001
 

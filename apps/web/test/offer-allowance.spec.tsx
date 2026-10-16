@@ -19,6 +19,7 @@ function preview(overrides: Partial<OfferCostPreview> = {}): OfferCostPreview {
     creditCost: 0,
     categoryCreditCost: 2,
     allowance: { quotaTotal: 3, quotaUsed: 1, remaining: 2 },
+    allowanceVoided: false,
     ...overrides,
   };
 }
@@ -41,6 +42,31 @@ describe('OfferCostPanel', () => {
     );
     expect(html).toContain('Bu yayın döneminin ücretsiz teklif hakları bitti; bu teklif 2 kredi.');
     expect(html).toMatch(/<strong>0 \/ 3<\/strong>/);
+  });
+
+  it('SHOWCASE-ALLOWANCE-004: voided free offers say "cancelled", not "ran out", and show no count', () => {
+    const paid = renderToStaticMarkup(
+      <OfferCostPanel preview={preview({ kind: 'CREDITS', creditCost: 2, allowance: null, allowanceVoided: true })} />,
+    );
+    expect(paid).toContain('Bu yayın döneminin ücretsiz teklif hakkı iptal edildi; bu teklif 2 kredi.');
+    expect(paid).not.toContain('bitti');
+    expect(paid).not.toContain('lead-offer-allowance');
+    expect(paid).toContain('data-credit-cost="2"');
+
+    const broke = renderToStaticMarkup(
+      <OfferCostPanel preview={preview({ kind: 'INSUFFICIENT_CREDITS', creditCost: 2, allowance: null, allowanceVoided: true })} />,
+    );
+    expect(broke).toContain('ücretsiz teklif hakkı iptal edildi');
+    expect(broke).toContain('bakiyeniz yetersiz');
+  });
+
+  it('SHOWCASE-ALLOWANCE-004: the card panel and the lead form name a voided allowance', () => {
+    const card = read('app/providers/[id]/vitrin/[cardId]/page.tsx');
+    expect(card).toContain("entry.freeOffers?.status === 'VOID'");
+    expect(card).toContain('showcase-free-offers-voided');
+    expect(card).toContain('Ücretsiz teklif hakkınız iptal edildi.');
+    const lead = read('app/providers/[id]/vitrin/talepler/[leadId]/page.tsx');
+    expect(lead).toContain('costPreview?.allowanceVoided');
   });
 
   it('no credits, a package, a daily cap and an unreadable preview each say what they are', () => {

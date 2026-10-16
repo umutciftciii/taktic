@@ -633,6 +633,15 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     showcaseUrl: `${WEB}/providers/p1/vitrin`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'showcase-allowance-voided': {
+    fullName: 'Murat Şahin',
+    cardTitle: 'Kombi bakım paketi',
+    packageName: 'Vitrin Standart 30 Gün',
+    voidedCount: '2',
+    voidedAt: '2026-09-26T11:12:00.000Z',
+    showcaseUrl: `${WEB}/providers/p1/vitrin`,
+    accountUrl: `${WEB}/providers/me`,
+  },
 };
 
 /**
@@ -715,7 +724,8 @@ describe('transactional e-mail rendering', () => {
     // refused revision of a live card (API-HARDENING-001), then the five of a
     // customer service issue (REL-002 Faz 3).
     // REL-002 Faz 4 adds the four incident decision / staff follow-up notices.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(61);
+    // SHOWCASE-ALLOWANCE-004 adds the provider's free-offer void notice.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(62);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -992,6 +1002,7 @@ describe('transactional e-mail rendering', () => {
         'Vitrin yayınınızın bitmesine 7 gün kaldı — Kombi bakım paketi',
       'showcase-placement-ending-3d': 'Vitrin yayınınız 3 gün içinde bitiyor — Kombi bakım paketi',
       'showcase-placement-expired': 'Vitrin yayınınız sona erdi — Kombi bakım paketi',
+      'showcase-allowance-voided': 'Vitrin ücretsiz teklif hakkınız iptal edildi — Kombi bakım paketi',
     });
   });
 

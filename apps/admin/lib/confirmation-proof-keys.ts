@@ -101,6 +101,8 @@ export const CONFIRMATION_PROOF_KEYS = [
   'showcase.placement-suspend',
   'showcase.reject',
   'showcase.placement-cancel',
+  // SHOWCASE-ALLOWANCE-004: voiding what is left of a run's free offers.
+  'showcase.allowance-void',
   'showcase-package.create-active',
   'showcase-package.update-commercial',
   'showcase-package.activate',

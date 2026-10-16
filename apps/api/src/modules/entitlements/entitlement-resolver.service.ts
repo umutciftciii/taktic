@@ -14,6 +14,7 @@ import {
 } from '../credits/promo-credit-ledger';
 import {
   claimAllowanceSlot,
+  isShowcaseAllowanceVoided,
   readShowcaseAllowance,
   recordAllowanceUsage,
   type ShowcaseAllowanceState,
@@ -125,6 +126,13 @@ export type OfferCostPreview = {
   categoryCreditCost: number;
   /** The bound vitrin allowance, when this is the provider's own direct lead. */
   allowance: { quotaTotal: number; quotaUsed: number; remaining: number } | null;
+  /**
+   * SHOWCASE-ALLOWANCE-004 — the direct lead's run *had* free offers and a
+   * super admin voided what was left. `allowance` is then null (a VOID grant
+   * pays for nothing) and this says why, so the form can say "cancelled"
+   * rather than "ran out".
+   */
+  allowanceVoided: boolean;
 };
 
 /**
@@ -261,7 +269,15 @@ export class EntitlementResolverService {
     const allowanceView = allowance
       ? { quotaTotal: allowance.quotaTotal, quotaUsed: allowance.quotaUsed, remaining: allowance.remaining }
       : null;
-    const base = { categoryCreditCost: input.creditCost, allowance: allowanceView };
+    const allowanceVoided = allowance
+      ? false
+      : await isShowcaseAllowanceVoided(tx, {
+          providerId: input.providerId,
+          directShowcaseProviderId: input.directShowcaseProviderId,
+          showcaseLeadId: input.showcaseLeadId,
+          roundSource: input.roundSource,
+        });
+    const base = { categoryCreditCost: input.creditCost, allowance: allowanceView, allowanceVoided };
 
     try {
       const decision = await this.resolve(tx, input);

@@ -4,6 +4,7 @@ import {
   MatchRoundOpenedBy,
   MatchRoundStatus,
   NotificationStatus,
+  OfferAllowanceStatus,
   OfferPackageType,
   OfferStatus,
   PackagePurchaseKind,
@@ -1633,6 +1634,21 @@ export class TransactionalMailService {
         const provider = await loadProvider(this.prisma, placement.providerId);
         return provider?.recipient
           ? { to: provider.recipient, data: showcasePlacementExpiredData(provider, placement) }
+          : null;
+      }
+
+      case 'showcase-allowance-voided': {
+        // Rebuilt from the grant, which is permanent once VOID (the DB trigger
+        // refuses to change or delete it), so the outbox can always deliver
+        // what the void enqueued. Only while it is still VOID — which, by that
+        // trigger, is for ever — and never with the reason or the note.
+        const grant = await loadVoidedShowcaseAllowance(this.prisma, source.ids[0]);
+        if (!grant) {
+          return null;
+        }
+        const provider = await loadProvider(this.prisma, grant.providerId);
+        return provider?.recipient
+          ? { to: provider.recipient, data: showcaseAllowanceVoidedData(provider, grant) }
           : null;
       }
 
@@ -3481,6 +3497,9 @@ const RETRY_DEDUPE_PREFIXES = {
   'showcase-placement-ending-7d': 'showcase-placement-ending-7d',
   'showcase-placement-ending-3d': 'showcase-placement-ending-3d',
   'showcase-placement-expired': 'showcase-placement-expired',
+  // SHOWCASE-ALLOWANCE-004. Keyed on the grant, voided at most once; *delivered*
+  // through this table by ShowcaseAllowanceVoidOutbox.
+  'showcase-allowance-voided': 'showcase-allowance-voided',
   // The two halves of a request report. The customer's notice carries the
   // request id and the decision's timestamp — the reason is *not* in the key,
   // and is read back out of the request's own rejectionReason on a retry. The
@@ -3595,6 +3614,8 @@ const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'showcase-placement-ending-7d': 1,
   'showcase-placement-ending-3d': 1,
   'showcase-placement-expired': 1,
+  /** The grant that was voided. */
+  'showcase-allowance-voided': 1,
   /** The request only; the ISO timestamp after it has colons of its own and is not an id. */
   'request-removed': 1,
   'request-report-new-for-support': 1,
@@ -3912,6 +3933,48 @@ function showcasePlacementExpiredData(
     cardTitle: placement.pinnedVersion.title,
     endAt: placement.endAt.toISOString(),
     packagesUrl: providerShowcasePackagesUrl(provider.id),
+    showcaseUrl: providerShowcaseUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
+/**
+ * SHOWCASE-ALLOWANCE-004 — a VOID grant and its run, for the provider's notice.
+ *
+ * `voidReason`, `voidNote` and `voidedById` are deliberately not selected: the
+ * notice says that the free offers were cancelled, never why or by whom.
+ */
+async function loadVoidedShowcaseAllowance(prisma: PrismaService, grantId: string) {
+  const grant = await prisma.offerAllowanceGrant.findUnique({
+    where: { id: grantId },
+    select: {
+      id: true,
+      status: true,
+      providerId: true,
+      quotaTotal: true,
+      quotaUsed: true,
+      voidedAt: true,
+      placement: {
+        select: { packageNameSnapshot: true, pinnedVersion: { select: { title: true } } },
+      },
+    },
+  });
+
+  return grant && grant.status === OfferAllowanceStatus.VOID && grant.voidedAt && grant.placement
+    ? { ...grant, voidedAt: grant.voidedAt, placement: grant.placement }
+    : null;
+}
+
+function showcaseAllowanceVoidedData(
+  provider: ShowcaseProviderSource,
+  grant: NonNullable<Awaited<ReturnType<typeof loadVoidedShowcaseAllowance>>>,
+) {
+  return {
+    fullName: provider.contactName ?? provider.businessName,
+    cardTitle: grant.placement.pinnedVersion.title,
+    packageName: grant.placement.packageNameSnapshot,
+    voidedCount: String(grant.quotaTotal - grant.quotaUsed),
+    voidedAt: grant.voidedAt.toISOString(),
     showcaseUrl: providerShowcaseUrl(provider.id),
     accountUrl: providerAccountUrl(),
   };

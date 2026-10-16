@@ -1,4 +1,5 @@
-import { IsString, MaxLength } from 'class-validator';
+import { OfferAllowanceVoidReason } from '@prisma/client';
+import { IsEnum, IsInt, IsString, MaxLength, Min } from 'class-validator';
 
 /**
  * The operator's note on a suspension.
@@ -44,3 +45,43 @@ export class ShowcasePlacementCancelDto {
 
 /** The shortest cancellation note, after trimming — the vitrin rejection's rule. */
 export const SHOWCASE_PLACEMENT_CANCEL_NOTE_MIN_LENGTH = 10;
+
+/**
+ * SHOWCASE-ALLOWANCE-004 — voiding a run's remaining free offers.
+ *
+ * `reasonCode` and `note` are the record of why: the code is one of a closed
+ * set, the note is internal (10..1000 characters, judged trimmed by the
+ * service) and neither is ever mailed to the provider.
+ *
+ * The three `expected*` figures are what the confirmation dialog showed — the
+ * slots granted, the slots spent, the leads still waiting for a free answer —
+ * posted back as a compare-and-set: if any of them moved in between, the void
+ * is refused with 409 OFFER_ALLOWANCE_CHANGED instead of taking away a
+ * different number of slots than the operator confirmed. Required, not
+ * optional: a void nobody was shown the figures of is not a confirmed void.
+ *
+ * There is no `count`: there is no partial void. Everything left goes.
+ */
+export class ShowcaseAllowanceVoidDto {
+  @IsEnum(OfferAllowanceVoidReason)
+  reasonCode!: OfferAllowanceVoidReason;
+
+  @IsString()
+  @MaxLength(1000)
+  note!: string;
+
+  @IsInt()
+  @Min(1)
+  expectedQuotaTotal!: number;
+
+  @IsInt()
+  @Min(0)
+  expectedQuotaUsed!: number;
+
+  @IsInt()
+  @Min(0)
+  expectedOpenLeads!: number;
+}
+
+/** The shortest void note, after trimming — the DB CHECK's lower bound. */
+export const SHOWCASE_ALLOWANCE_VOID_NOTE_MIN_LENGTH = 10;

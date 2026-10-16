@@ -22,7 +22,11 @@ import {
   resumeShowcasePlacementAction,
   suspendShowcasePlacementAction,
 } from '../actions';
-import { PLACEMENT_CANCEL_NOTE_MIN_LENGTH, PLACEMENT_SUSPEND_NOTE_MIN_LENGTH } from '../placement-cancel';
+import {
+  ALLOWANCE_VOID_NOTE_MIN_LENGTH,
+  PLACEMENT_CANCEL_NOTE_MIN_LENGTH,
+  PLACEMENT_SUSPEND_NOTE_MIN_LENGTH,
+} from '../placement-cancel';
 import { CONFIRMATION_PROOF_REFUSAL_MESSAGE } from '../../../../lib/confirmation-proof-keys';
 import { PlacementAllowanceSection } from './placement-allowance-section';
 
@@ -33,6 +37,7 @@ type PlacementPageProps = {
     suspended?: string;
     resumed?: string;
     cancelled?: string;
+    allowanceVoided?: string;
   }>;
 };
 
@@ -45,6 +50,16 @@ const ERRORS: Record<string, string> = {
   SHOWCASE_PLACEMENT_CANCEL_NOTE_REQUIRED: `İptal gerekçesi zorunludur (en az ${PLACEMENT_CANCEL_NOTE_MIN_LENGTH} karakter). Yerleşim iptal edilmedi.`,
   SHOWCASE_PLACEMENT_SUSPEND_NOTE_REQUIRED: `Durdurma gerekçesi zorunludur (en az ${PLACEMENT_SUSPEND_NOTE_MIN_LENGTH} karakter). Yerleşim durdurulmadı.`,
   CONFIRMATION_REQUIRED: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+  // SHOWCASE-ALLOWANCE-004 — the void's refusals, each with its own sentence.
+  OFFER_ALLOWANCE_NOT_FOUND: 'Bu yerleşimin ücretsiz teklif hakkı kaydı yok; iptal edilecek hak bulunmuyor.',
+  OFFER_ALLOWANCE_ZERO_PACKAGE: 'Bu yerleşim 0 ücretsiz teklifle satıldı; iptal edilecek hak bulunmuyor.',
+  OFFER_ALLOWANCE_ALREADY_VOID: 'Bu yerleşimin ücretsiz teklif hakkı zaten iptal edilmiş.',
+  OFFER_ALLOWANCE_NOTHING_TO_VOID: 'Kullanılmamış ücretsiz teklif hakkı kalmadı; iptal edilecek hak yok.',
+  OFFER_ALLOWANCE_CHANGED:
+    'Ücretsiz teklif hakkı onaydan sonra değişti (bir hak kullanıldı ya da yeni bir talep geldi). Hiçbir şey iptal edilmedi; aşağıdaki güncel değerleri kontrol edip yeniden onaylayın.',
+  OFFER_ALLOWANCE_VOID_NOTE_REQUIRED: `İç açıklama zorunludur (en az ${ALLOWANCE_VOID_NOTE_MIN_LENGTH} karakter). Hak iptal edilmedi.`,
+  OFFER_ALLOWANCE_VOID_REASON_REQUIRED: 'Bir iptal gerekçesi seçin. Hak iptal edilmedi.',
+  CONCURRENT_MODIFICATION: 'Kayıt aynı anda değişti; hiçbir şey kaydedilmedi. Sayfayı yenileyip yeniden deneyin.',
   SHOWCASE_PLACEMENT_ACTION_FAILED: 'İşlem tamamlanamadı.',
 };
 
@@ -83,9 +98,11 @@ export default async function ShowcasePlacementPage({
   const canOpenProvider = can('PROVIDERS_READ_DETAIL');
   const canOpenReview = can('SHOWCASE_REVIEW_READ');
   const canOpenOffer = can('OFFERS_READ');
+  // SHOWCASE-ALLOWANCE-004: reserved for a super admin; no role carries it.
+  const canVoidAllowance = can('SHOWCASE_ALLOWANCE_VOID');
 
   const { placementId } = await params;
-  const { error, suspended, resumed, cancelled } = await searchParams;
+  const { error, suspended, resumed, cancelled, allowanceVoided } = await searchParams;
   const placement = await fetchOrNotFound(() =>
     apiFetch<ShowcasePlacement>(`/admin/showcase/placements/${placementId}`),
   );
@@ -163,6 +180,13 @@ export default async function ShowcasePlacementPage({
         <div className="notice notice-warning detail-notice" role="status" data-testid="placement-cancelled-notice">
           Yerleşim iptal edildi. <strong>Para iadesi yapılmadı</strong> — ilgili satın alma
           manuel inceleme için işaretlendi.
+        </div>
+      ) : null}
+
+      {allowanceVoided ? (
+        <div className="notice notice-warning detail-notice" role="status" data-testid="placement-allowance-voided-notice">
+          Kalan ücretsiz teklif hakları iptal edildi. <strong>Para iadesi, kredi hareketi veya yerleşim iptali
+          yapılmadı</strong>; hizmet verene bilgilendirme e-postası gönderilecek.
         </div>
       ) : null}
 
@@ -265,7 +289,9 @@ export default async function ShowcasePlacementPage({
           <PlacementAllowanceSection
             allowance={placement.offerAllowance}
             canOpenOffer={canOpenOffer}
+            canVoid={canVoidAllowance}
             packageFreeOfferCount={placement.freeOfferCount}
+            placementId={placementId}
           />
         ) : null}
 

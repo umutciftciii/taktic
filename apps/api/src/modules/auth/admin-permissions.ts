@@ -85,10 +85,16 @@ export function mayReachAdminPanel(user: PermissionPrincipal | null | undefined)
  * three automatic rounds failed has no hard cap, so for now it is a
  * SUPER_ADMIN decision. An ADMIN still reads MATCH_REVIEW and the timeline
  * (REQUESTS_READ).
+ *
+ * SHOWCASE_ALLOWANCE_VOID (SHOWCASE-ALLOWANCE-004): voiding a vitrin run's
+ * remaining free offers takes away part of what a business paid for, by
+ * product decision a SUPER_ADMIN act. An ADMIN still reads the allowance
+ * (SHOWCASE_PLACEMENTS_READ).
  */
 export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [
   AdminPermission.SERVICE_INCIDENTS_CORRECT,
   AdminPermission.MATCH_REVIEW_OPEN_ROUND,
+  AdminPermission.SHOWCASE_ALLOWANCE_VOID,
 ];
 
 export function isReservedPermission(permission: AdminPermission): boolean {

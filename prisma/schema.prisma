@@ -4842,11 +4842,31 @@ enum OfferAllowanceBenefit {
 /// CAMPAIGN-ENTITLEMENT-001. ACTIVE grants can pay; a VOID one never again.
 /// There is no EXPIRED: a vitrin grant is scoped to its placement's own leads,
 /// so "expired" is derived (the run ended and none of its leads is still
-/// gated), never written by a sweeper. Nothing writes VOID in v1 — the value
-/// exists so a later punitive admin action is a code change, not a migration.
+/// gated), never written by a sweeper.
+///
+/// SHOWCASE-ALLOWANCE-004: VOID is written by one path only — a super admin's
+/// `POST /admin/showcase/placements/:placementId/allowance/void` — and is
+/// final. A trigger (`OfferAllowanceGrant_guard`) refuses any update of a VOID
+/// row and any delete of one, so it can never go back to ACTIVE.
 enum OfferAllowanceStatus {
   ACTIVE
   VOID
+}
+
+/// SHOWCASE-ALLOWANCE-004. Why a grant's remaining free offers were voided.
+/// A code the operator picks; never mailed to the provider (the mail says the
+/// right was cancelled, not what anybody suspected). The free text beside it
+/// is `OfferAllowanceGrant.voidNote`, internal only.
+enum OfferAllowanceVoidReason {
+  /// Free offers used to game leads (fake or self-made requests).
+  FRAUD
+  /// Abusive use of the vitrin leads short of fraud.
+  ABUSE
+  /// A breach of the vitrin package terms.
+  TERMS_VIOLATION
+  /// The grant should never have been usable (an operator's or the system's mistake).
+  OPERATOR_ERROR
+  OTHER
 }
 
 /// CAMPAIGN-ENTITLEMENT-001 — a bounded number of free offers, granted by one
@@ -4862,6 +4882,12 @@ enum OfferAllowanceStatus {
 /// WHERE carries `quotaUsed < quotaTotal` — and a CHECK holds it between 0 and
 /// `quotaTotal`. It is never decremented: a withdrawn, rejected, cancelled or
 /// failed offer keeps the slot it spent.
+///
+/// SHOWCASE-ALLOWANCE-004: the grant's identity (`id`, `source`, `benefit`,
+/// `showcasePlacementId`), its owner (`providerId`) and its size
+/// (`quotaTotal`) never change after the insert, `quotaUsed` never goes down,
+/// and a VOID row never changes at all — all held by the `OfferAllowanceGrant_guard`
+/// trigger, not by the application's good behaviour.
 ///
 /// The grants the 101 migration backfilled for runs live at rollout carry
 /// `quotaTotal = legacy free offers + 3` and `quotaUsed = legacy free offers`:
@@ -4881,9 +4907,13 @@ model OfferAllowanceGrant {
   /// is the lead's binding to the placement, never a clock.
   validFrom           DateTime
   status              OfferAllowanceStatus  @default(ACTIVE)
-  /// All three set together or none (CHECK), and only with VOID.
+  /// SHOWCASE-ALLOWANCE-004: all four set together or none (CHECK), only with
+  /// VOID, and only once (trigger). `voidedById` is a SUPER_ADMIN at the time
+  /// of writing (trigger); `voidNote` is the internal note, 10..1000 trimmed
+  /// characters, never mailed.
   voidedAt            DateTime?
-  voidReason          String?
+  voidReason          OfferAllowanceVoidReason?
+  voidNote            String?
   voidedById          String?
   grantedAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
@@ -5902,6 +5932,10 @@ enum AdminPermission {
   /// for SUPER_ADMIN in v0.2.0 (`SUPER_ADMIN_RESERVED_PERMISSIONS`): no role
   /// may carry it, so an ADMIN never holds it.
   MATCH_REVIEW_OPEN_ROUND
+  /// SHOWCASE-ALLOWANCE-004: voiding the remaining free offers of a vitrin
+  /// run's grant. Reserved for SUPER_ADMIN (`SUPER_ADMIN_RESERVED_PERMISSIONS`):
+  /// it takes away part of what a business paid for, so no role may carry it.
+  SHOWCASE_ALLOWANCE_VOID
 
   SHOWCASE_PACKAGES_READ
   SHOWCASE_PACKAGES_WRITE

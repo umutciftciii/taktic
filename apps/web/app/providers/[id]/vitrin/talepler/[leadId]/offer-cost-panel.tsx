@@ -52,11 +52,15 @@ function costSentence(preview: OfferCostPreview): string {
     case 'MONTHLY_QUOTA':
       return `Bu teklif aylık paket kotanızdan ${preview.creditCost} kredi düşer.`;
     case 'CREDITS':
-      return preview.allowance && preview.allowance.remaining === 0
-        ? `Bu yayın döneminin ücretsiz teklif hakları bitti; bu teklif ${preview.creditCost} kredi.`
-        : `Bu teklif ${preview.creditCost} kredi.`;
+      return preview.allowanceVoided
+        ? `Bu yayın döneminin ücretsiz teklif hakkı iptal edildi; bu teklif ${preview.creditCost} kredi.`
+        : preview.allowance && preview.allowance.remaining === 0
+          ? `Bu yayın döneminin ücretsiz teklif hakları bitti; bu teklif ${preview.creditCost} kredi.`
+          : `Bu teklif ${preview.creditCost} kredi.`;
     case 'INSUFFICIENT_CREDITS':
-      return `Bu teklif ${preview.creditCost} kredi, ancak bakiyeniz yetersiz. Teklif vermek için önce kredi yükleyin.`;
+      return preview.allowanceVoided
+        ? `Bu yayın döneminin ücretsiz teklif hakkı iptal edildi; bu teklif ${preview.creditCost} kredi, ancak bakiyeniz yetersiz. Teklif vermek için önce kredi yükleyin.`
+        : `Bu teklif ${preview.creditCost} kredi, ancak bakiyeniz yetersiz. Teklif vermek için önce kredi yükleyin.`;
     case 'DAILY_LIMIT':
       return 'Limitsiz paketinizin bugünkü teklif sınırına ulaştınız. Yarın tekrar deneyebilirsiniz.';
   }

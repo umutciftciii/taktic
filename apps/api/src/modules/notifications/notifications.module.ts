@@ -10,6 +10,7 @@ import { NotificationPort } from './notification.port';
 import { RequestExpiryOutbox } from './request-expiry-outbox.service';
 import { RequestPublishOutbox } from './request-publish-outbox.service';
 import { PackageRefundNotificationOutbox } from './package-refund-notification-outbox.service';
+import { ShowcaseAllowanceVoidOutbox } from './showcase-allowance-void-outbox.service';
 import { RequestCancellationOutbox } from './request-cancellation-outbox.service';
 import { ServiceIssueOutbox } from './service-issue-outbox.service';
 import { ReviewInvitationOutbox } from './review-invitation-outbox.service';
@@ -81,6 +82,9 @@ const smsAdapter = resolveSmsTransportKind() === 'file-outbox' ? FileOutboxSmsAd
     // REL-002 Faz 3: the service-issue notices, enqueued inside the report's
     // transaction, swept by the same lifecycle tick.
     ServiceIssueOutbox,
+    // SHOWCASE-ALLOWANCE-004: the free-offer void notice, enqueued inside the
+    // void's transaction, swept by the same lifecycle tick.
+    ShowcaseAllowanceVoidOutbox,
   ],
   exports: [
     NotificationPort,
@@ -95,6 +99,7 @@ const smsAdapter = resolveSmsTransportKind() === 'file-outbox' ? FileOutboxSmsAd
     PackageRefundNotificationOutbox,
     RequestCancellationOutbox,
     ServiceIssueOutbox,
+    ShowcaseAllowanceVoidOutbox,
   ],
 })
 export class NotificationsModule {}

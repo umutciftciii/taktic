@@ -12,7 +12,9 @@ import { Logger } from '@nestjs/common';
 export type OfferAllowanceEvent =
   | 'offer_allowance_granted'
   | 'offer_allowance_consumed'
-  | 'offer_allowance_exhausted_fallback';
+  | 'offer_allowance_exhausted_fallback'
+  /** SHOWCASE-ALLOWANCE-004: a super admin voided a grant's remaining slots. */
+  | 'offer_allowance_voided';
 
 export type OfferAllowanceEventFields = Record<string, string | number | boolean | null>;
 
