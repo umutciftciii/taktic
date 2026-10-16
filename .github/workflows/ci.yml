@@ -577,7 +577,9 @@ jobs:
             >"$lab/commit/migrations/20990102000000_fail/migration.sql"
           docker network create --internal "$net" >/dev/null
           docker run -d --name "$pg" --network "$net" -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -e POSTGRES_DB=lab_atomic postgres:16.6-alpine >/dev/null
-          until docker exec "$pg" pg_isready -q -U lab -d lab_atomic; do sleep 1; done
+          # Over TCP: the image's first-start server (initdb) listens on the
+          # socket only and is then restarted, so a socket check can pass on it.
+          until docker exec "$pg" pg_isready -q -h 127.0.0.1 -U lab -d lab_atomic; do sleep 1; done
           docker exec "$pg" psql -X -q -U lab -d lab_atomic -c 'CREATE DATABASE lab_commit'
           url() { echo "postgresql://lab:lab@$pg:5432/$1"; }
           q() { docker exec -i "$pg" psql -X -tA -v ON_ERROR_STOP=1 -U lab -d "$1" -c "$2"; }
