@@ -41,6 +41,8 @@ const LIST_SCREENS = [
   '/finance/credit-ledger',
   '/finance/manual-adjustments',
   '/finance/providers',
+  // SHOWCASE-ALLOWANCE-002.
+  '/finance/offer-allowances',
   '/package-purchases',
   '/package-refunds',
   '/showcase/reviews',
