@@ -6964,6 +6964,19 @@ button:disabled {
   margin-top: 16px;
 }
 
+/* SHOWCASE-ALLOWANCE-002: the free vitrin offer report stacks two KPI rows,
+   a notice and the period tables between its cards, on the same rhythm. */
+.offer-allowance-report-page > .finance-kpi-row,
+.offer-allowance-report-page > .finance-two-col,
+.offer-allowance-report-page > .notice,
+.offer-allowance-report-page > .inline-actions {
+  margin: 0 0 16px;
+}
+
+.offer-allowance-report-page .section-card .detail-muted-note {
+  margin: 12px 0;
+}
+
 .finance-list-page .detail-notice code,
 .purchase-detail-page code,
 .refund-detail-page code {

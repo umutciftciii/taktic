@@ -9,11 +9,16 @@ import { RequiresPermission } from '../auth/permissions.decorator';
 import { FinanceAnalyticsDto } from './dto/finance-analytics.dto';
 import { ListCreditLedgerDto } from './dto/list-credit-ledger.dto';
 import { ListProviderFinanceDto } from './dto/list-provider-finance.dto';
+import { OfferAllowanceReportDto } from './dto/offer-allowance-report.dto';
 import { FinanceService } from './finance.service';
+import { OfferAllowanceReportService } from './offer-allowance-report.service';
 
 @Controller('finance')
 export class FinanceController {
-  constructor(@Inject(FinanceService) private readonly financeService: FinanceService) {}
+  constructor(
+    @Inject(FinanceService) private readonly financeService: FinanceService,
+    @Inject(OfferAllowanceReportService) private readonly offerAllowanceReport: OfferAllowanceReportService,
+  ) {}
 
   @Get('summary')
   @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
@@ -41,5 +46,16 @@ export class FinanceController {
   @RequiresPermission(AdminPermission.FINANCE_READ)
   providerFinance(@Query() query: ListProviderFinanceDto, @CurrentUser() user: AuthUser) {
     return this.financeService.listProviderFinance(query, user);
+  }
+
+  /**
+   * SHOWCASE-ALLOWANCE-002: free vitrin offers — defined, used, remaining, the
+   * category credit of the used ones and its indicative TL value.
+   */
+  @Get('offer-allowances')
+  @UseGuards(AuthGuard, AdminAccessGuard, PermissionsGuard)
+  @RequiresPermission(AdminPermission.FINANCE_READ)
+  offerAllowances(@Query() query: OfferAllowanceReportDto) {
+    return this.offerAllowanceReport.report(query);
   }
 }

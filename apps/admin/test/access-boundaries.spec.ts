@@ -129,7 +129,7 @@ describe('sidebar row ↔ page gate', () => {
 
 describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-001)', () => {
   /**
-   * All 60 signed-in page.tsx files, kept by hand. The first test fails the
+   * All 61 signed-in page.tsx files, kept by hand. The first test fails the
    * moment a page is added or removed without this table changing with it, so
    * a new screen cannot arrive without somebody deciding which row lights on
    * it and which gate it asks for.
@@ -171,6 +171,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
     '/finance/credit-ledger': { row: '/finance/credit-ledger', gate: ['FINANCE_LEDGER_READ'] },
     '/finance/manual-adjustments': { row: '/finance/manual-adjustments', gate: ['FINANCE_LEDGER_READ'] },
     '/finance/providers': { row: '/finance/providers', gate: ['FINANCE_READ'] },
+    '/finance/offer-allowances': { row: '/finance/offer-allowances', gate: ['FINANCE_READ'] },
     '/package-purchases': { row: '/package-purchases', gate: ['PACKAGE_PURCHASES_READ'] },
     '/package-purchases/[id]': { row: '/package-purchases', gate: ['PACKAGE_PURCHASES_READ'] },
     '/package-refunds': { row: '/package-refunds', gate: ['PACKAGE_REFUND_READ'] },
@@ -247,7 +248,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
-    expect(onDisk).toHaveLength(60);
+    expect(onDisk).toHaveLength(61);
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {

@@ -1040,7 +1040,7 @@ function startOfIstanbulMonth(now: Date): Date {
   return new Date(`${parts.year}-${parts.month}-01T00:00:00+03:00`);
 }
 
-function istanbulDateParts(now: Date): {
+export function istanbulDateParts(now: Date): {
   year: string;
   month: string;
   day: string;
@@ -1073,7 +1073,7 @@ function normalizeAnalyticsGroupBy(
 
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function isValidIsoDate(value: string): boolean {
+export function isValidIsoDate(value: string): boolean {
   if (!ISO_DATE_RE.test(value)) return false;
   const { year, month, day } = splitIsoDate(value);
   if (month < 1 || month > 12) return false;
@@ -1117,15 +1117,15 @@ function resolveAnalyticsRange(
   };
 }
 
-function parseIstanbulDayStart(isoDate: string): Date {
+export function parseIstanbulDayStart(isoDate: string): Date {
   return new Date(`${isoDate}T00:00:00.000${ISTANBUL_TZ_OFFSET}`);
 }
 
-function parseIstanbulDayEnd(isoDate: string): Date {
+export function parseIstanbulDayEnd(isoDate: string): Date {
   return new Date(`${isoDate}T23:59:59.999${ISTANBUL_TZ_OFFSET}`);
 }
 
-function addDaysToIsoDate(isoDate: string, days: number): string {
+export function addDaysToIsoDate(isoDate: string, days: number): string {
   const { year, month, day } = splitIsoDate(isoDate);
   const t = Date.UTC(year, month - 1, day) + days * 86_400_000;
   const d = new Date(t);

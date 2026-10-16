@@ -170,7 +170,7 @@ describe('filterNavGroups', () => {
   it('drops Yönetim entirely for a super-admin-less session that holds none of its reads', () => {
     const groups = filterNavGroups(navGroups, only('FINANCE_READ'));
     expect(groups.map((group) => group.key)).toEqual(['finans']);
-    expect(groups[0]?.items.map((entry) => entry.href)).toEqual(['/finance', '/finance/providers']);
+    expect(groups[0]?.items.map((entry) => entry.href)).toEqual(['/finance', '/finance/providers', '/finance/offer-allowances']);
   });
 });
 

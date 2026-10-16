@@ -152,6 +152,8 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'GET', path: '/dashboard/admin-summary', permission: AdminPermission.DASHBOARD_READ },
   { method: 'GET', path: '/finance/analytics', permission: AdminPermission.FINANCE_READ },
   { method: 'GET', path: '/finance/credit-ledger', permission: AdminPermission.FINANCE_LEDGER_READ },
+  // SHOWCASE-ALLOWANCE-002: the free vitrin offer report.
+  { method: 'GET', path: '/finance/offer-allowances', permission: AdminPermission.FINANCE_READ },
   { method: 'GET', path: '/finance/providers', permission: AdminPermission.FINANCE_READ },
   { method: 'GET', path: '/finance/summary', permission: AdminPermission.FINANCE_READ },
   { method: 'GET', path: '/notification-logs', permission: AdminPermission.NOTIFICATION_LOGS_READ },

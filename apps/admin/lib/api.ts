@@ -1959,6 +1959,90 @@ export type ProviderFinanceResponse = {
   hasNextPage: boolean;
 };
 
+/** SHOWCASE-ALLOWANCE-002 — `GET /finance/offer-allowances`. */
+export type OfferAllowanceCohortFigures = {
+  grants: number;
+  defined: number;
+  usedTracked: number;
+  usedLegacy: number;
+  remainingUsable: number;
+  remainingUsableViaOpenLeads: number;
+  remainingUnusable: number;
+};
+
+export type OfferAllowanceUsageFigures = {
+  usages: number;
+  credits: number;
+  valuedCredits: number;
+  unvaluedCredits: number;
+  /** Kuruş; null when there are credits and none of them could be valued (N/A). */
+  indicativeValueMinor: number | null;
+};
+
+export type OfferAllowanceUnplacedFigures = {
+  pendingRights: number;
+  pendingFreeOffers: number;
+  expiredRights: number;
+  expiredFreeOffers: number;
+};
+
+export type OfferAllowanceReportGroupBy = 'day' | 'month' | 'year';
+
+export type OfferAllowanceReport = {
+  range: { from: string | null; to: string | null; groupBy: OfferAllowanceReportGroupBy; timezone: string };
+  filters: { packageId: string | null; providerId: string | null; categoryId: string | null };
+  timeBases: { cohort: string; usage: string; unplaced: string; valuation: string };
+  cohort: OfferAllowanceCohortFigures;
+  usage: OfferAllowanceUsageFigures;
+  /** Absent (null) under a category filter: an unplaced right has no category yet. */
+  unplaced: OfferAllowanceUnplacedFigures | null;
+  valuation: {
+    method: string;
+    months: Array<{
+      month: string;
+      usages: number;
+      credits: number;
+      purchases: number;
+      paidAmountMinor: number | null;
+      soldCredits: number | null;
+      perCreditMinor: number | null;
+    }>;
+    listPriceReference: {
+      basis: string;
+      packages: number;
+      minPerCreditMinor: number;
+      maxPerCreditMinor: number;
+      lowValueMinor: number;
+      highValueMinor: number;
+    } | null;
+  };
+  integrity: { zeroAllowancePlacements: number; placementsWithoutGrant: number; voidGrants: number };
+  byPackage: Array<{
+    package: { id: string; name: string | null };
+    cohort: OfferAllowanceCohortFigures;
+    usage: OfferAllowanceUsageFigures;
+    unplaced?: OfferAllowanceUnplacedFigures;
+  }>;
+  byCategory: Array<{
+    category: { id: string; name: string | null };
+    cohort: OfferAllowanceCohortFigures;
+    usage: OfferAllowanceUsageFigures;
+  }>;
+  byProvider: {
+    items: Array<{
+      provider: { id: string; businessName: string | null };
+      cohort: OfferAllowanceCohortFigures;
+      usage: OfferAllowanceUsageFigures;
+    }>;
+    total: number;
+    page: number;
+    pageSize: number;
+    hasNextPage: boolean;
+  };
+  cohortByPeriod: Array<OfferAllowanceCohortFigures & { bucket: string }>;
+  usageByPeriod: Array<OfferAllowanceUsageFigures & { bucket: string }>;
+};
+
 export type FinanceAnalyticsGroupBy = 'day' | 'month' | 'year';
 
 export type FinanceAnalyticsBucket = {

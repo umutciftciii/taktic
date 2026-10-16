@@ -43,6 +43,7 @@ const FULL_MENU: Array<[group: string, rows: string[]]> = [
       'Kredi hareketleri',
       'Elle kredi işlemleri',
       'İşletme bakiyeleri',
+      'Ücretsiz vitrin hakları',
       'Paket satışları',
       'Paket iadeleri',
       'İade kontrolü',
