@@ -170,7 +170,11 @@ const READ_MATRIX: Array<{ permission: string; rows: string[]; refused: string; 
   { permission: 'PROVIDERS_READ', rows: ['/providers'], refused: '/customers' },
   { permission: 'CUSTOMERS_READ', rows: ['/customers'], refused: '/providers' },
   { permission: 'SUPPORT_READ', rows: ['/support'], refused: '/customers' },
-  { permission: 'FINANCE_READ', rows: ['/finance', '/finance/providers'], refused: '/finance/credit-ledger' },
+  {
+    permission: 'FINANCE_READ',
+    rows: ['/finance', '/finance/providers', '/finance/offer-allowances'],
+    refused: '/finance/credit-ledger',
+  },
   {
     permission: 'FINANCE_LEDGER_READ',
     rows: ['/finance/credit-ledger', '/finance/manual-adjustments'],

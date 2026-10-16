@@ -136,6 +136,8 @@ export const navGroups: NavGroup[] = [
       // operator reports.
       { href: '/finance/manual-adjustments', label: 'Elle kredi işlemleri', permission: 'FINANCE_LEDGER_READ' },
       { href: '/finance/providers', label: 'İşletme bakiyeleri', permission: 'FINANCE_READ' },
+      // SHOWCASE-ALLOWANCE-002: free vitrin offers, read as finance.
+      { href: '/finance/offer-allowances', label: 'Ücretsiz vitrin hakları', permission: 'FINANCE_READ' },
       { href: '/package-purchases', label: 'Paket satışları', permission: 'PACKAGE_PURCHASES_READ' },
       // CMP-006 PR-B: the package money-refund queue. Beside the purchases it
       // is about; its own permission, because reading purchases is not reading

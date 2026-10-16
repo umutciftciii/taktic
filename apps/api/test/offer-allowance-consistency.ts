@@ -17,3 +17,16 @@ const CONSISTENCY_SQL = readFileSync(
 export async function allowanceInconsistencies(prisma: PrismaClient): Promise<AllowanceInconsistency[]> {
   return prisma.$queryRawUnsafe<AllowanceInconsistency[]>(CONSISTENCY_SQL);
 }
+
+/**
+ * SHOWCASE-ALLOWANCE-002 — the report's own read-only check
+ * (`scripts/ops/showcase-allowance-002-report-consistency.sql`).
+ */
+const REPORT_CONSISTENCY_SQL = readFileSync(
+  resolve(__dirname, '../../../scripts/ops/showcase-allowance-002-report-consistency.sql'),
+  'utf8',
+);
+
+export async function reportInconsistencies(prisma: PrismaClient): Promise<AllowanceInconsistency[]> {
+  return prisma.$queryRawUnsafe<AllowanceInconsistency[]>(REPORT_CONSISTENCY_SQL);
+}
