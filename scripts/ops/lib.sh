@@ -156,6 +156,56 @@ pg_query() {
     -U "$(pg_container_user)" -d "$(pg_container_db)" -c "$1"
 }
 
+# pg_query in a session PostgreSQL itself holds read-only
+# (default_transaction_read_only): whatever the SQL says, it cannot write.
+pg_query_ro() {
+  docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' "$POSTGRES_CONTAINER" \
+    psql -v ON_ERROR_STOP=1 -X -q -tA -U "$(pg_container_user)" -d "$(pg_container_db)" -c "$1"
+}
+
+# The database this host's PostgreSQL serves, as one token:
+# <cluster system identifier>/<database name>/<database oid>. A restore into a
+# new cluster or a new database changes it, so an operator's confirmation
+# typed for one database cannot be replayed against another.
+database_identity() {
+  pg_query_ro "SELECT (SELECT system_identifier FROM pg_control_system())::text || '/' || current_database() || '/' || (SELECT oid FROM pg_database WHERE datname = current_database())::text"
+}
+
+# Migrations whose own SQL refuses to run on some data, with the read-only
+# count that predicts the refusal — the same predicate, byte for byte, as the
+# migration's guard (ops-scripts.test.mjs compares them). A non-zero count
+# means `migrate deploy` would stop on that migration with P3018 and leave a
+# failed row behind (P3009), so the deploy stops before the API is.
+MIGRATION_DATA_GUARDED="20261006120000_user_phone_e164_check"
+migration_data_guard_sql() {
+  case "$1" in
+    20261006120000_user_phone_e164_check)
+      # shellcheck disable=SC2016
+      printf '%s' 'SELECT count(*) FROM "User" WHERE "phone" IS NOT NULL AND "phone" !~ '"'"'^\+[1-9][0-9]{7,14}$'"'"
+      ;;
+    *) return 1 ;;
+  esac
+}
+migration_data_guard_hint() {
+  case "$1" in
+    20261006120000_user_phone_e164_check)
+      printf '%s' "User.phone value(s) not canonical E.164 (AUTH-REG-002). Nothing is fixed automatically: canonicalize-user-phones dry run, a resolution file for collisions, then --apply (docs/ops/deploy-runtime.md, 'Migration data prerequisites')"
+      ;;
+  esac
+}
+
+# For each pending migration (names on stdin) that has a data guard, one line
+# "<migration> <count>"; nothing for the others. Read-only.
+migration_data_guard_counts() {
+  local name sql
+  while IFS= read -r name; do
+    [ -n "$name" ] || continue
+    case " $MIGRATION_DATA_GUARDED " in *" $name "*) ;; *) continue ;; esac
+    sql="$(migration_data_guard_sql "$name")"
+    printf '%s %s\n' "$name" "$(pg_query_ro "$sql")"
+  done
+}
+
 require_postgres_ready() {
   container_running "$POSTGRES_CONTAINER" || die "$POSTGRES_CONTAINER is not running"
   docker exec "$POSTGRES_CONTAINER" pg_isready -q -U "$(pg_container_user)" -d "$(pg_container_db)" \

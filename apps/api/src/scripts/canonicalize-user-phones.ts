@@ -11,6 +11,11 @@ import { isCanonicalPhone, normalizePhoneNumber } from '../modules/phone-verific
  *   pnpm --filter @taktic/api canonicalize:user-phones
  *       dry run (the default): reads, plans, writes the plan, changes nothing
  *   pnpm --filter @taktic/api canonicalize:user-phones -- --apply [--resolutions FILE] [--out DIR]
+ *   node dist/scripts/canonicalize-user-phones.js --report
+ *       the deploy preflight's form (scripts/ops/deploy-preflight.sh, check 7b):
+ *       read-only transaction, no file written, and no telephone number in
+ *       the output — counts, account ids and roles only. Exit 0 = GO (the
+ *       user_phone_e164_check migration would pass), 4 = NO-GO.
  *
  * The canonical form is whatever `normalizePhoneNumber` returns — the
  * application's own canonicaliser, not a second algorithm. A row is planned
@@ -87,6 +92,45 @@ export type ApplyResult = {
 };
 
 type UserPhoneRow = { id: string; role: string; phone: string };
+
+export type PreflightReport = { go: boolean; lines: string[] };
+
+/**
+ * The plan as the deploy preflight prints it: nothing in it is a telephone
+ * number or an e-mail address — counts, account ids, roles and, for a value
+ * the canonicaliser refuses, its length. GO only when no row needs anything,
+ * which is exactly when the user_phone_e164_check migration's own guard passes.
+ */
+export function formatPreflightReport(plan: Plan): PreflightReport {
+  const formatOnly = plan.changes.filter((change) => change.reason === 'canonicalize');
+  const colliding = new Set(plan.collisions.flatMap((collision) => collision.members.map((member) => member.userId)));
+  const lines = [
+    `users scanned              : ${plan.scanned}`,
+    `users with a phone         : ${plan.withPhone}`,
+    `already canonical          : ${plan.alreadyCanonical}`,
+    `format-only fixes          : ${formatOnly.filter((change) => !colliding.has(change.userId)).length}`,
+    `collision groups           : ${plan.collisions.length}`,
+  ];
+  plan.collisions.forEach((collision, index) => {
+    const members = collision.members.map((member) => `${member.userId} (${member.role})`).join(', ');
+    lines.push(`  group ${index + 1}: ${members} — one number after normalisation; a person decides`);
+  });
+  lines.push(`unsupported values         : ${plan.unsupported.length}`);
+  for (const row of plan.unsupported) {
+    lines.push(`  ${row.userId} (${row.role}): ${row.phone.length} characters the canonicaliser refuses; a person decides`);
+  }
+  const go = plan.changes.length === 0 && plan.collisions.length === 0 && plan.unsupported.length === 0;
+  if (go) {
+    lines.push('phone-preflight: GO (every User.phone is canonical E.164)');
+  } else {
+    const reasons: string[] = [];
+    if (formatOnly.length > 0) reasons.push(`${formatOnly.length} value(s) need canonicalize-user-phones --apply`);
+    if (plan.collisions.length > 0) reasons.push(`${plan.collisions.length} collision group(s) need a resolution file`);
+    if (plan.unsupported.length > 0) reasons.push(`${plan.unsupported.length} value(s) need a manual decision`);
+    lines.push(`phone-preflight: NO-GO (${reasons.join('; ')})`);
+  }
+  return { go, lines };
+}
 
 /**
  * Raw SQL over the unqualified "User" table, on whatever transaction client
@@ -305,11 +349,12 @@ export function parseResolutionFile(text: string): ResolutionFile {
   return parsed as ResolutionFile;
 }
 
-type Cli = { apply: boolean; resolutions: string | null; out: string };
+type Cli = { apply: boolean; report: boolean; resolutions: string | null; out: string };
 
 function parseArgs(argv: string[]): Cli {
   const cli: Cli = {
     apply: false,
+    report: false,
     resolutions: null,
     out: process.env.TAKTIC_OPS_OUTPUT_DIR || join(homedir(), 'Backups', 'taktic', 'ops'),
   };
@@ -318,9 +363,13 @@ function parseArgs(argv: string[]): Cli {
     if (arg === '--') continue;
     if (arg === '--apply') cli.apply = true;
     else if (arg === '--dry-run') cli.apply = false;
+    else if (arg === '--report') cli.report = true;
     else if (arg === '--resolutions') cli.resolutions = argv[++i] ?? null;
     else if (arg === '--out') cli.out = argv[++i] ?? cli.out;
     else throw new Error(`unknown argument: ${arg}`);
+  }
+  if (cli.report && (cli.apply || cli.resolutions)) {
+    throw new Error('--report reads only; it takes neither --apply nor --resolutions');
   }
   return cli;
 }
@@ -363,6 +412,18 @@ async function main(): Promise<void> {
   const prisma = new PrismaClient();
 
   try {
+    if (cli.report) {
+      const plan = await prisma.$transaction(async (tx) => {
+        await tx.$executeRawUnsafe('SET TRANSACTION READ ONLY');
+        return planCanonicalization(tx, null);
+      });
+      const report = formatPreflightReport(plan);
+      console.log('=== CANONICALIZE USER PHONES — PREFLIGHT REPORT (read-only, nothing written, no number shown) ===');
+      for (const line of report.lines) console.log(line);
+      process.exitCode = report.go ? 0 : 4;
+      return;
+    }
+
     if (!cli.apply) {
       const plan = await prisma.$transaction(async (tx) => {
         // A dry run cannot write, whatever a future edit to this file does.
