@@ -427,6 +427,12 @@ jobs:
     #      running stack, then the uploads ownership fix on a real root-owned
     #      volume, with a second volume proving nothing else is touched
     #   7. backup + isolated restore rehearsal of that database
+    #   8. P3009 recovery against the real migrate image's Prisma, on a
+    #      throwaway PostgreSQL with no network: a failing migration rolls
+    #      back whole, one that commits half-way does not (and the recovery
+    #      analysis says so), and the guard refuses resolve-rolled-back outside
+    #      staging or unconfirmed, while Prisma refuses a migration that is not
+    #      in a failed state
     #
     # Placeholders only: the .env written below holds no secret (Cloudflare's
     # published always-pass Turnstile test keys and throwaway values in the
@@ -449,7 +455,7 @@ jobs:
 
       - name: Compose security
         run: |
-          node --test scripts/ops/compose-security.test.mjs scripts/ops/runtime-contract.test.mjs scripts/ops/ops-scripts.test.mjs
+          node --test scripts/ops/compose-security.test.mjs scripts/ops/runtime-contract.test.mjs scripts/ops/ops-scripts.test.mjs scripts/ops/migration-recovery.test.mjs
           node scripts/ops/compose-security.mjs prod
           node scripts/ops/compose-security.mjs dev
 
@@ -551,6 +557,63 @@ jobs:
           archive="$(scripts/ops/backup-uploads.sh --label ci --allow-empty | sed -n 's/^UPLOADS_ARCHIVE=//p')"
           scripts/ops/restore-rehearsal.sh --db-dump "$dump" --uploads-archive "$archive" \
             --migrate-image "taktic-migrate:$TAKTIC_IMAGE_TAG"
+
+      - name: P3009 recovery against real Prisma and PostgreSQL
+        run: |
+          set -euo pipefail
+          image="taktic-migrate:$TAKTIC_IMAGE_TAG"
+          lab="$RUNNER_TEMP/p3009-lab"
+          net=taktic-p3009-lab
+          pg=taktic-p3009-lab-pg
+          for case in atomic commit; do
+            mkdir -p "$lab/$case/migrations/20990101000000_ok" "$lab/$case/migrations/20990102000000_fail"
+            printf 'datasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n}\nmodel Probe {\n  id Int @id\n}\n' >"$lab/$case/schema.prisma"
+            printf 'provider = "postgresql"\n' >"$lab/$case/migrations/migration_lock.toml"
+            printf 'CREATE TABLE "Probe" ("id" INTEGER PRIMARY KEY);\n' >"$lab/$case/migrations/20990101000000_ok/migration.sql"
+          done
+          printf 'CREATE TABLE "LabA" ("id" INTEGER);\nALTER TABLE "Probe" ADD COLUMN "x" INTEGER;\nINSERT INTO "Probe" VALUES (1);\nDO $$ BEGIN RAISE EXCEPTION %s; END $$;\n' "'lab guard'" \
+            >"$lab/atomic/migrations/20990102000000_fail/migration.sql"
+          printf 'CREATE TABLE "LabB" ("id" INTEGER);\nCOMMIT;\nCREATE TABLE "LabC" ("id" INTEGER);\nSELECT 1/0;\n' \
+            >"$lab/commit/migrations/20990102000000_fail/migration.sql"
+          docker network create --internal "$net" >/dev/null
+          docker run -d --name "$pg" --network "$net" -e POSTGRES_USER=lab -e POSTGRES_PASSWORD=lab -e POSTGRES_DB=lab_atomic postgres:16.6-alpine >/dev/null
+          until docker exec "$pg" pg_isready -q -U lab -d lab_atomic; do sleep 1; done
+          docker exec "$pg" psql -X -q -U lab -d lab_atomic -c 'CREATE DATABASE lab_commit'
+          url() { echo "postgresql://lab:lab@$pg:5432/$1"; }
+          q() { docker exec -i "$pg" psql -X -tA -v ON_ERROR_STOP=1 -U lab -d "$1" -c "$2"; }
+          for case in atomic commit; do
+            if docker run --rm --network "$net" -e DATABASE_URL="$(url "lab_$case")" -v "$lab/$case:/lab:ro" \
+                --entrypoint /app/node_modules/.bin/prisma "$image" migrate deploy --schema /lab/schema.prisma; then
+              echo "the failing lab migration ($case) applied" >&2; exit 1
+            fi
+            # Prisma records the same thing in both cases: unfinished, 0 steps.
+            test "$(q "lab_$case" "SELECT applied_steps_count FROM _prisma_migrations WHERE migration_name = '20990102000000_fail' AND finished_at IS NULL")" = 0
+          done
+          # Atomic: nothing the file did survived, and the analysis agrees.
+          test "$(q lab_atomic "SELECT to_regclass('\"LabA\"') IS NULL AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Probe' AND column_name = 'x') AND (SELECT count(*) FROM \"Probe\") = 0")" = t
+          node scripts/ops/migration-recovery.mjs analyze <"$lab/atomic/migrations/20990102000000_fail/migration.sql"
+          test -z "$(node scripts/ops/migration-recovery.mjs verify-sql <"$lab/atomic/migrations/20990102000000_fail/migration.sql" | q lab_atomic "$(cat)" | grep '|1$' || true)"
+          # Commit half-way: LabB survived, and the analysis refuses the file.
+          test "$(q lab_commit "SELECT to_regclass('\"LabB\"') IS NOT NULL AND to_regclass('\"LabC\"') IS NULL")" = t
+          if node scripts/ops/migration-recovery.mjs analyze <"$lab/commit/migrations/20990102000000_fail/migration.sql"; then
+            echo "the analysis accepted a file that commits half-way" >&2; exit 1
+          fi
+          node scripts/ops/migration-recovery.mjs verify-sql <"$lab/commit/migrations/20990102000000_fail/migration.sql" | q lab_commit "$(cat)" | grep -qx 'relation|LabB|1'
+          # The guard of the real image.
+          name=20261006120000_user_phone_e164_check
+          guard() { docker run --rm --network "$net" -e DATABASE_URL="$(url lab_atomic)" "$@"; }
+          set +e
+          guard -e APP_ENVIRONMENT=production -e TAKTIC_RESOLVE_CONFIRM="$name" "$image" resolve-rolled-back "$name"; prod_code=$?
+          guard -e APP_ENVIRONMENT=staging "$image" resolve-rolled-back "$name"; unconfirmed_code=$?
+          guard -e APP_ENVIRONMENT=staging -e TAKTIC_RESOLVE_CONFIRM="$name" "$image" resolve "$name"; bare_code=$?
+          # Confirmed on staging, but the migration is not failed here: Prisma refuses.
+          guard -e APP_ENVIRONMENT=staging -e TAKTIC_RESOLVE_CONFIRM="$name" "$image" resolve-rolled-back "$name"; prisma_code=$?
+          set -e
+          test "$prod_code" = 64 && test "$unconfirmed_code" = 64 && test "$bare_code" = 64
+          test "$prisma_code" -ne 0
+          test "$(q lab_atomic "SELECT count(*) FROM _prisma_migrations WHERE migration_name = '$name'")" = 0
+          docker rm -f "$pg" >/dev/null
+          docker network rm "$net" >/dev/null
 
       - name: Stack logs on failure
         if: failure()

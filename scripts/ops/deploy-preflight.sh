@@ -58,6 +58,15 @@
 #                           up to date, or only pending migrations — never a
 #                           failed or diverged history; with nothing pending,
 #                           the read-only drift check must find no difference
+#   7b data prerequisites   for every pending migration whose SQL refuses
+#                           some data (lib.sh MIGRATION_DATA_GUARDED), the
+#                           same predicate counted read-only; non-zero = FAIL,
+#                           because `migrate deploy` would stop there with
+#                           P3018 and leave a failed row (P3009). Pending is
+#                           read from the target commit's tree, so this runs
+#                           without images too; with the API image, a masked
+#                           report (counts, account ids, roles — never a
+#                           number) says what a person has to decide
 #   8  uploads              the API's uploads volume is the project's, read
 #                           from the API container's own mount; every entry
 #                           owned by the image's runtime uid:gid, and no link
@@ -293,7 +302,7 @@ if [ "$pg_ok" -eq 1 ] && docker image inspect "taktic-migrate:$sha" >/dev/null 2
   unfinished="$(unfinished_migrations)"
   log "image carries $(printf '%s\n' "$in_image" | grep -c .) migrations; database has applied $(printf '%s\n' "$in_db" | grep -c .); pending: $pending"
   [ -z "$unknown" ] || bad "the database has applied migrations this commit does not contain (deploying would run older code on a newer schema):$(printf ' %s' $unknown)"
-  [ -z "$unfinished" ] || bad "unfinished (failed) migrations in _prisma_migrations:$(printf ' %s' $unfinished)"
+  [ -z "$unfinished" ] || bad "unfinished (failed) migrations in _prisma_migrations:$(printf ' %s' $unfinished) — P3009: no deploy can continue; scripts/ops/migration-recover.sh --sha $sha says, read-only, whether it can be marked rolled back (docs/ops/deploy-runtime.md, 'P3009')"
   # With nothing to apply, the live schema must already be exactly this
   # commit's. Checked here, before the deploy stops anything, so a drifted
   # database costs no downtime. With pending migrations the comparison can
@@ -322,6 +331,56 @@ elif [ "$pg_ok" -eq 1 ] && [ "$allow_missing_images" -eq 1 ]; then
   skipped "the migrate image is not built; the migration status runs in the deploy's own preflight"
 else
   bad "skipped: PostgreSQL or the migrate image is not available"
+fi
+
+# --- 7b data prerequisites of pending migrations ---------------------------------
+step "7b. Data prerequisites of pending migrations"
+if [ "$pg_ok" -eq 1 ]; then
+  # Pending = in the target commit's tree, not applied here. Read from git, so
+  # the check needs no image and runs on any old schema: each guard is a plain
+  # SELECT over tables that exist long before its migration.
+  target_migrations="$(git -C "$REPO_ROOT" ls-tree --name-only "$sha" prisma/migrations/ \
+    | sed -n 's#^prisma/migrations/\([0-9]\{14\}_[a-z0-9_]*\)$#\1#p' | sort)"
+  applied_now="$(applied_migrations)"
+  pending_names="$(comm -23 <(printf '%s\n' "$target_migrations" | grep . || true) <(printf '%s\n' "$applied_now" | grep . || true))"
+  guard_counts="$(printf '%s\n' "$pending_names" | migration_data_guard_counts)" || guard_counts="error"
+  if [ "$guard_counts" = "error" ]; then
+    bad "could not count the data prerequisites of the pending migrations"
+  elif [ -z "$guard_counts" ]; then
+    ok "no pending migration with a data prerequisite"
+  else
+    while read -r guarded count; do
+      case "$count" in
+        '' | *[!0-9]*)
+          bad "$guarded: its data guard could not be counted; treated as a failure"
+          continue
+          ;;
+      esac
+      if [ "$count" = "0" ]; then
+        ok "$guarded: its data guard passes (0 rows)"
+        continue
+      fi
+      bad "$guarded would stop the deploy (P3018, then P3009): $count $(migration_data_guard_hint "$guarded")"
+      case "$guarded" in
+        20261006120000_user_phone_e164_check)
+          if docker image inspect "taktic-api:$sha" >/dev/null 2>&1; then
+            set +e
+            phone_report="$(prod_compose run --rm --no-deps -T api node dist/scripts/canonicalize-user-phones.js --report 2>&1)"
+            set -e
+            # The report prints no number; long digit runs are masked anyway.
+            printf '%s\n' "$phone_report" | grep -E '^(users|already|format-only|collision|unsupported|  |phone-preflight:)' \
+              | sed -E 's/[0-9]{7,}/•••/g; s/[^[:space:]]+@[^[:space:]]+/•••@•••/g' | sed 's/^/       /' >&2
+          else
+            note "masked phone report NOT RUN: taktic-api:$sha is not built (the count above is the verdict)"
+          fi
+          ;;
+      esac
+    done <<EOF_COUNTS
+$guard_counts
+EOF_COUNTS
+  fi
+else
+  bad "skipped: PostgreSQL is not available"
 fi
 
 # --- 8 uploads -----------------------------------------------------------------

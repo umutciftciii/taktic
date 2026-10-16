@@ -4,6 +4,7 @@ import {
   applyCanonicalization,
   CanonicalizationAborted,
   CanonicalizationRefused,
+  formatPreflightReport,
   parseResolutionFile,
   planCanonicalization,
   type ResolutionFile,
@@ -135,6 +136,49 @@ describe('dry run', () => {
       },
     ]);
     expect(plan.refusals).toEqual(['unresolved collision on one canonical number (2 accounts)']);
+  });
+});
+
+describe('the deploy preflight report (--report)', () => {
+  const NUMBERS = /\d{4,}|@/;
+
+  it('says GO when every number is already canonical, and writes nothing', async () => {
+    await seed('e-canonical', '+905550001122');
+    await seed('f-none', null, { role: 'ADMIN' });
+    const before = await rows();
+
+    const report = formatPreflightReport(await inScratch((tx) => planCanonicalization(tx, null), true));
+
+    expect(report.go).toBe(true);
+    expect(report.lines.at(-1)).toBe('phone-preflight: GO (every User.phone is canonical E.164)');
+    expect(await rows()).toEqual(before);
+  });
+
+  it('says NO-GO for format-only rows and a collision, naming accounts but never a number or an address', async () => {
+    await seedLocalShape();
+
+    const report = formatPreflightReport(await inScratch((tx) => planCanonicalization(tx, null), true));
+
+    expect(report.go).toBe(false);
+    expect(report.lines).toContain('format-only fixes          : 2');
+    expect(report.lines).toContain('collision groups           : 1');
+    expect(report.lines).toContain(
+      '  group 1: a-survivor (CUSTOMER), b-gives-up (CUSTOMER) — one number after normalisation; a person decides',
+    );
+    expect(report.lines.at(-1)).toBe(
+      'phone-preflight: NO-GO (4 value(s) need canonicalize-user-phones --apply; 1 collision group(s) need a resolution file)',
+    );
+    for (const line of report.lines) expect(line).not.toMatch(NUMBERS);
+  });
+
+  it('reports a value the canonicaliser refuses by its length only', async () => {
+    await seed('h-junk', '1234567');
+
+    const report = formatPreflightReport(await inScratch((tx) => planCanonicalization(tx, null), true));
+
+    expect(report.go).toBe(false);
+    expect(report.lines).toContain('  h-junk (CUSTOMER): 7 characters the canonicaliser refuses; a person decides');
+    expect(report.lines.join('\n')).not.toContain('1234567');
   });
 });
 

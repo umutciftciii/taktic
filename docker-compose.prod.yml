@@ -86,6 +86,9 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-taktic_user}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set for a deployed database}@postgres:5432/${POSTGRES_DB:-taktic}?schema=public
+      # Read by the guard's resolve-rolled-back, which runs on staging only
+      # (scripts/ops/prisma-migrate-guard.sh, migration-recover.sh).
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?APP_ENVIRONMENT must be staging or production}
 
   api:
     <<: *hardening

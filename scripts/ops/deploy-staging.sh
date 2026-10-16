@@ -40,7 +40,11 @@
 #    2  stop      the API container. From here on no old code can write and
 #                 no new code is running.
 #    3  checkout  `git checkout --detach <sha>` — only now, with the API down
-#    4  status    `prisma migrate status` + exact pending list
+#    4  status    `prisma migrate status` + exact pending list, and the data
+#                 prerequisites of the pending migrations counted again now
+#                 that nothing can write (preflight 7b ran while the API
+#                 still served); a row written in between stops the deploy
+#                 here, before the backup and before any migration
 #    5  backup    a fresh pg_dump (or --backup verified): sha256, pg_restore
 #                 --list, and migration count equal to the live database;
 #                 plus the uploads volume
@@ -152,6 +156,7 @@ on_exit() {
   if [ "$migrated" -eq 1 ]; then
     printf '%s       Migrations HAVE been applied. Do not start the previous API image on the new schema.\n' "$(_ts)" >&2
     printf '%s       Fix forward (rerun this script once the cause is fixed) or restore the pre-deploy dump: docs/ops/deploy-runtime.md, "Rollback".\n' "$(_ts)" >&2
+    printf '%s       If a migration failed (P3018; every later deploy then says P3009): scripts/ops/migration-recover.sh --sha %s reports, read-only, whether it can be marked rolled back.\n' "$(_ts)" "$sha" >&2
   elif [ "$api_stopped" -eq 1 ]; then
     printf '%s       No migration was applied. The previous API can be started again: docker start %s\n' "$(_ts)" "$API_CONTAINER" >&2
     printf '%s       (and, if the checkout moved: git -C %s checkout --detach %s)\n' "$(_ts)" "$REPO_ROOT" "$previous_head" >&2
@@ -253,7 +258,8 @@ in_db="$(applied_migrations)"
 pending_list="$(comm -23 <(printf '%s\n' "$in_image") <(printf '%s\n' "$in_db") | grep . || true)"
 unknown="$(comm -13 <(printf '%s\n' "$in_image") <(printf '%s\n' "$in_db") | grep . || true)"
 [ -z "$unknown" ] || die "database has migrations this commit does not contain:$(printf ' %s' $unknown)"
-[ -z "$(unfinished_migrations)" ] || die "database has an unfinished (failed) migration; resolve it by hand first"
+[ -z "$(unfinished_migrations)" ] \
+  || die "database has an unfinished (failed) migration (P3009); see scripts/ops/migration-recover.sh --sha $sha and docs/ops/deploy-runtime.md, 'P3009'"
 case "$status_code" in
   0 | 1) ;;
   *) die "migrate status failed (exit $status_code)" ;;
@@ -261,6 +267,17 @@ esac
 pending_count="$(printf '%s\n' "$pending_list" | grep -c . || true)"
 log "applied: $(printf '%s\n' "$in_db" | grep -c .), pending: $pending_count"
 [ -z "$pending_list" ] || printf '%s\n' "$pending_list" | sed 's/^/       pending: /' >&2
+# The preflight counted these while the old API still served; it is stopped
+# now, so this count is final. Read-only, before the backup and the migration.
+guard_counts="$(printf '%s\n' "$pending_list" | migration_data_guard_counts)"
+while read -r guarded count; do
+  [ -n "$guarded" ] || continue
+  [ "$count" = "0" ] \
+    || die "$guarded would fail on ${count:-an uncountable number of} row(s) written since the preflight: $(migration_data_guard_hint "$guarded"). No migration was applied"
+  log "$guarded: data guard still passes with the API stopped"
+done <<EOF_COUNTS
+$guard_counts
+EOF_COUNTS
 
 # --- 5 backup ----------------------------------------------------------------------
 current_step="5 backup"

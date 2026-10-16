@@ -122,11 +122,11 @@ script'leriyle yapılır.
 | # | Adım | Başarısızlıkta |
 |---|---|---|
 | 0 | `build-images.sh <sha>` (`git archive` bağlamı; çalışan hiçbir şeye dokunmaz) | durur |
-| 1 | `deploy-preflight.sh` (salt-okunur, aşağıda): runtime sözleşmesi **ve yeni API image'ının kendi boot kontrolleri** dahil | durur, hiçbir şey değişmemiştir |
+| 1 | `deploy-preflight.sh` (salt-okunur, aşağıda): runtime sözleşmesi, **yeni API image'ının kendi boot kontrolleri** ve **bekleyen migration'ların veri ön koşulları (7b)** dahil | durur, hiçbir şey değişmemiştir |
 | 1b | (`--fix-uploads-ownership`) API container'ının **bağlı olduğu** uploads volume'u image'ın runtime uid:gid'ine verilir; dosya listesi + sha256 önce/sonra aynı olmalı | durur, hiçbir şey durdurulmamış/migrate edilmemiştir |
 | 2 | API container'ı **durdurulur** | — |
 | 3 | `git checkout --detach <sha>` (yalnız API durduktan sonra) | eski API `docker start` ile açılabilir |
-| 4 | `migrate status` + image/DB migration listesi birebir karşılaştırma | durur |
+| 4 | `migrate status` + image/DB migration listesi birebir karşılaştırma; başarısız migration kaydı varsa durur (P3009); **7b veri ön koşulları API durmuşken yeniden sayılır** | durur, migration uygulanmamıştır |
 | 5 | Taze `pg_dump` (sha256, `pg_restore --list`, migration sayısı = canlı) + uploads arşivi; veya `--backup` ile verilen dump doğrulanır | durur |
 | 6 | Yalnız `prisma migrate deploy` (bekleyen yoksa atlanır) | durur; "migration uygulandı" uyarısı |
 | 7 | `migrate status` = güncel **ve** drift = fark yok | durur, **API başlatılmaz** |
@@ -149,7 +149,8 @@ alacağı env'in birebir aynısıyla, DB bağlantısı ve listener olmadan; API'
 `main.ts`'te çalıştırdığı kontrol listesinin aynısı, `apps/api/src/boot-config.ts`);
 PostgreSQL çalışıyor, sağlıklı, bu projeye ait, projenin veri volume'unda ve
 ağa yayınlı değil; migration geçmişi temiz (başarısız/yabancı migration yok) ve
-bekleyen yoksa drift sıfır; uploads: API container'ının gerçekten bağladığı
+bekleyen yoksa drift sıfır; **7b** bekleyen migration'ların veri ön koşulları
+(aşağıda); uploads: API container'ının gerçekten bağladığı
 volume projenin olanı, **her girdi** image'ın runtime uid:gid'ine ait, link/özel
 dosya yok; çalışan API'nin **değer taşıyan** her env değişkeni yeni
 yapılandırmada da iletiliyor (yalnız adlar, değerler asla yazılmaz); yedek
@@ -178,13 +179,144 @@ Bayraklar: `--environment <staging|production>` (varsayılan staging),
 - Checkout yalnız API durduktan sonra taşınır; yeni API yalnız `migrate deploy`
   + temiz status + sıfır drift'ten sonra başlar.
 - `migrate` image'ının giriş noktası (`scripts/ops/prisma-migrate-guard.sh`)
-  yalnız `status`, `deploy`, `drift`, `migrations` kabul eder; `migrate dev`,
-  `reset`, `db push`, `resolve` ve ek argümanları reddeder. Drift kontrolü
+  yalnız `status`, `deploy`, `drift`, `migrations` ve — yalnız staging'de,
+  onaylı — `resolve-rolled-back <ad>` kabul eder (aşağıda "P3009"); `migrate
+  dev`, `reset`, `db push`, `resolve --applied`, düz `resolve` ve ek
+  argümanları reddeder. Drift kontrolü
   `migrate diff --from-url … --to-schema-datamodel …` ile yapılır: shadow
   database yoktur (`--from-migrations` shadow DB isterdi, kullanılmaz).
 - PostgreSQL'e dokunan her compose komutu `--no-deps` ve servis adı içerir;
   script PostgreSQL'i asla oluşturmaz, recreate etmez, durdurmaz. Container ID
   başta ve sonda karşılaştırılır.
+
+### Migration veri ön koşulları (preflight 7b)
+
+Bazı migration'lar belirli veriyle karşılaşınca kendi guard'ıyla durur.
+Örneğin `20261006120000_user_phone_e164_check`, canonical E.164 olmayan bir
+`User.phone` görürse durur. Bu, deploy'un ortasında P3018 demektir: Prisma
+başarısız kaydı `_prisma_migrations`'a yazar, sonraki her deploy P3009 ile
+reddedilir ve API kapalı kalır. Preflight bunu API durdurulmadan önce
+yakalar:
+
+- Kayıt `scripts/ops/lib.sh` → `MIGRATION_DATA_GUARDED` +
+  `migration_data_guard_sql`. Sorgu migration guard'ının predicate'inin
+  **birebir** aynısıdır; `ops-scripts.test.mjs` ikisini karşılaştırır. Yeni
+  guard'lı bir migration buraya eklenir.
+- Bekleyen liste hedef commit'in `prisma/migrations` ağacından (git) okunur.
+  Image gerekmez, yani `--check` ve ilk geçiş için de çalışır. Sorgu eski
+  şemada da var olan tablolarda düz bir `SELECT`'tir ve
+  `default_transaction_read_only=on` oturumunda koşar.
+- Sayım 0 değilse sonuç **FAIL** olur ve deploy durur; API ayakta kalır. Veri
+  **otomatik düzeltilmez**.
+- `taktic-api:<sha>` varsa ek olarak maskeli rapor alınır:
+  `node dist/scripts/canonicalize-user-phones.js --report`. Rapor salt-okunur
+  transaction'da çalışır, dosya yazmaz, telefon ya da e-posta basmaz;
+  yalnız sayılar, hesap id'leri ve roller vardır. Preflight 7+ haneli
+  sayıları ve e-posta biçimini ayrıca maskeler. Çıktıda çakışma grupları
+  ("bir kişi karar verir"), canonicalizer'ın reddettiği değerler (yalnız
+  uzunluk) ve `phone-preflight: GO|NO-GO` satırı yer alır.
+
+Telefon ön koşulunu kapatmak (operatör, deploy'dan önce):
+
+```bash
+# 1. Salt-okunur plan (numaralar 0600 plan dosyasına yazılır, repoya girmez)
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+  -e TAKTIC_OPS_OUTPUT_DIR=/out -v "$HOME/Backups/taktic/ops:/out" \
+  api node dist/scripts/canonicalize-user-phones.js
+# 2. Çakışma varsa: bir kişi karar verir. Sahiplik kanıtlanmıyorsa iki hesap da
+#    numarayı bırakır ({"version":1,"resolutions":[{userId, expectedPhone, action:"clear"}]})
+# 3. Apply (tek SERIALIZABLE transaction; hesap/kayıt silinmez)
+docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+  -e TAKTIC_OPS_OUTPUT_DIR=/out -v "$HOME/Backups/taktic/ops:/out" \
+  api node dist/scripts/canonicalize-user-phones.js --apply --resolutions /out/resolutions.json
+# 4. scripts/ops/deploy-staging.sh --sha <sha> --check  → 7b ok
+```
+
+### Bakım penceresi: preflight ile migration arasındaki yazımlar
+
+Preflight 7b eski API hâlâ hizmet verirken koşar. Veri düzeltmesi (yukarıda)
+ile deploy arasında eski kod yeni bir satır yazabilir. Örneğin PR #81
+öncesi staging kodu telefonu canonical yazmaz. Bu yüzden:
+
+1. **Adım 4 yeniden sayar.** API durduktan sonra, yedekten ve migration'dan
+   önce aynı sorgular yeniden koşar. Bu sayım kesindir, çünkü yazan süreç
+   yoktur. Arada bir satır gelmişse deploy migration uygulamadan durur.
+   Script `docker start taktic-api` komutunu yazar, düzeltme tekrarlanır.
+   Kesinti olur ama P3009 olmaz.
+2. **Pencereyi daraltın.** Veri düzeltmesini deploy'dan hemen önce, aynı
+   oturumda yapın. Plan → apply → `--check` → deploy arasında başka iş
+   yapmayın.
+3. **Yazımı durdurun (önerilen).** Staging'de kısa bir bakım penceresi açın:
+   - Cloudflare'de staging web/api hostname'leri için geçici bakım kuralı
+     (operatör kararı; bu repo Cloudflare'i değiştirmez).
+   - Ya da düzeltmeden önce `docker stop taktic-api`. Bu durumda deploy'un
+     adım 2'si "zaten durmuş" API'yi bulur, adım 4 sayımı yine yapılır.
+     Preflight'ın env kontrolü (9) durmuş container'ın yapılandırmasını da
+     okur.
+   - Lemon test webhook'ları bu pencerede başarısız olur ve Lemon'un
+     yeniden denemesine kalır. Pencerede test checkout yapılmaz.
+
+### P3009: başarısız migration kurtarma (`scripts/ops/migration-recover.sh`)
+
+**Ne olur:** bir migration deploy sırasında hata verirse (P3018), Prisma
+`_prisma_migrations`'a bitmemiş bir kayıt yazar. `finished_at` ve
+`rolled_back_at` NULL kalır. Sonraki her `migrate deploy` P3009 ile
+reddedilir. Bunu yalnız `migrate resolve --rolled-back <ad>` temizler.
+Guard düz `resolve`'u reddettiği için deploy kendi başına ilerleyemez; bu
+bilinçlidir.
+
+**Ne zaman güvenli:** PostgreSQL çok ifadeli bir migration dosyasını tek
+örtük transaction'da çalıştırır, hata olunca dosyanın yaptığı her şey (DDL
+ve DML) geri alınır. Bu ancak dosya transaction'ı kendisi bitirmiyorsa
+geçerlidir. Açık bir `COMMIT` (ya da `BEGIN`/`END`/`ROLLBACK`, `CREATE INDEX
+CONCURRENTLY`, `VACUUM` vb.) dosyayı böler; öncesi uygulanmış kalır.
+Prisma ise yine `applied_steps_count = 0` yazar. Bu iki davranış CI'ın
+`ops` job'unda gerçek Prisma + PostgreSQL ile her koşuda kanıtlanır. Yani
+`applied_steps_count` kanıt değildir.
+
+**Akış (yalnız staging):**
+
+```bash
+# 1. Salt-okunur rapor: hiçbir şey yazmaz, değiştirmez
+scripts/ops/migration-recover.sh --sha <başarısız deploy'un sha'sı>
+# 2. RESOLVABLE ise: nedeni düzelt (ör. 7b), sonra raporun yazdığı komutun aynısı
+scripts/ops/migration-recover.sh --sha <sha> --migration <ad> \
+  --database-id '<sistem-id>/<db>/<oid>' --confirm 'rolled-back <ad> on <sistem-id>/<db>/<oid>'
+# 3. scripts/ops/deploy-staging.sh --sha <sha> --check, sonra deploy
+```
+
+Script'in reddettiği durumlar (hepsi fail-closed):
+
+| Kontrol | Red |
+|---|---|
+| Ortam | `--environment production` ya da host `.env`'inde `APP_ENVIRONMENT≠staging`. Docker'a dokunmadan reddeder. Guard da `APP_ENVIRONMENT=staging` dışında reddeder; migrate servisi bu değeri prod compose'dan alır. |
+| Proje / DB | `COMPOSE_PROJECT_NAME` beklenen değil, PostgreSQL container'ı başka projeye ait, DB kimliği (`pg_control_system().system_identifier/datname/oid`) okunamıyor. |
+| Başarısız kayıt | Hiç yoksa "nothing to resolve" ile çıkış 0, resolve çağrılmaz; tekrar çalıştırmak güvenlidir. Birden fazlaysa red. `--migration` başarısız kayıt değilse (ör. başarılı bir migration) red. Prisma da başarısız olmayanı P3012 ile reddeder. |
+| Dosya | `taktic-migrate:<sha>` bu migration'ı taşımıyor ya da `migration.sql`'in sha256'sı Prisma'nın kaydettiği checksum değil. |
+| Yazan süreç | `taktic-api` çalışıyor. |
+| Atomiklik | `scripts/ops/migration-recovery.mjs analyze` dosyayı atomik bulmuyor. Yorum, string ve dollar-quote gövdeleri ayıklanır; DO bloğundaki `BEGIN` sayılmaz. |
+| Kısmi DDL | Dosyanın oluşturduğu tablo, index, tip, kolon, constraint, fonksiyon ya da trigger şu an DB'de var. Dosyanın drop edip yeniden yarattığı nesneler bu kontrolün dışında kalır; onları atomiklik kapsar. |
+| Onay | `--database-id` bu DB değil, ya da `--confirm` raporun yazdığı cümlenin birebir aynısı değil. |
+
+Resolve, guard üzerinden çalışır:
+`compose run --rm --no-deps -e TAKTIC_RESOLVE_CONFIRM=<ad> migrate
+resolve-rolled-back <ad>`. Sonrasında kaydın rolled-back olduğu ve bitmemiş
+kayıt kalmadığı doğrulanır. Her deneme (`refused`, `attempt`, `resolved`,
+`failed`, `noop`) `$TAKTIC_BACKUP_DIR/ops-audit/migration-recover.jsonl`'a
+yazılır (0600; zaman, operatör, host, proje, sha, DB kimliği, migration,
+checksum; satır verisi ya da sır yok).
+
+**NOT RESOLVABLE ise** kayıt işaretlenmez:
+
+- **a. Restore:** başarısız deploy'un adım 5'te aldığı dump
+  `restore-rehearsal.sh` ile doğrulanır. API durmuşken yeni bir veritabanına
+  `pg_restore` yapılır ve deploy tekrarlanır.
+- **b. Fix-forward:** bir kişi kısmi durumu inceler, gözden geçirilmiş bir SQL
+  değişikliğiyle tamamlar ya da geri alır. Ancak bundan sonra, bu aracın
+  dışında, gözden geçirilmiş ve elle çalıştırılan bir `prisma migrate
+  resolve` uygulanır.
+
+Production'da bu araç çalışmaz: kurtarma yalnız (a) ya da (b) ile yapılır.
 
 ### İlk geçiş (dev compose → prod compose)
 
@@ -234,6 +366,8 @@ image ile açar ve smoke çalıştırır. Onaysız çağrı yalnız kontrol eder
 - **Migration uygulanmadıysa** (adım 6'dan önce durduysa): `docker start
   taktic-api` ve gerekirse `git checkout --detach <önceki-sha>`. Script çıktısı
   ikisini de yazar.
+- **Bir migration başarısız olduysa (P3018 → P3009)**: yukarıdaki "P3009"
+  akışı; `migration-recover.sh` salt-okunur raporu ilk adımdır.
 - **Migration uygulandıysa**: eski API image'ını yeni şemada başlatma. Tercih
   edilen: nedeni düzelt ve deploy'u tekrar çalıştır (fix-forward; script
   idempotenttir, bekleyen migration yoksa adım 6'yı atlar). Zorunluysa
