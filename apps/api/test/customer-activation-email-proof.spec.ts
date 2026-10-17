@@ -1,3 +1,4 @@
+import { generateFixturePassword } from './fixture-password';
 import { CustomerActivationDelivery, CustomerOrigin, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -29,7 +30,7 @@ import {
  */
 
 let ctx: TestContext;
-const PASSWORD = 'YeniSifre123!';
+const PASSWORD = generateFixturePassword();
 
 beforeAll(async () => {
   ctx = await createTestApp();

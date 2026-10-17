@@ -413,6 +413,9 @@ jobs:
     # database, and its few minutes of image builds sit well inside the e2e
     # job's runtime, so it adds nothing to a PR's wall-clock time.
     #
+    #   0. secret scan (STG-003): no credential and no well-known starting
+    #      password in any tracked file; a finding prints its place and a
+    #      redacted preview, never the value
     #   1. shell scripts: bash -n + shellcheck (warnings and above)
     #   2. compose security: the audit's own tests, then the audit of the
     #      real files — docker-compose.prod.yml alone must publish api, web and
@@ -445,6 +448,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+
+      - name: Secret scan
+        run: |
+          node --test scripts/security/secret-scan.test.mjs
+          node scripts/security/secret-scan.mjs
 
       - name: Shell scripts
         run: |

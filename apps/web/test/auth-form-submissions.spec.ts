@@ -102,7 +102,7 @@ describe('changePassword', () => {
     apiAnswers(json(429, { message: 'Too Many Requests' }));
 
     await expect(
-      changePassword(form({ currentPassword: 'OldPass123!', password: 'NewPass456!', passwordConfirm: 'NewPass456!' })),
+      changePassword(form({ currentPassword: 'fixture-current-value', password: 'fixture-new-value-1', passwordConfirm: 'fixture-new-value-1' })),
     ).resolves.toBe('/account/password?error=throttled');
   });
 
@@ -110,7 +110,7 @@ describe('changePassword', () => {
     const calls = apiAnswers();
 
     await expect(
-      changePassword(form({ currentPassword: 'OldPass123!', password: 'NewPass456!', passwordConfirm: 'Other456!' })),
+      changePassword(form({ currentPassword: 'fixture-current-value', password: 'fixture-new-value-1', passwordConfirm: 'fixture-new-value-2' })),
     ).resolves.toBe('/account/password?error=mismatch');
     expect(calls).toHaveLength(0);
   });
@@ -120,7 +120,7 @@ describe('registerCustomer', () => {
   it('turns ACTIVATION_REQUIRED into the activation notice', async () => {
     apiAnswers(json(409, { code: 'ACTIVATION_REQUIRED' }));
 
-    await expect(registerCustomer(form({ name: 'A', email: 'a@b.c', password: 'Password123!' }))).resolves.toBe(
+    await expect(registerCustomer(form({ name: 'A', email: 'a@b.c', password: 'fixture-new-value-1' }))).resolves.toBe(
       '/register/customer?notice=activation-sent',
     );
     expect(jar.size).toBe(0);

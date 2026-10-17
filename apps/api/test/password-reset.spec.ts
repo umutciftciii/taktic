@@ -1,3 +1,4 @@
+import { generateFixturePassword, TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
@@ -15,6 +16,8 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+
+const THIRD_PASSWORD = generateFixturePassword();
 
 /**
  * The reset flow's security properties, exercised through the real HTTP routes.
@@ -43,8 +46,8 @@ beforeEach(async () => {
   resetAuthThrottle(ctx.app);
 });
 
-const PASSWORD = 'Password123!';
-const NEW_PASSWORD = 'YeniSifre456!';
+const PASSWORD = TEST_ACCOUNT_PASSWORD;
+const NEW_PASSWORD = generateFixturePassword();
 
 function tokenOf(url: string): string {
   return new URL(url).searchParams.get('token') ?? '';
@@ -242,7 +245,7 @@ describe('password reset — consuming', () => {
 
     await request(ctx.server)
       .post('/auth/password-reset/confirm')
-      .send({ token, password: 'UcuncuSifre789!' })
+      .send({ token, password: THIRD_PASSWORD })
       .expect(400);
 
     // The second attempt changed nothing.
@@ -295,6 +298,78 @@ describe('password reset — consuming', () => {
       .post('/auth/password-reset/confirm')
       .send({ token, password: NEW_PASSWORD })
       .expect(201);
+  });
+});
+
+/**
+ * STG-003: a super admin keeps both of its own credential flows, and a staff
+ * account's completed reset is what proves its mailbox to the super-admin
+ * transition.
+ */
+describe('password reset — staff accounts', () => {
+  it('lets a super admin reset a forgotten password, and records the mailbox proof', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, password: PASSWORD });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+    expect(admin.emailVerifiedAt).toBeNull();
+
+    await requestReset(admin.email!);
+    const token = tokenOf(lastResetUrl());
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token, password: NEW_PASSWORD })
+      .expect(201);
+
+    const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    expect(stored.role).toBe(UserRole.SUPER_ADMIN);
+    expect(stored.emailVerifiedAt).not.toBeNull();
+    expect(await bcrypt.compare(NEW_PASSWORD, stored.passwordHash!)).toBe(true);
+    await request(ctx.server).get('/auth/me').set('Cookie', cookie).expect(401);
+    await request(ctx.server)
+      .post('/auth/login')
+      .send({ email: admin.email, password: NEW_PASSWORD })
+      .expect(201);
+  });
+
+  it('keeps the first proof time on a later reset', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.ADMIN, password: PASSWORD });
+    const firstProof = new Date('2026-01-02T03:04:05.000Z');
+    await ctx.prisma.user.update({ where: { id: admin.id }, data: { emailVerifiedAt: firstProof } });
+
+    await requestReset(admin.email!);
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token: tokenOf(lastResetUrl()), password: NEW_PASSWORD })
+      .expect(201);
+
+    const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    expect(stored.emailVerifiedAt?.toISOString()).toBe(firstProof.toISOString());
+  });
+
+  it('leaves a marketplace account to its own verification flow', async () => {
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, password: PASSWORD });
+
+    await requestReset(customer.email!);
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token: tokenOf(lastResetUrl()), password: NEW_PASSWORD })
+      .expect(201);
+
+    const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: customer.id } });
+    expect(stored.emailVerifiedAt).toBeNull();
+  });
+
+  it('lets a super admin change a known password', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, password: PASSWORD });
+    const cookie = await loginAs(ctx.prisma, admin.id);
+
+    await request(ctx.server)
+      .post('/account/password')
+      .set('Cookie', cookie)
+      .send({ currentPassword: PASSWORD, newPassword: NEW_PASSWORD, newPasswordConfirm: NEW_PASSWORD })
+      .expect(201);
+
+    const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    expect(await bcrypt.compare(NEW_PASSWORD, stored.passwordHash!)).toBe(true);
   });
 });
 

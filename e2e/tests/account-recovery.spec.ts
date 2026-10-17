@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { prisma, uniquePhone, uniqueSuffix } from '../src/fixtures';
+import { FIXTURE_PASSWORD, generateFixturePassword, prisma, uniquePhone, uniqueSuffix } from '../src/fixtures';
 import {
   emailCountFor,
   waitForLatestEmailVerificationUrl,
@@ -18,8 +18,8 @@ import { primaryRuntime } from '../src/runtime';
  * prove the URL in the mail resolves to a page that consumes it.
  */
 
-const PASSWORD = 'E2ePassword123!';
-const NEW_PASSWORD = 'E2eYeniSifre456!';
+const PASSWORD = FIXTURE_PASSWORD;
+const NEW_PASSWORD = generateFixturePassword();
 
 async function registerCustomer(actor: Actor) {
   const suffix = uniqueSuffix();

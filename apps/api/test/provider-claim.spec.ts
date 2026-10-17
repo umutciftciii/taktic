@@ -1,3 +1,4 @@
+import { generateFixturePassword, TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { NotificationStatus, ProviderStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -18,6 +19,8 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+
+const OTHER_PASSWORD = generateFixturePassword();
 
 let ctx: TestContext;
 
@@ -117,7 +120,7 @@ describe('POST /providers — flag off keeps today’s guest application behavio
 
     const submit = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token: 'anything', password: 'Password123!' });
+      .send({ token: 'anything', password: TEST_ACCOUNT_PASSWORD });
     expect(submit.status).toBe(409);
     expect(submit.body.code).toBe('PROVIDER_CLAIM_DISABLED');
   });
@@ -322,7 +325,7 @@ describe('claim consume — the happy path', () => {
 
     const response = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' })
+      .send({ token, password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     expect(response.body.user.role).toBe(UserRole.PROVIDER);
@@ -355,7 +358,7 @@ describe('claim consume — the happy path', () => {
 
     const claim = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' })
+      .send({ token, password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const cookie = sessionCookieFrom(claim);
@@ -393,12 +396,12 @@ describe('claim consume — replay, expiry and status', () => {
 
     const first = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' })
+      .send({ token, password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const replay = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'BaskaSifre123!' });
+      .send({ token, password: OTHER_PASSWORD });
 
     expect(replay.status).toBe(400);
     expect(replay.body.code).toBe('CLAIM_TOKEN_INVALID');
@@ -427,7 +430,7 @@ describe('claim consume — replay, expiry and status', () => {
 
     const submit = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
     expect(submit.status).toBe(400);
 
     const provider = await ctx.prisma.providerProfile.findUniqueOrThrow({
@@ -475,7 +478,7 @@ describe('claim consume — replay, expiry and status', () => {
 
       const response = await request(ctx.server)
         .post('/auth/provider-claim')
-        .send({ token, password: 'Password123!' });
+        .send({ token, password: TEST_ACCOUNT_PASSWORD });
 
       expect(response.status).toBe(409);
       expect(response.body.code).toBe('CLAIM_NOT_AVAILABLE');
@@ -555,7 +558,7 @@ describe('claim consume — accounts that already exist', () => {
 
     const submit = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
     expect(submit.status).toBe(409);
     expect(submit.body.code).toBe('EMAIL_BELONGS_TO_CUSTOMER');
 
@@ -583,7 +586,7 @@ describe('claim consume — accounts that already exist', () => {
 
     const response = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
 
     expect(response.status).toBe(409);
     expect(response.body.code).toBe('EMAIL_BELONGS_TO_CUSTOMER');
@@ -608,7 +611,7 @@ describe('claim consume — accounts that already exist', () => {
 
     const anonymous = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
     expect(anonymous.status).toBe(409);
     expect(anonymous.body.code).toBe('LOGIN_REQUIRED');
 
@@ -626,7 +629,7 @@ describe('claim consume — accounts that already exist', () => {
     const response = await request(ctx.server)
       .post('/auth/provider-claim')
       .set('Cookie', cookie)
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
 
     expect(response.status).toBe(409);
     expect(response.body.code).toBe('LOGIN_REQUIRED');
@@ -711,8 +714,8 @@ describe('claim consume — concurrency', () => {
     const token = lastClaimToken();
 
     const responses = await Promise.all([
-      request(ctx.server).post('/auth/provider-claim').send({ token, password: 'Password123!' }),
-      request(ctx.server).post('/auth/provider-claim').send({ token, password: 'Password123!' }),
+      request(ctx.server).post('/auth/provider-claim').send({ token, password: TEST_ACCOUNT_PASSWORD }),
+      request(ctx.server).post('/auth/provider-claim').send({ token, password: TEST_ACCOUNT_PASSWORD }),
     ]);
 
     const statuses = responses.map((response) => response.status).sort();
@@ -748,10 +751,10 @@ describe('claim consume — concurrency', () => {
     const responses = await Promise.all([
       request(ctx.server)
         .post('/auth/provider-claim')
-        .send({ token: firstToken, password: 'Password123!' }),
+        .send({ token: firstToken, password: TEST_ACCOUNT_PASSWORD }),
       request(ctx.server)
         .post('/auth/provider-claim')
-        .send({ token: secondToken, password: 'Password123!' }),
+        .send({ token: secondToken, password: TEST_ACCOUNT_PASSWORD }),
     ]);
 
     // Issuing the second link already closed the first, so only one can win —
@@ -949,7 +952,7 @@ describe('claimed applications — what may still change', () => {
     const { providerId } = await submitGuestApplication();
     const claim = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token: lastClaimToken(), password: 'Password123!' })
+      .send({ token: lastClaimToken(), password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const ownerCookie = sessionCookieFrom(claim);
@@ -999,7 +1002,7 @@ describe('claimed applications — what may still change', () => {
     const { providerId } = await submitGuestApplication();
     const claim = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token: lastClaimToken(), password: 'Password123!' })
+      .send({ token: lastClaimToken(), password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const cookie = sessionCookieFrom(claim);
@@ -1037,7 +1040,7 @@ describe('claimed applications — what may still change', () => {
 
     await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' })
+      .send({ token, password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     // A fresh link cannot be issued for an owned application at all…
@@ -1055,7 +1058,7 @@ describe('claimed applications — what may still change', () => {
 
     const second = await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
     expect(second.status).toBe(409);
     expect(second.body.code).toBe('CLAIM_ALREADY_COMPLETED');
   });
@@ -1225,7 +1228,7 @@ describe('admin visibility of ownership', () => {
 
     await request(ctx.server)
       .post('/auth/provider-claim')
-      .send({ token: lastClaimToken(), password: 'Password123!' })
+      .send({ token: lastClaimToken(), password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const after = await request(ctx.server)

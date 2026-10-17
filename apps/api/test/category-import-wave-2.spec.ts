@@ -1,3 +1,4 @@
+import { generateFixturePassword } from './fixture-password';
 import {
   ServiceCategoryKind,
   ServiceCategoryStatus,
@@ -151,7 +152,13 @@ let databaseUrl: string;
 function runScript(script: string) {
   execFileSync('pnpm', ['run', script], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      NODE_ENV: 'test',
+      // The seed has no default admin password (STG-003); it needs one to create the account.
+      SEED_SUPER_ADMIN_PASSWORD: generateFixturePassword(),
+    },
     stdio: 'ignore',
   });
 }
@@ -162,7 +169,13 @@ const importWave2 = () => runScript('db:import:categories:wave-2');
 function seed() {
   execFileSync('pnpm', ['exec', 'prisma', 'db', 'seed'], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      NODE_ENV: 'test',
+      // The seed has no default admin password (STG-003); it needs one to create the account.
+      SEED_SUPER_ADMIN_PASSWORD: generateFixturePassword(),
+    },
     stdio: 'ignore',
   });
 }

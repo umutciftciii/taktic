@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { CustomerOrigin, Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,13 +63,13 @@ afterEach(() => {
 function registerCustomer(email: string, overrides: Record<string, unknown> = {}) {
   return request(ctx.server)
     .post('/auth/register-customer')
-    .send({ name: 'Yeni Müşteri', email, password: 'Password123!', ...overrides });
+    .send({ name: 'Yeni Müşteri', email, password: TEST_ACCOUNT_PASSWORD, ...overrides });
 }
 
 function registerProvider(email: string, overrides: Record<string, unknown> = {}) {
   return request(ctx.server)
     .post('/auth/register-provider')
-    .send({ name: 'Yeni Esnaf', email, password: 'Password123!', ...overrides });
+    .send({ name: 'Yeni Esnaf', email, password: TEST_ACCOUNT_PASSWORD, ...overrides });
 }
 
 async function submitGuestApplication(email: string) {
@@ -475,7 +476,7 @@ describe('the flows the rule must not touch keep working', () => {
 
     await request(ctx.server)
       .post('/auth/login')
-      .send({ email: 'Ortak@Example.TEST', password: 'Password123!' })
+      .send({ email: 'Ortak@Example.TEST', password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
   });
 

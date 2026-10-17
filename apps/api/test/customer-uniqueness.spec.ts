@@ -1,3 +1,4 @@
+import { generateFixturePassword } from './fixture-password';
 import { CustomerOrigin, ServiceCategoryKind, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -17,6 +18,8 @@ import {
   showcaseLeadPayload,
   type TestContext,
 } from './harness';
+
+const STRONG_PASSWORD = generateFixturePassword();
 
 /**
  * AUTH-REG-001 — one telephone number, one e-mail address, one account.
@@ -98,7 +101,7 @@ async function snapshot() {
 function registerCustomer(body: Record<string, unknown>) {
   return request(ctx.server).post('/auth/register-customer').send({
     name: 'Ayşe Yılmaz',
-    password: 'GucluSifre123!',
+    password: STRONG_PASSWORD,
     ...body,
   });
 }
@@ -106,7 +109,7 @@ function registerCustomer(body: Record<string, unknown>) {
 function registerProvider(body: Record<string, unknown>) {
   return request(ctx.server).post('/auth/register-provider').send({
     name: 'Usta Mehmet',
-    password: 'GucluSifre123!',
+    password: STRONG_PASSWORD,
     ...body,
   });
 }

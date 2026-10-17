@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -32,7 +33,7 @@ import {
 
 let ctx: TestContext;
 
-const PASSWORD = 'Password123!';
+const PASSWORD = TEST_ACCOUNT_PASSWORD;
 
 beforeAll(async () => {
   ctx = await createTestApp();

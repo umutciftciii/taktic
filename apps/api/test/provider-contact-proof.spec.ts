@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { CustomerActivationDelivery, UserRole } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
@@ -139,7 +140,7 @@ describe('provider e-mail proof', () => {
     const email = `yeni-veren-${suffix}@example.test`;
     await request(ctx.server)
       .post('/auth/register-provider')
-      .send({ name: 'Murat Şahin', email, phone: `0555888${suffix.padStart(4, '0')}`, password: 'Password123!' })
+      .send({ name: 'Murat Şahin', email, phone: `0555888${suffix.padStart(4, '0')}`, password: TEST_ACCOUNT_PASSWORD })
       .expect(201);
 
     const mails = ctx.notifications.ofTemplate('provider-email-verification');
@@ -202,7 +203,7 @@ describe('provider e-mail proof', () => {
       });
       const res = await request(ctx.server)
         .post('/auth/customer-activation')
-        .send({ token: raw, password: 'Password123!' });
+        .send({ token: raw, password: TEST_ACCOUNT_PASSWORD });
       expect(res.status).toBeGreaterThanOrEqual(400);
     }
     expect((await proofs(user.id)).emailVerifiedAt).toBeNull();

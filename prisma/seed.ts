@@ -5,6 +5,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { requireBootstrapPassword } from '../apps/api/src/common/bootstrap-password';
 
 const prisma = new PrismaClient();
 
@@ -196,9 +197,22 @@ const creditPackages = [
   },
 ];
 
+/**
+ * The local development super admin (STG-003).
+ *
+ * There is no default password. One used to be written here, and a value in
+ * the repository is a value everybody who has read it knows — on whichever
+ * database the seed, or a copy of one it seeded, ended up. The password now
+ * comes from `SEED_SUPER_ADMIN_PASSWORD`, and only when the account is being
+ * created: it must pass the bootstrap rule (`requireBootstrapPassword`) and is
+ * never printed. An account that already exists is left exactly as it is —
+ * its password, its role and its status — so re-seeding can neither reset a
+ * password somebody changed nor re-promote an account that was retired by the
+ * super-admin transition (docs/ops/super-admin-transition.md).
+ */
 const localAdmin = {
-  email: 'admin@taktic.local',
-  password: 'ChangeMe123!',
+  // Stored the way every account address is: trimmed and lower-cased.
+  email: process.env.SEED_SUPER_ADMIN_EMAIL?.trim().toLowerCase() || 'admin@taktic.local',
   name: 'Local Admin',
 };
 
@@ -208,6 +222,15 @@ async function main() {
       `Refusing to seed when NODE_ENV=${process.env.NODE_ENV ?? 'undefined'}. Set NODE_ENV=development or NODE_ENV=test.`,
     );
   }
+
+  // Judged before anything is written, so a missing or weak password stops
+  // the seed with nothing half-done. Asked for only when the admin does not
+  // exist yet: seeding a database that has one needs no password at all.
+  const existingAdmin = await prisma.user.findUnique({
+    where: { email: localAdmin.email },
+    select: { id: true },
+  });
+  const adminPassword = existingAdmin ? null : requireBootstrapPassword(process.env, 'SEED_SUPER_ADMIN_PASSWORD');
 
   for (const category of categories) {
     const existingCategory = await prisma.serviceCategory.findUnique({
@@ -291,30 +314,21 @@ async function main() {
     });
   }
 
-  const existingAdmin = await prisma.user.findUnique({
-    where: { email: localAdmin.email },
-    select: { id: true },
-  });
-
-  if (!existingAdmin) {
-    await prisma.user.create({
-      data: {
-        email: localAdmin.email,
-        name: localAdmin.name,
-        role: UserRole.SUPER_ADMIN,
-        isActive: true,
-        passwordHash: await bcrypt.hash(localAdmin.password, 12),
-      },
-    });
-  } else {
-    await prisma.user.update({
-      where: { email: localAdmin.email },
-      data: {
-        role: UserRole.SUPER_ADMIN,
-        isActive: true,
-      },
-    });
+  if (adminPassword === null) {
+    console.log('seed: the local admin already exists; its password, role and status are left as they are.');
+    return;
   }
+
+  await prisma.user.create({
+    data: {
+      email: localAdmin.email,
+      name: localAdmin.name,
+      role: UserRole.SUPER_ADMIN,
+      isActive: true,
+      passwordHash: await bcrypt.hash(adminPassword, 12),
+    },
+  });
+  console.log('seed: created the local admin. Its password is the SEED_SUPER_ADMIN_PASSWORD you supplied; it is not stored anywhere else.');
 }
 
 main()

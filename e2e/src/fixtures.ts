@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { join } from 'node:path';
 import { getCities, getDistrictsOfEachCity } from 'turkey-neighbourhoods';
@@ -27,7 +27,18 @@ import { E2E_LEMON_PACKAGE_SLUG, locationClaimDir } from './runtime';
 /** Cheap bcrypt rounds: fixtures are created constantly and never stored. */
 const PASSWORD_ROUNDS = 4;
 
-export const FIXTURE_PASSWORD = 'E2ePassword123!';
+/**
+ * The password every fixture account is created with — drawn per test process,
+ * never written in the source. A seeded account and the sign-in that follows
+ * read the same constant, so nobody needs to know the value; a literal here
+ * would be one more well-known password in a repository that ships none.
+ * `E2E_FIXTURE_PASSWORD` may pin it for a person reproducing a run by hand.
+ */
+export function generateFixturePassword(): string {
+  return `E2e1-${randomBytes(18).toString('base64url')}`;
+}
+
+export const FIXTURE_PASSWORD = process.env.E2E_FIXTURE_PASSWORD?.trim() || generateFixturePassword();
 
 /**
  * Unique across a run AND across runs. The database is truncated before each

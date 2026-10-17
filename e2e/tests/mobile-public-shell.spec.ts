@@ -1,7 +1,7 @@
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createCategory, uniqueLocation, uniquePhone, uniqueSuffix } from '../src/fixtures';
+import { createCategory, FIXTURE_PASSWORD, uniqueLocation, uniquePhone, uniqueSuffix } from '../src/fixtures';
 import { completeContactStep } from '../src/journeys';
 import { waitForLatestEmailVerificationUrl } from '../src/outbox';
 import { artifactsDir, primaryRuntime } from '../src/runtime';
@@ -150,7 +150,7 @@ test.describe('auth screens on a phone', () => {
       await page.locator('input[name="name"]').fill('E2E Mobil Müşteri');
       await page.locator('input[name="email"]').fill(email);
       await page.locator('input[name="phone"]').fill(uniquePhone());
-      await page.locator('input[name="password"]').fill('E2ePassword123!');
+      await page.locator('input[name="password"]').fill(FIXTURE_PASSWORD);
       await page.getByRole('button', { name: 'Hesap Oluştur' }).click();
       await expect(page).not.toHaveURL(/\/register/);
 

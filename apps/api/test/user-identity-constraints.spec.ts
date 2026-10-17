@@ -1,3 +1,4 @@
+import { generateFixturePassword, TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +14,8 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+
+const STRONG_PASSWORD = generateFixturePassword();
 
 /**
  * AUTH-REG-002: the database is the last line for "one number, one address,
@@ -52,7 +55,7 @@ function insertRaw(phone: string | null, email: string) {
 function register(kind: 'customer' | 'provider', body: Record<string, unknown>) {
   return request(ctx.server)
     .post(`/auth/register-${kind}`)
-    .send({ name: 'Yarışan Kişi', password: 'GucluSifre123!', ...body });
+    .send({ name: 'Yarışan Kişi', password: STRONG_PASSWORD, ...body });
 }
 
 async function adminCookie() {
@@ -188,8 +191,8 @@ describe('registration races are decided by the index', () => {
 
 describe('a profile number change racing another account', () => {
   it('lets one of two customers take the number and gives the other the stable phone-taken answer', async () => {
-    const first = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05551110001', password: 'Password123!' });
-    const second = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05551110002', password: 'Password123!' });
+    const first = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05551110001', password: TEST_ACCOUNT_PASSWORD });
+    const second = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, phone: '05551110002', password: TEST_ACCOUNT_PASSWORD });
     const [firstCookie, secondCookie] = await Promise.all([loginAs(ctx.prisma, first.id), loginAs(ctx.prisma, second.id)]);
 
     const responses = await Promise.all([

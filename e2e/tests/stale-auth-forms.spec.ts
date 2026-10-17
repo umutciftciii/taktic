@@ -6,6 +6,7 @@ import {
   createCategory,
   createClaimableCustomer,
   createCustomer,
+  generateFixturePassword,
   prisma,
   uniqueLocation,
   uniqueSuffix,
@@ -16,6 +17,8 @@ import {
   waitForLatestPasswordResetUrl,
 } from '../src/outbox';
 import { primaryRuntime, providerClaimRuntime, type Runtime } from '../src/runtime';
+
+const WRONG_PASSWORD = generateFixturePassword();
 
 /**
  * BUG-AUTH-STALE-ACTION-001 — the sign-in, sign-up, sign-out and password
@@ -51,7 +54,7 @@ import { primaryRuntime, providerClaimRuntime, type Runtime } from '../src/runti
 /** Shaped like a real id (a two-hex-digit prefix and a 40-hex-digit hash); issued by no build. */
 const STALE_ACTION_ID = `7f${'0'.repeat(40)}`;
 
-const NEW_PASSWORD = 'E2eYeniSifre456!';
+const NEW_PASSWORD = generateFixturePassword();
 
 /** What a page that broke on a stale action shows, on screen or in the console. */
 const STALE_FAILURE = [
@@ -154,7 +157,7 @@ test.describe('web sign-in from a tab rendered by the previous build', () => {
     try {
       const tab = await prepareStaleTab(customer.page, primaryRuntime);
       await customer.gotoWeb('/login');
-      await fillLogin(customer.page, account.email, 'YanlisSifre999!');
+      await fillLogin(customer.page, account.email, WRONG_PASSWORD);
 
       await expect(customer.page).toHaveURL(/\/login\?error=1$/);
       await expect(customer.page.locator('.auth-screen-error')).toHaveText(
@@ -179,7 +182,7 @@ test.describe('web sign-in from a tab rendered by the previous build', () => {
     try {
       const tab = await prepareStaleTab(customer.page, primaryRuntime);
       await customer.gotoWeb('/login?redirectTo=%2Faccount%2Fprofile');
-      await fillLogin(customer.page, account.email, 'YanlisSifre999!');
+      await fillLogin(customer.page, account.email, WRONG_PASSWORD);
       // The refusal keeps the destination…
       await expect(customer.page).toHaveURL(/\/login\?error=1&redirectTo=%2Faccount%2Fprofile$/);
 
@@ -428,7 +431,7 @@ test.describe('web sign-up, sign-out and password forms from a stale tab', () =>
       await customer.gotoWeb('/account/password');
 
       // A wrong current password is the form's own refusal…
-      await customer.page.locator('input[name="currentPassword"]').fill('YanlisSifre999!');
+      await customer.page.locator('input[name="currentPassword"]').fill(WRONG_PASSWORD);
       await customer.page.locator('input[name="password"]').fill(NEW_PASSWORD);
       await customer.page.locator('input[name="passwordConfirm"]').fill(NEW_PASSWORD);
       await customer.page.getByRole('button', { name: 'Şifreyi güncelle' }).click();
@@ -498,7 +501,7 @@ test.describe('admin sign-in, sign-out and invite from a stale tab', () => {
     try {
       const tab = await prepareStaleTab(admin.page, primaryRuntime);
       await admin.gotoAdmin('/login');
-      await fillLogin(admin.page, adminAccount.email, 'YanlisSifre999!');
+      await fillLogin(admin.page, adminAccount.email, WRONG_PASSWORD);
       await expect(admin.page).toHaveURL(/\/login\?error=1$/);
       await expect(admin.page.locator('.error-message')).toBeVisible();
       await expectNoStaleActionFailure(admin.page, tab);

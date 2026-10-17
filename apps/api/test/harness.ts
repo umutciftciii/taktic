@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ModulesContainer } from '@nestjs/core';
@@ -446,7 +447,7 @@ export async function createUser(
   },
 ) {
   const suffix = uniqueSuffix();
-  const password = overrides.password === undefined ? 'Password123!' : overrides.password;
+  const password = overrides.password === undefined ? TEST_ACCOUNT_PASSWORD : overrides.password;
   // Stored the way every application path stores it (AUTH-REG-002): the
   // database refuses anything but E.164, so a fixture may be written in any
   // spelling a person would type and lands as the canonical number. A test

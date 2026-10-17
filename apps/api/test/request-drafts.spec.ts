@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -194,7 +195,7 @@ describe('POST /request-drafts', () => {
       });
       expect(response.status).toBe(201);
     }
-    const user = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, password: 'Password123!' });
+    const user = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, password: TEST_ACCOUNT_PASSWORD });
     const loginAfterDraftBudget = await request(ctx.server)
       .post('/auth/login')
       .send({ email: user.email, password: 'WrongPassword!' });

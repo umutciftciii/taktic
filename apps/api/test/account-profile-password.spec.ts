@@ -1,3 +1,4 @@
+import { generateFixturePassword } from './fixture-password';
 import request from 'supertest';
 import { CustomerOrigin, UserRole } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -11,6 +12,8 @@ import {
   serviceRequestPayload,
   type TestContext,
 } from './harness';
+
+const WRONG_PASSWORD = generateFixturePassword();
 
 /**
  * A customer's own account: the fields they may change, and their password.
@@ -30,7 +33,7 @@ import {
 
 let ctx: TestContext;
 
-const CURRENT_PASSWORD = 'MevcutSifre123';
+const CURRENT_PASSWORD = generateFixturePassword();
 
 beforeAll(async () => {
   ctx = await createTestApp();
@@ -321,7 +324,7 @@ describe('PATCH /account/profile', () => {
 });
 
 describe('POST /account/password', () => {
-  const NEW_PASSWORD = 'YeniSifre456';
+  const NEW_PASSWORD = generateFixturePassword();
 
   it('changes the password when the current one is right', async () => {
     const { customer, cookie } = await signedInCustomer();
@@ -410,7 +413,7 @@ describe('POST /account/password', () => {
       .post('/account/password')
       .set('Cookie', cookie)
       .send({
-        currentPassword: 'YanlisSifre123',
+        currentPassword: WRONG_PASSWORD,
         newPassword: NEW_PASSWORD,
         newPasswordConfirm: NEW_PASSWORD,
       })
@@ -539,7 +542,7 @@ describe('POST /account/password', () => {
         .post('/account/password')
         .set('Cookie', cookie)
         .send({
-          currentPassword: 'YanlisSifre123',
+          currentPassword: WRONG_PASSWORD,
           newPassword: NEW_PASSWORD,
           newPasswordConfirm: NEW_PASSWORD,
         }),
