@@ -11,7 +11,8 @@
     "backfill:display-numbers": "tsx src/scripts/backfill-display-numbers.ts",
     "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts",
     "canonicalize:provider-phones": "tsx src/scripts/canonicalize-provider-phones.ts",
-    "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts"
+    "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts",
+    "super-admin:transition": "tsx src/scripts/super-admin-transition.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.0",

@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { CustomerOrigin, UserRole } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import request from 'supertest';
@@ -39,7 +40,7 @@ beforeEach(async () => {
   resetAuthThrottle(ctx.app);
 });
 
-const PASSWORD = 'Password123!';
+const PASSWORD = TEST_ACCOUNT_PASSWORD;
 
 function tokenOf(url: string): string {
   return new URL(url).searchParams.get('token') ?? '';

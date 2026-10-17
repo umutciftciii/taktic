@@ -11,9 +11,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
   // to know why. Without it, an idle timeout is indistinguishable from the
   // panel breaking.
   const sessionEnded = reason === 'session-expired';
-  // The seeded local account's address and password are a convenience for a
-  // developer's machine. Anywhere else they are a published credential, so
-  // they are shown (and prefilled) on APP_ENVIRONMENT=local only.
+  // The seeded local account's address is a convenience for a developer's
+  // machine, shown (and prefilled) on APP_ENVIRONMENT=local only. Its password
+  // is never shown anywhere: there is no default one — the seed takes it from
+  // SEED_SUPER_ADMIN_PASSWORD (STG-003).
   const showLocalHint = isLocalEnvironment();
 
   return (
@@ -64,7 +65,8 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </div>
         {showLocalHint ? (
           <p className="auth-footnote" data-testid="local-admin-hint">
-            Yerel admin: <code>admin@taktic.local</code> / <code>ChangeMe123!</code>
+            Yerel admin: <code>admin@taktic.local</code> — şifre, seed çalıştırılırken verilen{' '}
+            <code>SEED_SUPER_ADMIN_PASSWORD</code>.
           </p>
         ) : null}
       </form>

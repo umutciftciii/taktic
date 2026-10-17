@@ -734,7 +734,7 @@ NOTIFICATION_RETRY UPLOADS_WRITE ADMIN_USERS_STATUS
 | F13 | Tasarımın `/providers/[id]` "Kredi hareketleri" sekmesi F4 çözülmeden ADMIN rolüne açılamaz | — | Türetilmiş |
 | F14 | `users/actions.ts`, `customers/actions.ts` (aktivasyon) ve kategori davet eylemi `catch` içinde `isRedirectError` ayırmıyor; 401/403 yönlendirmesi `?error=NEXT_REDIRECT` olarak görünür | Grup A/D raporları | [KOD-OKUMA] |
 | F15 | Sırlar URL'de taşınıyor: `?activationUrl=`, `?inviteUrl=`, `/admin-invite?token=…&error=` | Aynı | [KOD-OKUMA] |
-| F16 | `/login` yerel kimlik bilgisini (`admin@taktic.local / ChangeMe123!`) ortamdan bağımsız, her zaman gösteriyor | `login/page.tsx:53` | [DOĞRULANDI] |
+| F16 | `/login` yerel kimlik bilgisini (`admin@taktic.local` ve o zamanki seed parolası — STG-003 ile kaldırıldı) ortamdan bağımsız, her zaman gösteriyor | `login/page.tsx:53` | [DOĞRULANDI] |
 | F17 | `middleware.ts` `/api/session` yolunu muaf tutmuyor; çerez gidince yoklama `/login` HTML'i alır ve `json()` atar | Grup D raporu | [KOD-OKUMA] |
 | F18 | Topbar bağlam başlığı **filtresiz** `navGroups`'tan hesaplanıyor. Sızıntı değil (yalnız etiket), ama yeni menüde de filtreli kaynak kullanılmalı | `topbar.tsx:35-44` | [KOD-OKUMA] |
 | F19 | Rol ata/geri al geri bildirimi (`?ok=role-assigned`/`?error=`) `/users/[id]` tarafından okunmuyor | Grup D raporu | [KOD-OKUMA] |

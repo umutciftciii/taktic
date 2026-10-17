@@ -1,3 +1,4 @@
+import { generateFixturePassword, TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { CustomerOrigin, ServiceRequestStatus, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -12,6 +13,9 @@ import {
   serviceRequestPayload,
   type TestContext,
 } from './harness';
+
+const NEW_PASSWORD = generateFixturePassword();
+const OTHER_PASSWORD = generateFixturePassword();
 
 let ctx: TestContext;
 
@@ -114,7 +118,7 @@ describe('activation token consumption', () => {
 
     const activation = await request(ctx.server)
       .post('/auth/customer-activation')
-      .send({ token, password: 'YeniSifre123!' })
+      .send({ token, password: NEW_PASSWORD })
       .expect(201);
 
     expect(activation.body.success).toBe(true);
@@ -132,7 +136,7 @@ describe('activation token consumption', () => {
     // Replaying the same link fails.
     await request(ctx.server)
       .post('/auth/customer-activation')
-      .send({ token, password: 'BaskaSifre123!' })
+      .send({ token, password: OTHER_PASSWORD })
       .expect(400);
 
     const consumed = await ctx.prisma.customerActivationToken.findFirst({
@@ -153,7 +157,7 @@ describe('activation token consumption', () => {
 
     await request(ctx.server)
       .post('/auth/customer-activation')
-      .send({ token, password: 'YeniSifre123!' })
+      .send({ token, password: NEW_PASSWORD })
       .expect(400);
 
     const customer = await ctx.prisma.user.findUniqueOrThrow({ where: { id: created.customerId } });
@@ -163,7 +167,7 @@ describe('activation token consumption', () => {
   it('rejects an unknown token', async () => {
     await request(ctx.server)
       .post('/auth/customer-activation')
-      .send({ token: 'not-a-real-token', password: 'YeniSifre123!' })
+      .send({ token: 'not-a-real-token', password: NEW_PASSWORD })
       .expect(400);
   });
 });
@@ -176,7 +180,7 @@ describe('activated customer sees only their own data', () => {
 
     const activation = await request(ctx.server)
       .post('/auth/customer-activation')
-      .send({ token, password: 'YeniSifre123!' })
+      .send({ token, password: NEW_PASSWORD })
       .expect(201);
     const rawCookie = activation.headers['set-cookie'];
     const cookie = (Array.isArray(rawCookie) ? rawCookie[0] : rawCookie)!.split(';')[0]!;
@@ -232,7 +236,7 @@ describe('POST /auth/register-customer — claim behaviour', () => {
       .send({
         name: 'Yeni Kayıt',
         email: customer.email,
-        password: 'BaskaSifre123!',
+        password: OTHER_PASSWORD,
       })
       .expect(409);
 
@@ -253,12 +257,12 @@ describe('POST /auth/register-customer — claim behaviour', () => {
     const existing = await createUser(ctx.prisma, {
       role: UserRole.CUSTOMER,
       customerOrigin: CustomerOrigin.REGISTERED,
-      password: 'Password123!',
+      password: TEST_ACCOUNT_PASSWORD,
     });
 
     const response = await request(ctx.server)
       .post('/auth/register-customer')
-      .send({ name: 'Taklit', email: existing.email, password: 'BaskaSifre123!' })
+      .send({ name: 'Taklit', email: existing.email, password: OTHER_PASSWORD })
       .expect(409);
 
     // The canonical identity refusal, and no activation mail: the account is

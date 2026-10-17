@@ -79,13 +79,18 @@ There are intentionally no destructive database scripts. Do not use `prisma migr
 
 ## Local Auth
 
-Seeding creates a local development admin if it does not already exist:
+Seeding creates a local development admin if it does not already exist. There is no default password: the seed refuses to create the account unless `SEED_SUPER_ADMIN_PASSWORD` holds a strong, random value (at least 20 characters, three character classes), and it never prints it.
 
-- Email: `admin@taktic.local`
-- Password: `ChangeMe123!`
+```bash
+SEED_SUPER_ADMIN_PASSWORD="$(openssl rand -base64 24)" pnpm db:seed
+```
+
+Keep the value in your password manager — it is not stored anywhere else. Lost it? Use "Şifremi unuttum" on the web app (`/sifre-unuttum`), or run the recovery in [docs/ops/super-admin-transition.md](docs/ops/super-admin-transition.md).
+
+- Email: `admin@taktic.local` (override with `SEED_SUPER_ADMIN_EMAIL`)
 - Role: `SUPER_ADMIN`
 
-Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin password.
+Authentication uses an HTTP-only cookie session named `taktic_session` by default. The seed does not overwrite an existing admin's password or role — re-running it never re-promotes an account that was retired.
 
 ### Session policy
 

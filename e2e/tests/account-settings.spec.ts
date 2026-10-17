@@ -1,7 +1,9 @@
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createCustomer, prisma, uniquePhone } from '../src/fixtures';
+import { createCustomer, generateFixturePassword, prisma, uniquePhone } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+
+const WRONG_PASSWORD = generateFixturePassword();
 
 /**
  * The customer's own settings: the profile they may edit, and their password.
@@ -17,7 +19,7 @@ import { primaryRuntime } from '../src/runtime';
  * to say which of the three it was.
  */
 
-const NEW_PASSWORD = 'E2eYeniSifre456!';
+const NEW_PASSWORD = generateFixturePassword();
 
 /** Nothing may make the document wider than the phone it is on. */
 async function expectNoHorizontalOverflow(page: Page, label: string) {
@@ -170,7 +172,7 @@ test.describe('customer password settings', () => {
     }
 
     try {
-      await submit('YanlisSifre123', NEW_PASSWORD, NEW_PASSWORD);
+      await submit(WRONG_PASSWORD, NEW_PASSWORD, NEW_PASSWORD);
       await expect(error).toContainText('Mevcut şifreniz doğrulanamadı');
 
       await submit(account.password, NEW_PASSWORD, `${NEW_PASSWORD}7`);

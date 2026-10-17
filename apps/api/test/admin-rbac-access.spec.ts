@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { AdminPermission, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -273,7 +274,7 @@ describe('root capabilities are not delegable (RG-7 §12.1)', () => {
 
     const accepted = await request(ctx.server)
       .post('/auth/admin-invite')
-      .send({ token, password: 'Password123!' });
+      .send({ token, password: TEST_ACCOUNT_PASSWORD });
     expect(accepted.status).toBeLessThan(400);
 
     const after = await ctx.prisma.user.findUnique({

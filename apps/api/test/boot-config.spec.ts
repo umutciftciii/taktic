@@ -101,12 +101,12 @@ describe('the staging runtime contract', () => {
   });
 
   it('never prints a secret in a refusal', () => {
-    process.env.LEMON_SQUEEZY_API_KEY = 'not-a-jwt-but-secret-looking-value';
-    process.env.RESEND_API_KEY = 'secret-looking-resend-value';
+    process.env.LEMON_SQUEEZY_API_KEY = 'placeholder-not-a-jwt-secret-looking-value';
+    process.env.RESEND_API_KEY = 'placeholder-secret-looking-resend-value';
 
     const messages = Object.values(refused()).join('\n');
-    expect(messages).not.toContain('not-a-jwt-but-secret-looking-value');
-    expect(messages).not.toContain('secret-looking-resend-value');
+    expect(messages).not.toContain('placeholder-not-a-jwt-secret-looking-value');
+    expect(messages).not.toContain('placeholder-secret-looking-resend-value');
     expect(messages).not.toContain(PLACEHOLDER_WEBHOOK_SECRET);
     expect(messages).not.toContain(PLACEHOLDER_FINGERPRINT_KEY);
   });

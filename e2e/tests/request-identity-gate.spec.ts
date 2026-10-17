@@ -5,13 +5,14 @@ import {
   createClaimableCustomer,
   createCustomer,
   createProvider,
+  generateFixturePassword,
   prisma,
   storedPhone,
+  type Location,
+  type SeededCategory,
   uniqueLocation,
   uniquePhone,
   uniqueSuffix,
-  type Location,
-  type SeededCategory,
 } from '../src/fixtures';
 import { expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
 import {
@@ -72,7 +73,7 @@ const CONFLICT_SENTENCE =
  */
 const SUBMIT_CONFLICT_SENTENCE =
   'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.';
-const NEW_PASSWORD = 'YeniSifre123!';
+const NEW_PASSWORD = generateFixturePassword();
 
 /**
  * A client address nobody else in this run uses.

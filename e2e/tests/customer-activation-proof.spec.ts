@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createAdmin, createClaimableCustomer, prisma } from '../src/fixtures';
+import { createAdmin, createClaimableCustomer, generateFixturePassword, prisma } from '../src/fixtures';
 import { waitForLatestActivationUrl } from '../src/outbox';
 import { primaryRuntime } from '../src/runtime';
 
@@ -16,7 +16,7 @@ import { primaryRuntime } from '../src/runtime';
  * which was which (`delivery`), and nothing about the phone proof moves.
  */
 
-const PASSWORD = 'E2eYeniSifre123!';
+const PASSWORD = generateFixturePassword();
 
 async function activateWithPassword(page: Page): Promise<void> {
   await expect(page.getByRole('heading', { name: 'Şifre belirleyin' })).toBeVisible();

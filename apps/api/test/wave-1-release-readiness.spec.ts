@@ -1,3 +1,4 @@
+import { generateFixturePassword } from './fixture-password';
 import { ProviderStatus, ServiceCategoryStatus, UserRole } from '@prisma/client';
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -86,7 +87,13 @@ let databaseUrl: string;
 function runImport() {
   execFileSync('pnpm', ['run', 'db:import:categories'], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      NODE_ENV: 'test',
+      // The seed has no default admin password (STG-003); it needs one to create the account.
+      SEED_SUPER_ADMIN_PASSWORD: generateFixturePassword(),
+    },
     stdio: 'ignore',
   });
 }
@@ -94,7 +101,13 @@ function runImport() {
 function seed() {
   execFileSync('pnpm', ['exec', 'prisma', 'db', 'seed'], {
     cwd: repoRoot,
-    env: { ...process.env, DATABASE_URL: databaseUrl, NODE_ENV: 'test' },
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      NODE_ENV: 'test',
+      // The seed has no default admin password (STG-003); it needs one to create the account.
+      SEED_SUPER_ADMIN_PASSWORD: generateFixturePassword(),
+    },
     stdio: 'ignore',
   });
 }

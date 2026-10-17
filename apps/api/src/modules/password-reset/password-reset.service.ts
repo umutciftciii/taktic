@@ -1,5 +1,5 @@
 import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { passwordResetUrl } from '../../common/web-routes';
@@ -114,6 +114,28 @@ export class PasswordResetService {
         if (updated.count === 0) {
           throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
         }
+
+        // STG-003: for a staff account, completing a mailed reset link is the
+        // proof that the person controls the address — the link went to that
+        // mailbox and was consumed once, which is the same reasoning that lets
+        // the activation link record it for a customer. Staff have no other
+        // way to collect it (EmailVerificationService serves the marketplace
+        // roles only), and the super-admin transition requires it before it
+        // grants anything (docs/ops/super-admin-transition.md). Written only
+        // when absent, so the first proof's time is kept. The marketplace
+        // roles are left to their own verification flow and its campaign
+        // facts. A staff address never changes through the product, and the
+        // transition tool that does change one spends every open reset link in
+        // the same transaction, so this link was mailed to the address it
+        // now proves.
+        await tx.user.updateMany({
+          where: {
+            id: record.userId,
+            emailVerifiedAt: null,
+            role: { in: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
+          },
+          data: { emailVerifiedAt: now },
+        });
 
         // Every other live link for this account dies with the one just used.
         await tx.passwordResetToken.updateMany({

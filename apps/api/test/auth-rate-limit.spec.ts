@@ -1,3 +1,4 @@
+import { TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -22,7 +23,7 @@ describe('credential endpoint throttling', () => {
   it('answers 429 once the login attempt budget is spent', async () => {
     const user = await createUser(ctx.prisma, {
       role: UserRole.CUSTOMER,
-      password: 'Password123!',
+      password: TEST_ACCOUNT_PASSWORD,
     });
 
     const statuses: number[] = [];
@@ -40,7 +41,7 @@ describe('credential endpoint throttling', () => {
     // not the outcome, so an attacker cannot keep guessing.
     await request(ctx.server)
       .post('/auth/login')
-      .send({ email: user.email, password: 'Password123!' })
+      .send({ email: user.email, password: TEST_ACCOUNT_PASSWORD })
       .expect(429);
   });
 
