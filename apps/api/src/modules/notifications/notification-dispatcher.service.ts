@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationStatus, Prisma } from '@prisma/client';
+import { isReleasedEmail } from '../../common/released-customer-email';
 import { PrismaService } from '../../prisma/prisma.service';
 import { maskEmail, maskPhone } from './mask';
 import { classifyNotificationError } from './notification-errors';
@@ -100,6 +101,7 @@ export class NotificationDispatcher {
       context,
       null,
       (logId) => this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(logId) }),
+      message.to,
     );
 
     // Unreachable without a dedupe key, and narrowed rather than cast so it
@@ -126,6 +128,7 @@ export class NotificationDispatcher {
       context,
       context.dedupeKey,
       (logId) => this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(logId) }),
+      message.to,
     );
   }
 
@@ -155,6 +158,7 @@ export class NotificationDispatcher {
     context: DispatchContext,
     dedupeKey: string | null,
     send: (logId: string) => Promise<{ providerMessageId: string | null }>,
+    emailTo: string | null = null,
   ): Promise<DedupedDispatchOutcome> {
     let log: { id: string };
 
@@ -185,7 +189,7 @@ export class NotificationDispatcher {
       throw error;
     }
 
-    return this.attempt(log.id, channel, template, maskedRecipient, send);
+    return this.attempt(log.id, channel, template, maskedRecipient, send, emailTo);
   }
 
   /**
@@ -205,8 +209,13 @@ export class NotificationDispatcher {
     message: NotificationMessage,
     maskedRecipient: string,
   ): Promise<DispatchOutcome> {
-    return this.attempt(logId, NotificationChannel.EMAIL, message.template, maskedRecipient, (id) =>
-      this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(id) }),
+    return this.attempt(
+      logId,
+      NotificationChannel.EMAIL,
+      message.template,
+      maskedRecipient,
+      (id) => this.email.send({ ...message, idempotencyKey: notificationIdempotencyKey(id) }),
+      message.to,
     );
   }
 
@@ -224,7 +233,17 @@ export class NotificationDispatcher {
     template: string,
     maskedRecipient: string,
     send: (logId: string) => Promise<{ providerMessageId: string | null }>,
+    emailTo: string | null = null,
   ): Promise<DispatchOutcome> {
+    if (emailTo !== null && (await this.recipientReleased(logId, emailTo))) {
+      this.logger.warn(`${template} via ${channel} not sent for ${maskedRecipient}: RECIPIENT_RELEASED`);
+      await this.prisma.notificationLog.update({
+        where: { id: logId },
+        data: { status: NotificationStatus.FAILED, failedAt: new Date(), errorCode: 'RECIPIENT_RELEASED' },
+      });
+      return { logId, status: NotificationStatus.FAILED, errorCode: 'RECIPIENT_RELEASED' };
+    }
+
     try {
       const result = await send(logId);
       await this.prisma.notificationLog.update({
@@ -257,6 +276,30 @@ export class NotificationDispatcher {
 
       return { logId, status: NotificationStatus.FAILED, errorCode };
     }
+  }
+
+  /**
+   * Whether this e-mail is for an account that has given its address up
+   * (STG-003B). Read from the audit row's own `userId` at the moment of the
+   * attempt, so the first send, an outbox delivery and an admin retry all ask
+   * the same question of the same live row.
+   *
+   * Customer mail about a request is addressed to the request's
+   * `customerEmail` snapshot, which is deliberately left as it was; the
+   * account's current address is what says whether that snapshot may still be
+   * written to. Any message whose own recipient is a released placeholder is
+   * refused too — it could never be delivered.
+   */
+  private async recipientReleased(logId: string, emailTo: string): Promise<boolean> {
+    if (isReleasedEmail(emailTo)) {
+      return true;
+    }
+    const log = await this.prisma.notificationLog.findUnique({ where: { id: logId }, select: { userId: true } });
+    if (!log?.userId) {
+      return false;
+    }
+    const account = await this.prisma.user.findUnique({ where: { id: log.userId }, select: { email: true } });
+    return isReleasedEmail(account?.email);
   }
 }
 

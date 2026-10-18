@@ -42,6 +42,16 @@ export const NOTIFICATION_ERROR_CODES = [
    * not recorded, because that would start describing the message.
    */
   'SOURCE_UNAVAILABLE',
+  /**
+   * The account the message was for has given its address up
+   * (`release-customer-email`, STG-003B). Nothing was handed to a transport:
+   * the address the message carries — a request's customer snapshot — now
+   * belongs to somebody else, or to nobody.
+   *
+   * Written by the dispatcher itself, never raised by an adapter, so it is a
+   * statement about this deployment's data and not about a provider.
+   */
+  'RECIPIENT_RELEASED',
   'UNKNOWN',
 ] as const;
 
@@ -50,13 +60,14 @@ export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];
 /**
  * The classes an adapter may raise.
  *
- * UNKNOWN is the dispatcher's own fallback, and SOURCE_UNAVAILABLE is written
- * directly by the retry path — neither may be claimed by a thrown error, so an
- * adapter cannot dress a transport failure up as one of them.
+ * UNKNOWN is the dispatcher's own fallback, SOURCE_UNAVAILABLE is written
+ * directly by the retry path and RECIPIENT_RELEASED by the dispatcher's own
+ * guard — none may be claimed by a thrown error, so an adapter cannot dress a
+ * transport failure up as one of them.
  */
 const RAISABLE_ERROR_CODES: ReadonlySet<string> = new Set(
   NOTIFICATION_ERROR_CODES.filter(
-    (code) => code !== 'UNKNOWN' && code !== 'SOURCE_UNAVAILABLE',
+    (code) => code !== 'UNKNOWN' && code !== 'SOURCE_UNAVAILABLE' && code !== 'RECIPIENT_RELEASED',
   ),
 );
 
@@ -69,6 +80,7 @@ export const NOTIFICATION_ERROR_LABELS: Record<NotificationErrorCode, string> = 
   EMAIL_BRANDING_INCOMPLETE: 'Şirket ve e-posta ayarları eksik',
   EMAIL_PUBLIC_URL_INVALID: 'Uygulamanın public adresi e-postada kullanılamaz',
   SOURCE_UNAVAILABLE: 'Kaynak kayıt yeniden oluşturulamıyor',
+  RECIPIENT_RELEASED: 'Alıcı hesabın e-posta adresi serbest bırakıldı; gönderilmedi',
   UNKNOWN: 'Bilinmeyen hata',
 };
 
