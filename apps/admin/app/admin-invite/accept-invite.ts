@@ -1,3 +1,4 @@
+import { passwordViolations, readStaffPasswordRefusal } from '../../lib/password-policy';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -11,8 +12,11 @@ export async function submitAdminInvite(formData: FormData): Promise<string> {
     return '/admin-invite?error=invalid';
   }
 
-  if (!password || password.length < 8) {
-    const params = new URLSearchParams({ token, error: 'password' });
+  // ADMIN-AUTH-002: the staff rule, checked before the request is sent. The
+  // API judges it again and decides.
+  const [rule] = passwordViolations(password);
+  if (rule) {
+    const params = new URLSearchParams({ token, error: 'policy', rule });
     return `/admin-invite?${params.toString()}`;
   }
 
@@ -29,6 +33,11 @@ export async function submitAdminInvite(formData: FormData): Promise<string> {
   });
 
   if (!response.ok) {
+    const refused = await readStaffPasswordRefusal(response);
+    if (refused) {
+      const params = new URLSearchParams({ token, error: 'policy', rule: refused });
+      return `/admin-invite?${params.toString()}`;
+    }
     const message = await safeReadErrorMessage(response);
     const params = new URLSearchParams({ token, error: 'submit' });
     if (message) {

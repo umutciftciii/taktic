@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import bcrypt from 'bcryptjs';
+import { assertStaffPasswordPolicy, isStaffPasswordRole } from '../../common/staff-password-policy';
 import { PrismaService } from '../../prisma/prisma.service';
 import { runSerializable } from '../../common/serializable-transaction';
 import { canonicalAccountPhone, findAccountByPhone } from '../../common/account-identity';
@@ -160,7 +161,7 @@ export class AccountService {
   ): Promise<{ success: true; otherSessionsRevoked: number }> {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, passwordHash: true },
+      select: { id: true, role: true, passwordHash: true },
     });
 
     if (!user) {
@@ -192,6 +193,12 @@ export class AccountService {
 
     if (dto.newPassword !== dto.newPasswordConfirm) {
       throw new BadRequestException('Yeni şifre ile tekrarı aynı değil.');
+    }
+
+    // ADMIN-AUTH-002: a staff account's new password meets the staff rule; the
+    // current one is only compared with its hash above, whatever its length.
+    if (isStaffPasswordRole(user.role)) {
+      assertStaffPasswordPolicy(dto.newPassword);
     }
 
     // A plain comparison rather than a second bcrypt call: the line above has

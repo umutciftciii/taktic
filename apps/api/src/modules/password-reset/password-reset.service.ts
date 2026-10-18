@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
+import { assertStaffPasswordPolicy } from '../../common/staff-password-policy';
 import { adminPasswordResetUrl, passwordResetUrl } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
@@ -88,6 +89,11 @@ export class PasswordResetService {
 
   async confirm(dto: ConfirmPasswordResetDto): Promise<{ success: true }> {
     const record = await this.lookupActiveToken(dto.token);
+    // ADMIN-AUTH-002: a staff account's new password meets the staff rule.
+    // Judged after the link, so a dead link is still told it is dead.
+    if (isStaffRole(record.user.role)) {
+      assertStaffPasswordPolicy(dto.password);
+    }
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const now = new Date();
 
@@ -237,7 +243,7 @@ export class PasswordResetService {
         userId: true,
         expiresAt: true,
         usedAt: true,
-        user: { select: { id: true, email: true, isActive: true, passwordHash: true } },
+        user: { select: { id: true, email: true, role: true, isActive: true, passwordHash: true } },
       },
     });
 

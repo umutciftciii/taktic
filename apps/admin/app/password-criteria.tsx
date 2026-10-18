@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from '../lib/password-policy';
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, passwordCriteria } from '../lib/password-policy';
 
 /**
  * Password inputs with the criteria ticked as they are met.
@@ -14,18 +14,7 @@ export function PasswordFields() {
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
 
-  const criteria = [
-    {
-      key: 'length',
-      label: `En az ${PASSWORD_MIN_LENGTH} karakter`,
-      met: password.length >= PASSWORD_MIN_LENGTH,
-    },
-    {
-      key: 'match',
-      label: 'Şifreler eşleşiyor',
-      met: password.length > 0 && password === confirm,
-    },
-  ];
+  const criteria = passwordCriteria(password, confirm);
 
   return (
     <>
