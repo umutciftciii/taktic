@@ -78,6 +78,18 @@ are in [docs/release.md](docs/release.md).
 
 ### Changed
 
+- ADMIN-AUTH-002: staff password policy. A new password for an ADMIN or
+  SUPER_ADMIN account — accepted invite, completed reset link, or
+  `POST /account/password` — must be 20–128 characters, hold at least 10
+  distinct characters and contain no guessable word (`admin`, `password`,
+  `123456`, …); refused with `400 { code: "STAFF_PASSWORD_POLICY", rules }`
+  and the shared Turkish sentence. One table
+  (`packages/shared/staff-password-policy.json`) is read by the API, the panel's
+  live criteria and error messages, and the bootstrap rule (which adds its
+  generator checks on top). CUSTOMER / PROVIDER policy is unchanged (8–128).
+  Existing staff passwords keep signing in; the rule applies when one is
+  replaced. No migration, no new environment variable.
+
 - CAMPAIGN-ENTITLEMENT-001: answering a direct vitrin lead is no longer
   unconditionally free (`SHOWCASE_PLACEMENT ⇒ creditCost 0` removed); the
   direct-lead identity is read from the request's gate rather than from what

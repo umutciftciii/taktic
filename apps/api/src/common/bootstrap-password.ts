@@ -1,30 +1,32 @@
+import {
+  STAFF_PASSWORD_MAX_LENGTH,
+  STAFF_PASSWORD_MIN_DISTINCT_CHARACTERS,
+  STAFF_PASSWORD_MIN_LENGTH,
+  containsGuessableFragment,
+} from './staff-password-policy';
+
 /**
  * The rule for a password an operator hands to a bootstrap or recovery tool
  * (STG-003): the seed's first super admin (`SEED_SUPER_ADMIN_PASSWORD`, from
  * the environment) and the super-admin transition's rename and recovery
  * (typed at a hidden terminal prompt, `scripts/terminal-secret.ts`).
  *
- * Stricter than the product's sign-up policy on purpose. A person choosing
- * their own password at a form gets the length range and nothing else; a value
- * that opens the account with every capability there is, typed into a shell,
- * must be the output of a generator — `openssl rand -base64 24` passes — and
- * is refused when it looks like something a person made up.
+ * The staff rule (staff-password-policy.ts, ADMIN-AUTH-002) and then some. A
+ * staff member choosing their own password at a form gets length, variety and
+ * the guessable-word list; a value that opens the account with every
+ * capability there is, typed into a shell, must also look like the output of a
+ * generator — `openssl rand -base64 24` passes — so it adds the
+ * character-class and whitespace checks. The shared parts read the same
+ * numbers and the same word list, so the two cannot drift apart.
  *
  * There is no fallback anywhere. An unset variable is a refusal, never a
  * default, and no message here ever repeats the value it judged.
  */
 
-export const BOOTSTRAP_PASSWORD_MIN_LENGTH = 20;
-/** The product's own ceiling (ConfirmPasswordResetDto, ChangePasswordDto). */
-export const BOOTSTRAP_PASSWORD_MAX_LENGTH = 128;
+export const BOOTSTRAP_PASSWORD_MIN_LENGTH = STAFF_PASSWORD_MIN_LENGTH;
+export const BOOTSTRAP_PASSWORD_MAX_LENGTH = STAFF_PASSWORD_MAX_LENGTH;
 const MIN_CHARACTER_CLASSES = 3;
-const MIN_DISTINCT_CHARACTERS = 10;
-
-/**
- * Words a generated value does not contain, and a made-up one usually does.
- * Matched case-insensitively anywhere in the value.
- */
-const GUESSABLE_FRAGMENTS = ['password', 'passw0rd', 'changeme', 'admin', 'taktic', 'taktick', 'qwerty', '123456', 'letmein', 'welcome'];
+const MIN_DISTINCT_CHARACTERS = STAFF_PASSWORD_MIN_DISTINCT_CHARACTERS;
 
 export class BootstrapPasswordRefused extends Error {}
 
@@ -49,8 +51,7 @@ export function bootstrapPasswordProblem(value: string | undefined | null): stri
   if (new Set(value).size < MIN_DISTINCT_CHARACTERS) {
     return `has fewer than ${MIN_DISTINCT_CHARACTERS} distinct characters`;
   }
-  const folded = value.toLowerCase();
-  if (GUESSABLE_FRAGMENTS.some((fragment) => folded.includes(fragment))) {
+  if (containsGuessableFragment(value)) {
     return 'contains a guessable word or sequence';
   }
   return null;

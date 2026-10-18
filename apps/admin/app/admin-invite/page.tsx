@@ -1,7 +1,7 @@
 import { formatDateTime } from '@taktic/shared';
 import Link from 'next/link';
 import { BrandMark } from '../../components/brand-mark';
-import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
+import { passwordRuleMessage } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
 
 const apiUrl =
@@ -12,6 +12,7 @@ type SearchParams = {
   success?: string;
   error?: string;
   errorMessage?: string;
+  rule?: string;
 };
 
 type AdminInvitePageProps = {
@@ -79,7 +80,7 @@ async function safeReadMessage(response: Response): Promise<string | null> {
 const formatExpiry = formatDateTime;
 
 export default async function AdminInvitePage({ searchParams }: AdminInvitePageProps) {
-  const { token, success, error, errorMessage } = await searchParams;
+  const { token, success, error, errorMessage, rule } = await searchParams;
 
   if (success === '1') {
     return (
@@ -140,8 +141,8 @@ export default async function AdminInvitePage({ searchParams }: AdminInvitePageP
   const displayName = user.name ?? user.email ?? 'Admin';
 
   const fieldError =
-    error === 'password'
-      ? `Şifre en az ${PASSWORD_MIN_LENGTH} karakter olmalıdır.`
+    error === 'policy' || error === 'password'
+      ? passwordRuleMessage(rule)
       : error === 'mismatch'
         ? 'Şifreler eşleşmiyor.'
         : error === 'submit'

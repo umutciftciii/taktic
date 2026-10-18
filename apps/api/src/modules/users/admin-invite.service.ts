@@ -9,6 +9,7 @@ import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertStaffPasswordPolicy } from '../../common/staff-password-policy';
 import { STAFF_ROLES } from '../auth/admin-permissions';
 import {
   ADMIN_INVITE_PATH,
@@ -147,6 +148,10 @@ export class AdminInviteService {
     }
 
     const lookup = await this.lookupActiveToken(token);
+
+    // ADMIN-AUTH-002: every invite is for a staff account (lookupActiveToken
+    // refuses any other), so its first password meets the staff rule.
+    assertStaffPasswordPolicy(dto.password);
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const now = new Date();

@@ -1,14 +1,14 @@
 import { formatDateTime } from '@taktic/shared';
 import Link from 'next/link';
 import { BrandMark } from '../../components/brand-mark';
-import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
+import { passwordRuleMessage } from '../../lib/password-policy';
 import { PasswordFields } from '../password-criteria';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
 type ResetPasswordPageProps = {
-  searchParams: Promise<{ token?: string; success?: string; error?: string }>;
+  searchParams: Promise<{ token?: string; success?: string; error?: string; rule?: string }>;
 };
 
 type ValidateResult =
@@ -44,7 +44,7 @@ async function validateResetToken(token: string): Promise<ValidateResult> {
  * hours earlier than it does.
  */
 export default async function AdminResetPasswordPage({ searchParams }: ResetPasswordPageProps) {
-  const { token, success, error } = await searchParams;
+  const { token, success, error, rule } = await searchParams;
 
   if (success === '1') {
     return (
@@ -99,8 +99,8 @@ export default async function AdminResetPasswordPage({ searchParams }: ResetPass
   }
 
   const fieldError =
-    error === 'password'
-      ? `Şifre en az ${PASSWORD_MIN_LENGTH} karakter olmalıdır.`
+    error === 'policy' || error === 'password'
+      ? passwordRuleMessage(rule)
       : error === 'mismatch'
         ? 'Şifreler eşleşmiyor.'
         : error === 'submit'

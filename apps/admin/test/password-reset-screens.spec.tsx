@@ -107,7 +107,7 @@ describe('asking for a link', () => {
 });
 
 describe('choosing a new password', () => {
-  it('checks length and match before calling the API', async () => {
+  it('checks the staff rule and the match before calling the API', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
@@ -116,10 +116,10 @@ describe('choosing a new password', () => {
     );
     expect(
       await confirmPasswordReset(form({ token: 't1', password: 'short', passwordConfirm: 'short' })),
-    ).toBe('/sifre-sifirla?token=t1&error=password');
+    ).toBe('/sifre-sifirla?token=t1&error=policy&rule=minLength');
     expect(
       await confirmPasswordReset(
-        form({ token: 't1', password: 'yeterince-uzun', passwordConfirm: 'baska-bir-sey' }),
+        form({ token: 't1', password: 'Dort-mavi-kedi-bulutta-7', passwordConfirm: 'baska-bir-sey' }),
       ),
     ).toBe('/sifre-sifirla?token=t1&error=mismatch');
     expect(fetchMock).not.toHaveBeenCalled();
@@ -131,12 +131,12 @@ describe('choosing a new password', () => {
 
     fetchMock.mockResolvedValueOnce(jsonResponse(400, { message: 'Bağlantı geçersiz veya süresi dolmuş.' }));
     expect(
-      await confirmPasswordReset(form({ token: 't1', password: 'yeni-sifre-123', passwordConfirm: 'yeni-sifre-123' })),
+      await confirmPasswordReset(form({ token: 't1', password: 'Dort-mavi-kedi-bulutta-7', passwordConfirm: 'Dort-mavi-kedi-bulutta-7' })),
     ).toBe('/sifre-sifirla?token=t1&error=submit');
 
     fetchMock.mockRejectedValueOnce(new Error('connection refused'));
     expect(
-      await confirmPasswordReset(form({ token: 't1', password: 'yeni-sifre-123', passwordConfirm: 'yeni-sifre-123' })),
+      await confirmPasswordReset(form({ token: 't1', password: 'Dort-mavi-kedi-bulutta-7', passwordConfirm: 'Dort-mavi-kedi-bulutta-7' })),
     ).toBe('/sifre-sifirla?token=t1&error=submit');
 
     // A Set-Cookie on the API answer is not re-issued: this module has no
@@ -148,12 +148,12 @@ describe('choosing a new password', () => {
       }),
     );
     expect(
-      await confirmPasswordReset(form({ token: 't1', password: 'yeni-sifre-123', passwordConfirm: 'yeni-sifre-123' })),
+      await confirmPasswordReset(form({ token: 't1', password: 'Dort-mavi-kedi-bulutta-7', passwordConfirm: 'Dort-mavi-kedi-bulutta-7' })),
     ).toBe('/sifre-sifirla?success=1');
 
     const [url, init] = fetchMock.mock.calls[2] as [string, RequestInit];
     expect(url).toMatch(/\/auth\/password-reset\/confirm$/);
-    expect(JSON.parse(String(init.body))).toEqual({ token: 't1', password: 'yeni-sifre-123' });
+    expect(JSON.parse(String(init.body))).toEqual({ token: 't1', password: 'Dort-mavi-kedi-bulutta-7' });
   });
 
   it('renders the form for a live link, with the address and expiry', async () => {

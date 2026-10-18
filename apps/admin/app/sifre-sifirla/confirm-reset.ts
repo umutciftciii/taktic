@@ -1,4 +1,4 @@
-import { PASSWORD_MIN_LENGTH } from '../../lib/password-policy';
+import { passwordViolations, readStaffPasswordRefusal } from '../../lib/password-policy';
 
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
@@ -19,8 +19,11 @@ export async function confirmPasswordReset(formData: FormData): Promise<string> 
     return '/sifre-sifirla?error=invalid';
   }
 
-  if (!password || password.length < PASSWORD_MIN_LENGTH) {
-    return `/sifre-sifirla?${new URLSearchParams({ token, error: 'password' })}`;
+  // ADMIN-AUTH-002: the staff rule, checked before the request is sent. The
+  // API judges it again and decides.
+  const [rule] = passwordViolations(password);
+  if (rule) {
+    return `/sifre-sifirla?${new URLSearchParams({ token, error: 'policy', rule })}`;
   }
 
   if (password !== passwordConfirm) {
@@ -40,6 +43,12 @@ export async function confirmPasswordReset(formData: FormData): Promise<string> 
   }
 
   if (!response.ok) {
+    // A refusal by the staff rule names the rule, so the form can say which;
+    // any other refusal keeps the one message for a link that did not work.
+    const refused = await readStaffPasswordRefusal(response);
+    if (refused) {
+      return `/sifre-sifirla?${new URLSearchParams({ token, error: 'policy', rule: refused })}`;
+    }
     return `/sifre-sifirla?${new URLSearchParams({ token, error: 'submit' })}`;
   }
 
