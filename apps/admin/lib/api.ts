@@ -1701,6 +1701,8 @@ export const NOTIFICATION_ERROR_CODES = [
   'EMAIL_PUBLIC_URL_INVALID',
   // A retry could not rebuild the message from live data.
   'SOURCE_UNAVAILABLE',
+  // The account gave its address up (STG-003B); nothing was sent.
+  'RECIPIENT_RELEASED',
   'UNKNOWN',
 ] as const;
 export type NotificationErrorCode = (typeof NOTIFICATION_ERROR_CODES)[number];

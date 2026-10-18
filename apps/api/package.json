@@ -12,6 +12,7 @@
     "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts",
     "canonicalize:provider-phones": "tsx src/scripts/canonicalize-provider-phones.ts",
     "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts",
+    "customer-email:release": "tsx src/scripts/release-customer-email.ts",
     "super-admin:transition": "tsx src/scripts/super-admin-transition.ts"
   },
   "dependencies": {

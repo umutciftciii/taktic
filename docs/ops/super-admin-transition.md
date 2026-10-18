@@ -120,9 +120,15 @@ Hedef zaten SUPER_ADMIN ise (`A-retire`) yalnız 3–4 uygulanır;
 ## Hedef bir müşteri/esnaf hesabındaysa (`refused`)
 
 Araç rol dönüştürmez: o hesabın talepleri, teklifleri, kredileri bir
-pazar yeri hesabına aittir. Seçenekler bir kişinin kararıdır: hesabın
-sahibiyle görüşüp adresini değiştirmek (ürün içinden), sonra Yol B. Bu PR
-böyle bir veri değişikliği yapmaz.
+pazar yeri hesabına aittir. Seçenekler bir kişinin kararıdır. Üründe
+müşteri adresini değiştiren bir yol yoktur (profil formu e-postayı
+reddeder).
+
+- Hesap bir talep tarafından oluşturulmuş ve hiç sahiplenilmemişse
+  (`AUTO_CREATED_REQUEST`, parolasız, kanıtsız): adres
+  [customer-email-release.md](customer-email-release.md) ile serbest
+  bırakılır, sonra Yol B.
+- Hesabın bir sahibi varsa: sahibiyle görüşülür; araçla dokunulmaz.
 
 ## Geri alma
 
