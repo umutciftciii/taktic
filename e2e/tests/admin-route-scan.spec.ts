@@ -76,7 +76,7 @@ function contentCeiling(route: string, width: number): number | null {
 }
 
 /** Reached without a session, or the refusal itself: outside the shell. */
-const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/yetkisiz'];
+const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/sifre-unuttum', '/sifre-sifirla', '/yetkisiz'];
 
 /**
  * Every page.tsx under apps/admin/app, as a route pattern. A route group's

@@ -233,7 +233,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
   };
 
   /** Reached without a session, or the refusal itself: no shell row, no gate. */
-  const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/yetkisiz'];
+  const OUTSIDE_THE_SHELL = ['/login', '/admin-invite', '/sifre-unuttum', '/sifre-sifirla', '/yetkisiz'];
 
   function pageRoutes(): string[] {
     return [...PAGE_FILES.keys()];

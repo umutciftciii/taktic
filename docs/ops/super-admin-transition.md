@@ -72,8 +72,10 @@ uygulanacağı: `A-promote`, `A-retire`, `B-rename` veya `refused`.
 
 ## Yol A — hedef adreste bir personel (ADMIN) hesabı var
 
-1. **Sahiplik kanıtı.** Hedef adresin sahibi web uygulamasında
-   `/sifre-unuttum` sayfasından bağlantı ister ve tamamlar. `inspect`
+1. **Sahiplik kanıtı.** Hedef adresin sahibi admin paneli giriş ekranındaki
+   "Şifremi Unuttum" bağlantısından (`/sifre-unuttum`) bağlantı ister ve
+   tamamlar. Personel hesabının sıfırlama bağlantısı her zaman admin panelinin
+   `/sifre-sifirla` sayfasına gider (ADMIN-AUTH-001); web formundan istense de. `inspect`
    artık `emailVerified=true` gösterir. (Davet tamamlanmamışsa — parolası
    yoksa — önce davet bağlantısıyla parola belirlenir.)
 2. **Terfi (kuru, sonra uygula):**
@@ -138,7 +140,7 @@ Hedef zaten SUPER_ADMIN ise (`A-retire`) yalnız 3–4 uygulanır;
    çalışmaz), tüm oturumlar ve bağlantılar kapanır. Erişim kaybolmaz: yeni
    adres + yeni parola ile giriş yapılır. (`--keep-password` parolayı
    değiştirmez; yalnız mevcut parola zaten güçlü ve gizliyse kullanın.)
-3. **Sahiplik kanıtı.** Yeni adresle `/sifre-unuttum` tamamlanır;
+3. **Sahiplik kanıtı.** Yeni adresle admin panelinde `/sifre-unuttum` tamamlanır;
    `inspect` `emailVerified=true` gösterene kadar devir tamamlanmış sayılmaz.
    Kanıt gelmezse (adres yanlışsa) hemen geri alın.
 
@@ -174,8 +176,11 @@ yüklemek yanlış olur. Her geri almada hesabın oturumları yeniden kapanır.
 
 ## Kurtarma prosedürü
 
-**Panel girişi kayıp, e-posta çalışıyor:** `/sifre-unuttum` (her SUPER_ADMIN
-için açık). Başarılı sıfırlama tüm oturumları kapatır.
+**Panel girişi kayıp, e-posta çalışıyor:** admin panelinde "Şifremi Unuttum"
+(`/sifre-unuttum`, her SUPER_ADMIN/ADMIN için açık). Bağlantı 30 dakika geçerli
+ve tek kullanımlıktır; hesap başına saatte en fazla 3 bağlantı gönderilir.
+Başarılı sıfırlama tüm oturumları kapatır ve ilk kez ise `emailVerifiedAt`
+yazar.
 
 **Parola bilinmiyor ve e-posta teslim edilemiyor** (veritabanı erişimi olan
 operatör):

@@ -8,6 +8,8 @@ import {
   PASSWORD_RESET_MAX_PER_WINDOW,
   PASSWORD_RESET_TOKEN_TTL_MINUTES,
 } from '../src/modules/password-reset/password-reset.constants';
+import { getAdminAppBaseUrl } from '../src/modules/users/admin-invite.constants';
+import { publicWebUrl } from '../src/common/public-urls';
 import {
   createTestApp,
   createUser,
@@ -356,6 +358,120 @@ describe('password reset — staff accounts', () => {
 
     const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: customer.id } });
     expect(stored.emailVerifiedAt).toBeNull();
+  });
+
+  // ADMIN-AUTH-001: the panel's own "Şifremi Unuttum" screen.
+  it('sends a staff account to the admin panel and a marketplace account to the web', async () => {
+    const superAdmin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, password: PASSWORD });
+    const staff = await createUser(ctx.prisma, { role: UserRole.ADMIN, password: PASSWORD });
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER, password: PASSWORD });
+    const provider = await createUser(ctx.prisma, { role: UserRole.PROVIDER, password: PASSWORD });
+
+    const adminReset = new URL('/sifre-sifirla', `${getAdminAppBaseUrl()}/`);
+    const webReset = new URL(publicWebUrl('/sifre-sifirla'));
+
+    for (const [user, expected] of [
+      [superAdmin, adminReset],
+      [staff, adminReset],
+      [customer, webReset],
+      [provider, webReset],
+    ] as const) {
+      await requestReset(user.email!);
+      const sent = ctx.notifications.lastOfTemplate('password-reset');
+      expect(sent?.to).toBe(user.email);
+      const url = new URL(lastResetUrl());
+      expect(url.origin).toBe(expected.origin);
+      expect(url.pathname).toBe(expected.pathname);
+      expect([...url.searchParams.keys()]).toEqual(['token']);
+    }
+
+    // Two different origins for the link, one answer for the request.
+    expect(adminReset.origin).not.toBe(webReset.origin);
+  });
+
+  it('answers a staff address exactly as it answers an unknown one', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, password: PASSWORD });
+
+    const known = await requestReset(admin.email!);
+    const unknown = await requestReset('panelde-yok@example.test');
+
+    expect(known.status).toBe(unknown.status);
+    expect(known.body).toEqual(unknown.body);
+    expect(known.body).toEqual({ status: 'accepted' });
+    expect(ctx.notifications.ofTemplate('password-reset')).toHaveLength(1);
+  });
+
+  it('holds a staff account to the same per-account budget', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.ADMIN, password: PASSWORD });
+
+    for (let attempt = 0; attempt < PASSWORD_RESET_MAX_PER_WINDOW + 2; attempt += 1) {
+      resetAuthThrottle(ctx.app);
+      const response = await requestReset(admin.email!);
+      expect(response.body).toEqual({ status: 'accepted' });
+    }
+
+    expect(ctx.notifications.ofTemplate('password-reset')).toHaveLength(
+      PASSWORD_RESET_MAX_PER_WINDOW,
+    );
+  });
+
+  it('sends nothing to an invited operator who has not chosen a first password', async () => {
+    // The invitation link is that account's way in; a reset link would be a
+    // second, weaker one.
+    const invited = await createUser(ctx.prisma, { role: UserRole.ADMIN, password: null });
+
+    const response = await requestReset(invited.email!);
+
+    expect(response.body).toEqual({ status: 'accepted' });
+    expect(ctx.notifications.ofTemplate('password-reset')).toHaveLength(0);
+  });
+
+  it('refuses a spent or expired staff link, and closes every staff session', async () => {
+    const admin = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, password: PASSWORD });
+    const first = await loginAs(ctx.prisma, admin.id);
+    const second = await loginAs(ctx.prisma, admin.id);
+
+    await requestReset(admin.email!);
+    const staleToken = tokenOf(lastResetUrl());
+    resetAuthThrottle(ctx.app);
+    await requestReset(admin.email!);
+    const token = tokenOf(lastResetUrl());
+
+    // Issuing the second link closed the first.
+    await request(ctx.server).get('/auth/password-reset').query({ token: staleToken }).expect(400);
+
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token, password: NEW_PASSWORD })
+      .expect(201);
+
+    await request(ctx.server).get('/auth/me').set('Cookie', first).expect(401);
+    await request(ctx.server).get('/auth/me').set('Cookie', second).expect(401);
+    const open = await ctx.prisma.session.count({ where: { userId: admin.id, revokedAt: null } });
+    expect(open).toBe(0);
+
+    // Single use.
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token, password: THIRD_PASSWORD })
+      .expect(400);
+
+    // Expiry, on a fresh link aged past its window.
+    resetAuthThrottle(ctx.app);
+    await requestReset(admin.email!);
+    const expiring = tokenOf(lastResetUrl());
+    await ctx.prisma.passwordResetToken.update({
+      where: { tokenHash: sha256(expiring) },
+      data: { expiresAt: new Date(Date.now() - 1000) },
+    });
+    await request(ctx.server)
+      .post('/auth/password-reset/confirm')
+      .send({ token: expiring, password: THIRD_PASSWORD })
+      .expect(400);
+
+    const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: admin.id } });
+    expect(await bcrypt.compare(NEW_PASSWORD, stored.passwordHash!)).toBe(true);
+    expect(stored.role).toBe(UserRole.SUPER_ADMIN);
   });
 
   it('lets a super admin change a known password', async () => {

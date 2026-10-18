@@ -7,6 +7,7 @@ import { AdminFooter } from '../components/release-version';
 import { Sidebar } from '../components/sidebar';
 import type { AdminAccountSummary } from '../lib/admin-account';
 import type { NavMenu } from '../lib/nav';
+import { SIGNED_OUT_SCREENS } from '../lib/signed-out-screens';
 import { Topbar } from '../components/topbar';
 import { SessionGuard } from './session/session-guard';
 
@@ -201,7 +202,7 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
     target.addEventListener('blur', () => target.removeAttribute('tabindex'), { once: true });
   }
 
-  if (pathname === '/login' || pathname === '/admin-invite') {
+  if (SIGNED_OUT_SCREENS.has(pathname)) {
     return <>{children}</>;
   }
 
@@ -279,9 +280,9 @@ export function AdminShell({ children, navMenu, account }: AdminShellProps) {
       </div>
 
       {/*
-        Mounted here rather than in the layout, so it is absent from /login and
-        /admin-invite — the two screens that are reached without a session and
-        where a "your session ended" redirect would be a loop.
+        Mounted here rather than in the layout, so it is absent from the
+        screens reached without a session (lib/signed-out-screens.ts), where a
+        "your session ended" redirect would be a loop.
       */}
       <SessionGuard />
     </div>
