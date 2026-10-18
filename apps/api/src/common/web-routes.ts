@@ -134,8 +134,8 @@ export function customerSupportTicketUrl(ticketId: string): string {
 /**
  * One ticket in the operator queue. `apps/admin/app/support/[id]`.
  *
- * One of the three links in this file that are *not* on the web application
- * (the others are `adminRequestUrl` and `adminProviderReviewUrl` below), and
+ * One of the links in this file that are *not* on the web application (the
+ * others are the `admin*` functions below), and
  * it is here rather than in a file
  * of its own because the rule the module comment states applies to it
  * unchanged: the path is a literal this repository owns, and a route that
@@ -156,6 +156,25 @@ export function adminSupportTicketUrl(ticketId: string): string {
  */
 export function adminRequestUrl(requestId: string): string {
   return `${getAdminAppBaseUrl()}/requests/${encodeURIComponent(requestId)}`;
+}
+
+/**
+ * Where a staff account's reset link lands. `apps/admin/app/sifre-sifirla`.
+ *
+ * ADMIN-AUTH-001: an operator who forgot a password resets it on the panel
+ * they sign in to, and lands on the panel's own sign-in screen afterwards —
+ * never on the marketplace's, which does not serve staff. Which of the two
+ * links an account is sent is decided by the account's role, not by which
+ * form asked for it, so the request itself still says nothing about the
+ * address. The token is a query value, as on the web link, and goes through
+ * URLSearchParams for the same reason.
+ */
+export const ADMIN_PASSWORD_RESET_PATH = '/sifre-sifirla';
+
+export function adminPasswordResetUrl(rawToken: string): string {
+  const url = new URL(`${getAdminAppBaseUrl()}${ADMIN_PASSWORD_RESET_PATH}`);
+  url.search = new URLSearchParams({ token: rawToken }).toString();
+  return url.toString();
 }
 
 // ───────────────────────────── provider reviews ─────────────────────────────

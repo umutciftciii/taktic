@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { BrandMark } from '../../components/brand-mark';
 import { isLocalEnvironment } from '../../lib/local-environment';
 
@@ -63,6 +64,12 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </label>
           <button className="btn btn-primary btn-block" type="submit">Giriş Yap</button>
         </div>
+        {/* ADMIN-AUTH-001: the panel's own reset flow; see app/sifre-unuttum. */}
+        <p className="auth-footnote">
+          <Link href="/sifre-unuttum" style={{ textDecoration: 'underline' }}>
+            Şifremi Unuttum
+          </Link>
+        </p>
         {showLocalHint ? (
           <p className="auth-footnote" data-testid="local-admin-hint">
             Yerel admin: <code>admin@taktic.local</code> — şifre, seed çalıştırılırken verilen{' '}

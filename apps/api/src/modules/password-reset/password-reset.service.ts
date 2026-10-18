@@ -2,7 +2,7 @@ import { BadRequestException, Inject, Injectable, Logger } from '@nestjs/common'
 import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { createHash, randomBytes } from 'node:crypto';
-import { passwordResetUrl } from '../../common/web-routes';
+import { adminPasswordResetUrl, passwordResetUrl } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import {
@@ -132,7 +132,7 @@ export class PasswordResetService {
           where: {
             id: record.userId,
             emailVerifiedAt: null,
-            role: { in: [UserRole.SUPER_ADMIN, UserRole.ADMIN] },
+            role: { in: STAFF_ROLES },
           },
           data: { emailVerifiedAt: now },
         });
@@ -177,7 +177,7 @@ export class PasswordResetService {
 
     const user = await this.prisma.user.findUnique({
       where: { email },
-      select: { id: true, email: true, name: true, isActive: true, passwordHash: true },
+      select: { id: true, email: true, name: true, role: true, isActive: true, passwordHash: true },
     });
 
     if (!user?.email || !user.isActive || !user.passwordHash) {
@@ -215,7 +215,10 @@ export class PasswordResetService {
       userId: user.id,
       email: user.email,
       fullName: user.name,
-      resetUrl: passwordResetUrl(rawToken),
+      // ADMIN-AUTH-001: staff reset on the panel they sign in to. Chosen by
+      // the account, not by the form that asked, so both forms answer the
+      // same way for every address.
+      resetUrl: isStaffRole(user.role) ? adminPasswordResetUrl(rawToken) : passwordResetUrl(rawToken),
       requestedAt,
       expiryMinutes: PASSWORD_RESET_TOKEN_TTL_MINUTES,
     });
@@ -252,6 +255,12 @@ export class PasswordResetService {
 
     return record;
   }
+}
+
+const STAFF_ROLES: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.ADMIN];
+
+function isStaffRole(role: UserRole): boolean {
+  return STAFF_ROLES.includes(role);
 }
 
 function hashToken(rawToken: string): string {

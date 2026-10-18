@@ -1,21 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import { SIGNED_OUT_FORM_TARGETS, SIGNED_OUT_SCREENS } from './lib/signed-out-screens';
 
 const authCookieName = process.env.AUTH_COOKIE_NAME ?? 'taktic_session';
 
 /*
- * The sign-in, invite and sign-out forms post to fixed route handlers (see
- * @taktic/shared's form-post). The first two are reached without a session by
- * definition. `/logout` is public too: a tab whose session already ended must
+ * The sign-in, invite, password-reset and sign-out forms post to fixed route
+ * handlers (see @taktic/shared's form-post). All but the last are reached
+ * without a session by definition (lib/signed-out-screens.ts). `/logout` is public too: a tab whose session already ended must
  * still be able to press "Çıkış" and land on the sign-in screen, rather than
  * have its POST bounced by the redirect below.
  */
-const PUBLIC_PATHS = new Set([
-  '/login',
-  '/login/submit',
-  '/admin-invite',
-  '/admin-invite/submit',
-  '/logout',
-]);
+const PUBLIC_PATHS = new Set([...SIGNED_OUT_SCREENS, ...SIGNED_OUT_FORM_TARGETS, '/logout']);
 
 /*
  * The session probe answers for itself. `SessionGuard` polls it with `fetch`

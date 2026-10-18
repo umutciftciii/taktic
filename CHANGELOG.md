@@ -8,6 +8,15 @@ are in [docs/release.md](docs/release.md).
 
 ### Added
 
+- ADMIN-AUTH-001: "Şifremi Unuttum" on the admin sign-in card. Two new
+  signed-out panel screens (`/sifre-unuttum`, `/sifre-sifirla`) on the existing
+  `/auth/password-reset` API flow — 30-minute single-use hashed token, three
+  links per account per hour, every session revoked on success, first staff
+  reset records `emailVerifiedAt`. A staff (ADMIN / SUPER_ADMIN) account's
+  reset link now lands on the admin panel (`ADMIN_APP_URL`) instead of the web
+  app, whichever form asked; the request answer is unchanged for every
+  address. No migration, no new environment variable.
+
 - MATCH-001: category delivery model (`ON_SITE` / `REMOTE` / `HYBRID`) and
   location-independent remote matching. A request snapshots its delivery mode
   at creation (HYBRID: the customer chooses); REMOTE requests reach every
