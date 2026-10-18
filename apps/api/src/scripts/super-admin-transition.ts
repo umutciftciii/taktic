@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { Prisma, PrismaClient, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
-import { requireBootstrapPassword } from '../common/bootstrap-password';
+import { NoTerminal, promptNewPassword, refusePasswordEnvironment, SecretEntryRefused, terminalSecretReader, type SecretReader } from './terminal-secret';
 
 /**
  * Moves the platform's super-admin authority to a named address without ever
@@ -24,15 +24,15 @@ import { requireBootstrapPassword } from '../common/bootstrap-password';
  *   Path B — no account has the target address:
  *     rename --from-id ID --to EMAIL --confirm-to EMAIL [--apply] [--keep-password]
  *         the existing super admin takes the target address. Its password is
- *         rotated in the same transaction to SUPER_ADMIN_NEW_PASSWORD, so a
- *         password that was ever published stops working while whoever ran
- *         this keeps access. The address is then unproven until the owner
+ *         rotated in the same transaction to one typed twice at a hidden
+ *         prompt, so a password that was ever published stops working while
+ *         whoever ran this keeps access. The address is then unproven until the owner
  *         completes "Şifremi unuttum" for it.
  *
  *   recover-password --user-id ID [--apply]
- *       break-glass: sets an active super admin's password from
- *       SUPER_ADMIN_RECOVERY_PASSWORD, for when nobody can sign in and mail
- *       cannot deliver a reset link.
+ *       break-glass: sets an active super admin's password, typed twice at a
+ *       hidden prompt, for when nobody can sign in and mail cannot deliver a
+ *       reset link.
  *   rollback --manifest FILE [--apply]
  *       undoes a promote, retire or rename from its applied manifest, only
  *       while every row is still exactly as that manifest left it.
@@ -48,6 +48,13 @@ import { requireBootstrapPassword } from '../common/bootstrap-password';
  * sessions revoked in the same transaction, along with its open reset and
  * verification links, so nothing issued under the old state survives it.
  *
+ * Passwords are read only from the controlling terminal (/dev/tty, echo off),
+ * twice, and judged by the bootstrap rule — dry runs included, so a dry run
+ * proves the value too. Never from an argument or the environment: a
+ * SUPER_ADMIN_NEW_PASSWORD / SUPER_ADMIN_RECOVERY_PASSWORD still set is
+ * refused, and with no terminal (`docker compose run -T`, a pipe) the command
+ * stops before reading the database.
+ *
  * Output never contains a password, a hash or a token. Addresses are masked on
  * the console; the applied manifest — which rollback needs and which carries
  * the full addresses — is written outside the repository into --out,
@@ -58,8 +65,6 @@ import { requireBootstrapPassword } from '../common/bootstrap-password';
  * an address nobody has proven, or run a step that would leave no super admin.
  */
 
-export const NEW_PASSWORD_VAR = 'SUPER_ADMIN_NEW_PASSWORD';
-export const RECOVERY_PASSWORD_VAR = 'SUPER_ADMIN_RECOVERY_PASSWORD';
 /** How recent the new super admin's sign-in must be for `retire`. */
 export const RETIRE_SIGN_IN_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** The cost factor every other password in this product is stored at. */
@@ -704,8 +709,37 @@ function serializable<T>(prisma: PrismaClient, run: (tx: Tx) => Promise<T>): Pro
   return prisma.$transaction(run, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
 }
 
+/**
+ * The password a command sets, asked for before any transaction opens (the
+ * person may take a while; a SERIALIZABLE transaction should not wait on
+ * them). Null when the command sets none.
+ */
+export async function passwordFor(cli: Cli, read: SecretReader, env: NodeJS.ProcessEnv): Promise<string | null> {
+  refusePasswordEnvironment(env);
+  if (cli.command === 'rename' && !cli.keepPassword) return promptNewPassword(read, 'new super admin password');
+  if (cli.command === 'recover-password') return promptNewPassword(read, 'recovery password');
+  return null;
+}
+
 async function main(): Promise<void> {
   const cli = parseArgs(process.argv.slice(2));
+  // Before the database is touched: a refused entry or a missing terminal
+  // ends the run with nothing read and nothing changed.
+  let password: string | null;
+  const terminal = terminalSecretReader();
+  try {
+    password = await passwordFor(cli, terminal, process.env);
+  } catch (error) {
+    if (error instanceof SecretEntryRefused || error instanceof NoTerminal) {
+      console.error(`super-admin-transition: ${error.message}`);
+      process.exitCode = 2;
+      return;
+    }
+    throw error;
+  } finally {
+    // Back to the terminal's own mode before anything else is printed.
+    terminal.close();
+  }
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const prisma = new PrismaClient();
   const banner = (what: string) => console.log(`\n=== SUPER ADMIN TRANSITION — ${cli.command.toUpperCase()} — ${what} ===\n`);
@@ -731,14 +765,8 @@ async function main(): Promise<void> {
       : null;
     const rollbackManifest = cli.manifest ? parseManifest(readFileSync(cli.manifest, 'utf8')) : null;
 
-    // Passwords are read from the environment only, judged before anything
-    // else happens, and never printed.
-    let newPassword: string | null = null;
-    if (cli.command === 'rename' && !cli.keepPassword) {
-      newPassword = requireBootstrapPassword(process.env, NEW_PASSWORD_VAR);
-    }
-    const recoveryPassword =
-      cli.command === 'recover-password' && cli.apply ? requireBootstrapPassword(process.env, RECOVERY_PASSWORD_VAR) : null;
+    const newPassword = cli.command === 'rename' ? password : null;
+    const recoveryPassword = cli.command === 'recover-password' ? password : null;
 
     const plan = (tx: Tx): Promise<string[]> => {
       switch (cli.command) {
@@ -758,6 +786,7 @@ async function main(): Promise<void> {
     if (!cli.apply) {
       banner('DRY RUN (nothing changed)');
       const refusals = await readOnly(prisma, plan);
+      if (password) console.log('password                 : typed twice, matches, passes the bootstrap rule (not shown)');
       if (refusals.length > 0) refused(refusals);
       else console.log('no refusals: --apply would run this step');
       return;

@@ -1,3 +1,6 @@
+import { spawn } from 'node:child_process';
+import { openSync } from 'node:fs';
+import { join } from 'node:path';
 import { Prisma, UserRole } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import request from 'supertest';
@@ -16,11 +19,22 @@ import {
   inspect,
   maskEmail,
   parseArgs,
+  passwordFor,
   planPromote,
   planRollback,
   TransitionRefused,
   type Manifest,
 } from '../src/scripts/super-admin-transition';
+import {
+  applyKeys,
+  NoTerminal,
+  promptNewPassword,
+  refusePasswordEnvironment,
+  SecretEntryRefused,
+  terminalSecretReader,
+  type KeyState,
+  type SecretReader,
+} from '../src/scripts/terminal-secret';
 import { generateFixturePassword, TEST_ACCOUNT_PASSWORD } from './fixture-password';
 import { createTestApp, createUser, loginAs, resetAuthThrottle, resetDatabase, type TestContext } from './harness';
 
@@ -375,4 +389,142 @@ describe('bootstrap password rule', () => {
     expect(bootstrapPasswordProblem(STRONG)).toBeNull();
     expect(requireBootstrapPassword({ X: STRONG }, 'X')).toBe(STRONG);
   });
+});
+
+/** A reader that answers each prompt in turn and records what it was asked. */
+function scripted(...answers: string[]): SecretReader & { prompts: string[] } {
+  const prompts: string[] = [];
+  const reader = async (prompt: string) => {
+    prompts.push(prompt);
+    if (answers.length === 0) throw new Error('asked more often than scripted');
+    return answers.shift()!;
+  };
+  return Object.assign(reader, { prompts });
+}
+
+function refusalOf(run: () => Promise<unknown>): Promise<Error> {
+  return run().then(
+    () => {
+      throw new Error('expected a refusal');
+    },
+    (error: Error) => error,
+  );
+}
+
+describe('hidden password entry', () => {
+  it('asks twice and returns a value that matches and passes the bootstrap rule', async () => {
+    const reader = scripted(STRONG, STRONG);
+    expect(await promptNewPassword(reader, 'new super admin password')).toBe(STRONG);
+    expect(reader.prompts).toHaveLength(2);
+    expect(reader.prompts.join(' ')).not.toContain(STRONG);
+  });
+
+  it('refuses two entries that differ, without repeating either', async () => {
+    const other = generateFixturePassword();
+    const error = await refusalOf(() => promptNewPassword(scripted(STRONG, other), 'new super admin password'));
+    expect(error).toBeInstanceOf(SecretEntryRefused);
+    expect(error.message).toMatch(/do not match/);
+    expect(error.message).not.toContain(STRONG);
+    expect(error.message).not.toContain(other);
+  });
+
+  it('refuses a weak value at the first entry, by the same rule as the seed, without repeating it', async () => {
+    const weak = `Sifre-${'Taktic'}-Panel-2026-xyz`;
+    const reader = scripted(weak, weak);
+    const error = await refusalOf(() => promptNewPassword(reader, 'recovery password'));
+    expect(error).toBeInstanceOf(SecretEntryRefused);
+    expect(error.message).toMatch(/guessable/);
+    expect(error.message).not.toContain(weak);
+    expect(reader.prompts).toHaveLength(1);
+
+    expect((await refusalOf(() => promptNewPassword(scripted(''), 'recovery password'))).message).toMatch(/is not set/);
+    expect((await refusalOf(() => promptNewPassword(scripted('Kisa1!'), 'recovery password'))).message).toMatch(/shorter/);
+  });
+
+  it('refuses a password left in the environment, set or empty, naming the variable and never the value', () => {
+    expect(() => refusePasswordEnvironment({})).not.toThrow();
+    for (const name of ['SUPER_ADMIN_NEW_PASSWORD', 'SUPER_ADMIN_RECOVERY_PASSWORD']) {
+      for (const value of [STRONG, '']) {
+        try {
+          refusePasswordEnvironment({ [name]: value });
+          expect.unreachable();
+        } catch (error) {
+          expect(error).toBeInstanceOf(SecretEntryRefused);
+          expect((error as Error).message).toContain(name);
+          if (value) expect((error as Error).message).not.toContain(value);
+        }
+      }
+    }
+  });
+
+  it('refuses to read without a terminal: none to open, or one that is not a TTY', async () => {
+    const noDevice = terminalSecretReader(() => {
+      throw Object.assign(new Error('ENXIO: no such device or address'), { code: 'ENXIO' });
+    });
+    expect(await refusalOf(() => noDevice('password: '))).toBeInstanceOf(NoTerminal);
+
+    const notATerminal = terminalSecretReader(() => openSync('/dev/null', 'r+'));
+    const error = await refusalOf(() => notATerminal('password: '));
+    expect(error).toBeInstanceOf(NoTerminal);
+    expect(error.message).toMatch(/without -T/);
+  });
+
+  it('reads keys without echo: Backspace edits, Enter ends, Ctrl-C and control keys refuse', () => {
+    const state: KeyState = { chars: [] };
+    expect(applyKeys(state, 'abX')).toBe('more');
+    expect(applyKeys(state, '\u007fc')).toBe('more');
+    expect(applyKeys(state, 'ş\rignored')).toBe('done');
+    expect(state.chars.join('')).toBe('abcş');
+
+    expect(applyKeys({ chars: [] }, 'ab\u0003')).toBe('cancelled');
+    expect(applyKeys({ chars: [] }, '\u0004')).toBe('cancelled');
+    expect(applyKeys({ chars: [] }, 'ab\u001b[A')).toBe('control');
+    expect(applyKeys({ chars: [] }, '\t')).toBe('control');
+  });
+
+  it('asks only for the commands that set a password — dry runs included — and refuses a leftover variable first', async () => {
+    const rename = parseArgs(['rename', '--from-id', 'x', '--to', TARGET, '--confirm-to', TARGET]);
+    expect(await passwordFor(rename, scripted(STRONG, STRONG), {})).toBe(STRONG);
+    expect(rename.apply).toBe(false);
+
+    const keep = scripted();
+    expect(await passwordFor({ ...rename, keepPassword: true }, keep, {})).toBeNull();
+    expect(keep.prompts).toHaveLength(0);
+
+    const recover = parseArgs(['recover-password', '--user-id', 'x']);
+    expect(await passwordFor(recover, scripted(STRONG, STRONG), {})).toBe(STRONG);
+
+    const inspectOnly = scripted();
+    expect(await passwordFor(parseArgs(['inspect', '--to', TARGET]), inspectOnly, {})).toBeNull();
+    expect(inspectOnly.prompts).toHaveLength(0);
+
+    const untouched = scripted(STRONG, STRONG);
+    await expect(passwordFor(rename, untouched, { SUPER_ADMIN_NEW_PASSWORD: STRONG })).rejects.toBeInstanceOf(SecretEntryRefused);
+    expect(untouched.prompts).toHaveLength(0);
+  });
+
+  it('as a command with no controlling terminal, stops before the database and ignores a password piped to stdin', async () => {
+    const old = await seedSuperAdmin();
+    const apiRoot = join(__dirname, '..');
+    // `detached` starts a new session: no controlling terminal, as under
+    // `docker compose run -T` or cron.
+    const env = { ...process.env };
+    delete env.SUPER_ADMIN_NEW_PASSWORD;
+    delete env.SUPER_ADMIN_RECOVERY_PASSWORD;
+    const child = spawn(
+      join(apiRoot, 'node_modules', '.bin', 'tsx'),
+      ['src/scripts/super-admin-transition.ts', 'rename', '--from-id', old.id, '--to', TARGET, '--confirm-to', TARGET, '--apply'],
+      { cwd: apiRoot, detached: true, stdio: ['pipe', 'pipe', 'pipe'], env },
+    );
+    let output = '';
+    child.stdout.on('data', (chunk) => (output += chunk));
+    child.stderr.on('data', (chunk) => (output += chunk));
+    child.stdin.end(`${STRONG}\n${STRONG}\n`);
+    const code = await new Promise<number | null>((resolve) => child.on('close', resolve));
+
+    expect(code).toBe(2);
+    expect(output).toMatch(/no terminal to read the password from/);
+    expect(output).not.toContain(STRONG);
+    expect(await ctx.prisma.user.findUniqueOrThrow({ where: { id: old.id } })).toMatchObject({ email: 'admin@taktic.local' });
+  }, 60_000);
 });

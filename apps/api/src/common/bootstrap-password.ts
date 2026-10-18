@@ -1,8 +1,8 @@
 /**
  * The rule for a password an operator hands to a bootstrap or recovery tool
- * through the environment (STG-003): the seed's first super admin
- * (`SEED_SUPER_ADMIN_PASSWORD`) and the super-admin recovery
- * (`SUPER_ADMIN_RECOVERY_PASSWORD`).
+ * (STG-003): the seed's first super admin (`SEED_SUPER_ADMIN_PASSWORD`, from
+ * the environment) and the super-admin transition's rename and recovery
+ * (typed at a hidden terminal prompt, `scripts/terminal-secret.ts`).
  *
  * Stricter than the product's sign-up policy on purpose. A person choosing
  * their own password at a form gets the length range and nothing else; a value
