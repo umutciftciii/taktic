@@ -114,6 +114,10 @@ test.describe('provider account contact proof', () => {
       const reader = await Actor.open(browser, 'reader', primaryRuntime);
       try {
         await reader.page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
+        // Opening the link only reads it; the button proves the address
+        // (STAGING-UAT-001 B3).
+        await expect(reader.page.getByRole('heading', { name: 'E-postanızı doğrulayın' })).toBeVisible();
+        await reader.page.getByRole('button', { name: 'E-postamı doğrula' }).click();
         await expect(reader.page.getByRole('heading', { name: 'E-postanız doğrulandı' })).toBeVisible();
         await expect(reader.page.getByRole('link', { name: 'Panelime Git' })).toHaveAttribute('href', '/providers/me');
       } finally {

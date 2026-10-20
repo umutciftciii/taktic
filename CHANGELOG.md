@@ -105,6 +105,27 @@ are in [docs/release.md](docs/release.md).
   one row and its back/next buttons sit side by side. No business logic, API or
   migration change. See `docs/mobile-ux-hardening-001.md`.
 
+### Fixed
+
+- STAGING-UAT-001 B3 (P1): opening an e-mail verification link no longer
+  spends it. `/e-posta-dogrula` used to confirm on page load, so any GET — a
+  mail security scanner (Safe Links and the like), a link preview, a prefetch —
+  verified the account and left the person who clicked next with "Bağlantı
+  geçersiz veya süresi dolmuş". The page now only reads the link
+  (`GET /auth/email-verification`) and shows an "E-postamı doğrula" button that
+  posts to a fixed route handler (`/e-posta-dogrula/submit`), which spends it
+  and lands on a result screen carrying a result word, never the token — the
+  split activation, claim and reset already used. Refusals are still `400` and
+  now carry `code` (`EMAIL_VERIFICATION_INVALID` / `_EXPIRED` /
+  `_ALREADY_VERIFIED`); a spent or expired link of an account verified at that
+  address reads as "E-postanız zaten doğrulanmış", while an unknown link, a
+  replaced link, a deactivated account or a changed address stays a bare
+  INVALID. The read answer no longer echoes the address. Each answer is logged
+  as one line without token, account or address. Signed-in readers no longer
+  see the sign-in / sign-up tabs there (D0/G2). The `EMAIL_VERIFIED` campaign
+  fact is still written once, by the confirm POST only. No migration, no new
+  environment variable.
+
 ## 0.2.0 - 2026-10-12
 
 Match rounds and service assurance (REL-002 Faz 1–5). A request is now matched

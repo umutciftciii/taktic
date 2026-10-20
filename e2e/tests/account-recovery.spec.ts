@@ -53,19 +53,94 @@ test.describe('e-mail verification', () => {
       // The link points at this runtime's own web app, over a real absolute URL.
       expect(verifyUrl.startsWith(`${primaryRuntime.webUrl}/e-posta-dogrula?token=`)).toBe(true);
 
+      // Opening the link only reads it (STAGING-UAT-001 B3): the address is
+      // proven by the button, not by the page load.
       await customer.page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
-      await expect(
-        customer.page.getByRole('heading', { name: 'E-postanız doğrulandı' }),
-      ).toBeVisible();
+      await expect(customer.page.getByRole('heading', { name: 'E-postanızı doğrulayın' })).toBeVisible();
+      expect((await prisma().user.findUniqueOrThrow({ where: { email } })).emailVerifiedAt).toBeNull();
+      // Signed in from registration, so the sign-in / sign-up tabs are not
+      // offered (STAGING-UAT-001 D0/G2).
+      await expect(customer.page.getByRole('tab', { name: 'Giriş yap' })).toHaveCount(0);
+
+      await customer.page.getByRole('button', { name: 'E-postamı doğrula' }).click();
+      await expect(customer.page.getByRole('heading', { name: 'E-postanız doğrulandı' })).toBeVisible();
       await assertNoErrorScreen(customer.page);
+      // The result screen carries a result word, never the link.
+      expect(customer.page.url()).not.toContain('token=');
 
       const after = await prisma().user.findUniqueOrThrow({ where: { email } });
       expect(after.emailVerifiedAt).not.toBeNull();
 
-      // The link is spent. Opening it again says so rather than silently
-      // pretending to work.
+      // The link is spent. Opening it again says what is true — the address is
+      // verified — instead of blaming a dead link.
       await customer.page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
-      await expect(customer.page.getByRole('heading', { name: 'Bağlantı geçersiz' })).toBeVisible();
+      await expect(customer.page.getByRole('heading', { name: 'E-postanız zaten doğrulanmış' })).toBeVisible();
+      await expect(customer.page.getByRole('heading', { name: 'Bağlantı geçersiz' })).toHaveCount(0);
+      await expect(customer.page.getByRole('link', { name: 'Taleplerime Git' })).toHaveAttribute('href', '/requests/my');
+    } finally {
+      await customer.close();
+    }
+  });
+
+  test('a mail scanner opening the link first leaves it for the person (STAGING-UAT-001 B3)', async ({
+    browser,
+    request,
+  }) => {
+    const customer = await Actor.open(browser, 'scanned-customer', primaryRuntime);
+    const reader = await Actor.open(browser, 'scanned-reader', primaryRuntime);
+
+    try {
+      const email = await registerCustomer(customer);
+      const { id: userId } = await prisma().user.findUniqueOrThrow({ where: { email } });
+      const verifyUrl = await waitForLatestEmailVerificationUrl(email);
+
+      // What Safe Links, a link preview or a prefetcher does: fetch the page —
+      // no session, no script, sometimes a HEAD first — and walk away.
+      for (const method of ['head', 'get', 'get'] as const) {
+        const response = await request[method](verifyUrl, { maxRedirects: 0 });
+        expect(response.status(), `${method.toUpperCase()} ${new URL(verifyUrl).pathname}`).toBe(200);
+      }
+
+      expect((await prisma().user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).toBeNull();
+      const tokens = await prisma().emailVerificationToken.findMany({ where: { userId } });
+      expect(tokens.length).toBeGreaterThan(0);
+      expect(tokens.every((token) => token.usedAt === null)).toBe(true);
+
+      // Then the person opens it, in a browser with no session, as from an
+      // inbox — the tabs are offered there — and presses the button.
+      await reader.page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
+      await expect(reader.page.getByRole('heading', { name: 'E-postanızı doğrulayın' })).toBeVisible();
+      await expect(reader.page.getByRole('tab', { name: 'Giriş yap' })).toBeVisible();
+      await reader.page.getByRole('button', { name: 'E-postamı doğrula' }).click();
+      await expect(reader.page.getByRole('heading', { name: 'E-postanız doğrulandı' })).toBeVisible();
+      await assertNoErrorScreen(reader.page);
+
+      expect((await prisma().user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).not.toBeNull();
+    } finally {
+      await reader.close();
+      await customer.close();
+    }
+  });
+
+  test('an expired link says so and points at the next step', async ({ browser }) => {
+    const customer = await Actor.open(browser, 'expired-link-customer', primaryRuntime);
+
+    try {
+      const email = await registerCustomer(customer);
+      const { id: userId } = await prisma().user.findUniqueOrThrow({ where: { email } });
+      const verifyUrl = await waitForLatestEmailVerificationUrl(email);
+
+      await prisma().emailVerificationToken.updateMany({
+        where: { userId },
+        data: { expiresAt: new Date(Date.now() - 1000) },
+      });
+
+      await customer.page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
+      await expect(customer.page.getByRole('heading', { name: 'Bağlantının süresi dolmuş' })).toBeVisible();
+      await expect(customer.page.getByRole('button', { name: 'E-postamı doğrula' })).toHaveCount(0);
+      await expect(customer.page.getByRole('link', { name: 'Taleplerime Git' })).toBeVisible();
+      await assertNoErrorScreen(customer.page);
+      expect((await prisma().user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).toBeNull();
     } finally {
       await customer.close();
     }

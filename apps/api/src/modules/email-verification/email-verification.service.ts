@@ -7,8 +7,12 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
 import {
+  EMAIL_VERIFICATION_ALREADY_VERIFIED,
+  EMAIL_VERIFICATION_EXPIRED,
+  EMAIL_VERIFICATION_INVALID,
   EMAIL_VERIFICATION_MAX_PER_WINDOW,
   EMAIL_VERIFICATION_TOKEN_TTL_DAYS,
+  type EmailVerificationRefusalCode,
   emailVerificationCooldownStart,
   emailVerificationExpiry,
   emailVerificationWindowStart,
@@ -109,14 +113,28 @@ export class EmailVerificationService implements OnModuleInit {
     return { status: 'accepted' };
   }
 
-  async validate(rawToken: string) {
-    const record = await this.lookupActiveToken(rawToken);
+  /**
+   * Reads a link without spending it — what the confirmation page does when it
+   * is opened (STAGING-UAT-001 B3).
+   *
+   * Opening a page is a GET, and a GET is not only a person: mail security
+   * scanners (Safe Links and the like), link previews and prefetchers follow
+   * every link in a message. Spending the link here would let any of them
+   * verify the account and leave the person who clicks a moment later in front
+   * of "invalid". Only the button on that page — a POST — calls `confirm`.
+   *
+   * The answer carries no address: a link that leaks (a forwarded mail, a
+   * screenshot of the bar) must not also leak whose it is.
+   */
+  async validate(rawToken: string): Promise<{ status: 'VALID'; accountKind: VerifiedAccountKind }> {
+    const state = await this.classifyToken(rawToken);
+    this.logOutcome('validate', state.kind === 'ACTIVE' ? 'VALID' : state.kind, accountKindOf(state));
 
-    return {
-      valid: true as const,
-      email: record.emailSnapshot,
-      expiresAt: record.expiresAt,
-    };
+    if (state.kind !== 'ACTIVE') {
+      throw refusal(state);
+    }
+
+    return { status: 'VALID', accountKind: state.accountKind };
   }
 
   /**
@@ -129,21 +147,25 @@ export class EmailVerificationService implements OnModuleInit {
    *
    * Already-verified is reported as success rather than as an error — the fact
    * the caller wanted recorded is recorded — but the token is still consumed,
-   * so it cannot be replayed.
+   * so it cannot be replayed. A link that was already spent is refused as
+   * before, now with a code saying whether the account behind it is verified
+   * (see {@link classifyToken}); nothing is written for it, so the campaign
+   * fact below can still only be written once.
    */
   async confirm(
     rawToken: string,
     /** CMP-006 PR-D: the route's channel, never the request's; UNKNOWN when a caller cannot vouch. */
     sourceChannel: SourceChannel = SourceChannel.UNKNOWN,
   ): Promise<{ success: true; alreadyVerified: boolean; accountKind: VerifiedAccountKind }> {
-    const record = await this.lookupActiveToken(rawToken);
+    const state = await this.classifyToken(rawToken);
+    if (state.kind !== 'ACTIVE') {
+      this.logOutcome('confirm', state.kind, accountKindOf(state));
+      throw refusal(state);
+    }
+
+    const { record, accountKind } = state;
     const now = new Date();
     const alreadyVerified = record.user.emailVerifiedAt !== null;
-    // Which panel the confirmation page sends the reader back to. The token
-    // holder is the account's owner, so naming the kind of account tells them
-    // nothing they did not already know.
-    const accountKind: VerifiedAccountKind =
-      record.user.role === UserRole.PROVIDER ? 'PROVIDER' : 'CUSTOMER';
 
     try {
       // Serializable and replayed on a write conflict (S2B2): for a PROVIDER
@@ -159,7 +181,10 @@ export class EmailVerificationService implements OnModuleInit {
           });
 
           if (claimed.count === 0) {
-            throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
+            // Spent (or expired) between the read above and this write — two
+            // clicks racing. Re-read below so the loser gets the same answer a
+            // later click would.
+            throw new ClaimLost();
           }
 
           // Conditional on the address still being the one the link was mailed
@@ -191,13 +216,22 @@ export class EmailVerificationService implements OnModuleInit {
         { label: 'emailVerification.confirm' },
       );
     } catch (error) {
+      if (error instanceof ClaimLost) {
+        const after = await this.classifyToken(rawToken);
+        const lost: RefusedTokenState = after.kind === 'ACTIVE' ? { kind: 'INVALID' } : after;
+        this.logOutcome('confirm', lost.kind, accountKindOf(lost));
+        throw refusal(lost);
+      }
+
       if (error instanceof Prisma.PrismaClientKnownRequestError) {
-        throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
+        this.logOutcome('confirm', 'INVALID', accountKind);
+        throw refusal({ kind: 'INVALID' });
       }
 
       throw error;
     }
 
+    this.logOutcome('confirm', alreadyVerified ? 'CONFIRMED_ALREADY_VERIFIED' : 'VERIFIED', accountKind);
     return { success: true, alreadyVerified, accountKind };
   }
 
@@ -270,10 +304,28 @@ export class EmailVerificationService implements OnModuleInit {
     });
   }
 
-  private async lookupActiveToken(rawToken: string) {
+  /**
+   * What a link is, read without writing anything.
+   *
+   * ACTIVE is the only state `confirm` acts on — unchanged: unused, unexpired,
+   * an active account, still at the address it was mailed to. Of the rest:
+   *
+   * - an unknown link, a deactivated account, or a link whose address the
+   *   account has since left is INVALID, and says nothing more — those are the
+   *   cases where a more precise answer would describe somebody else's account
+   *   (or the account's new address), not the link the reader holds;
+   * - a spent or expired link of an account that is verified at that very
+   *   address is ALREADY_VERIFIED: the reader is the owner, the thing they came
+   *   to do is done, and "invalid or expired" was simply the wrong answer;
+   * - an unspent but expired link of an unverified account is EXPIRED, so the
+   *   page can offer a fresh link instead of a shrug;
+   * - a spent link of an unverified account was replaced by a newer one (a
+   *   re-send spends the old link) and stays INVALID.
+   */
+  private async classifyToken(rawToken: string): Promise<TokenState> {
     const token = rawToken.trim();
     if (!token) {
-      throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
+      return { kind: 'INVALID' };
     }
 
     const record = await this.prisma.emailVerificationToken.findUnique({
@@ -290,16 +342,86 @@ export class EmailVerificationService implements OnModuleInit {
 
     if (
       !record ||
-      record.usedAt ||
-      record.expiresAt.getTime() <= Date.now() ||
       !record.user.isActive ||
       record.user.email?.trim().toLowerCase() !== record.emailSnapshot
     ) {
-      throw new BadRequestException('Bağlantı geçersiz veya süresi dolmuş.');
+      return { kind: 'INVALID' };
     }
 
-    return record;
+    // Which panel the confirmation page sends the reader on to. The token
+    // holder is the account's owner, so naming the kind of account tells them
+    // nothing they did not already know.
+    const accountKind: VerifiedAccountKind =
+      record.user.role === UserRole.PROVIDER ? 'PROVIDER' : 'CUSTOMER';
+    const expired = record.expiresAt.getTime() <= Date.now();
+
+    if (!record.usedAt && !expired) {
+      return { kind: 'ACTIVE', record, accountKind };
+    }
+
+    if (record.user.emailVerifiedAt) {
+      return { kind: 'ALREADY_VERIFIED', accountKind };
+    }
+
+    if (!record.usedAt) {
+      return { kind: 'EXPIRED', accountKind };
+    }
+
+    return { kind: 'INVALID' };
   }
+
+  /**
+   * One line per answer, for telling a person's click from a scanner's and a
+   * spent link from a dead one after the fact. Deliberately carries neither
+   * the link, nor its hash, nor the account or its address.
+   */
+  private logOutcome(action: 'validate' | 'confirm', outcome: string, accountKind: VerifiedAccountKind | null) {
+    this.logger.log(`email-verification ${action} outcome=${outcome} accountKind=${accountKind ?? 'unknown'}`);
+  }
+}
+
+type ActiveTokenRecord = {
+  id: string;
+  userId: string;
+  emailSnapshot: string;
+  expiresAt: Date;
+  usedAt: Date | null;
+  user: { email: string | null; isActive: boolean; emailVerifiedAt: Date | null; role: UserRole };
+};
+
+type RefusedTokenState =
+  | { kind: 'INVALID' }
+  | { kind: 'EXPIRED'; accountKind: VerifiedAccountKind }
+  | { kind: 'ALREADY_VERIFIED'; accountKind: VerifiedAccountKind };
+
+type TokenState = { kind: 'ACTIVE'; record: ActiveTokenRecord; accountKind: VerifiedAccountKind } | RefusedTokenState;
+
+/** Thrown inside the confirm transaction when the link was spent under it. */
+class ClaimLost extends Error {}
+
+const REFUSALS: Record<RefusedTokenState['kind'], { code: EmailVerificationRefusalCode; message: string }> = {
+  // The wording every refusal used to carry, kept for the case it describes.
+  INVALID: { code: EMAIL_VERIFICATION_INVALID, message: 'Bağlantı geçersiz veya süresi dolmuş.' },
+  EXPIRED: { code: EMAIL_VERIFICATION_EXPIRED, message: 'Doğrulama bağlantısının süresi dolmuş.' },
+  ALREADY_VERIFIED: {
+    code: EMAIL_VERIFICATION_ALREADY_VERIFIED,
+    message: 'Bu e-posta adresi zaten doğrulanmış.',
+  },
+};
+
+/** Still a 400 for every refusal; `code` (and, for the link's owner, `accountKind`) is what changed. */
+function refusal(state: RefusedTokenState): BadRequestException {
+  const { code, message } = REFUSALS[state.kind];
+  return new BadRequestException({
+    statusCode: 400,
+    code,
+    message,
+    ...(state.kind === 'INVALID' ? {} : { accountKind: state.accountKind }),
+  });
+}
+
+function accountKindOf(state: TokenState): VerifiedAccountKind | null {
+  return state.kind === 'INVALID' ? null : state.accountKind;
 }
 
 function hashToken(rawToken: string): string {

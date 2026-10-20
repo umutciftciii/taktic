@@ -13,6 +13,13 @@ type AuthFrameProps = {
   /** Where the register tab should go — customer and provider sign-up differ. */
   registerHref?: string;
   loginHref?: string;
+  /**
+   * Whether to draw the sign-in / sign-up tabs. A screen a signed-in person can
+   * land on (the result of a verification link) passes false for them: offering
+   * "Giriş yap" and "Hesap oluştur" to somebody already signed in is wrong
+   * (STAGING-UAT-001 D0/G2).
+   */
+  showTabs?: boolean;
   children: ReactNode;
 };
 
@@ -40,30 +47,33 @@ export function AuthFrame({
   tab,
   registerHref = '/register/customer',
   loginHref = '/login',
+  showTabs = true,
   children,
 }: AuthFrameProps) {
   return (
     <main className="auth-screen auth-screen-split">
       <section className="auth-form-side">
         <div className="auth-screen-card">
-          <div className="auth-tabs" role="tablist" aria-label="Hesap">
-            <Link
-              className={`auth-tab${tab === 'login' ? ' is-active' : ''}`}
-              href={loginHref}
-              role="tab"
-              aria-selected={tab === 'login'}
-            >
-              Giriş yap
-            </Link>
-            <Link
-              className={`auth-tab${tab === 'register' ? ' is-active' : ''}`}
-              href={registerHref}
-              role="tab"
-              aria-selected={tab === 'register'}
-            >
-              Hesap oluştur
-            </Link>
-          </div>
+          {showTabs ? (
+            <div className="auth-tabs" role="tablist" aria-label="Hesap">
+              <Link
+                className={`auth-tab${tab === 'login' ? ' is-active' : ''}`}
+                href={loginHref}
+                role="tab"
+                aria-selected={tab === 'login'}
+              >
+                Giriş yap
+              </Link>
+              <Link
+                className={`auth-tab${tab === 'register' ? ' is-active' : ''}`}
+                href={registerHref}
+                role="tab"
+                aria-selected={tab === 'register'}
+              >
+                Hesap oluştur
+              </Link>
+            </div>
+          ) : null}
 
           {children}
         </div>

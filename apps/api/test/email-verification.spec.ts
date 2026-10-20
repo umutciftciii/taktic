@@ -195,10 +195,18 @@ describe('e-mail verification — consuming', () => {
     const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(stored.emailVerifiedAt).not.toBeNull();
 
-    await request(ctx.server)
+    // Refused, with a code that lets the page say "already verified" instead of
+    // blaming a dead link (STAGING-UAT-001 B3). Nothing is written.
+    const second = await request(ctx.server)
       .post('/auth/email-verification/confirm')
       .send({ token })
       .expect(400);
+    expect(second.body).toMatchObject({
+      code: 'EMAIL_VERIFICATION_ALREADY_VERIFIED',
+      accountKind: 'CUSTOMER',
+    });
+    const after = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
+    expect(after.emailVerifiedAt).toEqual(stored.emailVerifiedAt);
   });
 
   it('refuses an expired link', async () => {
@@ -210,11 +218,13 @@ describe('e-mail verification — consuming', () => {
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
 
-    await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(400);
-    await request(ctx.server)
+    const read = await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(400);
+    expect(read.body).toMatchObject({ code: 'EMAIL_VERIFICATION_EXPIRED', accountKind: 'CUSTOMER' });
+    const consumed = await request(ctx.server)
       .post('/auth/email-verification/confirm')
       .send({ token })
       .expect(400);
+    expect(consumed.body).toMatchObject({ code: 'EMAIL_VERIFICATION_EXPIRED' });
 
     const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(stored.emailVerifiedAt).toBeNull();
@@ -229,11 +239,14 @@ describe('e-mail verification — consuming', () => {
       data: { email: `tasindi-${uniqueSuffix()}@example.test` },
     });
 
-    // The snapshot no longer matches, so the link cannot verify the new address.
-    await request(ctx.server)
+    // The snapshot no longer matches, so the link cannot verify the new address
+    // — and its refusal says nothing about the account behind it.
+    const refused = await request(ctx.server)
       .post('/auth/email-verification/confirm')
       .send({ token })
       .expect(400);
+    expect(refused.body.code).toBe('EMAIL_VERIFICATION_INVALID');
+    expect(refused.body).not.toHaveProperty('accountKind');
 
     const stored = await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } });
     expect(stored.emailVerifiedAt).toBeNull();
@@ -255,6 +268,87 @@ describe('e-mail verification — consuming', () => {
       .expect(201);
 
     expect(ctx.notifications.ofTemplate('email-verification')).toHaveLength(0);
+  });
+});
+
+describe('e-mail verification — reading a link never spends it (STAGING-UAT-001 B3)', () => {
+  // A mail scanner, a link preview or a prefetch opens the page the way a
+  // person does. Only the page's button (POST /confirm) may spend the link.
+  it('lets a link be read any number of times, then still verifies on confirm', async () => {
+    const { userId, email } = await registerCustomer();
+    const token = tokenOf(lastVerifyUrl());
+
+    for (let read = 0; read < 3; read += 1) {
+      const response = await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(200);
+      expect(response.body).toEqual({ status: 'VALID', accountKind: 'CUSTOMER' });
+      // A leaked link must not also say whose it is.
+      expect(JSON.stringify(response.body)).not.toContain(email);
+    }
+
+    const tokens = await ctx.prisma.emailVerificationToken.findMany({ where: { userId } });
+    expect(tokens.every((row) => row.usedAt === null)).toBe(true);
+    expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).toBeNull();
+
+    await request(ctx.server).post('/auth/email-verification/confirm').send({ token }).expect(201);
+    expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).not.toBeNull();
+  });
+
+  it('reads a spent link of a verified account as already verified, without the address', async () => {
+    const { email } = await registerCustomer();
+    const token = tokenOf(lastVerifyUrl());
+    await request(ctx.server).post('/auth/email-verification/confirm').send({ token }).expect(201);
+
+    const read = await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(400);
+    expect(read.body).toMatchObject({ code: 'EMAIL_VERIFICATION_ALREADY_VERIFIED', accountKind: 'CUSTOMER' });
+    expect(JSON.stringify(read.body)).not.toContain(email);
+  });
+
+  it('keeps a link replaced by a re-send invalid, not "already verified"', async () => {
+    const { cookie, userId } = await registerCustomer();
+    const firstToken = tokenOf(lastVerifyUrl());
+    await ctx.prisma.emailVerificationToken.updateMany({
+      where: { userId },
+      data: { createdAt: new Date(Date.now() - 60 * 60 * 1000) },
+    });
+    await request(ctx.server).post('/auth/email-verification/resend').set('Cookie', cookie).expect(201);
+
+    const refused = await request(ctx.server).get(`/auth/email-verification?token=${firstToken}`).expect(400);
+    expect(refused.body.code).toBe('EMAIL_VERIFICATION_INVALID');
+    expect(refused.body).not.toHaveProperty('accountKind');
+  });
+
+  it('answers an unknown link and a deactivated account with the same bare INVALID', async () => {
+    const unknown = await request(ctx.server)
+      .get(`/auth/email-verification?token=${'x'.repeat(43)}`)
+      .expect(400);
+    expect(unknown.body.code).toBe('EMAIL_VERIFICATION_INVALID');
+    expect(unknown.body).not.toHaveProperty('accountKind');
+
+    const { userId } = await registerCustomer();
+    const token = tokenOf(lastVerifyUrl());
+    await request(ctx.server).post('/auth/email-verification/confirm').send({ token }).expect(201);
+    await ctx.prisma.user.update({ where: { id: userId }, data: { isActive: false } });
+
+    const deactivated = await request(ctx.server)
+      .post('/auth/email-verification/confirm')
+      .send({ token })
+      .expect(400);
+    expect(deactivated.body).toEqual(unknown.body);
+  });
+
+  it('lets exactly one of two racing clicks verify; the other is told it is already done', async () => {
+    const { userId } = await registerCustomer();
+    const token = tokenOf(lastVerifyUrl());
+
+    const answers = await Promise.all([
+      request(ctx.server).post('/auth/email-verification/confirm').send({ token }),
+      request(ctx.server).post('/auth/email-verification/confirm').send({ token }),
+    ]);
+
+    expect(answers.map((answer) => answer.status).sort()).toEqual([201, 400]);
+    const loser = answers.find((answer) => answer.status === 400)!;
+    expect(loser.body.code).toBe('EMAIL_VERIFICATION_ALREADY_VERIFIED');
+    expect((await ctx.prisma.user.findUniqueOrThrow({ where: { id: userId } })).emailVerifiedAt).not.toBeNull();
   });
 });
 

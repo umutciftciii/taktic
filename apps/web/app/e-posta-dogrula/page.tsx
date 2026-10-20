@@ -1,97 +1,144 @@
 import Link from 'next/link';
+import { getCurrentUser } from '../../lib/api';
 import { AuthFrame } from '../auth-frame';
-import { apiUrl, readApiMessage } from '../api-base';
+import {
+  readVerificationLink,
+  resultFromSearchParams,
+  type VerificationState,
+  type VerifiedAccountKind,
+} from './verify';
 
 type VerifyEmailPageProps = {
-  searchParams: Promise<{ token?: string }>;
+  searchParams: Promise<{ token?: string; sonuc?: string; hesap?: string }>;
 };
 
-type ConfirmResult =
-  | { kind: 'ok'; alreadyVerified: boolean; accountKind: 'CUSTOMER' | 'PROVIDER' }
-  | { kind: 'error'; message: string };
-
 /**
- * Confirms on load, rather than behind a button.
+ * Reads the link and asks for a click; never spends it on load.
  *
- * The link is single use and arrives from an inbox; asking the reader to press
- * something first adds a step without adding a guarantee. There is no session
- * requirement either — the token is the proof, and the mail is often opened in
- * a browser the customer never signed in with.
+ * Opening this page used to confirm the link, and a mail scanner opening it
+ * first was enough to spend it (STAGING-UAT-001 B3). Now the page only reads
+ * the link; the button posts it to `/e-posta-dogrula/submit`, which spends it
+ * and comes back here with a result word (`?sonuc=`) instead of the token.
+ * See ./verify.ts.
  */
-async function confirmVerification(token: string): Promise<ConfirmResult> {
-  try {
-    const response = await fetch(`${apiUrl}/auth/email-verification/confirm`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token }),
-      cache: 'no-store',
-    });
+export default async function VerifyEmailPage({ searchParams }: VerifyEmailPageProps) {
+  const params = await searchParams;
+  const token = params.token?.trim();
 
-    if (!response.ok) {
-      const message = await readApiMessage(response);
-      return { kind: 'error', message: message ?? 'Bağlantı geçersiz veya süresi dolmuş.' };
-    }
+  const state: VerificationState =
+    resultFromSearchParams(params) ?? (token ? await readVerificationLink(token) : { kind: 'invalid' });
+  const user = await getCurrentUser();
 
-    const payload = (await response.json()) as {
-      alreadyVerified?: boolean;
-      accountKind?: string;
-    };
-    return {
-      kind: 'ok',
-      alreadyVerified: payload.alreadyVerified === true,
-      // Which panel to send the reader on to. A provider's mailbox is proven
-      // by the same link as a customer's (AUTH-PROVIDER-CONTACT-001); only
-      // where they go next differs.
-      accountKind: payload.accountKind === 'PROVIDER' ? 'PROVIDER' : 'CUSTOMER',
-    };
-  } catch {
-    return { kind: 'error', message: 'Doğrulama tamamlanamadı. Lütfen tekrar deneyin.' };
+  return (
+    <AuthFrame tab="login" showTabs={!user}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <VerificationScreen state={state} token={token} signedIn={user !== null} />
+      </div>
+    </AuthFrame>
+  );
+}
+
+function VerificationScreen({
+  state,
+  token,
+  signedIn,
+}: {
+  state: VerificationState;
+  token: string | undefined;
+  signedIn: boolean;
+}) {
+  switch (state.kind) {
+    case 'ready':
+      return (
+        <>
+          <h1 className="auth-screen-title">E-postanızı doğrulayın</h1>
+          <p className="auth-screen-subtitle">
+            Bu adresin size ait olduğunu doğrulamak için aşağıdaki butona basın.
+          </p>
+          <form method="post" action="/e-posta-dogrula/submit">
+            <input type="hidden" name="token" value={token ?? ''} />
+            <button type="submit" className="auth-screen-submit">
+              E-postamı doğrula
+            </button>
+          </form>
+        </>
+      );
+    case 'verified':
+      return (
+        <>
+          <h1 className="auth-screen-title">E-postanız doğrulandı</h1>
+          <p className="auth-screen-subtitle">Teşekkür ederiz. Hesabınızı kullanmaya devam edebilirsiniz.</p>
+          <PanelLink accountKind={state.accountKind} />
+        </>
+      );
+    case 'already':
+      return (
+        <>
+          <h1 className="auth-screen-title">E-postanız zaten doğrulanmış</h1>
+          <p className="auth-screen-subtitle">
+            Bu bağlantı daha önce kullanıldı ve adresiniz doğrulandı. Yapmanız gereken başka bir şey yok.
+          </p>
+          <PanelLink accountKind={state.accountKind} />
+        </>
+      );
+    case 'expired':
+      return (
+        <>
+          <h1 className="auth-screen-title">Bağlantının süresi dolmuş</h1>
+          <p className="auth-screen-subtitle">
+            {state.accountKind === 'PROVIDER'
+              ? 'Panelinizdeki “Hesap iletişimi” kartından yeni bir doğrulama bağlantısı isteyebilirsiniz.'
+              : 'Doğrulama hesabınızın kullanımını kısıtlamaz; talep oluşturmaya ve teklifleri görmeye devam edebilirsiniz.'}
+          </p>
+          <PanelLink accountKind={state.accountKind} />
+        </>
+      );
+    case 'failed':
+      return (
+        <>
+          <h1 className="auth-screen-title">Doğrulama tamamlanamadı</h1>
+          <p className="auth-screen-subtitle">
+            Şu anda işleminizi tamamlayamadık. Bağlantıyı e-postanızdan yeniden açıp tekrar deneyin.
+          </p>
+          <HomeLink signedIn={signedIn} />
+        </>
+      );
+    case 'invalid':
+      return (
+        <>
+          <h1 className="auth-screen-title">Bağlantı geçersiz</h1>
+          <p className="auth-screen-subtitle">
+            Bu doğrulama bağlantısı geçerli değil. Size en son gönderilen e-postadaki bağlantıyı kullanın.
+          </p>
+          <HomeLink signedIn={signedIn} />
+        </>
+      );
   }
 }
 
-export default async function VerifyEmailPage({ searchParams }: VerifyEmailPageProps) {
-  const { token } = await searchParams;
-  const trimmed = token?.trim();
+function PanelLink({ accountKind }: { accountKind: VerifiedAccountKind }) {
+  // Which panel to send the reader on to. A provider's mailbox is proven by the
+  // same link as a customer's (AUTH-PROVIDER-CONTACT-001); only where they go
+  // next differs.
+  return accountKind === 'PROVIDER' ? (
+    <Link className="auth-screen-submit" href="/providers/me" style={{ textAlign: 'center' }}>
+      Panelime Git
+    </Link>
+  ) : (
+    <Link className="auth-screen-submit" href="/requests/my" style={{ textAlign: 'center' }}>
+      Taleplerime Git
+    </Link>
+  );
+}
 
-  const result = trimmed
-    ? await confirmVerification(trimmed)
-    : ({ kind: 'error', message: 'Doğrulama bağlantısı bulunamadı.' } as const);
-
-  if (result.kind === 'error') {
-    return (
-      <AuthFrame tab="login">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <h1 className="auth-screen-title">Bağlantı geçersiz</h1>
-          <p className="auth-screen-subtitle">{result.message}</p>
-          <Link className="auth-screen-submit" href="/login" style={{ textAlign: 'center' }}>
-            Giriş ekranına dön
-          </Link>
-        </div>
-      </AuthFrame>
-    );
-  }
-
-  return (
-    <AuthFrame tab="login">
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        <h1 className="auth-screen-title">
-          {result.alreadyVerified ? 'E-postanız zaten doğrulanmış' : 'E-postanız doğrulandı'}
-        </h1>
-        <p className="auth-screen-subtitle">
-          {result.alreadyVerified
-            ? 'Bu adres için doğrulama kaydı zaten vardı. Yapmanız gereken başka bir şey yok.'
-            : 'Teşekkür ederiz. Hesabınızı kullanmaya devam edebilirsiniz.'}
-        </p>
-        {result.accountKind === 'PROVIDER' ? (
-          <Link className="auth-screen-submit" href="/providers/me" style={{ textAlign: 'center' }}>
-            Panelime Git
-          </Link>
-        ) : (
-          <Link className="auth-screen-submit" href="/requests/my" style={{ textAlign: 'center' }}>
-            Taleplerime Git
-          </Link>
-        )}
-      </div>
-    </AuthFrame>
+function HomeLink({ signedIn }: { signedIn: boolean }) {
+  return signedIn ? (
+    <Link className="auth-screen-submit" href="/" style={{ textAlign: 'center' }}>
+      Ana sayfaya dön
+    </Link>
+  ) : (
+    <Link className="auth-screen-submit" href="/login" style={{ textAlign: 'center' }}>
+      Giriş ekranına dön
+    </Link>
   );
 }

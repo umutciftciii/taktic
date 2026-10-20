@@ -353,6 +353,33 @@ describe('stage A — every real path commits its write together with a PENDING 
     },
   );
 
+  it('EMAIL_VERIFIED is written by the confirm POST alone — reading the link, and replaying it, write nothing (STAGING-UAT-001 B3)', async () => {
+    await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: ['PROVIDER_APPROVED', 'EMAIL_VERIFIED'] });
+    const { cookie: adminCookie } = await admin();
+    const { provider, cookie } = await newProvider();
+    // Approved first, so the e-mail proof is the fact that completes the
+    // eligibility and therefore the one that writes an event.
+    await approve(adminCookie, provider.id).expect(200);
+    const token = await requestEmailToken(cookie);
+
+    // What a mail scanner or a link preview does: open the page, i.e. read.
+    const beforeRead = await engineWriteSnapshot(ctx.prisma);
+    await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(200);
+    await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(200);
+    expect(await engineWriteSnapshot(ctx.prisma)).toEqual(beforeRead);
+
+    await confirmEmail(token, 201);
+    const afterProof = await engineWriteSnapshot(ctx.prisma);
+    expect(afterProof).not.toEqual(beforeRead);
+
+    // The same link again — a second click, a reload — is refused as already
+    // verified and is not a second fact.
+    const replay = await confirmEmail(token, 400);
+    expect(replay.body.code).toBe('EMAIL_VERIFICATION_ALREADY_VERIFIED');
+    await request(ctx.server).get(`/auth/email-verification?token=${token}`).expect(400);
+    expect(await engineWriteSnapshot(ctx.prisma)).toEqual(afterProof);
+  });
+
   it('a suspension followed by a re-approval, and a re-save of an approved profile, raise no second event and grant nothing more', async () => {
     const { campaign } = await activeCampaign({ trigger: 'PROVIDER_ELIGIBILITY_REACHED', facts: [...K1_FACTS], credits: 5 });
     const { cookie: adminCookie } = await admin();
