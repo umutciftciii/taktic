@@ -156,6 +156,13 @@ test.describe('auth screens on a phone', () => {
 
       const verifyUrl = await waitForLatestEmailVerificationUrl(email);
       await page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
+      // Opening the link only reads it; the button sits on the first screen
+      // (STAGING-UAT-001 B3).
+      await expect(page.getByRole('heading', { level: 1, name: 'E-postanızı doğrulayın' })).toBeVisible();
+      const confirm = page.getByRole('button', { name: 'E-postamı doğrula' });
+      await expect(confirm).toBeInViewport();
+      await expectNoHorizontalOverflow(page, '/e-posta-dogrula (button) @375');
+      await confirm.click();
       await expect(page.getByRole('heading', { level: 1, name: 'E-postanız doğrulandı' })).toBeVisible();
       await assertNoErrorScreen(page);
 
@@ -168,11 +175,11 @@ test.describe('auth screens on a phone', () => {
       await expectNoHorizontalOverflow(page, '/e-posta-dogrula @375');
       await shoot(page, 'verify-result-375');
 
-      // The spent link's error state keeps the same hierarchy.
+      // The spent link's "already verified" state keeps the same hierarchy.
       await page.goto(verifyUrl, { waitUntil: 'domcontentloaded' });
-      await expect(page.getByRole('heading', { level: 1, name: 'Bağlantı geçersiz' })).toBeVisible();
+      await expect(page.getByRole('heading', { level: 1, name: 'E-postanız zaten doğrulanmış' })).toBeVisible();
       expect(await precedesInDom(page, '.auth-screen-card', '.auth-poster')).toBe(true);
-      await expect(page.getByRole('link', { name: 'Giriş ekranına dön' })).toBeInViewport();
+      await expect(page.getByRole('link', { name: 'Taleplerime Git' })).toBeInViewport();
     } finally {
       await actor.close();
     }

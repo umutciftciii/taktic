@@ -31,3 +31,25 @@ export function emailVerificationCooldownStart(now: Date = new Date()): Date {
 export function emailVerificationWindowStart(now: Date = new Date()): Date {
   return new Date(now.getTime() - EMAIL_VERIFICATION_WINDOW_MINUTES * 60 * 1000);
 }
+
+/**
+ * Why a verification link was refused (STAGING-UAT-001 B3).
+ *
+ * Every refusal is still a 400; the code is what lets the confirmation page say
+ * the right thing and offer the right next step, instead of one sentence that
+ * blamed a dead link for a link that had simply been used already.
+ *
+ * Only the holder of a link that exists can see a code other than INVALID, and
+ * a link is 32 random bytes compared by hash — so the code tells nobody
+ * anything they could not already learn by reading that mailbox. Everything
+ * that could describe somebody else's account (an unknown link, a link whose
+ * address the account has since left, a deactivated account) stays INVALID.
+ */
+export const EMAIL_VERIFICATION_INVALID = 'EMAIL_VERIFICATION_INVALID';
+export const EMAIL_VERIFICATION_EXPIRED = 'EMAIL_VERIFICATION_EXPIRED';
+export const EMAIL_VERIFICATION_ALREADY_VERIFIED = 'EMAIL_VERIFICATION_ALREADY_VERIFIED';
+
+export type EmailVerificationRefusalCode =
+  | typeof EMAIL_VERIFICATION_INVALID
+  | typeof EMAIL_VERIFICATION_EXPIRED
+  | typeof EMAIL_VERIFICATION_ALREADY_VERIFIED;
