@@ -12,7 +12,7 @@ import {
   uniqueLocation,
   uniqueSuffix,
 } from '../src/fixtures';
-import { completeContactStep } from '../src/journeys';
+import { chooseNeighborhood, completeContactStep } from '../src/journeys';
 import { isProviderReviewsEnabled, seedReview, setProviderReviewsEnabled } from '../src/review-fixtures';
 import {
   retireShowcasePlacements,
@@ -99,6 +99,7 @@ async function reachPlaceStep(
   await expect(visitor.page.locator('#request-step-place')).toBeVisible();
   await visitor.page.getByTestId('request-city').selectOption(values.city);
   await visitor.page.getByTestId('request-district').selectOption(values.district);
+  await chooseNeighborhood(visitor.page);
 }
 
 test.describe('request form — provider choice and hand-off', () => {

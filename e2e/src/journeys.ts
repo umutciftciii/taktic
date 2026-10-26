@@ -183,10 +183,26 @@ export async function fillRequestForm(
   // here — selecting the district at all proves the cascade populated it.
   await form.locator('select[name="city"]').selectOption(values.city);
   await form.locator('select[name="district"]').selectOption(values.district);
+  await chooseNeighborhood(form);
 
   if (values.urgency) {
     await form.locator('select[name="urgency"]').selectOption(values.urgency);
   }
+}
+
+/**
+ * SERVICE-AREA-001: picks the first neighbourhood the chosen district's list
+ * offers, once the list has arrived, and returns it. Every ON_SITE request and
+ * vitrin lead form requires one; a scenario that does not care which takes
+ * this. `scope` is the page or the form the field lives in.
+ */
+export async function chooseNeighborhood(scope: Page | Locator): Promise<string> {
+  const select = scope.getByTestId('request-neighborhood');
+  const first = select.locator('option').nth(1);
+  await expect(first).toBeAttached();
+  const value = (await first.getAttribute('value'))!;
+  await select.selectOption(value);
+  return value;
 }
 
 /**

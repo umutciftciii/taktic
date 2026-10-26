@@ -433,6 +433,7 @@ describe('consumption', () => {
     customerEmail: 'draft@example.test',
     city: 'İstanbul',
     district: 'Kadıköy',
+    neighborhood: 'Caferağa Mah',
     description: 'Klima bakımı',
     answers: [],
   };
@@ -440,6 +441,37 @@ describe('consumption', () => {
   async function leafCategory() {
     return createCategory(ctx.prisma, 'Klima Servisi', { offerCreditCost: 2 });
   }
+
+  it('SERVICE-AREA-001: keeps a draft without a neighbourhood restorable, and consumes it only once the request names one', async () => {
+    const category = await leafCategory();
+    // A draft saved before the field was required: the payload has no neighbourhood.
+    const created = await post({ ...marketplace, categorySlug: category.slug });
+    expect(created.status).toBe(201);
+    const { neighborhood: _neighborhood, ...withoutNeighborhood } = guestBody;
+
+    const refused = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', `${COOKIE}=${created.body.token}`)
+      .send({ ...withoutNeighborhood, categorySlug: category.slug });
+    expect(refused.status).toBe(400);
+    expect(refused.body.code).toBe('REQUEST_NEIGHBORHOOD_REQUIRED');
+
+    // The refusal spends nothing: the draft restores exactly as it was saved.
+    const query = { formType: 'MARKETPLACE', categorySlug: category.slug };
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).consumedAt).toBeNull();
+    const restored = await get(query, created.body.token);
+    expect(restored.status).toBe(200);
+    expect(JSON.stringify(restored.body)).toContain('Klima bakımı');
+    expect(JSON.stringify(restored.body)).not.toContain('neighborhood');
+
+    await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', `${COOKIE}=${created.body.token}`)
+      .send({ ...guestBody, categorySlug: category.slug })
+      .expect(201);
+    expect((await ctx.prisma.requestDraft.findFirstOrThrow()).consumedAt).not.toBeNull();
+    expect((await get(query, created.body.token)).status).toBe(204);
+  });
 
   it('marks the anonymous draft consumed and bound to the customer the request created', async () => {
     const category = await leafCategory();
@@ -482,7 +514,7 @@ describe('consumption', () => {
     const response = await request(ctx.server)
       .post('/service-requests')
       .set('Cookie', [`${COOKIE}=${created.body.token}`, await loginAs(ctx.prisma, owner.id)].join('; '))
-      .send({ categorySlug: category.slug, city: 'İstanbul', district: 'Kadıköy', description: 'Klima', answers: [] });
+      .send({ categorySlug: category.slug, city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah', description: 'Klima', answers: [] });
 
     expect(response.status).toBe(201);
     const row = await ctx.prisma.requestDraft.findFirstOrThrow();

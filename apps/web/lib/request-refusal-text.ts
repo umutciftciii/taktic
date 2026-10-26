@@ -18,6 +18,9 @@ import { CONTACT_DETAILS_ERROR, CONTACT_DETAILS_IN_TEXT } from './contact-detail
 
 export const REQUEST_REFUSAL_GENERIC = 'SHOWCASE_LEAD_FAILED';
 
+/** SERVICE-AREA-001: an on-site request posted without its neighbourhood. */
+export const REQUEST_NEIGHBORHOOD_REQUIRED = 'REQUEST_NEIGHBORHOOD_REQUIRED';
+
 export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   SHOWCASE_CARD_NOT_FOUND: 'Bu kart artık yayında değil.',
   SHOWCASE_LEAD_PHONE_VERIFICATION_REQUIRED:
@@ -32,6 +35,8 @@ export const REQUEST_REFUSAL_TEXTS: Record<string, string> = {
   PHONE_VERIFICATION_RATE_LIMITED:
     'Bu numara için kısa sürede çok fazla kod istendi. Lütfen biraz sonra tekrar deneyin.',
   SHOWCASE_AREA_UNKNOWN: 'Seçilen il, ilçe ve mahalle birlikte geçerli bir bölge oluşturmuyor.',
+  [REQUEST_NEIGHBORHOOD_REQUIRED]:
+    'Yerinde hizmet talebi için mahalle seçmelisiniz. Konum bölümünde mahallenizi seçip tekrar gönderin.',
   SHOWCASE_LEAD_FORBIDDEN:
     'Hizmet veren hesabıyla vitrin talebi gönderilemez. Müşteri olarak devam etmek için oturumu kapatın.',
   REQUEST_FORBIDDEN:

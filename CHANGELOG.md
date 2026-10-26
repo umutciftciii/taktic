@@ -78,6 +78,21 @@ are in [docs/release.md](docs/release.md).
 
 ### Changed
 
+- SERVICE-AREA-001: a new ON_SITE request names its neighbourhood. The
+  request and vitrin lead forms mark the field required for an on-site job (a
+  HYBRID one once the customer chose on site; REMOTE is never asked); while the
+  list is loading or failed to load the form cannot be sent and offers "Tekrar
+  dene", and a "Mahallem listede yok" note tells the customer not to pick a
+  nearby neighbourhood and where to ask instead. `createServiceRequest` refuses
+  an on-site request without one with `400 REQUEST_NEIGHBORHOOD_REQUIRED`
+  (`field: neighborhood`); the vitrin lead asks it before the shelf check. The
+  one controlled exception: a district whose shipped list has no neighbourhood
+  (none today) is accepted district-wide and logged. Only creation asks the
+  rule — approval, publish, a reopened round and every provider surface read
+  the stored row, so legacy requests without a neighbourhood keep B-02's
+  district-wide matching. Provider service-area semantics are unchanged. No
+  migration, no new environment variable.
+
 - ADMIN-AUTH-002: staff password policy. A new password for an ADMIN or
   SUPER_ADMIN account — accepted invite, completed reset link, or
   `POST /account/password` — must be 20–128 characters, hold at least 10

@@ -3,6 +3,7 @@ import {
   ServiceRequestQuestionSystemField,
   ServiceRequestQuestionType,
 } from '@prisma/client';
+import { listNeighborhoods } from '../locations/turkey-locations';
 
 /**
  * A system-bound question is a label and a requirement placed on a column the
@@ -78,9 +79,12 @@ export type SystemFieldRequestValues = {
  * Whether a bound field carries a value, in the sense the binding means.
  *
  * City and district are already mandatory on every request, so a required
- * ADDRESS binding is asking for the level the base form leaves optional: the
- * neighbourhood. Budget is satisfied by either end of the range — a customer
- * who states only a ceiling has stated a budget.
+ * ADDRESS binding is asking for the neighbourhood. Since SERVICE-AREA-001 every
+ * ON_SITE request names one anyway (`assertNeighborhoodForOnSite`), and the two
+ * share that rule's one exception: a district with no neighbourhood listed has
+ * nothing to name, so the binding is satisfied by the district there. Budget is
+ * satisfied by either end of the range — a customer who states only a ceiling
+ * has stated a budget.
  */
 export function hasSystemFieldValue(
   field: ServiceRequestQuestionSystemField,
@@ -88,7 +92,11 @@ export function hasSystemFieldValue(
 ): boolean {
   switch (field) {
     case ServiceRequestQuestionSystemField.ADDRESS:
-      return Boolean(values.city?.trim() && values.district?.trim() && values.neighborhood?.trim());
+      return Boolean(
+        values.city?.trim() &&
+          values.district?.trim() &&
+          (values.neighborhood?.trim() || listNeighborhoods(values.city, values.district).length === 0),
+      );
     case ServiceRequestQuestionSystemField.BUDGET:
       return values.budgetMin !== null || values.budgetMax !== null;
     case ServiceRequestQuestionSystemField.DESCRIPTION:

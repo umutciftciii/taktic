@@ -303,8 +303,8 @@ describe('request creation', () => {
         isActive: true,
       },
     });
-    await request(ctx.server).post('/service-requests').send(serviceRequestPayload(remote.slug, { deliveryMode: 'REMOTE' })).expect(201);
-    await request(ctx.server).post('/service-requests').send(serviceRequestPayload(remote.slug, { deliveryMode: 'ON_SITE' })).expect(400);
+    await request(ctx.server).post('/service-requests').send(serviceRequestPayload(remote.slug, { deliveryMode: 'REMOTE', neighborhood: null })).expect(201);
+    await request(ctx.server).post('/service-requests').send(serviceRequestPayload(remote.slug, { deliveryMode: 'ON_SITE', neighborhood: null })).expect(400);
   });
 
   it('the database refuses a request whose mode disagrees with its category, and any change of the mode', async () => {

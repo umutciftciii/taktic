@@ -251,6 +251,9 @@ describe('GET /service-requests/my/:id', () => {
       .set('Cookie', cookie)
       .send(serviceRequestPayload(category.slug, { description: null }))
       .expect(201);
+    // SERVICE-AREA-001: an ON_SITE request names its neighbourhood, so the
+    // optional-field case reads a legacy row that never had one.
+    await ctx.prisma.serviceRequest.update({ where: { id: created.body.id }, data: { neighborhood: null } });
 
     const detail = await request(ctx.server)
       .get(`/service-requests/my/${created.body.id}`)

@@ -515,10 +515,11 @@ describe('system field bindings', () => {
     );
 
     // City and district are already mandatory on every request, so a required
-    // ADDRESS binding is asking for the level the base form leaves optional.
+    // ADDRESS binding is asking for the neighbourhood — which, since
+    // SERVICE-AREA-001, an ON_SITE request is asked for anyway.
     await request(ctx.server)
       .post('/service-requests')
-      .send(serviceRequestPayload(category.slug))
+      .send(serviceRequestPayload(category.slug, { neighborhood: null }))
       .expect(400);
 
     // From the same canonical dataset the endpoint validates against, so this

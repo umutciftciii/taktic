@@ -14,6 +14,7 @@ import {
 } from '../src/fixtures';
 import {
   approveRequest,
+  chooseNeighborhood,
   createRequest,
   expectApprovalBlockedByPhoneGate,
   expectPublishedSuccess,
@@ -77,6 +78,7 @@ async function submitAccountRequest(
   await expect(customer.page.locator('#request-step-place')).toBeVisible();
   await form.locator('select[name="city"]').selectOption(location.city);
   await form.locator('select[name="district"]').selectOption(location.district);
+  await chooseNeighborhood(form);
   await customer.page.getByRole('button', { name: 'Talebi Gönder' }).click();
   await expect(customer.page).toHaveURL(/\/requests\/success\?id=/);
   await assertNoErrorScreen(customer.page);
@@ -501,6 +503,7 @@ test.describe('phone verification gate', () => {
       await customer.page.getByLabel('Açıklama *').fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
       await customer.page.getByTestId('request-city').selectOption(location.city);
       await customer.page.getByTestId('request-district').selectOption(location.district);
+      await chooseNeighborhood(customer.page);
       await customer.page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
       await customer.page.getByTestId('showcase-urgency-urgent').check();
       const leadDisclosure = customer.page.getByTestId('contact-disclosure-accept');

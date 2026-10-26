@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../lib/request-refusal-text';
+import {
+  REQUEST_NEIGHBORHOOD_REQUIRED,
+  REQUEST_REFUSAL_GENERIC,
+  requestRefusalText,
+} from '../lib/request-refusal-text';
 
 /**
  * The precedence the vitrin lead form applies to a refusal. The case that
@@ -58,5 +62,14 @@ describe('requestRefusalText', () => {
     ).toBe(
       'Bu iletişim bilgileri kayıtlı bir hesapla eşleşiyor. Giriş yapın ya da daha önce talep oluşturduysanız hesabınızı etkinleştirin.',
     );
+  });
+
+  it('SERVICE-AREA-001: names the missing neighbourhood and the step it is on', () => {
+    expect(
+      requestRefusalText({
+        code: REQUEST_NEIGHBORHOOD_REQUIRED,
+        message: 'Yerinde hizmet talebi için mahalle seçmelisiniz.',
+      }),
+    ).toBe('Yerinde hizmet talebi için mahalle seçmelisiniz. Konum bölümünde mahallenizi seçip tekrar gönderin.');
   });
 });

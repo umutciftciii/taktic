@@ -16,6 +16,7 @@ import {
 } from '@prisma/client';
 import { ForbiddenException } from '@nestjs/common';
 import { isLocationBound, resolveRequestDeliveryMode } from '../../common/delivery-mode';
+import { assertNeighborhoodForOnSite } from '../../common/request-neighborhood-rule';
 import { runSerializable } from '../../common/serializable-transaction';
 import { showcaseCandidateAreaKeys } from '../../common/showcase-area-key';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -186,6 +187,16 @@ export class ShowcaseLeadService {
     // HYBRID one the customer wants on site) is held to the shelf as before.
     const deliveryMode = resolveRequestDeliveryMode(live.categoryDeliveryModel, dto.deliveryMode);
     if (isLocationBound({ deliveryMode })) {
+      // SERVICE-AREA-001: asked before the shelf, so an on-site lead without a
+      // neighbourhood is told to pick one rather than that this card does not
+      // cover them. `createServiceRequest` asks it again and logs the
+      // district-without-neighbourhoods exception, so nothing is logged here.
+      assertNeighborhoodForOnSite({
+        deliveryMode,
+        city: dto.city?.trim() ?? '',
+        district: dto.district?.trim() ?? '',
+        neighborhood: dto.neighborhood,
+      });
       await this.assertPlacementServesRequest(live.placementId, dto);
     }
 

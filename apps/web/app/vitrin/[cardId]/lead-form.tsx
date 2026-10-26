@@ -683,7 +683,8 @@ export function ShowcaseLeadForm({
                 }
               : prefill
           }
-          neighborhoodRequired={(addressQuestion?.isRequired ?? false) && !remote}
+          // SERVICE-AREA-001: the same rule as the marketplace form.
+          neighborhoodRequired={!remote}
           neighborhoodHelpText={addressQuestion?.helpText}
           onChange={() => {
             // A new address is a new question; the last answer no longer applies.

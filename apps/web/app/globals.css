@@ -765,6 +765,42 @@ input[readonly] {
   color: var(--color-neutral-700);
 }
 
+/* SERVICE-AREA-001: the neighbourhood list's retry, and the note for a
+   neighbourhood the list does not have. Quiet, beside the field. */
+.location-retry {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.location-missing {
+  font-size: 12px;
+  color: var(--color-neutral-700);
+}
+
+.location-missing summary {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.location-missing p {
+  margin: var(--space-1) 0 0;
+}
+
+.location-missing a {
+  color: inherit;
+  font-weight: 600;
+}
+
 /* A field the API refused, said under the field itself. Weight and the
    accent rule carry it together, so it survives greyscale. */
 .field-error {
