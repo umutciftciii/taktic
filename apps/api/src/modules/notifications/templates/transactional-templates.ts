@@ -987,10 +987,15 @@ function matchCustomer(subject: string, fullName: string, data: Data): EmailDocu
 
 // ──────────────────── 09 · request.approved → matching providers ─────────────
 
+/** B-02: the "Mahalle" row of a request that named no neighbourhood. */
+const DISTRICT_WIDE_LOCATION_LABEL = 'Belirtilmedi (ilçe geneli)';
+
 function requestAvailable(subject: string, fullName: string, data: Data): EmailDocument {
   const district = text(data.district);
   // MATCH-001: absent on an intent composed before the field existed — ON_SITE.
   const remote = data.deliveryMode === 'REMOTE';
+  // B-02: absent on an intent composed before the field existed — no notice.
+  const districtWide = !remote && data.neighborhoodUnspecified === 'true';
   const creditCost = int(data.creditCost);
   const balance = int(data.creditBalance);
   const qualityScore = int(data.qualityScore);
@@ -1027,12 +1032,22 @@ function requestAvailable(subject: string, fullName: string, data: Data): EmailD
         // who matched — the same line the accepted-work brief draws.
         row('Hizmet şekli', remote ? 'Uzaktan hizmet' : null),
         row('Konum', formatLocation(text(data.city), district)),
+        row('Mahalle', districtWide ? DISTRICT_WIDE_LOCATION_LABEL : null),
         row('Kalite puanı', qualityScore === null ? null : `${qualityScore} / 100`),
         // The real per-category price, never a fixed figure.
         row('Teklif maliyeti', formatCredits(creditCost)),
         // No "Mevcut teklif" row: how many rivals are already on a request is
         // not something the discovery screen tells providers either.
       ]),
+      ...(districtWide
+        ? [
+            spacer(16),
+            note(
+              `Müşteri mahalle belirtmedi; iş ${district ? `${district} ilçesinin` : 'ilçenin'} ` +
+                'herhangi bir yerinde olabilir. Teklif vermeden önce konumu talep ayrıntısında kontrol edin.',
+            ),
+          ]
+        : []),
       spacer(24),
       cta('Talebi gör ve teklif ver', text(data.requestUrl), 'primary'),
       spacer(20),

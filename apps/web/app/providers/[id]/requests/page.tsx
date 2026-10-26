@@ -19,6 +19,7 @@ import { ProviderShell } from '../../provider-shell';
 import { readCreditBalance } from '../../provider-data';
 import { providerStatusBadgeClass, formatBudgetRange } from '../../provider-ui';
 import { DeliveryModeBadge } from '../../../request-fields/delivery-mode-badge';
+import { DistrictWideLocationTag } from '../../../request-fields/district-wide-location-tag';
 
 type ProviderRequestsPageProps = {
   params: Promise<{ id: string }>;
@@ -176,6 +177,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
                     {request.city}/{request.district}
                     {request.neighborhood ? `/${request.neighborhood}` : ''}
                   </span>
+                  <DistrictWideLocationTag request={request} />
                   <span>{formatDateTime(request.submittedAt)}</span>
                   <span>{request.answersCount} yanıt</span>
                 </p>

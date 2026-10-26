@@ -10,6 +10,7 @@ import {
 import type { ProvinceWithDistricts } from '../../../../lib/locations';
 import { CityDistrictFields } from '../../city-district-fields';
 import { ServiceAreaFields } from '../../service-area-fields';
+import { NEIGHBORHOOD_SCOPE_MATCHING_HINT } from '../../service-area-matching-hint';
 import {
   BUSINESS_REGISTRATION_ERROR_MESSAGES,
   describeBusinessRegistration,
@@ -191,6 +192,9 @@ export default async function ProviderEditPage({ params, searchParams }: Provide
           <p className="pdash-form-hint">
             Yerinde hizmet talepleri yalnızca buradaki bölgelerle eşleşir. Çalıştığınız her yeri
             ekleyin; il geneli, ilçe geneli veya tek bir mahalle seçebilirsiniz.
+          </p>
+          <p className="pdash-form-hint" data-testid="service-area-matching-hint">
+            {NEIGHBORHOOD_SCOPE_MATCHING_HINT}
           </p>
           <ServiceAreaDeliveryNote
             categories={categories.filter((category) => selectedCategoryIds.has(category.id))}

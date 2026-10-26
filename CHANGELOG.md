@@ -107,6 +107,23 @@ are in [docs/release.md](docs/release.md).
 
 ### Fixed
 
+- STAGING-UAT-001 B-02 (P1): a request that names no neighbourhood now reaches
+  the neighbourhood-scoped providers of its district. `matchesProviderArea`
+  refused that pair (a rule set on purpose in 4ca7ad76), so a district-wide
+  request in a district whose providers had all chosen single neighbourhoods
+  was published to nobody while the customer was told it was live. A
+  district-wide request is now matched by every province-, district- and
+  neighbourhood-scoped area of that province and district — discovery list,
+  detail, offer authority and the publish fan-out alike, since they share the
+  one predicate. Nothing wider: province and district still compare exactly,
+  a request that names a neighbourhood still matches only that neighbourhood,
+  REMOTE requests are unchanged, and `areaCovers` (the profile and vitrin
+  containment test) is not widened. Providers see "Mahalle belirtilmedi ·
+  <ilçe> geneli" on the list and detail, the `request-available` mail carries
+  the same notice (never the neighbourhood itself), and the profile service
+  area forms explain the rule. Already-published requests appear in lists but
+  are not mailed retroactively. No migration, no new environment variable.
+
 - STAGING-UAT-001 B3 (P1): opening an e-mail verification link no longer
   spends it. `/e-posta-dogrula` used to confirm on page load, so any GET — a
   mail security scanner (Safe Links and the like), a link preview, a prefetch —

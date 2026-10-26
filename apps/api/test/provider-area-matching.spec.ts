@@ -22,7 +22,13 @@ import { matchesProviderArea } from '../src/common/provider-request-matching';
  * it. The cases below are that sentence written out, including the two that
  * would be wrong in opposite directions — a province-wide area that fails to
  * reach a district in its own province, and a neighbourhood-scoped area that
- * reaches a request too vague to say which neighbourhood it is in.
+ * reaches a sibling neighbourhood.
+ *
+ * B-02 adds one exception to "every level it names": a request that names no
+ * neighbourhood is district-wide, and every neighbourhood-scoped area in that
+ * same district takes it (4ca7ad76 had kept them apart, which left such a
+ * request in front of nobody when the district's providers were all
+ * neighbourhood-scoped). The widening stops at the district.
  */
 let ctx: TestContext;
 
@@ -106,13 +112,32 @@ describe('matchesProviderArea', () => {
       request: { city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Fenerbahçe Mah' },
       expected: false,
     },
+
+    // B-02 — a request with no neighbourhood is district-wide. Every
+    // neighbourhood-scoped area in that district takes it, and none outside it.
     {
-      // The false positive the whole scope idea exists to prevent. A request
-      // that never said which neighbourhood it is in is not evidence that it is
-      // in this one, so a narrower area must not claim it.
-      name: 'neighbourhood area does not reach a request with no neighbourhood',
+      name: 'neighbourhood area reaches a request in its district with no neighbourhood',
       areas: [NEIGHBORHOOD_AREA],
       request: { city: 'İstanbul', district: 'Kadıköy', neighborhood: null },
+      expected: true,
+    },
+    {
+      name: 'a blank neighbourhood reads as no neighbourhood',
+      areas: [NEIGHBORHOOD_AREA],
+      request: { city: 'İstanbul', district: 'Kadıköy', neighborhood: '  ' },
+      expected: true,
+    },
+    {
+      name: 'the widening does not reach a sibling district',
+      areas: [NEIGHBORHOOD_AREA],
+      request: { city: 'İstanbul', district: 'Beşiktaş', neighborhood: null },
+      expected: false,
+    },
+    {
+      // "Merkez" is a district of many provinces; the province still decides.
+      name: 'the widening does not reach a same-named district in another province',
+      areas: [{ city: 'Ankara', district: 'Merkez', neighborhood: 'Cumhuriyet Mah' }],
+      request: { city: 'Kırşehir', district: 'Merkez', neighborhood: null },
       expected: false,
     },
 
@@ -219,19 +244,25 @@ describe('GET /providers/:providerId/requests', () => {
     expect(visible.has(created[2]!.id)).toBe(false);
   });
 
-  it('keeps a neighbourhood provider away from a request that named no neighbourhood', async () => {
+  it('shows a neighbourhood provider a district-wide request in its district, and nothing wider', async () => {
     const { created, visible } = await discoverableIds(
       [{ city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' }],
       [
         { city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' },
         { city: 'İstanbul', district: 'Kadıköy' },
         { city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Fenerbahçe Mah' },
+        { city: 'İstanbul', district: 'Beşiktaş' },
+        { city: 'Ankara', district: 'Çankaya' },
       ],
     );
 
     expect(visible.has(created[0]!.id)).toBe(true);
-    expect(visible.has(created[1]!.id)).toBe(false);
+    // B-02: no neighbourhood named, same district — shown.
+    expect(visible.has(created[1]!.id)).toBe(true);
+    // A named sibling neighbourhood is still not this one.
     expect(visible.has(created[2]!.id)).toBe(false);
+    expect(visible.has(created[3]!.id)).toBe(false);
+    expect(visible.has(created[4]!.id)).toBe(false);
   });
 
   it('still matches a provider carrying only the single area it always had', async () => {
@@ -260,17 +291,50 @@ describe('GET /providers/:providerId/requests', () => {
       categoryId: category.id,
       areas: [{ city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' }],
     });
-    const vague = await createApprovedRequest(ctx.prisma, {
+    const siblingDistrict = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      city: 'İstanbul',
+      district: 'Beşiktaş',
+    });
+    const siblingNeighborhood = await createApprovedRequest(ctx.prisma, {
+      categoryId: category.id,
+      city: 'İstanbul',
+      district: 'Kadıköy',
+      neighborhood: 'Fenerbahçe Mah',
+    });
+    const cookie = await loginAs(ctx.prisma, user.id);
+
+    for (const outside of [siblingDistrict, siblingNeighborhood]) {
+      await request(ctx.server)
+        .get(`/providers/${provider.id}/requests/${outside.id}`)
+        .set('Cookie', cookie)
+        .expect(404);
+    }
+  });
+
+  it('opens the detail of a district-wide request to a neighbourhood provider in that district', async () => {
+    const category = await createCategory(ctx.prisma);
+    const user = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, {
+      userId: user.id,
+      categoryId: category.id,
+      areas: [{ city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' }],
+    });
+    const districtWide = await createApprovedRequest(ctx.prisma, {
       categoryId: category.id,
       city: 'İstanbul',
       district: 'Kadıköy',
     });
     const cookie = await loginAs(ctx.prisma, user.id);
 
-    await request(ctx.server)
-      .get(`/providers/${provider.id}/requests/${vague.id}`)
+    const response = await request(ctx.server)
+      .get(`/providers/${provider.id}/requests/${districtWide.id}`)
       .set('Cookie', cookie)
-      .expect(404);
+      .expect(200);
+
+    // The provider is told the request names no neighbourhood — the screen's
+    // "Mahalle belirtilmedi" label reads this field.
+    expect(response.body).toMatchObject({ id: districtWide.id, district: 'Kadıköy', neighborhood: null });
   });
 });
 
