@@ -3148,6 +3148,10 @@ function requestAvailableData(
     // MATCH-001: a remote request reached this provider regardless of where
     // they serve, so the message says so rather than "in your area".
     deliveryMode: request.deliveryMode,
+    // B-02: whether the customer named a neighbourhood — never which one. A
+    // request that named none reaches every neighbourhood provider in the
+    // district, so the message says the job may be anywhere in it.
+    neighborhoodUnspecified: request.neighborhood?.trim() ? null : 'true',
     qualityScore: String(request.qualityScore),
     creditCost:
       request.category.offerCreditCost === null

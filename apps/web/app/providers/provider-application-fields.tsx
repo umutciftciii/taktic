@@ -3,6 +3,7 @@ import type { ProvinceWithDistricts } from '../../lib/locations';
 import { BusinessRegistrationFields } from './business-registration-fields';
 import { CityDistrictFields } from './city-district-fields';
 import { ServiceAreaFields } from './service-area-fields';
+import { NEIGHBORHOOD_SCOPE_MATCHING_HINT } from './service-area-matching-hint';
 
 type ProviderApplicationFieldsProps = {
   /** Every province with its districts, loaded by the page from the API. */
@@ -203,6 +204,9 @@ export function ProviderApplicationFields({
             Hizmet vermek istediğiniz bölgeleri ekleyin. İl geneli, ilçe geneli veya tek bir
             mahalle seçebilirsiniz; yerinde verdiğiniz hizmetler için en az bir bölge gerekir.
           </p>
+          <p className="provider-apply-card-subtitle" data-testid="service-area-matching-hint">
+            {NEIGHBORHOOD_SCOPE_MATCHING_HINT}
+          </p>
         </div>
         {serviceAreaNote}
         {/*
@@ -211,6 +215,8 @@ export function ProviderApplicationFields({
           no neighbourhood means the whole district — which is what
           `matchesProviderArea` reads those nulls as. Making either mandatory
           would quietly take the wider coverage away from anyone who wanted it.
+          (B-02: a neighbourhood area also takes the district's requests that
+          name no neighbourhood — the hint above says so.)
         */}
         <ServiceAreaFields
           provinces={provinces}

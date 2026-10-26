@@ -1242,6 +1242,26 @@ describe('transactional e-mail rendering', () => {
     expect(notSelected).not.toContain('kabul oranınız');
   });
 
+  it('tells a provider when an on-site request named no neighbourhood (B-02)', () => {
+    const districtWide = render(messageFor('request-available', { neighborhoodUnspecified: 'true' }));
+    expect(districtWide.html).toContain('Belirtilmedi (ilçe geneli)');
+    expect(districtWide.html).toContain('Müşteri mahalle belirtmedi; iş Çankaya ilçesinin herhangi bir yerinde olabilir.');
+    expect(districtWide.text).toContain('Müşteri mahalle belirtmedi');
+
+    // A request that named one, and an intent composed before the field existed.
+    const exact: Record<string, string | null>[] = [{ neighborhoodUnspecified: null }, {}];
+    for (const overrides of exact) {
+      expect(render(messageFor('request-available', overrides)).html).not.toContain('mahalle belirtmedi');
+    }
+
+    // REMOTE: the place does not decide who sees it, so nothing is said about it.
+    const remote = render(
+      messageFor('request-available', { neighborhoodUnspecified: 'true', deliveryMode: 'REMOTE' }),
+    ).html;
+    expect(remote).not.toContain('mahalle belirtmedi');
+    expect(remote).not.toContain('Belirtilmedi (ilçe geneli)');
+  });
+
   it('drops the contact rows when the accept did not open them', () => {
     const withContact = render(messageFor('match-customer')).html;
     expect(withContact).toContain('Telefon');

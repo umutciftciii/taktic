@@ -63,11 +63,25 @@ export function matchesRequestLocation(
  * a NULL district covers the whole city, and one with a NULL neighbourhood
  * covers the whole district — so a provider widens their reach by leaving the
  * finer level unset, never by listing more rows.
+ *
+ * B-02 — a request that names no neighbourhood is a district-wide request, and
+ * a neighbourhood-scoped area in that same province and district takes it too.
+ * The request does not say it is outside the provider's neighbourhood, and
+ * refusing it left a published request that no neighbourhood provider ever saw
+ * (4ca7ad76 had ruled the opposite way). The widening stops at the district:
+ * province and district are still compared exactly, so it never reaches a
+ * sibling district or another province. A request that does name a
+ * neighbourhood is held to it exactly, as before.
+ *
+ * This is the matching rule only. `areaCovers` — whether one area contains
+ * another, which the profile and showcase forms ask — is not widened.
  */
 export function matchesProviderArea(
   areas: readonly ProviderServiceAreaLike[],
   request: MatchableRequestLocation,
 ): boolean {
+  const requestNamesNeighborhood = Boolean(request.neighborhood?.trim());
+
   return areas.some((area) => {
     if (!sameText(area.city, request.city)) {
       return false;
@@ -77,7 +91,11 @@ export function matchesProviderArea(
       return false;
     }
 
-    if (area.neighborhood && !sameText(area.neighborhood, request.neighborhood)) {
+    if (
+      area.neighborhood &&
+      requestNamesNeighborhood &&
+      !sameText(area.neighborhood, request.neighborhood)
+    ) {
       return false;
     }
 

@@ -28,6 +28,7 @@ import { OfferPriceField } from '../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
 import { ReportDialog } from './report-dialog';
 import { DeliveryModeBadge } from '../../../../request-fields/delivery-mode-badge';
+import { DistrictWideLocationTag } from '../../../../request-fields/district-wide-location-tag';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
@@ -144,7 +145,8 @@ export default async function ProviderRequestDetailPage({
           <p className="pdash-page-sub">
             <DeliveryModeBadge request={request} />{' '}
             {request.city}/{request.district}
-            {request.neighborhood ? `/${request.neighborhood}` : ''} ·{' '}
+            {request.neighborhood ? `/${request.neighborhood}` : ''}{' '}
+            <DistrictWideLocationTag request={request} /> ·{' '}
             {formatDateTime(request.submittedAt)}
           </p>
 
