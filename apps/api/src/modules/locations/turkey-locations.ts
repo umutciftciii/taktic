@@ -144,9 +144,11 @@ export function listNeighborhoods(city: string, district: string): string[] {
  * *of that district*. "İstanbul / Çankaya" names two real places and is still
  * rejected, because Çankaya is in Ankara.
  *
- * The neighbourhood is optional — the form does not require one — but a
- * neighbourhood that was supplied and does not belong to the district is a
- * rejection, never a silently dropped field.
+ * The neighbourhood is optional here — a REMOTE request, and every legacy
+ * request, has none; SERVICE-AREA-001 requires it for a new ON_SITE request in
+ * `assertNeighborhoodForOnSite` — but a neighbourhood that was supplied and
+ * does not belong to the district is a rejection, never a silently dropped
+ * field.
  */
 export function resolveLocation(input: {
   city: string;

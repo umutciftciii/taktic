@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import { createAdmin, createCategory, createProvider, prisma, uniqueLocation } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
+import { chooseNeighborhood } from '../src/journeys';
 
 /**
  * Every vitrin screen, at four widths, photographed.
@@ -521,6 +522,7 @@ test.describe('vitrin ekranları: genişlikler ve ekran görüntüleri', () => {
         await expect(leadForm).toBeVisible();
         await visitor.page.getByTestId('request-city').selectOption(location.city);
         await visitor.page.getByTestId('request-district').selectOption(location.district);
+        await chooseNeighborhood(visitor.page);
         await visitor.page
           .getByLabel('Açıklama *')
           .fill('Dar ekranda satır kırılmasını zorlamak için bilinçli olarak uzun tutulmuş bir açıklama.');

@@ -12,7 +12,12 @@ import {
 } from '../src/fixtures';
 import { confirmThrough } from '../src/confirm-dialog';
 import { waitForLatestSmsCode } from '../src/outbox';
-import { completeContactStep, fillLeadContact, settleIdentityGate } from '../src/journeys';
+import {
+  chooseNeighborhood,
+  completeContactStep,
+  fillLeadContact,
+  settleIdentityGate,
+} from '../src/journeys';
 import { primaryRuntime } from '../src/runtime';
 
 /**
@@ -450,6 +455,8 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       await chooseLeadLocation(visitor.page, location);
       await expect(neighborhoodSelect).toHaveValue('');
+      // SERVICE-AREA-001: an on-site lead names its neighbourhood.
+      await chooseNeighborhood(visitor.page);
 
       // The two options are rendered from this card's own approved promises,
       // beside — not instead of — the request's own timing select.
@@ -622,6 +629,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
         .getByLabel('Açıklama *')
         .fill('Kapsam dışı bir adres için talep gönderiyorum.');
       await chooseLeadLocation(visitor.page, elsewhere);
+      await chooseNeighborhood(visitor.page);
       await visitor.page.getByTestId('showcase-urgency-normal').check();
       await fillLeadContact(visitor.page, {
         name: 'E2E Kapsam Disi',
@@ -715,6 +723,7 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
 
       await visitor.page.getByLabel('Açıklama *').fill('Kimlik çakışması denemesi.');
       await chooseLeadLocation(visitor.page, location);
+      await chooseNeighborhood(visitor.page);
       await visitor.page.getByTestId('showcase-urgency-normal').check();
       await fillLeadContact(visitor.page, { name: 'E2E Çakışan Kişi', email: customerEmail });
       await proveLeadPhoneInForm(visitor.page, customerPhone);
@@ -789,6 +798,8 @@ test.describe('vitrin: yayın, ana sayfa rafı ve doğrudan talep', () => {
       await visitor.page.getByRole('tab', { name: 'Konum & zaman' }).click();
       await visitor.page.getByTestId('request-city').selectOption(location.city);
       await visitor.page.getByTestId('request-district').selectOption(location.district);
+      // SERVICE-AREA-001: the hand-off leaves the place step only with a neighbourhood.
+      await chooseNeighborhood(visitor.page);
 
       const matches = visitor.page.getByTestId('showcase-request-matches');
       await expect(matches).toBeVisible();

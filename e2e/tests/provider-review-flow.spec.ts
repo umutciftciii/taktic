@@ -16,13 +16,14 @@ import {
 import {
   acceptOffer,
   approveRequest,
+  chooseNeighborhood,
   completeRequest,
   createRequest,
+  fillOfferSchedule,
   moderateReview,
   readProviderOfferId,
   reportReview,
   submitOffer,
-  fillOfferSchedule,
   submitReview,
 } from '../src/journeys';
 import { emailCountFor, waitForLatestSmsCode } from '../src/outbox';
@@ -706,6 +707,7 @@ test.describe('provider review flow', () => {
 
       await customer.page.getByTestId('request-city').selectOption(location.city);
       await customer.page.getByTestId('request-district').selectOption(location.district);
+      await chooseNeighborhood(customer.page);
       await customer.page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
       await customer.page.getByTestId('showcase-urgency-normal').check();
       await customer.page.getByLabel('Açıklama *').fill('Salon kliması bakım istiyorum.');

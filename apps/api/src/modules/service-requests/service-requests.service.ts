@@ -21,6 +21,7 @@ import { isPhoneVerificationRequired } from '../phone-verification/phone-verific
 import { equivalentPhoneSpellings, normalizePhoneNumber } from '../phone-verification/phone.util';
 import { AdminPermission, CancelWinnerRefundDecision, CustomerOrigin, MatchRoundStatus, NumberedEntityType, OfferEntitlementSource, OfferStatus, Prisma, QuestionConditionMatchMode, RequestDeliveryMode, ServiceRequestQuestion, ServiceRequestQuestionSystemField, ServiceRequestQuestionType, ServiceRequestReportResolution, ServiceRequestCancelActor, ServiceRequestStatus, ShowcaseLeadCloseReason, UserRole } from '@prisma/client';
 import { resolveRequestDeliveryMode } from '../../common/delivery-mode';
+import { assertNeighborhoodForOnSite } from '../../common/request-neighborhood-rule';
 import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -499,6 +500,17 @@ export class ServiceRequestsService {
     if (!location) {
       throw new BadRequestException(
         'Seçilen il, ilçe ve mahalle birlikte geçerli bir adres oluşturmuyor.',
+      );
+    }
+
+    // SERVICE-AREA-001: a new ON_SITE request names its neighbourhood (the
+    // HYBRID choice decides, REMOTE is never asked). The vitrin lead path asks
+    // the same rule first and arrives here too. A district the shipped list
+    // has no neighbourhood for is let through district-wide, and said so.
+    if (assertNeighborhoodForOnSite({ deliveryMode, ...location }) === 'DISTRICT_HAS_NO_NEIGHBORHOODS') {
+      this.logger.warn(
+        `ON_SITE request accepted without a neighbourhood: no neighbourhood is listed for ` +
+          `${location.district} / ${location.city} (category ${category.slug})`,
       );
     }
 

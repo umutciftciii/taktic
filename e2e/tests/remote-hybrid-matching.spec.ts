@@ -14,6 +14,7 @@ import {
 } from '../src/fixtures';
 import {
   approveRequest,
+  chooseNeighborhood,
   completeContactStep,
   matchingRequestIds,
   submitOffer,
@@ -76,7 +77,8 @@ async function sendRequest(
     await expect(page.getByTestId('delivery-mode-field')).toHaveCount(0);
   }
   const remoteNote = page.getByTestId('delivery-mode-remote-note');
-  if (mode === 'REMOTE' || (!mode && (await categoryModel(category)) === 'REMOTE')) {
+  const remote = mode === 'REMOTE' || (!mode && (await categoryModel(category)) === 'REMOTE');
+  if (remote) {
     await expect(remoteNote).toBeVisible();
   } else {
     await expect(remoteNote).toHaveCount(0);
@@ -84,6 +86,8 @@ async function sendRequest(
 
   await form.locator('select[name="city"]').selectOption(answers.city);
   await form.locator('select[name="district"]').selectOption(answers.district);
+  // SERVICE-AREA-001: on site needs the neighbourhood; remote is not asked.
+  if (!remote) await chooseNeighborhood(form);
   await submitRequestForm(actor);
   const requestId = new URL(page.url()).searchParams.get('id');
   expect(requestId).toBeTruthy();

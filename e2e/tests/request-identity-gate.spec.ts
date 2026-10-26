@@ -14,7 +14,7 @@ import {
   uniquePhone,
   uniqueSuffix,
 } from '../src/fixtures';
-import { expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
+import { chooseNeighborhood, expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
 import {
   emailCountFor,
   emailEntriesFor,
@@ -310,6 +310,7 @@ async function fillShowcaseBody(page: Page, location: Location): Promise<void> {
   await page.getByLabel('Açıklama *').fill(SHOWCASE_DESCRIPTION);
   await page.getByTestId('request-city').selectOption(location.city);
   await page.getByTestId('request-district').selectOption(location.district);
+  await chooseNeighborhood(page);
   await page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
   await page.getByTestId('showcase-urgency-urgent').check();
 }
@@ -374,6 +375,7 @@ async function fillMarketplaceBody(page: Page, location: Location): Promise<void
   await expect(page.locator('#request-step-place')).toBeVisible();
   await form.locator('select[name="city"]').selectOption(location.city);
   await form.locator('select[name="district"]').selectOption(location.district);
+  await chooseNeighborhood(form);
   await form.getByTestId('request-urgency').selectOption('THIS_WEEK');
   await form.getByTestId('request-budget-min').fill(MARKETPLACE_BUDGET_TYPED);
   await expect(form.getByTestId('request-budget-min')).toHaveValue(MARKETPLACE_BUDGET_SHOWN);
@@ -1156,6 +1158,7 @@ test.describe('kimlik gate’i: her iki talep formu', () => {
       await expect(visitor.page.locator('#request-step-place')).toBeVisible();
       await form.locator('select[name="city"]').selectOption(stage.location.city);
       await form.locator('select[name="district"]').selectOption(stage.location.district);
+      await chooseNeighborhood(form);
 
       // Between the check and the submission the number and the address each
       // become another customer's.

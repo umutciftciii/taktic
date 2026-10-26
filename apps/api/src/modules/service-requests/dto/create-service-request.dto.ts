@@ -131,6 +131,12 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   district!: string;
 
+  /**
+   * Optional at the DTO: a REMOTE request carries none, and whether this one is
+   * ON_SITE is only known once the category and the HYBRID choice resolve.
+   * SERVICE-AREA-001 requires it for ON_SITE in `createServiceRequest`
+   * (`assertNeighborhoodForOnSite`).
+   */
   @IsOptional()
   @IsString()
   neighborhood?: string | null;

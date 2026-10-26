@@ -13,7 +13,12 @@ import {
   type Location,
   type SeededCategory,
 } from '../src/fixtures';
-import { createRequest, expectIdentityGateOpen, settleIdentityGate } from '../src/journeys';
+import {
+  chooseNeighborhood,
+  createRequest,
+  expectIdentityGateOpen,
+  settleIdentityGate,
+} from '../src/journeys';
 import { emailCountFor, smsEntriesFor, waitForLatestSmsCode } from '../src/outbox';
 import { primaryRuntime, turnstileClosedWebRuntime } from '../src/runtime';
 import { retireShowcasePlacements, seedApprovedShowcaseCard, seedLiveShowcasePlacement } from '../src/showcase-fixtures';
@@ -200,6 +205,7 @@ test.describe('Turnstile: normal talep formu', () => {
       await expect(visitor.page.locator('#request-step-place')).toBeVisible();
       await form.locator('select[name="city"]').selectOption(location.city);
       await form.locator('select[name="district"]').selectOption(location.district);
+      await chooseNeighborhood(form);
 
       // ── submit with a token the API refuses: the banner, no request ────
       await steerTurnstile(visitor.page, 'invalid');
@@ -287,6 +293,7 @@ test.describe('Turnstile: vitrin direct lead formu', () => {
       await visitor.page.getByLabel('Açıklama *').fill('Salon kliması bakım istiyorum, iki gündür soğutmuyor.');
       await visitor.page.getByTestId('request-city').selectOption(stage.location.city);
       await visitor.page.getByTestId('request-district').selectOption(stage.location.district);
+      await chooseNeighborhood(visitor.page);
       await visitor.page.getByTestId('showcase-lead-urgency').selectOption('THIS_WEEK');
       await visitor.page.getByTestId('showcase-urgency-urgent').check();
 

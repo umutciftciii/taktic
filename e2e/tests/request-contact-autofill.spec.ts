@@ -9,7 +9,7 @@ import {
   uniqueLocation,
 } from '../src/fixtures';
 import { primaryRuntime } from '../src/runtime';
-import { openRequestFormContactStep, settleIdentityGate } from '../src/journeys';
+import { chooseNeighborhood, openRequestFormContactStep, settleIdentityGate } from '../src/journeys';
 
 /**
  * The contact step, in the two shapes it now has.
@@ -41,6 +41,7 @@ async function walkToLastStep(customer: Actor, city: string, district: string) {
   await expect(customer.page.locator('#request-step-place')).toBeVisible();
   await form.locator('select[name="city"]').selectOption(city);
   await form.locator('select[name="district"]').selectOption(district);
+  await chooseNeighborhood(form);
 }
 
 /**

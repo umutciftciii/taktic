@@ -29,6 +29,7 @@ import { ShowcaseEntitlementService } from '../src/modules/showcase/showcase-ent
 import { ShowcasePlacementService } from '../src/modules/showcase/showcase-placement.service';
 import { toShowcaseAreaRow } from '../src/common/showcase-area-key';
 import { PrismaService } from '../src/prisma/prisma.service';
+import { listNeighborhoods } from '../src/modules/locations/turkey-locations';
 import { addIsoDays, todayIsoDay } from '../src/common/date-only';
 import { type BackgroundWorkOwner, isBackgroundWorkOwner } from '../src/common/background-work';
 
@@ -824,8 +825,18 @@ export function offerPayload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * SERVICE-AREA-001: a new ON_SITE request names its neighbourhood, so the
+ * default body names one — the first the shipped list has for the district the
+ * body ends up with, so a case that overrides only the district still posts a
+ * valid triple. A case that needs a request *without* one passes
+ * `neighborhood: null` (REMOTE, or a refusal), or inserts a legacy row with
+ * {@link createLegacyServiceRequestWithoutNeighborhood}.
+ */
 export function serviceRequestPayload(categorySlug: string, overrides: Record<string, unknown> = {}) {
   const suffix = uniqueSuffix();
+  const city = typeof overrides.city === 'string' ? overrides.city : 'İstanbul';
+  const district = typeof overrides.district === 'string' ? overrides.district : 'Kadıköy';
   return {
     categorySlug,
     customerName: `Müşteri ${suffix}`,
@@ -833,6 +844,7 @@ export function serviceRequestPayload(categorySlug: string, overrides: Record<st
     customerEmail: `customer-${suffix}@example.test`,
     city: 'İstanbul',
     district: 'Kadıköy',
+    neighborhood: listNeighborhoods(city, district)[0] ?? null,
     description: 'Klima montajı gerekiyor.',
     answers: [],
     ...overrides,
@@ -1324,6 +1336,10 @@ export function showcaseLeadPayload(
   overrides: Record<string, unknown> = {},
 ) {
   const suffix = uniqueSuffix();
+  // SERVICE-AREA-001: as serviceRequestPayload — the district's first listed
+  // neighbourhood unless the case names its own (or null).
+  const city = typeof overrides.city === 'string' ? overrides.city : 'İstanbul';
+  const district = typeof overrides.district === 'string' ? overrides.district : 'Kadıköy';
 
   return {
     categorySlug,
@@ -1333,6 +1349,7 @@ export function showcaseLeadPayload(
     customerEmail: `vitrin-${suffix}@example.test`,
     city: 'İstanbul',
     district: 'Kadıköy',
+    neighborhood: listNeighborhoods(city, district)[0] ?? null,
     description: 'Vitrin kartından gönderilen test talebi.',
     answers: [],
     ...overrides,

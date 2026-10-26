@@ -1,4 +1,5 @@
 import request from 'supertest';
+import { CategoryDeliveryModel } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createApprovedRequest,
@@ -86,7 +87,7 @@ describe('POST /service-requests location validation', () => {
   }
 
   it('accepts a real province and district and stores the canonical spelling', async () => {
-    const response = await postRequest({ city: 'istanbul', district: 'kadıköy' });
+    const response = await postRequest({ city: 'istanbul', district: 'kadıköy', neighborhood: 'caferağa mah' });
 
     expect(response.status).toBe(201);
 
@@ -94,7 +95,7 @@ describe('POST /service-requests location validation', () => {
       where: { id: response.body.id as string },
       select: { city: true, district: true, neighborhood: true },
     });
-    expect(stored).toEqual({ city: 'İstanbul', district: 'Kadıköy', neighborhood: null });
+    expect(stored).toEqual({ city: 'İstanbul', district: 'Kadıköy', neighborhood: 'Caferağa Mah' });
   });
 
   it('accepts a neighbourhood of that district and stores it canonically', async () => {
@@ -150,10 +151,16 @@ describe('POST /service-requests location validation', () => {
     expect(await ctx.prisma.serviceRequest.count()).toBe(0);
   });
 
-  it('still treats the neighbourhood as optional', async () => {
-    const response = await postRequest({ city: 'Ankara', district: 'Çankaya', neighborhood: null });
+  it('SERVICE-AREA-001: requires the neighbourhood of an ON_SITE request, and only there', async () => {
+    const onSite = await postRequest({ city: 'Ankara', district: 'Çankaya', neighborhood: null });
+    expect(onSite.status).toBe(400);
+    expect(onSite.body.code).toBe('REQUEST_NEIGHBORHOOD_REQUIRED');
 
-    expect(response.status).toBe(201);
+    const remote = await createCategory(ctx.prisma, 'Online', { deliveryModel: CategoryDeliveryModel.REMOTE });
+    await request(ctx.server)
+      .post('/service-requests')
+      .send(serviceRequestPayload(remote.slug, { city: 'Ankara', district: 'Çankaya', neighborhood: null }))
+      .expect(201);
   });
 });
 

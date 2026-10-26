@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ProvinceWithDistricts } from '../../lib/locations';
 
 type LocationFieldsProps = {
@@ -20,10 +20,15 @@ type LocationFieldsProps = {
   /**
    * Whether the neighbourhood has to be chosen.
    *
-   * Off by default, which is what it has always been. A category whose form
-   * binds a required ADDRESS question turns it on: the work needs the finer
-   * level, and the API refuses the request without it, so the field says so
-   * before the customer submits.
+   * SERVICE-AREA-001: every ON_SITE request — and a HYBRID one the customer
+   * wants on site — turns it on; the API refuses such a request without one.
+   * A REMOTE request leaves it off. Off is also the default, for any caller
+   * that names a place without matching on it.
+   *
+   * Required means the form cannot be submitted without a neighbourhood while
+   * the list is loading or failed to load (it offers a retry instead). The one
+   * exception is the API's own: a district whose list is really empty has
+   * nothing to pick, and the request goes through district-wide.
    */
   neighborhoodRequired?: boolean;
   /** Category-specific wording for the neighbourhood field, when there is any. */
@@ -75,6 +80,10 @@ export function LocationFields({
   const [district, setDistrict] = useState(initialValue?.district ?? '');
   const [neighborhood, setNeighborhood] = useState(initialValue?.neighborhood ?? '');
   const [neighborhoods, setNeighborhoods] = useState<NeighborhoodState>({ status: 'idle' });
+  // Bumped by "Tekrar dene": re-runs the fetch for the same pair.
+  const [attempt, setAttempt] = useState(0);
+  const neighborhoodSelectRef = useRef<HTMLSelectElement>(null);
+  const neighborhoodId = useId();
 
   // Held in a ref so the notify effect depends on the values only, and a caller
   // passing a fresh closure on every render cannot turn it into a loop.
@@ -105,7 +114,7 @@ export function LocationFields({
       });
 
     return () => controller.abort();
-  }, [city, district]);
+  }, [city, district, attempt]);
 
   /*
    * After the render, not during the change event.
@@ -133,6 +142,26 @@ export function LocationFields({
   }
 
   const neighborhoodOptions = neighborhoods.status === 'ready' ? neighborhoods.names : [];
+  // A district whose list really is empty — the API's one exception. Not a
+  // failure: there is nothing to pick, so nothing is asked.
+  const districtHasNoNeighborhoods = neighborhoods.status === 'ready' && neighborhoodOptions.length === 0;
+  const required = neighborhoodRequired && Boolean(district) && !districtHasNoNeighborhoods;
+  /*
+   * While the list is loading or failed to load, a required select stays
+   * enabled with only its placeholder: a disabled control is skipped by
+   * constraint validation, and this one has to stop the step and the submit.
+   */
+  const blockedMessage = !required
+    ? ''
+    : neighborhoods.status === 'unavailable'
+      ? 'Mahalle listesi getirilemedi. Listeyi yeniden yükleyip mahallenizi seçin.'
+      : neighborhoods.status === 'loading' || neighborhoods.status === 'idle'
+        ? 'Mahalle listesi yükleniyor. Lütfen bekleyin.'
+        : '';
+
+  useEffect(() => {
+    neighborhoodSelectRef.current?.setCustomValidity(blockedMessage);
+  }, [blockedMessage]);
 
   return (
     <div className="form-grid">
@@ -173,14 +202,19 @@ export function LocationFields({
         </select>
       </label>
 
-      <label className="form-row">
-        <span>Mahalle{neighborhoodRequired ? ' *' : ''}</span>
+      <div className="form-row">
+        <label className="field-label" htmlFor={neighborhoodId}>
+          Mahalle{required ? ' *' : ''}
+        </label>
         <select
+          ref={neighborhoodSelectRef}
+          id={neighborhoodId}
           name="neighborhood"
-          required={neighborhoodRequired}
+          required={required}
           value={neighborhood}
-          disabled={!district || neighborhoodOptions.length === 0}
+          disabled={!district || (neighborhoodOptions.length === 0 && !required)}
           onChange={(event) => setNeighborhood(event.target.value)}
+          aria-describedby={`${neighborhoodId}-help`}
           data-testid="request-neighborhood"
         >
           <option value="">{neighborhoodPlaceholder(district, neighborhoods)}</option>
@@ -190,14 +224,63 @@ export function LocationFields({
             </option>
           ))}
         </select>
-        <span className="help-text">
-          {neighborhoods.status === 'unavailable'
-            ? 'Mahalle listesi şu anda getirilemedi. Adres notuna yazabilirsiniz.'
-            : (neighborhoodHelpText ??
-              (neighborhoodRequired ? 'Bu hizmet için mahalle gereklidir.' : 'İsteğe bağlı.'))}
+        <span className="help-text" id={`${neighborhoodId}-help`} data-testid="request-neighborhood-help">
+          {neighborhoodHelp({
+            status: neighborhoods.status,
+            neighborhoodRequired,
+            districtHasNoNeighborhoods,
+            helpText: neighborhoodHelpText,
+          })}
         </span>
-      </label>
+        {neighborhoods.status === 'unavailable' ? (
+          <button
+            type="button"
+            className="location-retry"
+            onClick={() => setAttempt((value) => value + 1)}
+            data-testid="request-neighborhood-retry"
+          >
+            Tekrar dene
+          </button>
+        ) : null}
+        {required && neighborhoods.status === 'ready' ? (
+          <details className="location-missing" data-testid="request-neighborhood-missing">
+            <summary>Mahallem listede yok</summary>
+            <p>
+              Liste, PTT&apos;nin posta kodu listesinden gelir. Mahallenizi bulamıyorsanız
+              yakın bir mahalle seçmeyin: talebiniz yanlış bölgedeki hizmet verenlere gider.{' '}
+              <a href="/destek/yeni" target="_blank" rel="noopener">
+                Destek ekibimize yazın
+              </a>
+              , mahallenizi kontrol edip size dönelim.
+            </p>
+          </details>
+        ) : null}
+      </div>
     </div>
+  );
+}
+
+function neighborhoodHelp(input: {
+  status: NeighborhoodState['status'];
+  neighborhoodRequired: boolean;
+  districtHasNoNeighborhoods: boolean;
+  helpText?: string | null;
+}): string {
+  if (input.status === 'unavailable') {
+    return input.neighborhoodRequired
+      ? 'Mahalle listesi şu anda getirilemedi. Talebi göndermek için listeyi yeniden yükleyin.'
+      : 'Mahalle listesi şu anda getirilemedi. Adres notuna yazabilirsiniz.';
+  }
+  if (input.districtHasNoNeighborhoods) {
+    return input.neighborhoodRequired
+      ? 'Bu ilçe için kayıtlı mahalle yok; talebiniz ilçe genelinde yayınlanır. Ayrıntıyı adres notuna yazabilirsiniz.'
+      : 'İsteğe bağlı.';
+  }
+  return (
+    input.helpText ??
+    (input.neighborhoodRequired
+      ? 'Yerinde hizmet için mahalle gereklidir; hizmet verenler bölgelerine göre eşleşir.'
+      : 'İsteğe bağlı.')
   );
 }
 

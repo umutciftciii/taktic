@@ -32,7 +32,11 @@ import {
   contactDetailsTarget,
   type ContactDetailsTarget,
 } from '../../../lib/contact-details-refusal';
-import { REQUEST_REFUSAL_GENERIC, requestRefusalText } from '../../../lib/request-refusal-text';
+import {
+  REQUEST_NEIGHBORHOOD_REQUIRED,
+  REQUEST_REFUSAL_GENERIC,
+  requestRefusalText,
+} from '../../../lib/request-refusal-text';
 import { switchAccountAction } from '../../login/actions';
 import {
   ContactSection,
@@ -534,6 +538,8 @@ export function RequestForm({
         answerableQuestions.map((question) => question.key),
       );
       if (target) setStep(target.target === 'addressNote' ? 2 : 1);
+      // The neighbourhood lives on the place step; the banner names it.
+      else if (result.code === REQUEST_NEIGHBORHOOD_REQUIRED) setStep(2);
     });
   }
 
@@ -886,9 +892,10 @@ export function RequestForm({
                   setPlace(value);
                   refreshSignals();
                 }}
-                // A REMOTE job happens nowhere in particular: the API does
-                // not hold it to a required ADDRESS, so neither does the form.
-                neighborhoodRequired={(addressQuestion?.isRequired ?? false) && !remote}
+                // SERVICE-AREA-001: an on-site job names its neighbourhood
+                // (a HYBRID one too, once the customer chose on site). A
+                // REMOTE job happens nowhere in particular and is not asked.
+                neighborhoodRequired={!remote}
                 neighborhoodHelpText={addressQuestion?.helpText}
               />
               <label className="form-row">
