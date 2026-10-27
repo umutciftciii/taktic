@@ -75,13 +75,28 @@ Pencereyi kısa tutmak yine de iyidir: aynı oturumda plan → onay → apply.
 ## Ortak hazırlık
 
 ```bash
-# Hedef ortamda, repo kökünde, deploy edilmiş image ile. Komut kısaltması:
+# Hedef ortamda, repo kökünde (checkout = deploy edilen commit). Komut kısaltması:
 qsb() {
-  docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+  local tag
+  tag="$(git rev-parse HEAD)" || return 1
+  # Araç yalnız çalışan API'nin image'ıyla koşar: checkout ile çalışan image
+  # ayrışmışsa (yarım kalmış deploy, elle geri dönüş) hiçbir şey çalıştırma.
+  if [ "$(docker inspect -f '{{.Config.Image}}' taktic-api)" != "taktic-api:$tag" ]; then
+    echo "qsb: taktic-api taktic-api:$tag değil; dur" >&2
+    return 9
+  fi
+  TAKTIC_IMAGE_TAG="$tag" docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
     -e TAKTIC_OPS_OUTPUT_DIR=/out -v "$HOME/Backups/taktic/ops:/out" \
     api node dist/scripts/backfill-quality-score-v2.js "$@"
 }
 ```
+
+`docker-compose.prod.yml` image adını `TAKTIC_IMAGE_TAG`'den kurar ve değişken
+tanımlı değilse komutu reddeder (`TAKTIC_IMAGE_TAG must name the built
+commit`); varsayılana düşüp başka bir sürümü çalıştırmaz. Etiketi elle yazmayın:
+yukarıdaki fonksiyon checkout'tan alır ve çalışan API'yle aynı olduğunu
+doğrular. `--confirm-digest` gibi elle kopyalanan değerlerle birlikte yanlış
+bir etiket, planı başka bir modelin hesaplayıcısıyla doğrulamak demektir.
 
 ## Adımlar
 
@@ -150,6 +165,67 @@ qsb rollback --manifest /out/quality-score-v2-<stamp>-applied.json --apply
   `qualityScoreVersion` kolonunu tanımaz (eklemeli olduğu için boot eder) ama v2
   kırılımını eski eşiklerle okur. Migration geri alınmaz; kolon kalır.
 
+### Kodu önceki sürüme döndürme
+
+`deploy-staging.sh` bu yol için kullanılamaz: preflight, veritabanında
+commit'in içermediği bir migration görünce durur
+(`scripts/ops/deploy-preflight.sh`, "the database has applied migrations this
+commit does not contain"). 105. migration uygulandıktan sonra daha eski bir
+commit'in deploy'u bu yüzden adım 1'de reddedilir. Bu doğru davranıştır; aşağıdaki
+elle dönüş yalnız ileri düzeltme mümkün değilse ve ayrı onayla yapılır.
+
+Önce ileri düzeltmeyi değerlendirin (düzeltme commit'i → normal deploy). Elle
+dönüş gerekiyorsa, sırayla:
+
+1. Backfill uygulandıysa veriyi geri alın (önce kuru, sonra `--apply`):
+
+   ```bash
+   qsb rollback --manifest /out/quality-score-v2-<stamp>-applied.json
+   qsb rollback --manifest /out/quality-score-v2-<stamp>-applied.json --apply
+   ```
+
+   Bu adım yeni image çalışırken yapılır (`qsb` çalışan image'la checkout'un
+   aynı olmasını şart koşar).
+
+2. Önceki image'ların makinede durduğunu doğrulayın (`PREV` = önceki deploy
+   commit'inin tam SHA'sı; deploy log'unun son satırı "previous API image"
+   olarak yazar):
+
+   ```bash
+   PREV=<önceki tam sha>
+   for t in api web admin; do
+     docker image inspect -f "{{index .Config.Labels \"org.opencontainers.image.revision\"}}" "taktic-$t:$PREV"
+   done
+   ```
+
+   Her satır `$PREV` olmalı. Image silinmişse `scripts/ops/build-images.sh
+   "$PREV"` ile yeniden üretin (çalışan hiçbir şeye dokunmaz).
+
+3. Yalnız uygulama container'larını önceki image'la yeniden oluşturun.
+   PostgreSQL'e dokunulmaz (`--no-deps`, servisler adıyla); checkout yeni
+   commit'te kalır, çünkü veritabanı o commit'in şemasındadır ve bir sonraki
+   ileri deploy oradan devam eder:
+
+   ```bash
+   TAKTIC_IMAGE_TAG="$PREV" docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate api
+   # API healthy olduktan sonra:
+   TAKTIC_IMAGE_TAG="$PREV" docker compose -f docker-compose.prod.yml up -d --no-deps --force-recreate web admin
+   ```
+
+   Bu iki `compose` komutu, iki commit arasında `docker-compose.prod.yml` aynı
+   kaldığı sürece güvenlidir; değiştiyse önceki commit'in dosyasını
+   `git show "$PREV":docker-compose.prod.yml > /tmp/prev-compose.yml` ile alıp
+   `-f /tmp/prev-compose.yml --project-directory .` ile kullanın.
+
+4. Doğrulayın: `docker inspect -f '{{.Config.Image}} {{.State.Health.Status}}'
+   taktic-api taktic-web taktic-admin` önceki etiketi ve `healthy` göstermeli;
+   `curl -fsS http://127.0.0.1:3001/health`. Elle dönüşten sonra `qsb`
+   checkout ile çalışan image ayrıştığı için çalışmayı reddeder; bu beklenir.
+
+5. Son çare veritabanı geri yüklemesidir (deploy öncesi yedek,
+   `db/taktic-db-<stamp>-pre-deploy-<sha>.dump`): yedekten sonra yazılan her şey
+   kaybolur. Ayrı onay ister ve bu runbook'un kapsamı dışındadır.
+
 ## Yerel stack
 
 Merge sonrası yerel eşitlemede migration `npx prisma migrate deploy` (ya da
@@ -174,3 +250,21 @@ silindi:
   Offer / ProviderCreditTransaction / ServiceRequestMatchRound / PromoCreditLot
   parmak izleri değişmedi.
 - rollback → kalite kolonları önceki haliyle birebir; diğer kolonlar aynı.
+
+## Staging (2026-10-27)
+
+`341113ed` deploy edildi (`deploy-staging.sh --sha … --allow-empty-uploads
+--skip-build`; preflight 0 hata, bekleyen yalnız 105; API ~16 sn kapalı), ardından
+yukarıdaki adımlar `qsb` ile koşuldu:
+
+- deploy sonrası 17 talep `qualityScoreVersion = 1`; sekiz veri grubunun
+  parmak izi deploy öncesiyle aynı; v1 satırda yeniden hesaplama 17/17
+  `409 QUALITY_SCORE_BACKFILL_PENDING`.
+- plan: 17 satır, HIGH 14 / MEDIUM 3 / LOW 0 → HIGH 0 / MEDIUM 7 / LOW 10;
+  `form changed since sent` 0, `no prior breakdown` 1. Digest, deploy'dan önce
+  aynı kodun READ ONLY bir transaction'da (kolon yerine version=1 vererek)
+  hesapladığıyla birebir aynıydı.
+- yedek → kuru apply (ret yok) → `--apply`: 17/17 v2, yeni plan 0 satır; 4
+  talep 40'ın üstünde puanla 5 kelime kapısı yüzünden LOW. Parmak izinde yalnız
+  talebin kalite kolonları değişti; `updatedAt` dahil diğer yedi grup aynı.
+- kuru rollback: ret yok (17 satır geri yazılabilir); çalıştırılmadı.
