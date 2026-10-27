@@ -1,5 +1,5 @@
 import config from '@taktic/shared/quality-score.json';
-import { ServiceRequestQuestionSystemField } from '@prisma/client';
+import { Prisma, ServiceRequestQuestionSystemField } from '@prisma/client';
 import {
   resolveVisibleQuestionIds,
   type VisibilityQuestion,
@@ -323,4 +323,45 @@ function storedMeaningfulWords(breakdown: unknown): number {
   }
 
   return 0;
+}
+
+/**
+ * What a stored request is read with to be scored again: its category's active
+ * form, conditions included, and its answers. One include for the admin
+ * recalculation and the backfill CLI, so the two cannot read different forms.
+ */
+export const storedRequestQualityInclude = {
+  category: {
+    include: {
+      questions: {
+        where: { isActive: true },
+        orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+        include: {
+          conditions: {
+            select: { sourceQuestionId: true, expectedValues: true, matchMode: true },
+          },
+        },
+      },
+    },
+  },
+  answers: { orderBy: { createdAt: 'asc' } },
+} satisfies Prisma.ServiceRequestInclude;
+
+export type StoredRequestForQuality = Prisma.ServiceRequestGetPayload<{
+  include: typeof storedRequestQualityInclude;
+}>;
+
+/** The current model's result for a stored request — recalculation and backfill alike. */
+export function scoreStoredRequest(request: StoredRequestForQuality): RequestQualityResult {
+  return scoreRequestQuality(
+    resolveQualitySignals({
+      description: request.description,
+      budgetMin: request.budgetMin,
+      budgetMax: request.budgetMax,
+      preferredDate: request.preferredDate,
+      urgency: request.urgency,
+      questions: request.category.questions,
+      answers: request.answers,
+    }),
+  );
 }

@@ -76,6 +76,8 @@ import {
   requestQualityLabel,
   resolveQualitySignals,
   scoreRequestQuality,
+  scoreStoredRequest,
+  storedRequestQualityInclude,
 } from './request-quality';
 
 /**
@@ -2063,24 +2065,7 @@ export class ServiceRequestsService {
   async recalculateQuality(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
-      include: {
-        category: {
-          include: {
-            questions: {
-              where: { isActive: true },
-              orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
-              include: {
-                conditions: {
-                  select: { sourceQuestionId: true, expectedValues: true, matchMode: true },
-                },
-              },
-            },
-          },
-        },
-        answers: {
-          orderBy: { createdAt: 'asc' },
-        },
-      },
+      include: storedRequestQualityInclude,
     });
 
     if (!request) {
@@ -2097,17 +2082,7 @@ export class ServiceRequestsService {
       });
     }
 
-    const quality = scoreRequestQuality(
-      resolveQualitySignals({
-        description: request.description,
-        budgetMin: request.budgetMin,
-        budgetMax: request.budgetMax,
-        preferredDate: request.preferredDate,
-        urgency: request.urgency,
-        questions: request.category.questions,
-        answers: request.answers,
-      }),
-    );
+    const quality = scoreStoredRequest(request);
 
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
