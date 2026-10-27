@@ -92,6 +92,7 @@ export class ProvidersController {
     @Query('district') district?: string,
     @Query('minQualityScore') minQualityScore?: string,
     @Query('qualityLabel') qualityLabel?: string,
+    @Query('minQualityLabel') minQualityLabel?: string,
     @Query('urgency') urgency?: string,
   ) {
     return this.providersService.listMatchingRequests(providerId, {
@@ -100,6 +101,7 @@ export class ProvidersController {
       district,
       minQualityScore,
       qualityLabel,
+      minQualityLabel,
       urgency,
     });
   }

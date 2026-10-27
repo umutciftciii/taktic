@@ -31,7 +31,7 @@ function detail(overrides: Partial<CustomerServiceRequestDetail> = {}): Customer
     preferredDate: null,
     preferredDateEnd: null,
     urgency: null,
-    qualityScore: 70,
+    qualityTips: [],
     qualityLabel: 'GOOD' as CustomerServiceRequestDetail['qualityLabel'],
     phoneVerifiedAt: null,
     expiredAt: null,

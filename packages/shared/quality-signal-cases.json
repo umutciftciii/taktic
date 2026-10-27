@@ -1,0 +1,68 @@
+{
+  "$comment": "QUALITY-SCORE-001 signal parity: the same form state read by the API (resolveQualitySignals, from stored questions and answers) and by the web form (formQualitySignals, from what is on screen) must give these signals. Question ids equal their keys so one file serves both: the API keys answers and conditions by id, the form by key. Answers are as the form holds them while it is filled in.",
+  "scenarios": [
+    {
+      "name": "a hidden optional and a hidden required question cost nothing",
+      "questions": [
+        { "id": "ek_is", "key": "ek_is", "type": "SELECT", "sortOrder": 1, "isRequired": false, "systemField": null, "conditions": [] },
+        { "id": "ek_detay", "key": "ek_detay", "type": "SELECT", "sortOrder": 2, "isRequired": false, "systemField": null, "conditions": [{ "source": "ek_is", "expectedValues": ["evet"] }] },
+        { "id": "ek_zorunlu", "key": "ek_zorunlu", "type": "SELECT", "sortOrder": 3, "isRequired": true, "systemField": null, "conditions": [{ "source": "ek_is", "expectedValues": ["evet"] }] }
+      ],
+      "answers": { "ek_is": "hayir" },
+      "fields": { "description": "Kombi su akıtıyor", "budgetMin": "", "budgetMax": "", "preferredDate": "", "urgency": "" },
+      "expected": { "hasBudget": false, "hasDates": false, "hasUrgency": false, "budgetRequired": false, "datesRequired": false, "optionalVisible": 1, "optionalAnswered": 1 }
+    },
+    {
+      "name": "an unanswered trigger keeps its dependants hidden",
+      "questions": [
+        { "id": "ek_is", "key": "ek_is", "type": "SELECT", "sortOrder": 1, "isRequired": false, "systemField": null, "conditions": [] },
+        { "id": "ek_detay", "key": "ek_detay", "type": "SELECT", "sortOrder": 2, "isRequired": false, "systemField": null, "conditions": [{ "source": "ek_is", "expectedValues": ["evet"] }] }
+      ],
+      "answers": {},
+      "fields": { "description": "", "budgetMin": "", "budgetMax": "", "preferredDate": "", "urgency": "FLEXIBLE" },
+      "expected": { "hasBudget": false, "hasDates": false, "hasUrgency": true, "budgetRequired": false, "datesRequired": false, "optionalVisible": 1, "optionalAnswered": 0 }
+    },
+    {
+      "name": "a trigger that reveals an optional question widens the denominator (known, documented)",
+      "questions": [
+        { "id": "ek_is", "key": "ek_is", "type": "SELECT", "sortOrder": 1, "isRequired": false, "systemField": null, "conditions": [] },
+        { "id": "ek_detay", "key": "ek_detay", "type": "SELECT", "sortOrder": 2, "isRequired": false, "systemField": null, "conditions": [{ "source": "ek_is", "expectedValues": ["evet"] }] }
+      ],
+      "answers": { "ek_is": "evet" },
+      "fields": { "description": "", "budgetMin": "", "budgetMax": "", "preferredDate": "", "urgency": "" },
+      "expected": { "hasBudget": false, "hasDates": false, "hasUrgency": false, "budgetRequired": false, "datesRequired": false, "optionalVisible": 2, "optionalAnswered": 1 }
+    },
+    {
+      "name": "a required bound budget is mandatory; an optional bound date is neither mandatory nor an optional question",
+      "questions": [
+        { "id": "butce", "key": "butce", "type": "NUMBER", "sortOrder": 1, "isRequired": true, "systemField": "BUDGET", "conditions": [] },
+        { "id": "tarih", "key": "tarih", "type": "DATE", "sortOrder": 2, "isRequired": false, "systemField": "PREFERRED_DATE", "conditions": [] },
+        { "id": "aciklama", "key": "aciklama", "type": "TEXTAREA", "sortOrder": 3, "isRequired": true, "systemField": "DESCRIPTION", "conditions": [] }
+      ],
+      "answers": {},
+      "fields": { "description": "Petek temizliği", "budgetMin": "150000", "budgetMax": "", "preferredDate": "2026-11-02", "urgency": "THIS_WEEK" },
+      "expected": { "hasBudget": true, "hasDates": true, "hasUrgency": true, "budgetRequired": true, "datesRequired": false, "optionalVisible": 0, "optionalAnswered": 0 }
+    },
+    {
+      "name": "a required bound question hidden by a condition does not make its field mandatory",
+      "questions": [
+        { "id": "tip", "key": "tip", "type": "SELECT", "sortOrder": 1, "isRequired": true, "systemField": null, "conditions": [] },
+        { "id": "tarih", "key": "tarih", "type": "DATE", "sortOrder": 2, "isRequired": true, "systemField": "PREFERRED_DATE", "conditions": [{ "source": "tip", "expectedValues": ["randevulu"] }] }
+      ],
+      "answers": { "tip": "acil" },
+      "fields": { "description": "", "budgetMin": "", "budgetMax": "", "preferredDate": "", "urgency": "" },
+      "expected": { "hasBudget": false, "hasDates": false, "hasUrgency": false, "budgetRequired": false, "datesRequired": false, "optionalVisible": 0, "optionalAnswered": 0 }
+    },
+    {
+      "name": "empty text and an empty multi-select are not answers; a boolean always is",
+      "questions": [
+        { "id": "not", "key": "not", "type": "TEXT", "sortOrder": 1, "isRequired": false, "systemField": null, "conditions": [] },
+        { "id": "secim", "key": "secim", "type": "MULTI_SELECT", "sortOrder": 2, "isRequired": false, "systemField": null, "conditions": [] },
+        { "id": "var_mi", "key": "var_mi", "type": "BOOLEAN", "sortOrder": 3, "isRequired": false, "systemField": null, "conditions": [] }
+      ],
+      "answers": { "not": "   ", "secim": [], "var_mi": "false" },
+      "fields": { "description": "", "budgetMin": "", "budgetMax": "250000", "preferredDate": "", "urgency": "" },
+      "expected": { "hasBudget": true, "hasDates": false, "hasUrgency": false, "budgetRequired": false, "datesRequired": false, "optionalVisible": 3, "optionalAnswered": 1 }
+    }
+  ]
+}

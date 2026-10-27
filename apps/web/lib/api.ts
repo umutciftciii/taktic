@@ -211,8 +211,13 @@ export type CustomerServiceRequest = {
   preferredDate: string | null;
   preferredDateEnd: string | null;
   urgency: string | null;
-  qualityScore: number;
+  /**
+   * QUALITY-SCORE-001: the customer sees the label and what they could add —
+   * never the number or how it was worked out (that is the business's view).
+   * Tips are empty on a request scored before the current model.
+   */
   qualityLabel: RequestQualityLabel;
+  qualityTips: RequestQualityTip[];
   /** null until the customer proves control of customerPhone with a one-time code. */
   phoneVerifiedAt: string | null;
   /**
@@ -453,6 +458,9 @@ export type ProviderDashboard = {
 };
 
 export type RequestQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+/** One component the customer could still add; see qualityTipText. */
+export type RequestQualityTip = 'DESCRIPTION' | 'OPTIONAL_QUESTIONS' | 'BUDGET' | 'TIMING';
 
 /**
  * One row of a request's quality breakdown. `points`, `max` and `passed` are

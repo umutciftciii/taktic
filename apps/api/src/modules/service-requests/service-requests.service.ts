@@ -73,6 +73,7 @@ import {
   QUALITY_SCORE_BACKFILL_PENDING_CODE,
   QUALITY_SCORE_VERSION,
   type QualityLabel,
+  qualityTips,
   requestQualityLabel,
   resolveQualitySignals,
   scoreRequestQuality,
@@ -2287,23 +2288,49 @@ function answerDisplayValue(value: unknown, options: unknown): string {
 }
 
 /**
- * The customer's row. Two columns are dropped on the way out: `moderationNote`
- * is what an operator wrote for other operators, and `qualityScoreBreakdown`
- * is how the score was arrived at — the customer gets the score, not the
- * working. Neither screen of theirs ever read them.
+ * The customer's view of a request's quality (QUALITY-SCORE-001): the label
+ * and what they could add — never the number, the model version or the
+ * breakdown, which are the business's and the operator's to read.
+ */
+export function customerQualityView(request: {
+  qualityScore: number;
+  qualityScoreVersion: number;
+  qualityScoreBreakdown: unknown;
+}) {
+  return { qualityLabel: requestQualityLabel(request), qualityTips: qualityTips(request) };
+}
+
+/**
+ * What the public create endpoint answers. The form reads only `id` and
+ * `status`, and the caller may be a guest: the row goes out without its quality
+ * working, with the customer's view of it instead.
+ */
+export function toCreatedServiceRequestResponse<
+  T extends { qualityScore: number; qualityScoreVersion: number; qualityScoreBreakdown: unknown },
+>({ qualityScore, qualityScoreVersion, qualityScoreBreakdown, ...request }: T) {
+  return {
+    ...request,
+    ...customerQualityView({ qualityScore, qualityScoreVersion, qualityScoreBreakdown }),
+  };
+}
+
+/**
+ * The customer's row. `moderationNote` is dropped on the way out — it is what
+ * an operator wrote for other operators — and the quality columns are replaced
+ * by the customer's view of them (see customerQualityView).
  */
 function toCustomerServiceRequest({
   showcaseLeadSource,
   reviews,
   moderationNote: _moderationNote,
+  qualityScore,
+  qualityScoreVersion,
   qualityScoreBreakdown,
   ...request
 }: CustomerRequestRow) {
   return {
     ...request,
-    // Read off the breakdown before it is dropped: the description gate on the
-    // label lives there.
-    qualityLabel: requestQualityLabel({ ...request, qualityScoreBreakdown }),
+    ...customerQualityView({ qualityScore, qualityScoreVersion, qualityScoreBreakdown }),
     offersCount: request._count.offers,
     awaitingPhoneVerification: isAwaitingPhoneVerification(request),
     review: reviews[0] ?? null,

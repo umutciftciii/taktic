@@ -106,6 +106,16 @@ describe('service request description limit', () => {
       .send(serviceRequestPayload(category.slug, { description: 'a'.repeat(400) }))
       .expect(201);
 
-    expect(padded.body.qualityScoreBreakdown.descriptionDepth).toMatchObject({ meaningfulWords: 0, points: 0 });
+    const stored = await ctx.prisma.serviceRequest.findUniqueOrThrow({
+      where: { id: padded.body.id },
+      select: { qualityScoreBreakdown: true },
+    });
+    expect((stored.qualityScoreBreakdown as Record<string, unknown>).descriptionDepth).toMatchObject({
+      meaningfulWords: 0,
+      points: 0,
+    });
+    // What the customer is told instead of a number.
+    expect(padded.body.qualityLabel).toBe('LOW');
+    expect(padded.body.qualityTips).toContain('DESCRIPTION');
   });
 });

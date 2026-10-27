@@ -78,7 +78,7 @@ function myRequest(status: string, extra: Record<string, unknown> = {}) {
       preferredDate: null,
       preferredDateEnd: null,
       urgency: null,
-      qualityScore: 70,
+      qualityTips: [],
       qualityLabel: 'GOOD',
       phoneVerifiedAt: null,
       expiredAt: null,

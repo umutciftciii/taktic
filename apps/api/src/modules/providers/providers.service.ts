@@ -134,7 +134,7 @@ import {
   publishRound,
 } from '../match-rounds/match-round-transitions';
 import { validateOfferSchedule } from '../../common/offer-schedule';
-import { type QualityLabel, requestQualityLabel } from '../service-requests/request-quality';
+import { type QualityLabel, qualityLabelAtLeast, requestQualityLabel } from '../service-requests/request-quality';
 
 type ProviderOwnershipFilter = 'claimed' | 'unclaimed';
 
@@ -151,8 +151,11 @@ type RequestDiscoveryFilters = {
   categoryId?: string;
   city?: string;
   district?: string;
+  /** Retired (QUALITY-SCORE-001): refused, never translated — see normalizeDiscoveryFilters. */
   minQualityScore?: string;
   qualityLabel?: string;
+  /** "At least this label": MEDIUM keeps MEDIUM and HIGH. */
+  minQualityLabel?: string;
   urgency?: string;
 };
 
@@ -1324,9 +1327,6 @@ export class ProvidersService implements OnModuleInit {
         ...(normalizedFilters.district
           ? { district: { equals: normalizedFilters.district, mode: 'insensitive' } }
           : {}),
-        ...(normalizedFilters.minQualityScore !== null
-          ? { qualityScore: { gte: normalizedFilters.minQualityScore } }
-          : {}),
         ...(normalizedFilters.urgency ? { urgency: normalizedFilters.urgency } : {}),
       },
       // QUALITY-SCORE-001: the model version leads, so a request scored by the
@@ -1357,6 +1357,11 @@ export class ProvidersService implements OnModuleInit {
       .map(toProviderRequestListItem)
       .filter((request) =>
         normalizedFilters.qualityLabel ? request.qualityLabel === normalizedFilters.qualityLabel : true,
+      )
+      .filter((request) =>
+        normalizedFilters.minQualityLabel
+          ? qualityLabelAtLeast(request.qualityLabel, normalizedFilters.minQualityLabel)
+          : true,
       );
   }
 
@@ -3087,34 +3092,36 @@ function normalizeOptionalOwnership(value: string | undefined): ProviderOwnershi
   return normalized;
 }
 
+/**
+ * QUALITY-SCORE-001: the numeric minimum is refused, not translated. A
+ * threshold a provider chose against the original scale means something else
+ * on the current one, and mapping it to a label behind their back would hide
+ * requests they never asked to hide (or show ones they did). The label filter
+ * says what it means on every scale.
+ */
+export const QUALITY_SCORE_FILTER_RETIRED_CODE = 'QUALITY_SCORE_FILTER_RETIRED';
+
 function normalizeDiscoveryFilters(filters: RequestDiscoveryFilters) {
-  const minQualityScore = normalizeOptionalScore(filters.minQualityScore);
+  if (normalizeNullableString(filters.minQualityScore)) {
+    throw new BadRequestException({
+      statusCode: 400,
+      error: 'Bad Request',
+      code: QUALITY_SCORE_FILTER_RETIRED_CODE,
+      message: 'Sayısal kalite filtresi kaldırıldı. Talepleri kalite etiketiyle filtreleyin.',
+    });
+  }
 
   return {
     categoryId: normalizeNullableString(filters.categoryId),
     city: normalizeNullableString(filters.city),
     district: normalizeNullableString(filters.district),
-    minQualityScore,
-    qualityLabel: normalizeOptionalQualityLabel(filters.qualityLabel),
+    qualityLabel: normalizeOptionalQualityLabel(filters.qualityLabel, 'qualityLabel'),
+    minQualityLabel: normalizeOptionalQualityLabel(filters.minQualityLabel, 'minQualityLabel'),
     urgency: normalizeNullableString(filters.urgency),
   };
 }
 
-function normalizeOptionalScore(value: string | undefined) {
-  const normalized = normalizeNullableString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const score = Number(normalized);
-  if (!Number.isInteger(score) || score < 0 || score > 100) {
-    throw new BadRequestException('minQualityScore must be an integer between 0 and 100');
-  }
-
-  return score;
-}
-
-function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel | null {
+function normalizeOptionalQualityLabel(value: string | undefined, field: string): QualityLabel | null {
   const normalized = normalizeNullableString(value)?.toUpperCase();
 
   if (!normalized) {
@@ -3122,7 +3129,7 @@ function normalizeOptionalQualityLabel(value: string | undefined): QualityLabel 
   }
 
   if (normalized !== 'LOW' && normalized !== 'MEDIUM' && normalized !== 'HIGH') {
-    throw new BadRequestException('qualityLabel must be LOW, MEDIUM, or HIGH');
+    throw new BadRequestException(`${field} must be LOW, MEDIUM, or HIGH`);
   }
 
   return normalized;
