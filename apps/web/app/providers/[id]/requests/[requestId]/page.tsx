@@ -11,6 +11,7 @@ import {
   formatDateRange,
   formatDateTime,
   qualityLabel,
+  orderedQualityBreakdown,
   qualityBreakdownDetail,
   qualityBreakdownLabel,
   qualityBreakdownStatus,
@@ -438,7 +439,7 @@ function renderBreakdownRows(breakdown: Record<string, RequestQualityBreakdownCo
 
   // A row that does not apply to this request left the denominator: it shows
   // no points and no maximum rather than a 0 that reads like a miss.
-  return Object.entries(breakdown).map(([key, component]) => {
+  return orderedQualityBreakdown(breakdown).map(([key, component]) => {
     const applicable = component.applicable !== false;
     return (
       <tr key={key}>
