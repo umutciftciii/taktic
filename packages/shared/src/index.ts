@@ -78,3 +78,13 @@ export {
   requestDeliveryMode,
 } from './delivery-model';
 export type { CategoryDeliveryModel, RequestDeliveryMode } from './delivery-model';
+
+export { countMeaningfulWords, scoreRequestQuality } from './quality-score';
+export type {
+  QualityComponent,
+  QualityComponentKey,
+  QualityLabel,
+  QualityTip,
+  RequestQualityResult,
+  RequestQualitySignals,
+} from './quality-score';

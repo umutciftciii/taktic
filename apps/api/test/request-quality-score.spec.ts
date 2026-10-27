@@ -6,11 +6,14 @@ import {
   UserRole,
 } from '@prisma/client';
 import cases from '@taktic/shared/quality-score-cases.json';
+import signalCases from '@taktic/shared/quality-signal-cases.json';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   countMeaningfulWords,
+  qualityTips,
   requestQualityLabel,
+  resolveQualitySignals,
   scoreRequestQuality,
   type QualityComponentKey,
   type RequestQualitySignals,
@@ -65,9 +68,42 @@ describe('quality calculator — shared cases', () => {
     }
   });
 
+  it.each(cases.scores)('tells the customer what to add: $name', ({ signals, expected }) => {
+    const { breakdown, version } = scoreRequestQuality(signals as RequestQualitySignals);
+    expect(qualityTips({ qualityScoreVersion: version, qualityScoreBreakdown: breakdown })).toEqual(expected.tips);
+  });
+
   it('carries the decomposed ü of the NFC case as two code points, not a pre-composed one', () => {
     const nfc = cases.words.find((item) => item.name.startsWith('NFC'));
     expect(nfc?.text).toContain('ü');
+  });
+});
+
+describe('quality signals — shared cases', () => {
+  // The web form reads the same scenarios through formQualitySignals
+  // (apps/web/test/request-quality-estimate.spec.ts). Question ids equal keys.
+  it.each(signalCases.scenarios)('$name', ({ questions, answers, fields, expected }) => {
+    const signals = resolveQualitySignals({
+      description: fields.description,
+      budgetMin: fields.budgetMin ? Number(fields.budgetMin) : null,
+      budgetMax: fields.budgetMax ? Number(fields.budgetMax) : null,
+      preferredDate: fields.preferredDate || null,
+      urgency: fields.urgency || null,
+      questions: questions.map((question) => ({
+        id: question.id,
+        key: question.key,
+        type: question.type as ServiceRequestQuestionType,
+        sortOrder: question.sortOrder,
+        isRequired: question.isRequired,
+        systemField: question.systemField as ServiceRequestQuestionSystemField | null,
+        conditions: question.conditions.map((condition) => ({
+          sourceQuestionId: condition.source,
+          expectedValues: condition.expectedValues,
+        })),
+      })),
+      answers: Object.entries(answers).map(([questionId, value]) => ({ questionId, value })),
+    });
+    expect(signals).toEqual({ description: fields.description, ...expected });
   });
 });
 
@@ -191,6 +227,21 @@ async function recalcCookie() {
   return loginAs(ctx.prisma, admin.id);
 }
 
+/**
+ * The quality the API stored. The create response is the customer's and
+ * carries only the label and tips (QUALITY-SCORE-001), so the number, the
+ * version and the breakdown are read where the business and the operator
+ * read them: the row.
+ */
+async function quality(id: string) {
+  const row = await stored(id);
+  return {
+    score: row.qualityScore,
+    version: row.qualityScoreVersion,
+    breakdown: row.qualityScoreBreakdown as Record<string, Record<string, unknown>>,
+  };
+}
+
 async function stored(id: string) {
   return ctx.prisma.serviceRequest.findUniqueOrThrow({
     where: { id },
@@ -215,12 +266,13 @@ describe('quality on a created request', () => {
       )
       .expect(201);
 
-    expect(created.body.qualityScore).toBe(100);
+    const written = await quality(created.body.id);
+    expect(written.score).toBe(100);
     expect(created.body.qualityLabel).toBe('HIGH');
-    expect(created.body.qualityScoreVersion).toBe(2);
-    expect(Object.keys(created.body.qualityScoreBreakdown).sort()).toEqual([...COMPONENTS].sort());
+    expect(written.version).toBe(2);
+    expect(Object.keys(written.breakdown).sort()).toEqual([...COMPONENTS].sort());
     // A category without optional questions takes that row out of the denominator.
-    expect(created.body.qualityScoreBreakdown.optionalAnswers).toMatchObject({
+    expect(written.breakdown.optionalAnswers).toMatchObject({
       applicable: false,
       notApplicableReason: 'NO_VISIBLE_OPTIONAL_QUESTIONS',
     });
@@ -245,8 +297,7 @@ describe('quality on a created request', () => {
       )
       .expect(201);
 
-    expect(dressed.body.qualityScore).toBe(bare.body.qualityScore);
-    expect(dressed.body.qualityScoreBreakdown).toEqual(bare.body.qualityScoreBreakdown);
+    expect(await quality(dressed.body.id)).toEqual(await quality(bare.body.id));
   });
 
   it('scores an ON_SITE and a REMOTE request with the same content the same', async () => {
@@ -264,8 +315,7 @@ describe('quality on a created request', () => {
       .expect(201);
 
     expect(b.body.deliveryMode).toBe('REMOTE');
-    expect(b.body.qualityScore).toBe(a.body.qualityScore);
-    expect(b.body.qualityScoreBreakdown).toEqual(a.body.qualityScoreBreakdown);
+    expect(await quality(b.body.id)).toEqual(await quality(a.body.id));
   });
 
   it('caps the label of a near-empty description at LOW and keeps the number', async () => {
@@ -282,9 +332,12 @@ describe('quality on a created request', () => {
       )
       .expect(201);
 
-    expect(created.body.qualityScoreBreakdown.descriptionDepth.meaningfulWords).toBe(2);
-    expect(created.body.qualityScore).toBe(47);
+    const written = await quality(created.body.id);
+    expect(written.breakdown.descriptionDepth?.meaningfulWords).toBe(2);
+    expect(written.score).toBe(47);
     expect(created.body.qualityLabel).toBe('LOW');
+    // The customer is told what to add; the business still sees the number.
+    expect(created.body.qualityTips).toEqual(['DESCRIPTION']);
   });
 
   it('counts only the optional questions the customer could see', async () => {
@@ -324,7 +377,7 @@ describe('quality on a created request', () => {
 
     // One visible optional question, answered: the hidden optional one is not
     // in the denominator and the hidden required one costs nothing.
-    expect(answeredNo.body.qualityScoreBreakdown.optionalAnswers).toMatchObject({
+    expect((await quality(answeredNo.body.id)).breakdown.optionalAnswers).toMatchObject({
       applicable: true,
       visible: 1,
       answered: 1,
@@ -336,7 +389,11 @@ describe('quality on a created request', () => {
       .post('/service-requests')
       .send(serviceRequestPayload(category.slug))
       .expect(201);
-    expect(unanswered.body.qualityScoreBreakdown.optionalAnswers).toMatchObject({ visible: 1, answered: 0, points: 0 });
+    expect((await quality(unanswered.body.id)).breakdown.optionalAnswers).toMatchObject({
+      visible: 1,
+      answered: 0,
+      points: 0,
+    });
   });
 
   it('takes a required bound field out of the denominator and never counts a bound question as optional', async () => {
@@ -354,12 +411,55 @@ describe('quality on a created request', () => {
       .send(serviceRequestPayload(category.slug, { budgetMin: 100_000 }))
       .expect(201);
 
-    expect(created.body.qualityScoreBreakdown.budget).toMatchObject({
-      applicable: false,
-      notApplicableReason: 'REQUIRED_FIELD',
-    });
-    expect(created.body.qualityScoreBreakdown.timing).toMatchObject({ applicable: true, basis: 'NONE' });
-    expect(created.body.qualityScoreBreakdown.optionalAnswers).toMatchObject({ applicable: false });
+    const { breakdown } = await quality(created.body.id);
+    expect(breakdown.budget).toMatchObject({ applicable: false, notApplicableReason: 'REQUIRED_FIELD' });
+    expect(breakdown.timing).toMatchObject({ applicable: true, basis: 'NONE' });
+    expect(breakdown.optionalAnswers).toMatchObject({ applicable: false });
+  });
+});
+
+describe("the customer's view", () => {
+  it('never carries the number, the version or the working — only the label and the tips', async () => {
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const cookie = await loginAs(ctx.prisma, customer.id);
+    const category = await createCategory(ctx.prisma, 'Müşteri görünümü', { offerCreditCost: 1 });
+
+    const created = await request(ctx.server)
+      .post('/service-requests')
+      .set('Cookie', cookie)
+      .send(serviceRequestPayload(category.slug, { description: DESCRIPTION_25, urgency: 'FLEXIBLE' }))
+      .expect(201);
+    const list = await request(ctx.server).get('/service-requests/my').set('Cookie', cookie).expect(200);
+    const detail = await request(ctx.server)
+      .get(`/service-requests/my/${created.body.id}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    for (const body of [created.body, list.body[0], detail.body]) {
+      expect(body).not.toHaveProperty('qualityScore');
+      expect(body).not.toHaveProperty('qualityScoreVersion');
+      expect(body).not.toHaveProperty('qualityScoreBreakdown');
+      // 25+ words, no budget, urgency only: 48/70.
+      expect(body.qualityLabel).toBe('MEDIUM');
+      expect(body.qualityTips).toEqual(['BUDGET', 'TIMING']);
+    }
+    // The number is still there for the business and the operator.
+    expect((await quality(created.body.id)).score).toBe(69);
+  });
+
+  it('gives an original-model row its label and no tips', async () => {
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const category = await createCategory(ctx.prisma, 'Eski müşteri', { offerCreditCost: 1 });
+    const legacy = await createApprovedRequest(ctx.prisma, { categoryId: category.id, customerId: customer.id });
+
+    const detail = await request(ctx.server)
+      .get(`/service-requests/my/${legacy.id}`)
+      .set('Cookie', await loginAs(ctx.prisma, customer.id))
+      .expect(200);
+
+    expect(detail.body.qualityLabel).toBe('HIGH');
+    expect(detail.body.qualityTips).toEqual([]);
+    expect(detail.body).not.toHaveProperty('qualityScore');
   });
 });
 
@@ -471,5 +571,44 @@ describe('provider request feed', () => {
       .set('Cookie', cookie)
       .expect(200);
     expect(high.body.map((row: { id: string }) => row.id)).toEqual([legacy.id]);
+  });
+
+  it('filters by "at least this label" and refuses the retired numeric minimum outright', async () => {
+    const category = await createCategory(ctx.prisma, 'Etiket filtresi', { offerCreditCost: 1 });
+    const user = await createUser(ctx.prisma, { role: UserRole.PROVIDER });
+    const provider = await createDiscoverableProvider(ctx.prisma, { userId: user.id, categoryId: category.id });
+    const cookie = await loginAs(ctx.prisma, user.id);
+    const write = async (qualityScore: number, meaningfulWords: number) => {
+      const row = await createApprovedRequest(ctx.prisma, { categoryId: category.id });
+      await ctx.prisma.serviceRequest.update({
+        where: { id: row.id },
+        data: {
+          qualityScore,
+          qualityScoreVersion: 2,
+          qualityScoreBreakdown: { descriptionDepth: { points: 0, max: 40, passed: false, applicable: true, meaningfulWords } },
+        },
+      });
+      return row.id;
+    };
+    const high = await write(85, 20);
+    const medium = await write(50, 12);
+    const low = await write(30, 12);
+    const gated = await write(75, 3);
+
+    const list = async (query: string) =>
+      (await request(ctx.server).get(`/providers/${provider.id}/requests${query}`).set('Cookie', cookie).expect(200))
+        .body.map((row: { id: string }) => row.id)
+        .sort();
+
+    expect(await list('?minQualityLabel=MEDIUM')).toEqual([high, medium].sort());
+    expect(await list('?minQualityLabel=HIGH')).toEqual([high]);
+    expect(await list('?minQualityLabel=LOW')).toEqual([high, medium, low, gated].sort());
+
+    // A bookmarked numeric filter is not quietly turned into a label.
+    const refused = await request(ctx.server)
+      .get(`/providers/${provider.id}/requests?minQualityScore=60`)
+      .set('Cookie', cookie)
+      .expect(400);
+    expect(refused.body.code).toBe('QUALITY_SCORE_FILTER_RETIRED');
   });
 });

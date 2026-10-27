@@ -10,6 +10,7 @@ import {
   ProviderRequestListItem,
   formatPrice,
   formatDateTime,
+  qualityLabel,
   statusLabel,
   urgencyLabel,
 } from '../../../../lib/api';
@@ -27,13 +28,26 @@ type ProviderRequestsPageProps = {
     categoryId?: string;
     city?: string;
     district?: string;
+    /** QUALITY-SCORE-001: "at least this label" — MEDIUM or HIGH. */
+    minQualityLabel?: string;
+    /** Retired. Read only to say so; never forwarded and never translated. */
     minQualityScore?: string;
   }>;
 };
 
+const MIN_QUALITY_OPTIONS = [
+  { value: '', label: 'Tümü' },
+  { value: 'MEDIUM', label: 'Orta ve üstü' },
+  { value: 'HIGH', label: 'Yalnız yüksek' },
+];
+
 export default async function ProviderRequestsPage({ params, searchParams }: ProviderRequestsPageProps) {
   const { id } = await params;
-  const filters = await searchParams;
+  // A link or bookmark from before the label filter may still carry the
+  // numeric minimum. It is not applied — a number on the old scale means
+  // something else on the current one — and the page says so instead of
+  // quietly picking a label for the provider.
+  const { minQualityScore: retiredMinQualityScore, ...filters } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/requests`);
@@ -107,15 +121,14 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
           <input name="district" defaultValue={filters.district ?? ''} placeholder="Örn. Kadıköy" />
         </label>
         <label className="pdash-filter-field">
-          <span>Min. kalite</span>
-          <input
-            name="minQualityScore"
-            type="number"
-            min="0"
-            max="100"
-            defaultValue={filters.minQualityScore ?? ''}
-            placeholder="0-100"
-          />
+          <span>Kalite</span>
+          <select name="minQualityLabel" defaultValue={filters.minQualityLabel ?? ''} data-testid="min-quality-label">
+            {MIN_QUALITY_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
         </label>
         <div className="pdash-filter-actions">
           <Link className="pdash-btn pdash-btn-secondary pdash-btn-sm" href={`/providers/${id}/requests`}>
@@ -126,6 +139,13 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
           </button>
         </div>
       </form>
+
+      {retiredMinQualityScore ? (
+        <div className="pdash-notice pdash-notice-warn" role="status" data-testid="retired-quality-filter-notice">
+          Sayısal kalite filtresi (en az {retiredMinQualityScore}) kaldırıldı ve bu listeye uygulanmadı. Kalite
+          etiketine göre daraltmak için yukarıdaki “Kalite” seçimini kullanın.
+        </div>
+      ) : null}
 
       {errorMessage ? <div className="pdash-notice pdash-notice-error">{errorMessage}</div> : null}
 
@@ -164,7 +184,9 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
               <div className="datarow-body">
                 <h3 className="datarow-title">
                   <span>{request.category.name}</span>
-                  <span className="tag tag-accent">Kalite {request.qualityScore}</span>
+                  <span className="tag tag-accent">
+                    Kalite {qualityLabel(request.qualityLabel)} · {request.qualityScore}
+                  </span>
                   {request.urgency ? (
                     <span className={urgencyTagClass(request.urgency)}>
                       {urgencyLabel(request.urgency)}

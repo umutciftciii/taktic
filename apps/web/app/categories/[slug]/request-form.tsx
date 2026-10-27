@@ -27,6 +27,8 @@ import { DRAFT_STATE_FIELD, draftStateFor } from '../../../lib/draft-state';
 import type { ProvinceWithDistricts } from '../../../lib/locations';
 import type { RequestDraftPayload } from '../../../lib/request-drafts';
 import { boundQuestion, encodeRouterSelections, visibleQuestions } from '../../../lib/request-flow';
+import { estimateRequestQuality, type QualityFormFields } from '../../../lib/request-quality-estimate';
+import { qualityBadgeClass, qualityLabel, qualityTipText } from '../../../lib/formatters';
 import {
   CONTACT_DETAILS_ERROR,
   contactDetailsTarget,
@@ -205,15 +207,19 @@ export function RequestForm({
   ];
 
   /*
-   * A client-side estimate, never the score itself. The API computes the real
-   * quality score when the request is created; this only reflects which
-   * signals the customer has filled in so far, and says so on screen.
+   * The fields the quality estimate reads, mirrored from the DOM on every
+   * change (QUALITY-SCORE-001). The estimate is the shared model's — the same
+   * arithmetic and the same cases as the API's — so it is the label the
+   * request will get, not an approximation of it; it is still called an
+   * estimate on screen because the API computes the stored value. Nothing
+   * mandatory feeds it: contact details and the place are not quality.
    */
-  const [signals, setSignals] = useState({
-    detail: false,
-    place: false,
-    time: false,
-    contact: false,
+  const [qualityFields, setQualityFields] = useState<QualityFormFields>({
+    description: '',
+    budgetMin: '',
+    budgetMax: '',
+    preferredDate: '',
+    urgency: '',
   });
 
   /*
@@ -373,36 +379,10 @@ export function RequestForm({
   /** The questions that are actually rendered as inputs. */
   const answerableQuestions = shown.filter((question) => !question.systemField);
 
-  /*
-   * The contact signal, which now has two sources.
-   *
-   * A guest fills the three fields in and `refreshSignals` reads them from the
-   * DOM, exactly as before. A signed-in customer on the default path has no
-   * fields to read — the details come from their account — so the signal is
-   * derived from state instead, and the estimate keeps counting contact as
-   * done rather than punishing them for a step the product filled in for them.
-   */
-  const contactSignal = accountContact
-    ? useAlternateContact
-      ? Boolean(
-          alternateContact.name.trim() &&
-            alternateContact.phone.trim() &&
-            alternateContact.email.trim(),
-        )
-      : accountContactComplete
-    : signals.contact;
-
-  const checklist = useMemo(
-    () => [
-      { label: 'İş detayı yazıldı', done: signals.detail },
-      { label: 'Konum girildi', done: signals.place },
-      { label: 'Zaman veya bütçe belirtildi', done: signals.time },
-      { label: 'İletişim bilgisi verildi', done: contactSignal },
-    ],
-    [signals, contactSignal],
+  const estimate = useMemo(
+    () => estimateRequestQuality(qualityFields, questions, answers),
+    [qualityFields, questions, answers],
   );
-
-  const estimate = checklist.filter((item) => item.done).length * 25;
 
   function refreshSignals() {
     const form = formRef.current;
@@ -420,11 +400,12 @@ export function RequestForm({
 
     setAnswers(readAnswers(form, questions));
 
-    setSignals({
-      detail: value('description').length >= 40,
-      place: Boolean(value('city') && value('district')),
-      time: Boolean(value('preferredDate') || value('urgency') || value('budgetMin') || value('budgetMax')),
-      contact: Boolean(value('customerName') && value('customerPhone') && value('customerEmail')),
+    setQualityFields({
+      description: value('description'),
+      budgetMin: value('budgetMin'),
+      budgetMax: value('budgetMax'),
+      preferredDate: value('preferredDate'),
+      urgency: value('urgency'),
     });
   }
 
@@ -1076,34 +1057,34 @@ export function RequestForm({
         <aside className="req-rail" aria-label="Talep kalite tahmini">
           <div className="quality-card">
             <div>
-              <span className="cdash-summary-label">Talep kalite skoru</span>
+              <span className="cdash-summary-label">Talep kalitesi</span>
               <div className="quality-head">
-                <span className="quality-score">
-                  {estimate}
-                  <sup>/100</sup>
+                <span className={qualityBadgeClass(estimate.label)} data-testid="request-quality-estimate">
+                  {qualityLabel(estimate.label)}
                 </span>
                 <span className="tag tag-neutral">Tahmin</span>
               </div>
-              <div className="databar" style={{ marginTop: 12 }}>
-                <div className="databar-fill" style={{ width: `${estimate}%` }} />
-              </div>
             </div>
 
-            <ul className="quality-list">
-              {checklist.map((item) => (
-                <li className="quality-item" key={item.label}>
-                  <span className={`check-square${item.done ? '' : ' check-square-idle'}`}>
-                    {item.done ? <IconCheck size={10} /> : null}
-                  </span>
-                  <span>{item.label}</span>
-                </li>
-              ))}
-            </ul>
+            {estimate.tips.length > 0 ? (
+              <ul className="quality-list" data-testid="request-quality-tips">
+                {estimate.tips.map((tip) => (
+                  <li className="quality-item" key={tip}>
+                    <span className="check-square check-square-idle" />
+                    <span>{qualityTipText(tip)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="quality-note" data-testid="request-quality-complete">
+                <IconCheck size={10} /> Hizmet verenlerin fiyatlamak için ihtiyaç duyduğu bilgiler talepte var.
+              </p>
+            )}
 
             <p className="quality-note">
-              Buradaki değer yalnızca doldurduğunuz alanlara bakan bir tahmindir. Kesin kalite
-              skoru talebiniz oluşturulduğunda sunucu tarafında hesaplanır ve talep ekranınızda
-              görünür.
+              Kalite; iş açıklamanızın ayrıntısına, isteğe bağlı sorulara, bütçeye ve zamana bakar.
+              İletişim ve konum gibi zorunlu bilgiler kaliteyi değiştirmez. Kesin değer talebiniz
+              oluşturulduğunda hesaplanır.
             </p>
           </div>
 

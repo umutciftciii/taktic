@@ -23,7 +23,7 @@ function row(overrides: Partial<CustomerServiceRequest> = {}): CustomerServiceRe
     preferredDate: null,
     preferredDateEnd: null,
     urgency: null,
-    qualityScore: 70,
+    qualityTips: [],
     qualityLabel: 'GOOD' as CustomerServiceRequest['qualityLabel'],
     phoneVerifiedAt: null,
     expiredAt: null,
