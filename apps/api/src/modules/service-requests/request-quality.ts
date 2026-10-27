@@ -188,6 +188,44 @@ export function requestQualityLabel(request: {
   return labelForScore(request.qualityScore, storedMeaningfulWords(request.qualityScoreBreakdown));
 }
 
+/**
+ * What the customer could add, one code per component that fell short — the
+ * customer's side of the breakdown (QUALITY-SCORE-001): they see the label and
+ * these, never the number or the working. In component order, so the list
+ * reads the same on every screen. A row written by the original model has no
+ * component to read and yields none.
+ */
+export type QualityTip = 'DESCRIPTION' | 'OPTIONAL_QUESTIONS' | 'BUDGET' | 'TIMING';
+
+const TIP_BY_COMPONENT: Array<[QualityComponentKey, QualityTip]> = [
+  ['descriptionDepth', 'DESCRIPTION'],
+  ['optionalAnswers', 'OPTIONAL_QUESTIONS'],
+  ['budget', 'BUDGET'],
+  ['timing', 'TIMING'],
+];
+
+export function qualityTips(request: { qualityScoreVersion: number; qualityScoreBreakdown: unknown }): QualityTip[] {
+  if (request.qualityScoreVersion < QUALITY_SCORE_VERSION) {
+    return [];
+  }
+
+  const breakdown =
+    request.qualityScoreBreakdown && typeof request.qualityScoreBreakdown === 'object'
+      ? (request.qualityScoreBreakdown as Record<string, Partial<QualityComponent> | undefined>)
+      : {};
+
+  return TIP_BY_COMPONENT.filter(([key]) => {
+    const component = breakdown[key];
+    return (
+      component !== undefined &&
+      component.applicable !== false &&
+      typeof component.points === 'number' &&
+      typeof component.max === 'number' &&
+      component.points < component.max
+    );
+  }).map(([, tip]) => tip);
+}
+
 const LABEL_RANK: Record<QualityLabel, number> = { LOW: 0, MEDIUM: 1, HIGH: 2 };
 
 /** Whether `label` is `minimum` or better — what an "at least" filter asks. */

@@ -13,7 +13,7 @@ import { CancelServiceRequestDto, WithholdWinnerRefundCancelDto } from './dto/ca
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { ServiceRequestThrottlerGuard } from './service-request.throttler';
-import { ServiceRequestsService } from './service-requests.service';
+import { ServiceRequestsService, toCreatedServiceRequestResponse } from './service-requests.service';
 import { TurnstileAction } from '../turnstile/turnstile.decorators';
 import { TurnstileGuard } from '../turnstile/turnstile.guard';
 import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
@@ -36,9 +36,9 @@ export class ServiceRequestsController {
     @CurrentUser() user: AuthUser | null,
     @Req() req: { headers?: Record<string, string | string[] | undefined> },
   ) {
-    return this.serviceRequestsService.createServiceRequest(dto, user, {
-      draftToken: getDraftTokenFromRequest(req),
-    });
+    return this.serviceRequestsService
+      .createServiceRequest(dto, user, { draftToken: getDraftTokenFromRequest(req) })
+      .then(toCreatedServiceRequestResponse);
   }
 
   @Get()

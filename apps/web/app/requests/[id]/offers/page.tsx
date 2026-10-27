@@ -12,6 +12,9 @@ import {
   formatDateTime,
   getCurrentUser,
   getMarketplacePublishPolicy,
+  qualityBadgeClass,
+  qualityLabel,
+  qualityTipText,
   statusLabel,
 } from '../../../../lib/api';
 import {
@@ -287,16 +290,31 @@ export default async function RequestOffersPage({ params, searchParams }: Reques
         </div>
 
         <aside className="cdash-summary-rail" aria-label="Talep durumu">
-          <span className="cdash-summary-label">Kalite skoru</span>
+          {/*
+            QUALITY-SCORE-001: the customer sees the label and what the request
+            does not say — never the number. A sent request is not edited, so
+            the tips read as what a business may ask about.
+          */}
+          <span className="cdash-summary-label">Talep kalitesi</span>
           <div className="quality-head">
-            <span className="quality-score">
-              {summary ? summary.qualityScore : '—'}
-              <sup>/100</sup>
+            <span
+              className={summary ? qualityBadgeClass(summary.qualityLabel) : 'badge'}
+              data-testid="request-quality-label"
+            >
+              {summary ? qualityLabel(summary.qualityLabel) : '—'}
             </span>
           </div>
-          {summary ? (
-            <div className="databar" style={{ marginTop: 12 }}>
-              <div className="databar-fill" style={{ width: `${summary.qualityScore}%` }} />
+          {/* `?? []`: an API from before the tips reads as "nothing to add". */}
+          {(summary?.qualityTips ?? []).length > 0 ? (
+            <div style={{ marginTop: 12 }} data-testid="request-quality-tips">
+              <p className="quality-note">Talepte eksik kalanlar; hizmet verenler bunları size sorabilir:</p>
+              <ul className="quality-list">
+                {(summary?.qualityTips ?? []).map((tip) => (
+                  <li className="quality-item" key={tip}>
+                    {qualityTipText(tip)}
+                  </li>
+                ))}
+              </ul>
             </div>
           ) : null}
 

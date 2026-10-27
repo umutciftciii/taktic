@@ -6,6 +6,7 @@ import type { CustomerServiceRequest } from '../../../lib/api';
 import { CategoryVisual } from '../../category-visual';
 import { IconArrowRight, IconSearch } from '../../landing-icons';
 import { formatDateTime, statusLabel } from '../../../lib/request-formatters';
+import { qualityLabel } from '../../../lib/formatters';
 import { ReviewStars } from '../../review-stars';
 import { statusPillClass } from '../../status-pill';
 import { PHONE_VERIFICATION_ANCHOR } from '../../../lib/request-lifecycle';
@@ -226,7 +227,9 @@ function RequestRow({ request, reviewsEnabled }: { request: CustomerServiceReque
 
       <div className="datarow-stat">
         <span className="datarow-stat-label">Kalite</span>
-        <span className="datarow-stat-value">{request.qualityScore}/100</span>
+        <span className="datarow-stat-value" data-testid="request-quality-label">
+          {qualityLabel(request.qualityLabel)}
+        </span>
       </div>
 
       <div className="datarow-stat">

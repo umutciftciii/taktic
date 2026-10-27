@@ -21,7 +21,7 @@ const buildItems = (refundWindowHours: number) => [
   {
     q: 'Talep kalite skoru nedir?',
     a:
-      'Talebin ne kadar detaylı ve takip edilebilir olduğunu özetleyen bir puandır. İletişim bilgisinin verilmiş olması, brief detayı, lokasyon ve zaman bilgisi gibi sinyaller hesaplamaya girer. Skor sunucu tarafında hesaplanır.',
+      'Talebin hizmet verene ne kadar yol gösterdiğini özetler: işin ne kadar ayrıntılı anlatıldığı, isteğe bağlı kategori sorularının yanıtları, bütçe ve zaman bilgisi. İletişim ve konum gibi her talepte zorunlu olan bilgiler puanı değiştirmez. Kalite sunucu tarafında hesaplanır; size Yüksek, Orta veya Düşük olarak ve neyi ekleyebileceğinizle birlikte gösterilir.',
   },
   {
     q: 'Teklif kredisi nedir?',

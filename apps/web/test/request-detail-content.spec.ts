@@ -99,7 +99,7 @@ function myRequest(extra: Record<string, unknown> = {}) {
       preferredDate: null,
       preferredDateEnd: null,
       urgency: null,
-      qualityScore: 70,
+      qualityTips: [],
       qualityLabel: 'GOOD',
       phoneVerifiedAt: '2026-09-17T10:00:00.000Z',
       approvedAt: '2026-09-17T10:00:00.000Z',

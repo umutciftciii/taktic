@@ -98,7 +98,12 @@
           "optionalAnswers": null,
           "budget": 0,
           "timing": 0
-        }
+        },
+        "tips": [
+          "DESCRIPTION",
+          "BUDGET",
+          "TIMING"
+        ]
       }
     },
     {
@@ -121,7 +126,8 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": []
       }
     },
     {
@@ -144,7 +150,8 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": []
       }
     },
     {
@@ -167,7 +174,10 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -190,7 +200,10 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -213,7 +226,10 @@
           "optionalAnswers": 20,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -236,7 +252,10 @@
           "optionalAnswers": 20,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -259,7 +278,10 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -282,7 +304,8 @@
           "optionalAnswers": null,
           "budget": null,
           "timing": null
-        }
+        },
+        "tips": []
       }
     },
     {
@@ -305,7 +328,12 @@
           "optionalAnswers": 5,
           "budget": 0,
           "timing": 8
-        }
+        },
+        "tips": [
+          "OPTIONAL_QUESTIONS",
+          "BUDGET",
+          "TIMING"
+        ]
       }
     },
     {
@@ -328,7 +356,10 @@
           "optionalAnswers": 0,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "OPTIONAL_QUESTIONS"
+        ]
       }
     },
     {
@@ -351,7 +382,11 @@
           "optionalAnswers": 13,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION",
+          "OPTIONAL_QUESTIONS"
+        ]
       }
     },
     {
@@ -374,7 +409,12 @@
           "optionalAnswers": null,
           "budget": 0,
           "timing": 0
-        }
+        },
+        "tips": [
+          "DESCRIPTION",
+          "BUDGET",
+          "TIMING"
+        ]
       }
     },
     {
@@ -397,7 +437,8 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": null
-        }
+        },
+        "tips": []
       }
     },
     {
@@ -420,7 +461,10 @@
           "optionalAnswers": null,
           "budget": 15,
           "timing": 15
-        }
+        },
+        "tips": [
+          "DESCRIPTION"
+        ]
       }
     },
     {
@@ -443,7 +487,12 @@
           "optionalAnswers": null,
           "budget": 0,
           "timing": 0
-        }
+        },
+        "tips": [
+          "DESCRIPTION",
+          "BUDGET",
+          "TIMING"
+        ]
       }
     }
   ]

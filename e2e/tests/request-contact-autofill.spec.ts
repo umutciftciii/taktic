@@ -93,9 +93,11 @@ test.describe('request contact autofill', () => {
       await expect(customer.page.locator('input[name="customerPhone"]')).toHaveCount(0);
       await expect(customer.page.locator('input[name="customerEmail"]')).toHaveCount(0);
 
-      // The estimate counts contact as done: the customer supplied it by having
-      // an account, and telling them otherwise would be wrong.
-      await expect(customer.page.getByText('İletişim bilgisi verildi')).toBeVisible();
+      // QUALITY-SCORE-001: contact is mandatory, so it is not quality — the
+      // estimate neither counts it nor asks for it, account or no account.
+      await expect(customer.page.getByTestId('request-quality-estimate')).toBeVisible();
+      await expect(customer.page.getByText('İletişim bilgisi verildi')).toHaveCount(0);
+      await expect(customer.page.getByTestId('request-quality-tips')).not.toContainText('İletişim');
 
       const requestId = await submitRequest(customer, location.city, location.district);
 

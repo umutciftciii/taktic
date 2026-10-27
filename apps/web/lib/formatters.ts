@@ -1,6 +1,6 @@
 import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
 // Type-only: erased on build, so this module still never loads `lib/api.ts`.
-import type { RequestQualityBreakdownComponent } from './api';
+import type { RequestQualityBreakdownComponent, RequestQualityTip } from './api';
 
 /**
  * Presentation helpers with no server dependency.
@@ -146,6 +146,24 @@ export function qualityBreakdownDetail(component: RequestQualityBreakdownCompone
   if (component.basis === 'URGENCY') return 'Yalnız aciliyet seçildi';
   if (component.basis === 'NONE') return 'Zaman bilgisi yok';
   return null;
+}
+
+/**
+ * What the customer could add, in their words (QUALITY-SCORE-001). Read on the
+ * form while it can still be acted on, and on a sent request as the questions
+ * a business is likely to ask — a request is not edited after it is sent.
+ */
+export function qualityTipText(tip: RequestQualityTip): string {
+  switch (tip) {
+    case 'DESCRIPTION':
+      return 'İşi birkaç cümleyle daha ayrıntılı anlatın: ne yapılacak, ne durumda, ne kadar.';
+    case 'OPTIONAL_QUESTIONS':
+      return 'İsteğe bağlı soruları da yanıtlayın; fiyatlamayı kolaylaştırır.';
+    case 'BUDGET':
+      return 'Bir bütçe aralığı belirtin.';
+    case 'TIMING':
+      return 'Uygun olduğunuz tarih aralığını seçin.';
+  }
 }
 
 export function qualityBadgeClass(label: string) {
