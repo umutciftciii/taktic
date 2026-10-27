@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   TAKTIC_LOCALE,
   TAKTIC_TIME_ZONE,
@@ -11,6 +11,9 @@ import {
   formatIsoDay,
   formatTime,
   isIsoDay,
+  isoDayRangeBounds,
+  isoDayStart,
+  orderIsoDayRange,
   todayIsoDay,
 } from './datetime';
 
@@ -186,5 +189,81 @@ describe('date-only helpers', () => {
     expect(formatDateRange(null, null)).toBe('-');
     // A legacy row stored the day as UTC midnight; it still reads as that day.
     expect(formatDateRange(new Date('2026-09-15T00:00:00.000Z'), null)).toBe('15 Eyl 2026');
+  });
+});
+
+/**
+ * TIMEZONE-001: a day filter is the whole Istanbul day, as the half-open
+ * window [its 00:00, the next day's 00:00) Istanbul time — and the line is the
+ * same whatever zone the process runs in.
+ */
+/** The test runner's environment; this package compiles without Node's types. */
+const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } }).process.env;
+
+describe('Istanbul day boundaries', () => {
+  const hostZone = env.TZ;
+  afterEach(() => {
+    if (hostZone === undefined) delete env.TZ;
+    else env.TZ = hostZone;
+  });
+
+  it('starts a day at Istanbul midnight, three hours before UTC midnight', () => {
+    expect(isoDayStart('2026-10-27').toISOString()).toBe('2026-10-26T21:00:00.000Z');
+    // Month, year and leap-day ends roll the UTC date back with them.
+    expect(isoDayStart('2026-11-01').toISOString()).toBe('2026-10-31T21:00:00.000Z');
+    expect(isoDayStart('2027-01-01').toISOString()).toBe('2026-12-31T21:00:00.000Z');
+    expect(isoDayStart('2028-02-29').toISOString()).toBe('2028-02-28T21:00:00.000Z');
+    // Read back through the product's zone, the start is that day.
+    expect(todayIsoDay(isoDayStart('2026-10-27'))).toBe('2026-10-27');
+    expect(todayIsoDay(new Date(isoDayStart('2026-10-27').getTime() - 1))).toBe('2026-10-26');
+  });
+
+  it('follows the zone rules of the day itself, not a written-down offset', () => {
+    // Turkey kept DST until 2016: on 1 July 2015 Istanbul was UTC+3 (EEST),
+    // on 1 January 2015 UTC+2 (EET). A fixed `+03:00` would get the second wrong.
+    expect(isoDayStart('2015-07-01').toISOString()).toBe('2015-06-30T21:00:00.000Z');
+    expect(isoDayStart('2015-01-01').toISOString()).toBe('2014-12-31T22:00:00.000Z');
+  });
+
+  it('turns a one-day filter into exactly that day, end exclusive', () => {
+    const { gte, lt } = isoDayRangeBounds('2026-10-27', '2026-10-27');
+    expect(gte?.toISOString()).toBe('2026-10-26T21:00:00.000Z');
+    expect(lt?.toISOString()).toBe('2026-10-27T21:00:00.000Z');
+    expect(lt!.getTime() - gte!.getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('closes a range at the start of the day after, across a month end', () => {
+    const { gte, lt } = isoDayRangeBounds('2026-10-01', '2026-10-31');
+    expect(gte?.toISOString()).toBe('2026-09-30T21:00:00.000Z');
+    expect(lt?.toISOString()).toBe('2026-10-31T21:00:00.000Z');
+  });
+
+  it('leaves a missing end open', () => {
+    expect(isoDayRangeBounds('2026-10-27', null)).toEqual({ gte: new Date('2026-10-26T21:00:00.000Z'), lt: null });
+    expect(isoDayRangeBounds(undefined, '2026-10-27')).toEqual({ gte: null, lt: new Date('2026-10-27T21:00:00.000Z') });
+    expect(isoDayRangeBounds(null, null)).toEqual({ gte: null, lt: null });
+  });
+
+  it('draws the same line in every host zone', () => {
+    const expected = { gte: '2026-10-31T21:00:00.000Z', lt: '2026-11-01T21:00:00.000Z' };
+    const offsets = new Set<number>();
+    for (const zone of ['UTC', 'Europe/Istanbul', 'America/New_York', 'Pacific/Kiritimati', 'Asia/Kolkata']) {
+      env.TZ = zone;
+      // The switch took: the host's own reading of one instant differs by zone.
+      offsets.add(new Date('2026-11-01T00:00:00.000Z').getTimezoneOffset());
+      const { gte, lt } = isoDayRangeBounds('2026-11-01', '2026-11-01');
+      expect({ gte: gte?.toISOString(), lt: lt?.toISOString() }, zone).toEqual(expected);
+    }
+    expect(offsets.size).toBeGreaterThan(1);
+  });
+
+  it('orders raw filter input into days: blanks and non-days dropped, a reversed pair swapped', () => {
+    expect(orderIsoDayRange('2026-10-01', '2026-10-31')).toEqual({ from: '2026-10-01', to: '2026-10-31' });
+    expect(orderIsoDayRange('2026-10-31', '2026-10-01')).toEqual({ from: '2026-10-01', to: '2026-10-31' });
+    expect(orderIsoDayRange(' 2026-10-27 ', '2026-10-27')).toEqual({ from: '2026-10-27', to: '2026-10-27' });
+    expect(orderIsoDayRange('', '2026-10-27')).toEqual({ from: null, to: '2026-10-27' });
+    expect(orderIsoDayRange('2026-10-27', undefined)).toEqual({ from: '2026-10-27', to: null });
+    expect(orderIsoDayRange('2026-02-30', 'yarın')).toEqual({ from: null, to: null });
+    expect(orderIsoDayRange('2026-10-27T00:00:00Z', ['2026-10-27'])).toEqual({ from: null, to: null });
   });
 });

@@ -10,6 +10,7 @@ import {
   UserRole,
 } from '@prisma/client';
 import { assertNoContactDetails } from '../../common/contact-guard';
+import { toIsoDay } from '../../common/date-only';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
 import {
@@ -429,7 +430,9 @@ export class ProviderReviewsService {
         id: row.id,
         rating: row.rating,
         comment: row.comment ?? '',
-        month: row.createdAt.toISOString().slice(0, 7),
+        // The Istanbul calendar month (TIMEZONE-001): a review written at 01:30
+        // on 1 October in Istanbul is October's, not September's.
+        month: toIsoDay(row.createdAt).slice(0, 7),
         categoryName: row.request.category.name,
       })),
       nextCursor: rows.length > take ? (page[page.length - 1]?.id ?? null) : null,

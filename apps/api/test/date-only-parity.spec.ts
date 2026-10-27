@@ -1,9 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   addIsoDays,
   compareIsoDays,
   endOfWeekIsoDay,
   isIsoDay,
+  isoDayRangeBounds,
+  isoDayStart,
   isoDayToStoredDate,
   toIsoDay,
   todayIsoDay,
@@ -62,5 +64,48 @@ describe('date-only helpers (API mirror)', () => {
     expect(toIsoDay(isoDayToStoredDate('2026-12-31'))).toBe('2026-12-31');
     expect(toIsoDay(null)).toBe('');
     expect(toIsoDay('not a date')).toBe('');
+  });
+});
+
+/** TIMEZONE-001: the same cases as the shared "Istanbul day boundaries" block. */
+describe('Istanbul day boundaries (API mirror)', () => {
+  const hostZone = process.env.TZ;
+  afterEach(() => {
+    if (hostZone === undefined) delete process.env.TZ;
+    else process.env.TZ = hostZone;
+  });
+
+  it('starts a day at Istanbul midnight, across month, year and leap-day ends', () => {
+    expect(isoDayStart('2026-10-27').toISOString()).toBe('2026-10-26T21:00:00.000Z');
+    expect(isoDayStart('2026-11-01').toISOString()).toBe('2026-10-31T21:00:00.000Z');
+    expect(isoDayStart('2027-01-01').toISOString()).toBe('2026-12-31T21:00:00.000Z');
+    expect(isoDayStart('2028-02-29').toISOString()).toBe('2028-02-28T21:00:00.000Z');
+    expect(todayIsoDay(isoDayStart('2026-10-27'))).toBe('2026-10-27');
+    expect(todayIsoDay(new Date(isoDayStart('2026-10-27').getTime() - 1))).toBe('2026-10-26');
+  });
+
+  it('follows the zone rules of the day itself, not a written-down offset', () => {
+    expect(isoDayStart('2015-07-01').toISOString()).toBe('2015-06-30T21:00:00.000Z');
+    expect(isoDayStart('2015-01-01').toISOString()).toBe('2014-12-31T22:00:00.000Z');
+  });
+
+  it('turns a one-day filter into exactly that day, end exclusive, and leaves a missing end open', () => {
+    const { gte, lt } = isoDayRangeBounds('2026-10-27', '2026-10-27');
+    expect(gte?.toISOString()).toBe('2026-10-26T21:00:00.000Z');
+    expect(lt?.toISOString()).toBe('2026-10-27T21:00:00.000Z');
+    expect(isoDayRangeBounds('2026-10-01', '2026-10-31').lt?.toISOString()).toBe('2026-10-31T21:00:00.000Z');
+    expect(isoDayRangeBounds('2026-10-27', null).lt).toBeNull();
+    expect(isoDayRangeBounds(undefined, '2026-10-27').gte).toBeNull();
+  });
+
+  it('draws the same line in every host zone', () => {
+    for (const zone of ['UTC', 'Europe/Istanbul', 'America/New_York', 'Pacific/Kiritimati', 'Asia/Kolkata']) {
+      process.env.TZ = zone;
+      const { gte, lt } = isoDayRangeBounds('2026-11-01', '2026-11-01');
+      expect([gte?.toISOString(), lt?.toISOString()], zone).toEqual([
+        '2026-10-31T21:00:00.000Z',
+        '2026-11-01T21:00:00.000Z',
+      ]);
+    }
   });
 });

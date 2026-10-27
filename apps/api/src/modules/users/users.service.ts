@@ -15,6 +15,7 @@ import {
   uniqueViolationField,
 } from '../../common/account-identity';
 import { AuditPageQueryDto } from '../../common/admin-audit';
+import { parseAdminDateRange } from '../../common/admin-date-range';
 import { parseAdminTextSearch, phoneColumnMatchers } from '../../common/admin-search';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -195,13 +196,13 @@ export class UsersService {
     const sortBy: UserSortField = filters.sortBy ?? 'createdAt';
     const sortDir: UserSortDirection = filters.sortDir ?? 'desc';
 
-    const createdRange = parseDateRange(
+    const createdRange = parseAdminDateRange(
       filters.createdFrom,
       filters.createdTo,
       'createdFrom',
       'createdTo',
     );
-    const lastLoginRange = parseDateRange(
+    const lastLoginRange = parseAdminDateRange(
       filters.lastLoginFrom,
       filters.lastLoginTo,
       'lastLoginFrom',
@@ -465,34 +466,6 @@ function clampPageSize(value: number | undefined): number {
     return DEFAULT_PAGE_SIZE;
   }
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
-}
-
-function parseDateRange(
-  fromInput: string | undefined,
-  toInput: string | undefined,
-  fromKey: string,
-  toKey: string,
-): Prisma.DateTimeFilter | undefined {
-  const range: Prisma.DateTimeFilter = {};
-  if (fromInput) {
-    const fromDate = new Date(fromInput);
-    if (Number.isNaN(fromDate.getTime())) {
-      throw new BadRequestException(`Invalid "${fromKey}" date`);
-    }
-    range.gte = fromDate;
-  }
-  if (toInput) {
-    const toDate = new Date(toInput);
-    if (Number.isNaN(toDate.getTime())) {
-      throw new BadRequestException(`Invalid "${toKey}" date`);
-    }
-    range.lte = toDate;
-  }
-  if (range.gte === undefined && range.lte === undefined) return undefined;
-  if (range.gte && range.lte && (range.gte as Date) > (range.lte as Date)) {
-    throw new BadRequestException(`"${fromKey}" must be on or before "${toKey}"`);
-  }
-  return range;
 }
 
 function buildUserOrderBy(

@@ -1,4 +1,5 @@
 import { CustomerOrigin, OfferStatus, Prisma, UserRole } from '@prisma/client';
+import type { AdminDateRange } from '../../common/admin-date-range';
 import type { AdminTextSearch } from '../../common/admin-search';
 import type { CustomerSortDirection, CustomerSortField } from './dto/list-customers.dto';
 
@@ -27,7 +28,7 @@ export type CustomerListFilter = {
   search: AdminTextSearch | null;
   customerOrigin: CustomerOrigin | undefined;
   city: string | undefined;
-  lastRequestRange: { gte?: Date; lte?: Date } | undefined;
+  lastRequestRange: AdminDateRange | undefined;
 };
 
 /** A timestamp the way Prisma compares one with a `timestamp(3)` column: UTC. */
@@ -65,6 +66,9 @@ export function customerListWhere(filter: CustomerListFilter): Prisma.Sql {
   }
   if (filter.lastRequestRange?.gte) {
     requestClauses.push(Prisma.sql`sr."submittedAt" >= ${utcTimestamp(filter.lastRequestRange.gte)}`);
+  }
+  if (filter.lastRequestRange?.lt) {
+    requestClauses.push(Prisma.sql`sr."submittedAt" < ${utcTimestamp(filter.lastRequestRange.lt)}`);
   }
   if (filter.lastRequestRange?.lte) {
     requestClauses.push(Prisma.sql`sr."submittedAt" <= ${utcTimestamp(filter.lastRequestRange.lte)}`);

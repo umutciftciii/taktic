@@ -1,3 +1,4 @@
+import { orderIsoDayRange } from '@taktic/shared';
 import Link from 'next/link';
 import {
   apiFetch,
@@ -146,8 +147,13 @@ export default async function AdminCustomersPage({ searchParams }: AdminCustomer
   const q = (params.q ?? '').trim();
   // The request filters are dropped, not sent, where the API would refuse them.
   const city = figures.requests ? (params.city ?? '').trim() : '';
-  const lastRequestFrom = figures.requests ? (params.lastRequestFrom ?? '').trim() : '';
-  const lastRequestTo = figures.requests ? (params.lastRequestTo ?? '').trim() : '';
+  // Istanbul days, in order: a reversed pair is swapped, anything else dropped
+  // (TIMEZONE-001). The API reads each day as the whole Istanbul day.
+  const lastRequestDays = figures.requests
+    ? orderIsoDayRange(params.lastRequestFrom, params.lastRequestTo)
+    : { from: null, to: null };
+  const lastRequestFrom = lastRequestDays.from ?? '';
+  const lastRequestTo = lastRequestDays.to ?? '';
   const customerOrigin = normalizeCustomerOrigin(params.customerOrigin);
   const sortBy = normalizeSortBy(params.sortBy, sortFields, defaultSort);
   const sortDir = normalizeSortDir(params.sortDir);

@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -10,6 +9,7 @@ import type { AuthUser } from '../auth/auth.types';
 import { mayEmbed, staffActorSelect } from '../auth/embedded-permissions';
 import { INSUFFICIENT_PERMISSION } from '../auth/permissions.guard';
 import { AuditPageQueryDto } from '../../common/admin-audit';
+import { parseAdminDateRange } from '../../common/admin-date-range';
 import { parseAdminTextSearch } from '../../common/admin-search';
 import { readAccountStatusHistory } from '../../common/account-status-history';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -96,7 +96,7 @@ export class CustomersService {
       });
     }
 
-    const lastRequestRange = parseDateRange(
+    const lastRequestRange = parseAdminDateRange(
       filters.lastRequestFrom,
       filters.lastRequestTo,
       'lastRequestFrom',
@@ -518,34 +518,6 @@ function clampPageSize(value: number | undefined): number {
     return DEFAULT_PAGE_SIZE;
   }
   return Math.min(Math.floor(value), MAX_PAGE_SIZE);
-}
-
-function parseDateRange(
-  fromInput: string | undefined,
-  toInput: string | undefined,
-  fromKey: string,
-  toKey: string,
-): { gte?: Date; lte?: Date } | undefined {
-  const range: { gte?: Date; lte?: Date } = {};
-  if (fromInput) {
-    const fromDate = new Date(fromInput);
-    if (Number.isNaN(fromDate.getTime())) {
-      throw new BadRequestException(`Invalid "${fromKey}" date`);
-    }
-    range.gte = fromDate;
-  }
-  if (toInput) {
-    const toDate = new Date(toInput);
-    if (Number.isNaN(toDate.getTime())) {
-      throw new BadRequestException(`Invalid "${toKey}" date`);
-    }
-    range.lte = toDate;
-  }
-  if (range.gte === undefined && range.lte === undefined) return undefined;
-  if (range.gte && range.lte && range.gte > range.lte) {
-    throw new BadRequestException(`"${fromKey}" must be on or before "${toKey}"`);
-  }
-  return range;
 }
 
 /**
