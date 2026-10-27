@@ -408,7 +408,7 @@ function RequestProcessDemo() {
         <div style={{ flex: 1 }}>
           <div className="lp-rc-quality-label">
             Talep kalite skoru
-            <small>Detaylı brief · konum · zaman · bütçe · iletişim</small>
+            <small>Detaylı brief · kategori soruları · bütçe · zaman</small>
           </div>
           <div className="lp-rc-bar">
             <div
