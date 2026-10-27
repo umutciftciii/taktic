@@ -21,6 +21,7 @@ import {
   ListCustomersDto,
 } from './dto/list-customers.dto';
 import { UpdateCustomerStatusDto } from './dto/update-customer-status.dto';
+import { requestQualityLabel } from '../service-requests/request-quality';
 
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -28,14 +29,6 @@ const MAX_PAGE_SIZE = 100;
 const RECENT_REQUESTS_LIMIT = 10;
 const RECENT_OFFERS_LIMIT = 10;
 const ACCEPTED_OFFERS_LIMIT = 10;
-
-type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
-
-function qualityLabel(score: number): QualityLabel {
-  if (score >= 80) return 'HIGH';
-  if (score >= 50) return 'MEDIUM';
-  return 'LOW';
-}
 
 type CustomerListItem = {
   id: string;
@@ -347,6 +340,9 @@ export class CustomersService {
           district: true,
           status: true,
           qualityScore: true,
+          // The label's inputs; neither leaves this method.
+          qualityScoreVersion: true,
+          qualityScoreBreakdown: true,
           submittedAt: true,
           category: { select: { name: true } },
           _count: { select: { offers: true } },
@@ -363,7 +359,7 @@ export class CustomersService {
         city: row.city,
         district: row.district,
         status: row.status,
-        qualityLabel: qualityLabel(row.qualityScore),
+        qualityLabel: requestQualityLabel(row),
         submittedAt: row.submittedAt,
         offerCount: row._count.offers,
       })),

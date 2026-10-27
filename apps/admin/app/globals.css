@@ -2775,6 +2775,16 @@ button:disabled {
   border-color: var(--color-accent-300);
 }
 
+.quality-breakdown-item.is-na {
+  background: var(--surface);
+  border-style: dashed;
+}
+
+.quality-breakdown-item-detail {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+
 .quality-breakdown-item-head {
   display: flex;
   align-items: baseline;

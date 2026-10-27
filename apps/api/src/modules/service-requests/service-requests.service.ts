@@ -69,6 +69,14 @@ import {
 import { CreateServiceRequestAnswerDto, CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { UpdateServiceRequestStatusDto } from './dto/update-service-request-status.dto';
 import { normalizePreferredDateRange } from './preferred-date-range';
+import {
+  QUALITY_SCORE_BACKFILL_PENDING_CODE,
+  QUALITY_SCORE_VERSION,
+  type QualityLabel,
+  requestQualityLabel,
+  resolveQualitySignals,
+  scoreRequestQuality,
+} from './request-quality';
 
 /**
  * Returned when a signed-in customer's own account carries no complete contact
@@ -107,32 +115,6 @@ type ValidatedAnswer = {
   questionLabel: string;
   questionType: string;
   value: Prisma.InputJsonValue;
-};
-
-type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
-
-type QualityComponent = {
-  points: number;
-  max: number;
-  passed: boolean;
-};
-
-type QualityBreakdown = Record<string, QualityComponent>;
-
-type QualityScoringInput = {
-  customerName: string;
-  customerPhone: string;
-  city: string;
-  district: string;
-  neighborhood: string | null;
-  addressNote: string | null;
-  budgetMin: number | null;
-  budgetMax: number | null;
-  preferredDate: Date | string | null;
-  urgency: string | null;
-  description: string | null;
-  questions: Pick<ServiceRequestQuestion, 'id' | 'isRequired'>[];
-  answers: { questionId: string; value: unknown }[];
 };
 
 /**
@@ -547,15 +529,14 @@ export class ServiceRequestsService {
     // provider matching and pricing already read.
     const answers = validateAnswers(category.questions, dto.answers ?? [], requestData, deliveryMode);
 
-    const quality = calculateQualityScore({
-      ...requestData,
-      // System-bound questions are excluded: the fields they name — address,
-      // budget, description, preferred date — are already scored by name in the
-      // breakdown, and counting them again as unanswered questions would make a
-      // category that binds them score lower for exactly the data it demands.
-      questions: category.questions.filter((question) => question.systemField === null),
-      answers,
-    });
+    // QUALITY-SCORE-001: the same calculator the admin recalculation runs,
+    // over the same form — the whole active form, bound questions and
+    // conditions included, so visibility resolves exactly as it just did in
+    // validateAnswers. Router steps are not passed: they grade the route, not
+    // how completely this category's form was filled in.
+    const quality = scoreRequestQuality(
+      resolveQualitySignals({ ...requestData, questions: category.questions, answers }),
+    );
 
     // Read once per creation, outside the transaction: the switch is an
     // operations decision that changes rarely, and a request that raced a
@@ -681,6 +662,7 @@ export class ServiceRequestsService {
           ...(phoneVerifiedAt ? { phoneVerifiedAt } : {}),
           qualityScore: quality.score,
           qualityScoreBreakdown: quality.breakdown,
+          qualityScoreVersion: quality.version,
           answers: {
             // The router steps are stored alongside the leaf's own answers.
             // They are real answers to real questions, and a provider pricing a
@@ -2068,6 +2050,16 @@ export class ServiceRequestsService {
     return withQualityLabel(request);
   }
 
+  /**
+   * The admin's "recalculate" — the same calculator, over the same form, as
+   * creation. Nothing about a request's content changes after it is created,
+   * so on a current row this reproduces the stored score unless the
+   * category's form changed since; that drift is the point of the button.
+   *
+   * A row written by the original model is refused: moving one is the
+   * backfill's decision (QUALITY-SCORE-001), made for every row at once with
+   * a manifest and a way back, not one click at a time from a detail screen.
+   */
   async recalculateQuality(id: string) {
     const request = await this.prisma.serviceRequest.findUnique({
       where: { id },
@@ -2077,6 +2069,11 @@ export class ServiceRequestsService {
             questions: {
               where: { isActive: true },
               orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+              include: {
+                conditions: {
+                  select: { sourceQuestionId: true, expectedValues: true, matchMode: true },
+                },
+              },
             },
           },
         },
@@ -2090,27 +2087,34 @@ export class ServiceRequestsService {
       throw new NotFoundException('Service request not found');
     }
 
-    const quality = calculateQualityScore({
-      customerName: request.customerName,
-      customerPhone: request.customerPhone,
-      city: request.city,
-      district: request.district,
-      neighborhood: request.neighborhood,
-      addressNote: request.addressNote,
-      budgetMin: request.budgetMin,
-      budgetMax: request.budgetMax,
-      preferredDate: request.preferredDate,
-      urgency: request.urgency,
-      description: request.description,
-      questions: request.category.questions,
-      answers: request.answers,
-    });
+    if (request.qualityScoreVersion < QUALITY_SCORE_VERSION) {
+      throw new ConflictException({
+        statusCode: HttpStatus.CONFLICT,
+        error: 'Conflict',
+        code: QUALITY_SCORE_BACKFILL_PENDING_CODE,
+        message:
+          'Bu talebin kalite puanı eski modelle hesaplandı. Eski kayıtlar yalnız toplu geçişle yeni modele taşınır.',
+      });
+    }
+
+    const quality = scoreRequestQuality(
+      resolveQualitySignals({
+        description: request.description,
+        budgetMin: request.budgetMin,
+        budgetMax: request.budgetMax,
+        preferredDate: request.preferredDate,
+        urgency: request.urgency,
+        questions: request.category.questions,
+        answers: request.answers,
+      }),
+    );
 
     const updated = await this.prisma.serviceRequest.update({
       where: { id },
       data: {
         qualityScore: quality.score,
         qualityScoreBreakdown: quality.breakdown,
+        qualityScoreVersion: quality.version,
       },
       include: {
         category: {
@@ -2292,11 +2296,14 @@ function toCustomerServiceRequest({
   showcaseLeadSource,
   reviews,
   moderationNote: _moderationNote,
-  qualityScoreBreakdown: _qualityScoreBreakdown,
+  qualityScoreBreakdown,
   ...request
 }: CustomerRequestRow) {
   return {
-    ...withQualityLabel(request),
+    ...request,
+    // Read off the breakdown before it is dropped: the description gate on the
+    // label lives there.
+    qualityLabel: requestQualityLabel({ ...request, qualityScoreBreakdown }),
     offersCount: request._count.offers,
     awaitingPhoneVerification: isAwaitingPhoneVerification(request),
     review: reviews[0] ?? null,
@@ -2455,83 +2462,6 @@ async function resolveCustomerForCreate(
   }
 }
 
-function calculateQualityScore(input: QualityScoringInput) {
-  const requiredQuestions = input.questions.filter((question) => question.isRequired);
-  const optionalQuestions = input.questions.filter((question) => !question.isRequired);
-  const answeredQuestionIds = new Set(
-    input.answers
-      .filter((answer) => hasAnswerValue(answer.value))
-      .map((answer) => answer.questionId),
-  );
-  const requiredComplete =
-    requiredQuestions.length === 0 ||
-    requiredQuestions.every((question) => answeredQuestionIds.has(question.id));
-  const optionalAnsweredCount = optionalQuestions.filter((question) =>
-    answeredQuestionIds.has(question.id),
-  ).length;
-  const optionalRatio = optionalQuestions.length === 0 ? 0 : optionalAnsweredCount / optionalQuestions.length;
-  const optionalPoints = Math.round(optionalRatio * 10);
-
-  const breakdown: QualityBreakdown = {
-    phonePresent: scoreFixed(Boolean(input.customerPhone?.trim()), 20),
-    namePresent: scoreFixed(Boolean(input.customerName?.trim()), 10),
-    cityDistrictPresent: scoreFixed(Boolean(input.city?.trim() && input.district?.trim()), 15),
-    locationDetailPresent: scoreFixed(Boolean(input.neighborhood?.trim() || input.addressNote?.trim()), 10),
-    budgetPresent: scoreFixed(input.budgetMin !== null || input.budgetMax !== null, 10),
-    preferredDatePresent: scoreFixed(Boolean(input.preferredDate), 10),
-    urgencyPresent: scoreFixed(Boolean(input.urgency?.trim()), 5),
-    descriptionDetailed: scoreFixed((input.description?.trim().length ?? 0) >= 20, 10),
-    requiredAnswersComplete: scoreFixed(requiredComplete, 10),
-    optionalAnswersCompleted: {
-      points: optionalPoints,
-      max: 10,
-      passed: optionalPoints > 0,
-    },
-  };
-  const score = Math.min(
-    100,
-    Object.values(breakdown).reduce((total, component) => total + component.points, 0),
-  );
-
-  return { score, breakdown };
-}
-
-function scoreFixed(passed: boolean, max: number): QualityComponent {
-  return {
-    points: passed ? max : 0,
-    max,
-    passed,
-  };
-}
-
-function hasAnswerValue(value: unknown) {
-  if (value === undefined || value === null) {
-    return false;
-  }
-
-  if (typeof value === 'string') {
-    return value.trim().length > 0;
-  }
-
-  if (Array.isArray(value)) {
-    return value.length > 0;
-  }
-
-  return true;
-}
-
-function qualityLabel(score: number): QualityLabel {
-  if (score >= 80) {
-    return 'HIGH';
-  }
-
-  if (score >= 50) {
-    return 'MEDIUM';
-  }
-
-  return 'LOW';
-}
-
 /**
  * What the request should record about the contact-sharing disclosure.
  *
@@ -2571,10 +2501,12 @@ function resolveContactDisclosure(dto: CreateServiceRequestDto) {
   };
 }
 
-function withQualityLabel<T extends { qualityScore: number }>(request: T): T & { qualityLabel: QualityLabel } {
+function withQualityLabel<
+  T extends { qualityScore: number; qualityScoreVersion: number; qualityScoreBreakdown: unknown },
+>(request: T): T & { qualityLabel: QualityLabel } {
   return {
     ...request,
-    qualityLabel: qualityLabel(request.qualityScore),
+    qualityLabel: requestQualityLabel(request),
   };
 }
 

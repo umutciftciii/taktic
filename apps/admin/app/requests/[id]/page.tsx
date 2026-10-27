@@ -15,6 +15,7 @@ import {
   formatPrice,
   Offer,
   qualityBadgeClass,
+  qualityBreakdownDetail,
   qualityBreakdownLabel,
   qualityLabel,
   QualityScoreBreakdown,
@@ -111,6 +112,7 @@ type RequestDetailPageProps = {
     cancelled?: string;
     roundError?: string;
     roundOpened?: string;
+    qualityError?: string;
   }>;
 };
 
@@ -135,7 +137,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The design's ⓘ for the quality card, fitted to the real ten-part score. */
 const QUALITY_BREAKDOWN_INFO =
-  'Puan on başlıktan toplanır: iletişim, konum, bütçe, tarih, aciliyet, açıklama ve kategori soruları. Eksik kalan başlık, müşteriye hangi bilgiyi sormanız gerektiğini söyler. 80 ve üzeri Yüksek, 50–79 Orta sayılır.';
+  'Puan yalnız ayırt edici bilgilerden hesaplanır: açıklamanın ayrıntısı, isteğe bağlı kategori soruları, bütçe ve zamanlama. Zorunlu alanlar ve adres notu puanlanmaz; bu talepte uygulanmayan başlık paydadan çıkar ve sonuç 100 üzerinden okunur. 70 ve üzeri Yüksek, 40–69 Orta; açıklamada beşten az anlamlı kelime varsa etiket Düşük kalır. Eski modelle puanlanmış talepler geçişe kadar kendi eşikleriyle (80/50) okunur.';
+
+const QUALITY_ERROR_MESSAGES: Record<string, string> = {
+  backfillPending:
+    'Bu talebin puanı eski modelle hesaplandı. Eski kayıtlar tek tek değil, yalnız toplu geçişle yeni modele taşınır.',
+};
 
 const OFFER_COLUMNS: DataColumn[] = [
   { key: 'provider', label: 'Hizmet veren' },
@@ -176,6 +183,7 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
     cancelled: justCancelled,
     roundError,
     roundOpened,
+    qualityError,
   } = await searchParams;
   const request = await fetchOrNotFound(() => apiFetch<ServiceRequest>(`/service-requests/${id}`));
 
@@ -487,6 +495,11 @@ export default async function RequestDetailPage({ params, searchParams }: Reques
                 </InfoPopover>
               }
             >
+              {qualityError && QUALITY_ERROR_MESSAGES[qualityError] ? (
+                <div className="notice-warning detail-notice" role="alert" data-testid="request-quality-error">
+                  {QUALITY_ERROR_MESSAGES[qualityError]}
+                </div>
+              ) : null}
               <QualityBreakdown request={request} />
             </SectionCard>
             <SectionCard title="Müşteri" subtitle="İletişim bilgileri ve bağlı hesap.">
@@ -1316,6 +1329,11 @@ function QualityBreakdown({ request }: { request: ServiceRequest }) {
         <span className={qualityBadgeClass(request.qualityLabel)}>
           {request.qualityScore}/100 · {qualityLabel(request.qualityLabel)}
         </span>
+        {request.qualityScoreVersion < 2 ? (
+          <span className="badge badge-muted" data-testid="request-quality-legacy">
+            Eski model
+          </span>
+        ) : null}
         <div className="request-quality-bar" role="presentation">
           <span
             className={`request-quality-bar-fill request-quality-bar-fill-${request.qualityLabel.toLowerCase()}`}
@@ -1697,17 +1715,22 @@ function QualityBreakdownItem({
   keyName: string;
   component: QualityScoreBreakdown[string];
 }) {
+  // A row that does not apply left the denominator: no score and no "missing"
+  // tint, since nothing was missed.
+  const applicable = component.applicable !== false;
+  const state = !applicable ? 'is-na' : component.passed ? 'is-passed' : 'is-missing';
+  const status = !applicable ? 'Uygulanmaz' : component.passed ? 'Tamam' : component.points > 0 ? 'Kısmi' : 'Eksik';
+  const detail = qualityBreakdownDetail(component);
   return (
-    <div className={`quality-breakdown-item ${component.passed ? 'is-passed' : 'is-missing'}`}>
+    <div className={`quality-breakdown-item ${state}`}>
       <div className="quality-breakdown-item-head">
         <span className="quality-breakdown-item-label">{qualityBreakdownLabel(keyName)}</span>
         <span className="quality-breakdown-item-score">
-          {component.points}/{component.max}
+          {applicable ? `${component.points}/${component.max}` : '—'}
         </span>
       </div>
-      <span className={component.passed ? 'badge badge-good' : 'badge badge-muted'}>
-        {component.passed ? 'Tamam' : 'Eksik'}
-      </span>
+      <span className={component.passed ? 'badge badge-good' : 'badge badge-muted'}>{status}</span>
+      {detail ? <span className="quality-breakdown-item-detail">{detail}</span> : null}
     </div>
   );
 }

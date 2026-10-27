@@ -134,6 +134,7 @@ import {
   publishRound,
 } from '../match-rounds/match-round-transitions';
 import { validateOfferSchedule } from '../../common/offer-schedule';
+import { type QualityLabel, requestQualityLabel } from '../service-requests/request-quality';
 
 type ProviderOwnershipFilter = 'claimed' | 'unclaimed';
 
@@ -202,7 +203,6 @@ type ProviderApplicationInput = ProviderInviteApplicationFields & {
 /** The client address, carried only so a claim invitation can be rate limited. */
 type ApplicationRequestMeta = { ipAddress?: string | null; userAgent?: string | null };
 
-type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 /**
  * Machine-readable codes for the offer-pricing conflicts, so the web app can
  * render a specific explanation instead of a generic error screen.
@@ -1329,7 +1329,11 @@ export class ProvidersService implements OnModuleInit {
           : {}),
         ...(normalizedFilters.urgency ? { urgency: normalizedFilters.urgency } : {}),
       },
-      orderBy: [{ qualityScore: 'desc' }, { submittedAt: 'desc' }],
+      // QUALITY-SCORE-001: the model version leads, so a request scored by the
+      // current model is never ranked below an original-model row only because
+      // the original model gave bigger numbers. Once the backfill has moved
+      // every row this key is a tie everywhere and the order is score, then age.
+      orderBy: [{ qualityScoreVersion: 'desc' }, { qualityScore: 'desc' }, { submittedAt: 'desc' }],
       include: {
         category: {
           select: {
@@ -3186,7 +3190,7 @@ function toProviderRequestListItem(
     preferredDateEnd: request.preferredDateEnd,
     urgency: request.urgency,
     qualityScore: request.qualityScore,
-    qualityLabel: qualityLabel(request.qualityScore),
+    qualityLabel: requestQualityLabel(request),
     submittedAt: request.submittedAt,
     createdAt: request.createdAt,
     answersCount: request._count.answers,
@@ -3249,7 +3253,7 @@ function toProviderRequestDetail(
     urgency: request.urgency,
     description: request.description,
     qualityScore: request.qualityScore,
-    qualityLabel: qualityLabel(request.qualityScore),
+    qualityLabel: requestQualityLabel(request),
     qualityScoreBreakdown: request.qualityScoreBreakdown,
     submittedAt: request.submittedAt,
     createdAt: request.createdAt,
@@ -3390,18 +3394,6 @@ function normalizeOfferPayload(dto: CreateOfferDto) {
     warrantyNote: normalizeNullableString(dto.warrantyNote),
     internalNote: normalizeNullableString(dto.internalNote),
   };
-}
-
-function qualityLabel(score: number): QualityLabel {
-  if (score >= 80) {
-    return 'HIGH';
-  }
-
-  if (score >= 50) {
-    return 'MEDIUM';
-  }
-
-  return 'LOW';
 }
 
 function normalizeNullableString(value: string | null | undefined) {
