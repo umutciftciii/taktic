@@ -1158,6 +1158,12 @@ model ServiceRequest {
   description                 String?
   qualityScore                Int                  @default(0)
   qualityScoreBreakdown       Json?
+  /// QUALITY-SCORE-001: which model wrote qualityScore and its breakdown.
+  /// 1 is the original model (every row written before this column, and any
+  /// row inserted without saying), 2 the current one. The label is read with
+  /// the thresholds of the model that wrote the number, and the admin
+  /// recalculation refuses a version-1 row: only the backfill moves one.
+  qualityScoreVersion         Int                  @default(1) @db.SmallInt
   moderatedAt                 DateTime?
   moderationNote              String?
   rejectionReason             String?

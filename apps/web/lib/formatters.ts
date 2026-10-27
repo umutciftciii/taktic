@@ -1,4 +1,6 @@
 import { urgencyLabel as sharedUrgencyLabel } from '@taktic/shared';
+// Type-only: erased on build, so this module still never loads `lib/api.ts`.
+import type { RequestQualityBreakdownComponent } from './api';
 
 /**
  * Presentation helpers with no server dependency.
@@ -71,6 +73,12 @@ export function qualityBreakdownLabel(key: string): string {
     locationDetailPresent: 'Adres notu',
     requiredAnswersComplete: 'Zorunlu kategori soruları',
     optionalAnswersCompleted: 'İsteğe bağlı kategori soruları',
+    // QUALITY-SCORE-001. The keys above stay: a request scored before the
+    // current model keeps its breakdown until the backfill rewrites it.
+    descriptionDepth: 'İş açıklamasının ayrıntısı',
+    optionalAnswers: 'İsteğe bağlı kategori soruları',
+    budget: 'Bütçe bilgisi',
+    timing: 'Zamanlama',
   };
 
   const label = labels[key];
@@ -81,6 +89,63 @@ export function qualityBreakdownLabel(key: string): string {
   // one-line addition above.
   const spaced = key.replace(/([A-Z])/g, ' $1').toLowerCase().trim();
   return spaced.charAt(0).toLocaleUpperCase('tr-TR') + spaced.slice(1);
+}
+
+/**
+ * A breakdown's rows in the order the model defines them. The API stores the
+ * breakdown as jsonb, which re-orders object keys (shorter first), so the
+ * order a row arrives in says nothing; the screen keeps one order instead —
+ * the current model's four components, then the original model's rows for a
+ * request scored before it, then anything newer, as it came.
+ */
+const QUALITY_BREAKDOWN_ORDER = [
+  'descriptionDepth',
+  'optionalAnswers',
+  'budget',
+  'timing',
+  'phonePresent',
+  'namePresent',
+  'cityDistrictPresent',
+  'locationDetailPresent',
+  'budgetPresent',
+  'preferredDatePresent',
+  'urgencyPresent',
+  'descriptionDetailed',
+  'requiredAnswersComplete',
+  'optionalAnswersCompleted',
+];
+
+export function orderedQualityBreakdown<T>(breakdown: Record<string, T>): Array<[string, T]> {
+  const rank = (key: string) => {
+    const index = QUALITY_BREAKDOWN_ORDER.indexOf(key);
+    return index === -1 ? QUALITY_BREAKDOWN_ORDER.length : index;
+  };
+  return Object.entries(breakdown).sort(([a], [b]) => rank(a) - rank(b));
+}
+
+/**
+ * The state of one breakdown row in words: full marks, part of them, none, or
+ * "does not apply to this request" — a row that left the denominator, which
+ * is not a miss and must not read like one.
+ */
+export function qualityBreakdownStatus(component: RequestQualityBreakdownComponent): string {
+  if (component.applicable === false) return 'Uygulanmaz';
+  if (component.passed) return 'Tam';
+  return component.points > 0 ? 'Kısmi' : 'Yok';
+}
+
+/** Why a row scored what it did, from the counts the current model stores. */
+export function qualityBreakdownDetail(component: RequestQualityBreakdownComponent): string | null {
+  if (component.notApplicableReason === 'REQUIRED_FIELD') return 'Bu kategoride zorunlu alan';
+  if (component.notApplicableReason === 'NO_VISIBLE_OPTIONAL_QUESTIONS') return 'Görünür isteğe bağlı soru yok';
+  if (typeof component.meaningfulWords === 'number') return `${component.meaningfulWords} anlamlı kelime`;
+  if (typeof component.visible === 'number' && typeof component.answered === 'number') {
+    return `${component.answered}/${component.visible} soru yanıtlandı`;
+  }
+  if (component.basis === 'DATES') return 'Tarih aralığı verildi';
+  if (component.basis === 'URGENCY') return 'Yalnız aciliyet seçildi';
+  if (component.basis === 'NONE') return 'Zaman bilgisi yok';
+  return null;
 }
 
 export function qualityBadgeClass(label: string) {

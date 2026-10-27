@@ -243,10 +243,22 @@ export type ServiceRequestStatus =
 
 export type QualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
+/**
+ * One row of a request's quality breakdown. `points`, `max` and `passed` are
+ * on every row ever written; the rest belong to the current model
+ * (QUALITY-SCORE-001) and are absent on an original-model row.
+ * `applicable: false` is a row that left the denominator.
+ */
 export type QualityBreakdownComponent = {
   points: number;
   max: number;
   passed: boolean;
+  applicable?: boolean;
+  meaningfulWords?: number;
+  visible?: number;
+  answered?: number;
+  basis?: 'DATES' | 'URGENCY' | 'NONE';
+  notApplicableReason?: 'REQUIRED_FIELD' | 'NO_VISIBLE_OPTIONAL_QUESTIONS';
 };
 
 export type QualityScoreBreakdown = Record<string, QualityBreakdownComponent>;
@@ -268,6 +280,8 @@ export type ServiceRequest = {
   qualityScore: number;
   qualityLabel: QualityLabel;
   qualityScoreBreakdown: QualityScoreBreakdown | null;
+  /** 1: the original model, read with its own 80/50 thresholds until the backfill moves it; 2: current. */
+  qualityScoreVersion: number;
   customerName: string;
   customerPhone: string;
   customerEmail: string | null;
@@ -2252,6 +2266,52 @@ export function customerOriginBadgeClass(origin: CustomerOrigin | null | undefin
   }
 }
 
+/**
+ * A breakdown's rows in the order the model defines them. The API stores the
+ * breakdown as jsonb, which re-orders object keys (shorter first), so the
+ * order a row arrives in says nothing; the screen keeps one order instead —
+ * the current model's four components, then the original model's rows for a
+ * request scored before it, then anything newer, as it came.
+ */
+const QUALITY_BREAKDOWN_ORDER = [
+  'descriptionDepth',
+  'optionalAnswers',
+  'budget',
+  'timing',
+  'phonePresent',
+  'namePresent',
+  'cityDistrictPresent',
+  'locationDetailPresent',
+  'budgetPresent',
+  'preferredDatePresent',
+  'urgencyPresent',
+  'descriptionDetailed',
+  'requiredAnswersComplete',
+  'optionalAnswersCompleted',
+];
+
+export function orderedQualityBreakdown<T>(breakdown: Record<string, T>): Array<[string, T]> {
+  const rank = (key: string) => {
+    const index = QUALITY_BREAKDOWN_ORDER.indexOf(key);
+    return index === -1 ? QUALITY_BREAKDOWN_ORDER.length : index;
+  };
+  return Object.entries(breakdown).sort(([a], [b]) => rank(a) - rank(b));
+}
+
+/** Why a row scored what it did, from the counts the current model stores. */
+export function qualityBreakdownDetail(component: QualityBreakdownComponent): string | null {
+  if (component.notApplicableReason === 'REQUIRED_FIELD') return 'Kategoride zorunlu alan — puanlanmaz';
+  if (component.notApplicableReason === 'NO_VISIBLE_OPTIONAL_QUESTIONS') return 'Görünür isteğe bağlı soru yok';
+  if (typeof component.meaningfulWords === 'number') return `${component.meaningfulWords} anlamlı kelime`;
+  if (typeof component.visible === 'number' && typeof component.answered === 'number') {
+    return `${component.answered}/${component.visible} soru yanıtlandı`;
+  }
+  if (component.basis === 'DATES') return 'Tarih aralığı verildi';
+  if (component.basis === 'URGENCY') return 'Yalnız aciliyet seçildi';
+  if (component.basis === 'NONE') return 'Zaman bilgisi yok';
+  return null;
+}
+
 export function qualityBreakdownLabel(key: string) {
   const labels: Record<string, string> = {
     phonePresent: 'Telefon bilgisi',
@@ -2264,6 +2324,11 @@ export function qualityBreakdownLabel(key: string) {
     descriptionDetailed: 'Açıklama detayı',
     requiredAnswersComplete: 'Zorunlu yanıtlar',
     optionalAnswersCompleted: 'Opsiyonel yanıtlar',
+    // QUALITY-SCORE-001; the keys above stay for original-model rows.
+    descriptionDepth: 'Açıklamanın ayrıntısı',
+    optionalAnswers: 'İsteğe bağlı sorular',
+    budget: 'Bütçe',
+    timing: 'Zamanlama',
   };
 
   if (labels[key]) return labels[key];

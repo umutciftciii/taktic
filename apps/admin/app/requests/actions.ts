@@ -314,9 +314,17 @@ export async function reopenRequestAction(formData: FormData) {
 export async function recalculateRequestQualityAction(formData: FormData) {
   const id = readFormString(formData, 'id');
 
-  await apiFetch<ServiceRequest>(`/service-requests/${id}/recalculate-quality`, {
-    method: 'POST',
-  });
+  try {
+    await apiFetch<ServiceRequest>(`/service-requests/${id}/recalculate-quality`, {
+      method: 'POST',
+    });
+  } catch (error) {
+    // QUALITY-SCORE-001: an original-model row moves only with the backfill.
+    if (conflictCode(error) === 'QUALITY_SCORE_BACKFILL_PENDING') {
+      redirect(`/requests/${id}?qualityError=backfillPending`);
+    }
+    throw error;
+  }
 
   revalidatePath('/requests');
   revalidatePath(`/requests/${id}`);

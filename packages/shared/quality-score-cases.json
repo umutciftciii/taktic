@@ -1,0 +1,450 @@
+{
+  "$comment": "QUALITY-SCORE-001 parity cases. Both calculators — apps/api/src/modules/service-requests/request-quality.ts and packages/shared/src/quality-score.ts — must produce exactly these results. Expected values are worked out by hand from packages/shared/quality-score.json; a component is null when it does not apply.",
+  "words": [
+    {
+      "name": "empty",
+      "text": "",
+      "expected": 0
+    },
+    {
+      "name": "repetition counts once",
+      "text": "boya boya boya boya",
+      "expected": 1
+    },
+    {
+      "name": "digit runs are not words",
+      "text": "123 4567 2024",
+      "expected": 0
+    },
+    {
+      "name": "no vowel is not a word",
+      "text": "xyz zzz qwrt",
+      "expected": 0
+    },
+    {
+      "name": "residual: a three-letter mash with a vowel counts",
+      "text": "asd qwe",
+      "expected": 2
+    },
+    {
+      "name": "filler and short words are dropped",
+      "text": "lütfen merhaba acil çok ve bir",
+      "expected": 0
+    },
+    {
+      "name": "Turkish dotless I folds to one word",
+      "text": "IŞIK ışık Işık",
+      "expected": 1
+    },
+    {
+      "name": "Turkish dotted İ folds to one word",
+      "text": "İSTANBUL istanbul",
+      "expected": 1
+    },
+    {
+      "name": "an ordinary description",
+      "text": "Salon kliması soğutmuyor; dış ünite ses yapıyor.",
+      "expected": 7
+    },
+    {
+      "name": "a token over twenty characters is dropped",
+      "text": "aaaaaaaaaaaaaaaaaaaaaaaa kombi",
+      "expected": 1
+    },
+    {
+      "name": "numbers inside a description",
+      "text": "3+1 daire, 2. kat",
+      "expected": 2
+    },
+    {
+      "name": "a unit with no vowel",
+      "text": "Kombi 24kW",
+      "expected": 1
+    },
+    {
+      "name": "superscripts and dashes split words",
+      "text": "Dış cephe boyası — 120 m² alan",
+      "expected": 4
+    },
+    {
+      "name": "NFC: a decomposed ü is the same word",
+      "text": "ünite ünite",
+      "expected": 1
+    },
+    {
+      "name": "hyphenated words split",
+      "text": "iç-dış",
+      "expected": 1
+    }
+  ],
+  "scores": [
+    {
+      "name": "empty request",
+      "signals": {
+        "description": "",
+        "hasBudget": false,
+        "hasDates": false,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 0,
+        "label": "LOW",
+        "points": {
+          "descriptionDepth": 0,
+          "optionalAnswers": null,
+          "budget": 0,
+          "timing": 0
+        }
+      }
+    },
+    {
+      "name": "saturated description, budget and dates",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": true,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 100,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "past saturation stays at 40",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah fayans seramik çatı oluk baca",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 100,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "twelve words, budget and dates reach HIGH exactly",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 70,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 19,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "ten words, budget and dates are MEDIUM",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 66,
+        "label": "MEDIUM",
+        "points": {
+          "descriptionDepth": 16,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "four words: the gate caps the label, the number stays",
+      "signals": {
+        "description": "kombi petek salon mutfak",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 3,
+        "optionalAnswered": 3
+      },
+      "expected": {
+        "score": 62,
+        "label": "LOW",
+        "points": {
+          "descriptionDepth": 6,
+          "optionalAnswers": 20,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "five words pass the gate",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 3,
+        "optionalAnswered": 3
+      },
+      "expected": {
+        "score": 64,
+        "label": "MEDIUM",
+        "points": {
+          "descriptionDepth": 8,
+          "optionalAnswers": 20,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "no description, budget and dates: gate makes it LOW",
+      "signals": {
+        "description": "",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 43,
+        "label": "LOW",
+        "points": {
+          "descriptionDepth": 0,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "every other component required: description alone decides",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": true,
+        "datesRequired": true,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 100,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": null,
+          "budget": null,
+          "timing": null
+        }
+      }
+    },
+    {
+      "name": "urgency only earns 8; two optional questions weigh 10",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah",
+        "hasBudget": false,
+        "hasDates": false,
+        "hasUrgency": true,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 2,
+        "optionalAnswered": 1
+      },
+      "expected": {
+        "score": 66,
+        "label": "MEDIUM",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": 5,
+          "budget": 0,
+          "timing": 8
+        }
+      }
+    },
+    {
+      "name": "one optional question weighs 10",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 1,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 88,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": 0,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "three optional questions weigh 20",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 3,
+        "optionalAnswered": 2
+      },
+      "expected": {
+        "score": 83,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 32,
+          "optionalAnswers": 13,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "description alone, eighteen words",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör",
+        "hasBudget": false,
+        "hasDates": false,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 41,
+        "label": "MEDIUM",
+        "points": {
+          "descriptionDepth": 29,
+          "optionalAnswers": null,
+          "budget": 0,
+          "timing": 0
+        }
+      }
+    },
+    {
+      "name": "required dates take timing out even with an urgency",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben radyatör priz sigorta kablo lamba avize dolap tezgah",
+        "hasBudget": true,
+        "hasDates": false,
+        "hasUrgency": true,
+        "budgetRequired": false,
+        "datesRequired": true,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 100,
+        "label": "HIGH",
+        "points": {
+          "descriptionDepth": 40,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": null
+        }
+      }
+    },
+    {
+      "name": "just under HIGH",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı",
+        "hasBudget": true,
+        "hasDates": true,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 69,
+        "label": "MEDIUM",
+        "points": {
+          "descriptionDepth": 18,
+          "optionalAnswers": null,
+          "budget": 15,
+          "timing": 15
+        }
+      }
+    },
+    {
+      "name": "just under MEDIUM",
+      "signals": {
+        "description": "kombi petek salon mutfak banyo duvar boya tavan zemin parke kapı pencere vana musluk lavabo klozet şofben",
+        "hasBudget": false,
+        "hasDates": false,
+        "hasUrgency": false,
+        "budgetRequired": false,
+        "datesRequired": false,
+        "optionalVisible": 0,
+        "optionalAnswered": 0
+      },
+      "expected": {
+        "score": 39,
+        "label": "LOW",
+        "points": {
+          "descriptionDepth": 27,
+          "optionalAnswers": null,
+          "budget": 0,
+          "timing": 0
+        }
+      }
+    }
+  ]
+}

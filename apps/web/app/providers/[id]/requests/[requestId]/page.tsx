@@ -11,7 +11,10 @@ import {
   formatDateRange,
   formatDateTime,
   qualityLabel,
+  orderedQualityBreakdown,
+  qualityBreakdownDetail,
   qualityBreakdownLabel,
+  qualityBreakdownStatus,
   urgencyLabel,
   getRefundPolicy,
 } from '../../../../../lib/api';
@@ -224,7 +227,8 @@ export default async function ProviderRequestDetailPage({
                     <th>Bileşen</th>
                     <th>Puan</th>
                     <th>Maks.</th>
-                    <th>Geçti</th>
+                    <th>Durum</th>
+                    <th>Ayrıntı</th>
                   </tr>
                 </thead>
                 <tbody>{renderBreakdownRows(request.qualityScoreBreakdown)}</tbody>
@@ -426,25 +430,31 @@ function renderBreakdownRows(breakdown: Record<string, RequestQualityBreakdownCo
   if (!breakdown) {
     return (
       <tr>
-        <td colSpan={4} className="muted">
+        <td colSpan={5} className="muted">
           Kırılım kaydı yok.
         </td>
       </tr>
     );
   }
 
-  return Object.entries(breakdown).map(([key, component]) => (
-    <tr key={key}>
-      <td>{qualityBreakdownLabel(key)}</td>
-      <td>{component.points}</td>
-      <td>{component.max}</td>
-      <td>
-        <span className={component.passed ? 'tag tag-ink' : 'tag tag-neutral'}>
-          {component.passed ? 'Evet' : 'Hayır'}
-        </span>
-      </td>
-    </tr>
-  ));
+  // A row that does not apply to this request left the denominator: it shows
+  // no points and no maximum rather than a 0 that reads like a miss.
+  return orderedQualityBreakdown(breakdown).map(([key, component]) => {
+    const applicable = component.applicable !== false;
+    return (
+      <tr key={key}>
+        <td>{qualityBreakdownLabel(key)}</td>
+        <td>{applicable ? component.points : '—'}</td>
+        <td>{applicable ? component.max : '—'}</td>
+        <td>
+          <span className={component.passed ? 'tag tag-ink' : 'tag tag-neutral'}>
+            {qualityBreakdownStatus(component)}
+          </span>
+        </td>
+        <td className="muted">{qualityBreakdownDetail(component) ?? '—'}</td>
+      </tr>
+    );
+  });
 }
 
 function formatValue(value: unknown) {

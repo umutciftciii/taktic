@@ -95,20 +95,17 @@ describe('service request description limit', () => {
       .expect(400);
   });
 
-  it("leaves the quality score's 20-character floor alone", async () => {
+  it('is a bound on what may be stored, not a quality floor', async () => {
     const category = await createCategory(ctx.prisma, 'Kalite tabanı', { offerCreditCost: 1 });
 
-    const short = await request(ctx.server)
+    // A long run of one character is accepted — it is under the limit — and
+    // earns nothing: quality counts meaningful words (QUALITY-SCORE-001), not
+    // characters, so length alone is not detail.
+    const padded = await request(ctx.server)
       .post('/service-requests')
-      .send(serviceRequestPayload(category.slug, { description: 'Kısa.' }))
+      .send(serviceRequestPayload(category.slug, { description: 'a'.repeat(400) }))
       .expect(201);
 
-    const detailed = await request(ctx.server)
-      .post('/service-requests')
-      .send(serviceRequestPayload(category.slug, { description: 'a'.repeat(20) }))
-      .expect(201);
-
-    expect(short.body.qualityScoreBreakdown.descriptionDetailed.passed).toBe(false);
-    expect(detailed.body.qualityScoreBreakdown.descriptionDetailed.passed).toBe(true);
+    expect(padded.body.qualityScoreBreakdown.descriptionDepth).toMatchObject({ meaningfulWords: 0, points: 0 });
   });
 });

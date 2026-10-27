@@ -309,14 +309,23 @@ test.describe('provider request detail', () => {
         'locationDetailPresent',
         'requiredAnswersComplete',
         'optionalAnswersCompleted',
+        'descriptionDepth',
+        'optionalAnswers',
+        'budget',
+        'timing',
       ]) {
         expect(componentNames).not.toContain(key);
       }
 
-      // And what is there is the wording the product uses.
-      expect(componentNames).toContain('Ad soyad bilgisi');
-      expect(componentNames).toContain('İl ve ilçe bilgisi');
-      expect(componentNames).toContain('İsteğe bağlı kategori soruları');
+      // And what is there is the wording the product uses — the four rows of
+      // the current model (QUALITY-SCORE-001); nothing mandatory is scored.
+      expect(componentNames).toEqual([
+        'İş açıklamasının ayrıntısı',
+        'İsteğe bağlı kategori soruları',
+        'Bütçe bilgisi',
+        'Zamanlama',
+      ]);
+      expect(componentNames).not.toContain('Ad soyad bilgisi');
 
       // The numbers beside them are still the server's, untouched.
       const points = await table.locator('tbody tr td:nth-child(2)').allTextContents();

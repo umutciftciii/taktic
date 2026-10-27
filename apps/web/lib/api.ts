@@ -454,10 +454,23 @@ export type ProviderDashboard = {
 
 export type RequestQualityLabel = 'LOW' | 'MEDIUM' | 'HIGH';
 
+/**
+ * One row of a request's quality breakdown. `points`, `max` and `passed` are
+ * on every row the API has ever written. The rest belong to the current model
+ * (QUALITY-SCORE-001) and are absent on a row written before it:
+ * `applicable: false` is a row that left the denominator, and the counts say
+ * why a row scored what it did.
+ */
 export type RequestQualityBreakdownComponent = {
   points: number;
   max: number;
   passed: boolean;
+  applicable?: boolean;
+  meaningfulWords?: number;
+  visible?: number;
+  answered?: number;
+  basis?: 'DATES' | 'URGENCY' | 'NONE';
+  notApplicableReason?: 'REQUIRED_FIELD' | 'NO_VISIBLE_OPTIONAL_QUESTIONS';
 };
 
 export type ProviderRequestAnswer = {

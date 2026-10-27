@@ -1,0 +1,64 @@
+{
+  "version": 2,
+  "description": {
+    "max": 40,
+    "saturationWords": 25,
+    "minWordLength": 3,
+    "maxWordLength": 20,
+    "vowels": "aeıioöuüâîû",
+    "stopWords": [
+      "acil",
+      "ama",
+      "ben",
+      "bir",
+      "biz",
+      "çok",
+      "daha",
+      "ederim",
+      "fakat",
+      "gibi",
+      "günler",
+      "her",
+      "ile",
+      "için",
+      "iyi",
+      "kadar",
+      "lütfen",
+      "merhaba",
+      "olan",
+      "olarak",
+      "önce",
+      "rica",
+      "selam",
+      "sen",
+      "siz",
+      "sonra",
+      "teşekkür",
+      "teşekkürler",
+      "var",
+      "veya",
+      "yok"
+    ]
+  },
+  "optionalAnswers": {
+    "smallSetMax": 10,
+    "largeSetMax": 20,
+    "largeSetMinQuestions": 3
+  },
+  "budget": {
+    "max": 15
+  },
+  "timing": {
+    "max": 15,
+    "urgencyOnlyPoints": 8
+  },
+  "labels": {
+    "highMin": 70,
+    "mediumMin": 40,
+    "lowCapBelowWords": 5
+  },
+  "legacyLabels": {
+    "highMin": 80,
+    "mediumMin": 50
+  }
+}
