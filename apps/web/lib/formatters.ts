@@ -92,6 +92,38 @@ export function qualityBreakdownLabel(key: string): string {
 }
 
 /**
+ * A breakdown's rows in the order the model defines them. The API stores the
+ * breakdown as jsonb, which re-orders object keys (shorter first), so the
+ * order a row arrives in says nothing; the screen keeps one order instead —
+ * the current model's four components, then the original model's rows for a
+ * request scored before it, then anything newer, as it came.
+ */
+const QUALITY_BREAKDOWN_ORDER = [
+  'descriptionDepth',
+  'optionalAnswers',
+  'budget',
+  'timing',
+  'phonePresent',
+  'namePresent',
+  'cityDistrictPresent',
+  'locationDetailPresent',
+  'budgetPresent',
+  'preferredDatePresent',
+  'urgencyPresent',
+  'descriptionDetailed',
+  'requiredAnswersComplete',
+  'optionalAnswersCompleted',
+];
+
+export function orderedQualityBreakdown<T>(breakdown: Record<string, T>): Array<[string, T]> {
+  const rank = (key: string) => {
+    const index = QUALITY_BREAKDOWN_ORDER.indexOf(key);
+    return index === -1 ? QUALITY_BREAKDOWN_ORDER.length : index;
+  };
+  return Object.entries(breakdown).sort(([a], [b]) => rank(a) - rank(b));
+}
+
+/**
  * The state of one breakdown row in words: full marks, part of them, none, or
  * "does not apply to this request" — a row that left the denominator, which
  * is not a miss and must not read like one.
