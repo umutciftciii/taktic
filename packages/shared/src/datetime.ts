@@ -225,3 +225,86 @@ export function formatDateRange(start: DateInput, end: DateInput): string {
 
   return `${first} – ${last}`;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Istanbul day boundaries (TIMEZONE-001)
+//
+// A filter that says "from the 27th to the 27th" means the whole of that day in
+// Istanbul, which is a window of instants: [00:00 on the 27th, 00:00 on the
+// 28th) Istanbul time. The end is exclusive — the start of the next day, never
+// `23:59:59.999` of this one — so nothing that happens in the last millisecond
+// falls between two days.
+//
+// The zone's offset is read from `Intl` for the day in question rather than
+// written down as `+03:00`, and nothing here touches the host's zone: a server
+// in UTC, a laptop in Istanbul and a CI runner in New York draw the same line.
+// The API keeps a byte-for-byte mirror (apps/api/src/common/date-only.ts).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const zoneWallClockFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: TAKTIC_TIME_ZONE,
+  hourCycle: 'h23',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+});
+
+/** How far Istanbul's wall clock is ahead of UTC at `instant`, in milliseconds. */
+function zoneOffsetMs(instant: number): number {
+  const parts: Record<string, number> = {};
+  for (const part of zoneWallClockFormatter.formatToParts(new Date(instant))) {
+    parts[part.type] = Number(part.value);
+  }
+  const wallClock = Date.UTC(
+    parts.year!,
+    parts.month! - 1,
+    parts.day!,
+    parts.hour!,
+    parts.minute!,
+    parts.second!,
+  );
+  return wallClock - Math.floor(instant / 1000) * 1000;
+}
+
+/** The instant `day` begins in Europe/Istanbul: `2026-10-27` → `2026-10-26T21:00:00.000Z`. */
+export function isoDayStart(day: IsoDay): Date {
+  const wallMidnight = isoDayToUtc(day).getTime();
+  // Asked twice so a zone whose offset changed between the two readings still
+  // lands on its own midnight; with today's fixed UTC+3 both answers agree.
+  const guess = wallMidnight - zoneOffsetMs(wallMidnight);
+  return new Date(wallMidnight - zoneOffsetMs(guess));
+}
+
+/**
+ * Two Istanbul days as a half-open window of instants: `gte` is the start of
+ * `from`, `lt` the start of the day after `to`. An absent end stays `null`, so
+ * a one-sided filter is one-sided. The days are not checked here — see
+ * `orderIsoDayRange` for turning raw input into a pair this can take.
+ */
+export function isoDayRangeBounds(
+  from: IsoDay | null | undefined,
+  to: IsoDay | null | undefined,
+): { gte: Date | null; lt: Date | null } {
+  return {
+    gte: from ? isoDayStart(from) : null,
+    lt: to ? isoDayStart(addIsoDays(to, 1)) : null,
+  };
+}
+
+/**
+ * Two raw date-filter inputs as a usable pair of days: anything that is not a
+ * real `YYYY-MM-DD` day is dropped (a one-sided or empty filter is still a
+ * filter), and a pair given in reverse is put in order rather than turned into
+ * a window that matches nothing.
+ */
+export function orderIsoDayRange(from: unknown, to: unknown): { from: IsoDay | null; to: IsoDay | null } {
+  const first = typeof from === 'string' && isIsoDay(from.trim()) ? from.trim() : null;
+  const last = typeof to === 'string' && isIsoDay(to.trim()) ? to.trim() : null;
+  if (first && last && compareIsoDays(first, last) > 0) {
+    return { from: last, to: first };
+  }
+  return { from: first, to: last };
+}

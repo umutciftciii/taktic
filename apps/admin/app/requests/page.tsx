@@ -1,4 +1,9 @@
-import { CATEGORY_DELIVERY_MODEL_LABELS, requestDeliveryMode } from '@taktic/shared';
+import {
+  CATEGORY_DELIVERY_MODEL_LABELS,
+  isoDayRangeBounds,
+  orderIsoDayRange,
+  requestDeliveryMode,
+} from '@taktic/shared';
 import Link from 'next/link';
 import type { MatchReviewQueue } from '../../lib/match-rounds';
 import { MatchReviewQueueCard } from './match-review-queue';
@@ -142,20 +147,6 @@ function toLower(value: string | null | undefined) {
   return (value ?? '').toLocaleLowerCase('tr-TR');
 }
 
-function parseDateBoundary(value: string | undefined, edge: 'start' | 'end'): Date | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  const date = new Date(trimmed);
-  if (Number.isNaN(date.getTime())) return null;
-  if (edge === 'end') {
-    date.setHours(23, 59, 59, 999);
-  } else {
-    date.setHours(0, 0, 0, 0);
-  }
-  return date;
-}
-
 /**
  * The lifecycle clock behind the status badge.
  *
@@ -192,10 +183,12 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
   const quality = normalizeQuality(params.quality);
   const categorySlug = (params.category ?? '').trim();
   const cityFilter = (params.city ?? '').trim();
-  const fromRaw = (params.from ?? '').trim();
-  const toRaw = (params.to ?? '').trim();
-  const fromDate = parseDateBoundary(fromRaw, 'start');
-  const toDate = parseDateBoundary(toRaw, 'end');
+  // Istanbul days, in order, as [from 00:00, the day after `to` 00:00) Istanbul
+  // time (TIMEZONE-001) — independent of the zone this server runs in.
+  const dayRange = orderIsoDayRange(params.from, params.to);
+  const fromValue = dayRange.from ?? '';
+  const toValue = dayRange.to ?? '';
+  const { gte: fromDate, lt: untilDate } = isoDayRangeBounds(dayRange.from, dayRange.to);
   const page = parsePage(params.page);
 
   const [requests, categories, matchReviewQueue] = await Promise.all([
@@ -216,11 +209,11 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
     if (categorySlug && request.category.slug !== categorySlug) return false;
     if (normalizedCity && !toLower(request.city).includes(normalizedCity)) return false;
 
-    if (fromDate || toDate) {
+    if (fromDate || untilDate) {
       const submitted = new Date(request.submittedAt);
       if (Number.isNaN(submitted.getTime())) return false;
       if (fromDate && submitted < fromDate) return false;
-      if (toDate && submitted > toDate) return false;
+      if (untilDate && submitted >= untilDate) return false;
     }
 
     return true;
@@ -242,8 +235,8 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
     quality !== 'all' ||
     categorySlug.length > 0 ||
     cityFilter.length > 0 ||
-    fromRaw.length > 0 ||
-    toRaw.length > 0;
+    fromValue.length > 0 ||
+    toValue.length > 0;
 
   const filterParams: QueryParams = {
     q: query,
@@ -251,8 +244,8 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
     quality: quality === 'all' ? '' : quality,
     category: categorySlug,
     city: cityFilter,
-    from: fromRaw,
-    to: toRaw,
+    from: fromValue,
+    to: toValue,
   };
 
   // Exact counts: the whole list is on this page already.
@@ -359,10 +352,10 @@ export default async function AdminRequestsPage({ searchParams }: AdminRequestsP
           />
         </FilterField>
         <FilterField label="Başlangıç" htmlFor="request-from">
-          <input id="request-from" name="from" type="date" defaultValue={fromRaw} />
+          <input id="request-from" name="from" type="date" defaultValue={fromValue} />
         </FilterField>
         <FilterField label="Bitiş" htmlFor="request-to">
-          <input id="request-to" name="to" type="date" defaultValue={toRaw} />
+          <input id="request-to" name="to" type="date" defaultValue={toValue} />
         </FilterField>
       </FilterBar>
 

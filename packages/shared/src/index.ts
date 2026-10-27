@@ -34,6 +34,9 @@ export {
   formatIsoDay,
   formatTime,
   isIsoDay,
+  isoDayRangeBounds,
+  isoDayStart,
+  orderIsoDayRange,
   todayIsoDay,
 } from './datetime';
 export type { DateInput, IsoDay } from './datetime';

@@ -1,3 +1,4 @@
+import { orderIsoDayRange } from '@taktic/shared';
 import Link from 'next/link';
 import {
   AdminUserSortDirection,
@@ -114,10 +115,14 @@ export default async function AdminUsersPage({ searchParams }: AdminUsersPagePro
   const q = (params.q ?? '').trim();
   const isActive = normalizeBool(params.isActive);
   const hasPassword = normalizeBool(params.hasPassword);
-  const createdFrom = (params.createdFrom ?? '').trim();
-  const createdTo = (params.createdTo ?? '').trim();
-  const lastLoginFrom = (params.lastLoginFrom ?? '').trim();
-  const lastLoginTo = (params.lastLoginTo ?? '').trim();
+  // Istanbul days, in order: a reversed pair is swapped, anything else dropped
+  // (TIMEZONE-001). The API reads each day as the whole Istanbul day.
+  const createdDays = orderIsoDayRange(params.createdFrom, params.createdTo);
+  const lastLoginDays = orderIsoDayRange(params.lastLoginFrom, params.lastLoginTo);
+  const createdFrom = createdDays.from ?? '';
+  const createdTo = createdDays.to ?? '';
+  const lastLoginFrom = lastLoginDays.from ?? '';
+  const lastLoginTo = lastLoginDays.to ?? '';
   const sortBy = normalizeSortBy(params.sortBy);
   const sortDir = normalizeSortDir(params.sortDir);
   const page = normalizePage(params.page);

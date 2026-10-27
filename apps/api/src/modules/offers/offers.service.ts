@@ -22,6 +22,7 @@ import {
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
+import { parseAdminDateRange } from '../../common/admin-date-range';
 import { parseAdminTextSearch } from '../../common/admin-search';
 import { isProviderExcluded } from '../../common/provider-request-matching';
 import { runSerializable } from '../../common/serializable-transaction';
@@ -126,13 +127,14 @@ export class OffersService {
     const categoryId = normalizeNullableString(filters.categoryId);
     const categorySlug = normalizeNullableString(filters.categorySlug);
     const city = normalizeNullableString(filters.city);
-    const submittedFrom = normalizeOptionalDate(filters.submittedFrom, 'submittedFrom');
-    const submittedTo = normalizeOptionalDate(filters.submittedTo, 'submittedTo');
+    // A `YYYY-MM-DD` end is an Istanbul day, a timestamp an instant (TIMEZONE-001).
+    const submittedRange = parseAdminDateRange(
+      filters.submittedFrom,
+      filters.submittedTo,
+      'submittedFrom',
+      'submittedTo',
+    );
     const search = await parseAdminTextSearch(this.prisma, filters.q);
-
-    if (submittedFrom && submittedTo && submittedFrom > submittedTo) {
-      throw new BadRequestException('submittedFrom cannot be after submittedTo');
-    }
 
     const requestFilter: Prisma.ServiceRequestWhereInput = {};
     if (categoryId) {
@@ -149,14 +151,7 @@ export class OffersService {
       ...(status ? { status } : {}),
       ...(providerId ? { providerId } : {}),
       ...(requestId ? { requestId } : {}),
-      ...(submittedFrom || submittedTo
-        ? {
-            submittedAt: {
-              ...(submittedFrom ? { gte: submittedFrom } : {}),
-              ...(submittedTo ? { lte: submittedTo } : {}),
-            },
-          }
-        : {}),
+      ...(submittedRange ? { submittedAt: submittedRange } : {}),
       ...(Object.keys(requestFilter).length > 0 ? { request: { is: requestFilter } } : {}),
     };
 
@@ -1927,19 +1922,4 @@ function normalizeNullableString(value: string | null | undefined) {
 
   const trimmed = value.trim();
   return trimmed ? trimmed : null;
-}
-
-
-function normalizeOptionalDate(value: string | undefined | null, fieldName: string): Date | null {
-  const normalized = normalizeNullableString(value ?? undefined);
-  if (!normalized) {
-    return null;
-  }
-
-  const date = new Date(normalized);
-  if (Number.isNaN(date.getTime())) {
-    throw new BadRequestException(`${fieldName} must be a valid ISO-8601 date`);
-  }
-
-  return date;
 }

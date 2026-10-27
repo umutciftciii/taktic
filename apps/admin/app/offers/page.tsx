@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { orderIsoDayRange } from '@taktic/shared';
 import {
   apiFetch,
   formatDateTime,
@@ -121,12 +122,6 @@ function normalizeRefundAction(value: string | undefined): RefundActionFilter {
   return 'all';
 }
 
-function isIsoDate(value: string) {
-  if (!value) return false;
-  const date = new Date(value);
-  return !Number.isNaN(date.getTime());
-}
-
 export default async function AdminOffersPage({ searchParams }: AdminOffersPageProps) {
   const { can } = await requireAdmin('OFFERS_READ');
   // The customer column is the request's contact snapshot, which the API
@@ -139,8 +134,12 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   const refundAction = normalizeRefundAction(params.refundAction);
   const categorySlug = (params.category ?? '').trim();
   const cityFilter = (params.city ?? '').trim();
-  const fromValue = (params.from ?? '').trim();
-  const toValue = (params.to ?? '').trim();
+  // Istanbul days, in order; the API turns them into [from 00:00, the day after
+  // `to` 00:00) Istanbul time (TIMEZONE-001). No instant is built here, so the
+  // window cannot depend on the zone this server runs in.
+  const dayRange = orderIsoDayRange(params.from, params.to);
+  const fromValue = dayRange.from ?? '';
+  const toValue = dayRange.to ?? '';
   const providerId = (params.providerId ?? '').trim();
   const requestId = (params.requestId ?? '').trim();
   const page = Math.min(parsePage(params.page), MAX_PAGE);
@@ -152,14 +151,8 @@ export default async function AdminOffersPage({ searchParams }: AdminOffersPageP
   if (requestId) apiQuery.set('requestId', requestId);
   if (categorySlug) apiQuery.set('categorySlug', categorySlug);
   if (cityFilter) apiQuery.set('city', cityFilter);
-  if (fromValue && isIsoDate(fromValue)) {
-    apiQuery.set('submittedFrom', new Date(fromValue).toISOString());
-  }
-  if (toValue && isIsoDate(toValue)) {
-    const toDate = new Date(toValue);
-    toDate.setHours(23, 59, 59, 999);
-    apiQuery.set('submittedTo', toDate.toISOString());
-  }
+  if (fromValue) apiQuery.set('submittedFrom', fromValue);
+  if (toValue) apiQuery.set('submittedTo', toValue);
 
   if (refundAction !== 'all') apiQuery.set('refundAction', refundAction);
   apiQuery.set('page', String(page));

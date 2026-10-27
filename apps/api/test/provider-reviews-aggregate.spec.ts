@@ -291,6 +291,22 @@ describe('provider review aggregate', () => {
     expect(JSON.stringify(body)).not.toMatch(PII_PATTERN);
   });
 
+  it('labels a public item with its Istanbul calendar month, not the UTC one (TIMEZONE-001)', async () => {
+    await setReviewsEnabled(true);
+    const fixture = await providerFixture();
+    // 30 Sep 23:59:59.999 Istanbul; 1 Oct 00:00 Istanbul (UTC still says 30 Sep);
+    // 1 Jan 2027 00:30 Istanbul (UTC still says 31 Dec 2026).
+    const september = await review(fixture, { rating: 5, comment: 'Eylül sonu.', createdAt: new Date('2026-09-30T20:59:59.999Z') });
+    const october = await review(fixture, { rating: 4, comment: 'Ekim başı.', createdAt: new Date('2026-09-30T21:00:00.000Z') });
+    const january = await review(fixture, { rating: 4, comment: 'Yılbaşı.', createdAt: new Date('2026-12-31T21:30:00.000Z') });
+
+    const body = (await request(ctx.server).get(publicUrl(fixture.provider.id)).expect(200)).body;
+    const monthOf = Object.fromEntries(
+      (body.items as Array<{ id: string; month: string }>).map((item) => [item.id, item.month]),
+    );
+    expect(monthOf).toEqual({ [september.id]: '2026-09', [october.id]: '2026-10', [january.id]: '2027-01' });
+  });
+
   it('public list is 404 for a non-APPROVED provider and while the switch is off; provider panel still lists its own', async () => {
     await setReviewsEnabled(true);
     const fixture = await providerFixture();
