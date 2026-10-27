@@ -15,6 +15,7 @@ import {
   formatPrice,
   Offer,
   qualityBadgeClass,
+  orderedQualityBreakdown,
   qualityBreakdownDetail,
   qualityBreakdownLabel,
   qualityLabel,
@@ -1343,7 +1344,7 @@ function QualityBreakdown({ request }: { request: ServiceRequest }) {
       </div>
       {request.qualityScoreBreakdown ? (
         <div className="quality-breakdown-grid">
-          {Object.entries(request.qualityScoreBreakdown).map(([key, component]) => (
+          {orderedQualityBreakdown(request.qualityScoreBreakdown).map(([key, component]) => (
             <QualityBreakdownItem key={key} keyName={key} component={component} />
           ))}
         </div>
