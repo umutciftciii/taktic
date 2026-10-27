@@ -13,6 +13,7 @@
     "canonicalize:provider-phones": "tsx src/scripts/canonicalize-provider-phones.ts",
     "canonicalize:user-phones": "tsx src/scripts/canonicalize-user-phones.ts",
     "customer-email:release": "tsx src/scripts/release-customer-email.ts",
+    "quality:backfill": "tsx src/scripts/backfill-quality-score-v2.ts",
     "super-admin:transition": "tsx src/scripts/super-admin-transition.ts"
   },
   "dependencies": {
