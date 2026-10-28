@@ -29,10 +29,10 @@ import {
 import { createOfferAction } from './actions';
 import { OfferPriceField } from '../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
-import { DiscardOfferDraft, OfferFormDraft } from '../../../offer-form-draft';
 import { ReportDialog } from './report-dialog';
 import { DeliveryModeBadge } from '../../../../request-fields/delivery-mode-badge';
 import { DistrictWideLocationTag } from '../../../../request-fields/district-wide-location-tag';
+import { DiscardOfferDraft, OfferFormDraft } from '../../../offer-form-draft';
 
 type ProviderRequestDetailPageProps = {
   params: Promise<{ id: string; requestId: string }>;
