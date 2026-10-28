@@ -16,6 +16,7 @@ import {
   resolveWebAppBaseUrl,
   PaymentProviderKind,
 } from '../payments/payment-provider.config';
+import { assertMockCheckoutPermitted } from '../payments/mock-payment-availability';
 import { CheckoutSessionError, PaymentProviderPort } from '../payments/payment-provider.port';
 import { CreateShowcasePackageCheckoutDto } from './dto/showcase-package-checkout.dto';
 import { resolveShowcasePriceTerms } from './showcase.constants';
@@ -93,6 +94,12 @@ export class ShowcasePackageCheckoutService {
     }
 
     const kind = resolvePaymentProviderKind();
+    // G-02: before the reusable-checkout lookup, so a mock purchase left
+    // pending from before is not handed back either.
+    if (kind === 'mock') {
+      assertMockCheckoutPermitted();
+    }
+
     const terms = resolveShowcasePriceTerms();
 
     // Held locally and never read back off the row: the purchase projection

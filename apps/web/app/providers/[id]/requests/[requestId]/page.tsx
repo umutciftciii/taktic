@@ -29,6 +29,7 @@ import {
 import { createOfferAction } from './actions';
 import { OfferPriceField } from '../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
+import { OfferSubmitRefusalNotice } from '../../../offer-submit-refusal';
 import { ReportDialog } from './report-dialog';
 import { DeliveryModeBadge } from '../../../../request-fields/delivery-mode-badge';
 import { DistrictWideLocationTag } from '../../../../request-fields/district-wide-location-tag';
@@ -281,6 +282,7 @@ export default async function ProviderRequestDetailPage({
             ) : null}
 
             <OfferScheduleNotice code={offerError} />
+            <OfferSubmitRefusalNotice code={offerError} />
 
             {offerError === 'categoryInactive' ? (
               <div className="pdash-notice pdash-notice-error" role="alert">
