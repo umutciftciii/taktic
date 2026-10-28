@@ -5,6 +5,7 @@ import { redirect } from 'next/navigation';
 import { ApiError, apiFetch, ProviderOffer } from '../../../../../lib/api';
 import { parseLiraToMinor } from '../../../../../lib/lira-input';
 import { isOfferScheduleErrorCode, validateOfferSchedule } from '@taktic/shared';
+import { describeOfferSubmitRefusal } from '../../../offer-submit-refusal';
 
 /** Pricing conflicts the API reports with a machine-readable code. */
 type OfferConflict = {
@@ -82,6 +83,17 @@ export async function createOfferAction(formData: FormData) {
     const code = apiErrorCode(error);
     if (isOfferScheduleErrorCode(code)) {
       redirect(`/providers/${providerId}/requests/${requestId}?offerError=${code}`);
+    }
+
+    // G-07: the request moved, the balance ran out or the body was refused.
+    // A request the provider can no longer see lands on the list, since its
+    // own page would answer 404; everything else back on the form.
+    const refusal = describeOfferSubmitRefusal(error);
+    if (refusal?.on === 'list') {
+      redirect(`/providers/${providerId}/requests?offerError=${refusal.refusal}`);
+    }
+    if (refusal) {
+      redirect(`/providers/${providerId}/requests/${requestId}?offerError=${refusal.refusal}`);
     }
 
     throw error;
