@@ -119,6 +119,15 @@ are in [docs/release.md](docs/release.md).
   640px while the legal links stay visible; the request form's step tabs share
   one row and its back/next buttons sit side by side. No business logic, API or
   migration change. See `docs/mobile-ux-hardening-001.md`.
+- STAGING-UAT-001 B-04: a refused marketplace offer submit keeps what the
+  provider typed. The form used to come back empty after any `?offerError=`
+  redirect (a date check, a price change), so fixing one date meant retyping
+  price, dates, message and notes. The typed fields are copied into the tab's
+  own `sessionStorage` on submit and written back only when the page says the
+  submit was refused; any other visit drops the copy, and so does the screen
+  once the offer exists. Never in the URL; the displayed credit cost
+  (`expectedCreditCost`) is never restored, so a price change still shows the
+  new price. No API, credit or migration change.
 
 ### Fixed
 
