@@ -14,13 +14,17 @@ export async function seedOffer(options: {
   providerId: string;
   creditCost?: number;
   priceAmount?: number;
-  status?: 'SUBMITTED' | 'VIEWED' | 'SHORTLISTED' | 'ACCEPTED';
-  /** `eligible`: in policy, unviewed, window over. `none`: outside the policy. */
-  refund?: 'eligible' | 'none';
+  status?: 'SUBMITTED' | 'VIEWED' | 'SHORTLISTED' | 'ACCEPTED' | 'REJECTED';
+  /**
+   * `eligible`: in policy, unviewed, window over. `pending`: in policy, sent
+   * just now, window still running. `none`: outside the policy.
+   */
+  refund?: 'eligible' | 'pending' | 'none';
 }) {
   const creditCost = options.creditCost ?? 3;
   const refund = options.refund ?? 'none';
-  const submittedAt = new Date(Date.now() - 50 * 60 * 60 * 1000);
+  const inPolicy = refund !== 'none';
+  const submittedAt = new Date(Date.now() - (refund === 'pending' ? 0 : 50) * 60 * 60 * 1000);
   const spend = await recordCreditTransaction({
     providerId: options.providerId,
     type: 'OFFER_SPEND',
@@ -41,9 +45,10 @@ export async function seedOffer(options: {
       entitlementSource: 'ONE_TIME_CREDIT',
       creditSpentTransactionId: spend.id,
       submittedAt,
-      unviewedRefundPolicy: refund === 'eligible',
-      unviewedRefundWindowHours: refund === 'eligible' ? 48 : null,
-      unviewedRefundEligibleAt: refund === 'eligible' ? new Date(submittedAt.getTime() + 48 * 60 * 60 * 1000) : null,
+      rejectedAt: options.status === 'REJECTED' ? new Date() : null,
+      unviewedRefundPolicy: inPolicy,
+      unviewedRefundWindowHours: inPolicy ? 48 : null,
+      unviewedRefundEligibleAt: inPolicy ? new Date(submittedAt.getTime() + 48 * 60 * 60 * 1000) : null,
     },
     select: { id: true, offerNumber: true },
   });
