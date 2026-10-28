@@ -29,6 +29,7 @@ import {
 import { createOfferAction } from './actions';
 import { OfferPriceField } from '../../../offer-price-field';
 import { OfferScheduleFields, OfferScheduleNotice } from '../../../offer-schedule-fields';
+import { DiscardOfferDraft, OfferFormDraft } from '../../../offer-form-draft';
 import { ReportDialog } from './report-dialog';
 import { DeliveryModeBadge } from '../../../../request-fields/delivery-mode-badge';
 import { DistrictWideLocationTag } from '../../../../request-fields/district-wide-location-tag';
@@ -346,6 +347,8 @@ export default async function ProviderRequestDetailPage({
                   </div>
                 )}
 
+                <DiscardOfferDraft providerId={id} requestId={requestId} />
+
                 <div className="pdash-actions">
                   <Link
                     className="pdash-btn pdash-btn-primary"
@@ -369,6 +372,8 @@ export default async function ProviderRequestDetailPage({
                   charged a price they did not see. It never sets the charge.
                 */}
                 <input type="hidden" name="expectedCreditCost" value={offerCreditCost ?? ''} />
+                {/* B-04: what was typed comes back after a refused submit. */}
+                <OfferFormDraft providerId={id} requestId={requestId} restore={Boolean(offerError)} />
 
                 <OfferPriceField />
 
