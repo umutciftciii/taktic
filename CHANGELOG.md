@@ -122,6 +122,19 @@ are in [docs/release.md](docs/release.md).
 
 ### Fixed
 
+- RELEASE-GAP-001 G-02 (security): the mock card form no longer opens or
+  settles a purchase on production. `mock` is the only payment provider a
+  production boot accepts, and `POST …/package-purchases/:id/mock-pay` only
+  checked the provider, so a provider could mark their own credit or vitrin
+  purchase paid and receive credits or a vitrin right without paying. The mock
+  form now follows the sandbox rule (`isSandboxIntegrationPermitted`): never on
+  `APP_ENVIRONMENT=production`, always on staging, on a local or undeclared
+  stack only outside `NODE_ENV=production`. Where it may not run, `mock-pay`
+  answers `404 MOCK_PAYMENT_UNAVAILABLE` before reading the purchase, and the
+  credit checkout, the legacy package-purchase route and the vitrin checkout
+  answer `409 MOCK_PAYMENT_UNAVAILABLE` before writing anything (no purchase,
+  no terms acceptance, no reused pending checkout). Staging, local and the test
+  suite behave as before. No migration, no new environment variable.
 - STAGING-UAT-001 B-02 (P1): a request that names no neighbourhood now reaches
   the neighbourhood-scoped providers of its district. `matchesProviderArea`
   refused that pair (a rule set on purpose in 4ca7ad76), so a district-wide
