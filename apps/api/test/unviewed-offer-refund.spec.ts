@@ -515,7 +515,11 @@ describe('paying twice is impossible', () => {
     expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
   });
 
-  it('does not refund an offer a customer opens between the scan and the write', async () => {
+  it('pays an offer a customer opens between the scan and the write, because the promise had matured', async () => {
+    // OFFER-VIEW-001 A-2. The scan only ever picks offers whose own refund
+    // moment has passed, and a look after that moment is no longer written
+    // as a view — so this race cannot take a matured refund back any more.
+    // It used to: the view won and the provider kept nothing.
     const { provider, serviceRequest, offerId, customerCookie } = await policyFixture();
     await ageBeyondWindow(offerId);
 
@@ -523,19 +527,18 @@ describe('paying twice is impossible', () => {
     const preview = await worker().dryRun();
     expect(preview.items.map((item) => item.offerId)).toContain(offerId);
 
-    // …and then the customer opens it. The execution re-reads inside its own
-    // transaction, so the view wins and no credit moves.
+    // …and then the customer opens it. Too late to count as a view.
     await request(ctx.server)
       .post(viewUrl(serviceRequest.id, offerId))
       .set('Cookie', customerCookie)
       .expect(201);
+    const opened = await ctx.prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
+    expect(opened.viewedAt).toBeNull();
 
     const result = await worker().execute();
-    expect(result.refunded).toBe(0);
-    expect(await refundRows(offerId)).toHaveLength(0);
-    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(
-      STARTING_CREDITS - CATEGORY_COST,
-    );
+    expect(result.refunded).toBe(1);
+    expect(await refundRows(offerId)).toHaveLength(1);
+    expect(await currentCreditBalance(ctx.prisma, provider.id)).toBe(STARTING_CREDITS);
   });
 });
 

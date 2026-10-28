@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AdminPermission, UserRole } from '@prisma/client';
 import { AdminAccessGuard } from '../auth/admin-access.guard';
 import { AuthGuard, OptionalAuthGuard } from '../auth/auth.guard';
@@ -8,6 +8,7 @@ import { PermissionsGuard } from '../auth/permissions.guard';
 import { RequiresPermission, RequiresPermissionFromStaff } from '../auth/permissions.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import { CustomerOfferActionDto } from '../offers/dto/customer-offer-action.dto';
+import { OfferImpressionsDto } from '../offers/dto/offer-impressions.dto';
 import { getDraftTokenFromRequest } from '../request-drafts/request-draft.cookie';
 import { CancelServiceRequestDto, WithholdWinnerRefundCancelDto } from './dto/cancel-service-request.dto';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -95,6 +96,22 @@ export class ServiceRequestsController {
     @CurrentUser() user: AuthUser | null,
   ) {
     return this.offersService.getRequestOffer(requestId, offerId, user);
+  }
+
+  /**
+   * OFFER-VIEW-001: the offers the customer's list or comparison screen
+   * actually showed. Signed-in only — the web reaches it through its own
+   * same-origin route, which forwards the session cookie.
+   */
+  @Post(':requestId/offers/impressions')
+  @HttpCode(200)
+  @UseGuards(AuthGuard)
+  recordRequestOfferImpressions(
+    @Param('requestId') requestId: string,
+    @Body() dto: OfferImpressionsDto,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.offersService.recordRequestOfferImpressions(requestId, dto.offerIds, user);
   }
 
   @Post(':requestId/offers/:offerId/view')

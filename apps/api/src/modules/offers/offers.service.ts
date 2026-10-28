@@ -55,6 +55,7 @@ import {
   offerActionNotAllowedException,
   offerStatusNotSettableException,
 } from './offer-transitions';
+import { OFFER_IMPRESSIONS_MAX, stampCustomerViews, viewStampableWhere } from './offer-view';
 import {
   ManualRefundReasonCode,
   RefundRecommendedAction,
@@ -523,10 +524,12 @@ export class OffersService {
    * The single point at which an offer becomes "viewed".
    *
    * This endpoint — POST /service-requests/:requestId/offers/:offerId/view — is
-   * the only writer of `Offer.viewedAt` that a customer can reach, and
-   * `viewedAt` is now the whole refund policy: an offer with a timestamp here
-   * keeps its credit forever, one without it is paid back once its own refund
-   * window has elapsed. So
+   * one of the three writers of `Offer.viewedAt` a customer can reach, beside
+   * the list/compare impression report ({@link recordRequestOfferImpressions})
+   * and the customer's own action on the offer. All three share one stamp rule
+   * (`viewStampableWhere`, OFFER-VIEW-001), because `viewedAt` is now the whole
+   * refund policy: an offer with a timestamp here keeps its credit forever, one
+   * without it is paid back once its own refund window has elapsed. So
    * everything about this method is about not writing that timestamp by
    * accident.
    *
@@ -546,18 +549,13 @@ export class OffersService {
     const existingOffer = await this.getRequestOfferOrThrow(requestId, offerId, user);
 
     if (isCustomerViewer(existingOffer.request.customerId, user)) {
-      // Two conditional writes rather than one read-then-write: the row was read
-      // outside any transaction and is already stale. Each clause is its own
-      // guard, so a concurrent open cannot move a timestamp that is already set.
-      await this.prisma.offer.updateMany({
-        where: { id: offerId, viewedAt: null },
-        data: { viewedAt: new Date() },
-      });
-
-      await this.prisma.offer.updateMany({
-        where: { id: offerId, status: OfferStatus.SUBMITTED },
-        data: { status: OfferStatus.VIEWED },
-      });
+      // Conditional writes rather than one read-then-write: the row was read
+      // outside any transaction and is already stale. The `where` carries the
+      // whole stamp rule (OFFER-VIEW-001), so a concurrent open cannot move a
+      // timestamp that is already set, a rival the customer's acceptance
+      // closed stays unviewed (A-1), and a look after the refund moment does
+      // not take back a matured refund (A-2).
+      await stampCustomerViews(this.prisma, { id: offerId, requestId }, new Date());
     }
 
     const offer = await this.prisma.offer.findUniqueOrThrow({
@@ -566,6 +564,48 @@ export class OffersService {
     });
 
     return this.withProviderReviewSummary(toCustomerOfferDetail(offer));
+  }
+
+  /**
+   * OFFER-VIEW-001: the offers whose price and content the customer's list or
+   * comparison screen actually showed — at least half visible, for a second,
+   * in the foreground tab, as the web client measures it.
+   *
+   * Opening the list is not a view of every offer on it; only the cards the
+   * client reports are stamped, and only under the same server-side rule as a
+   * detail open (`viewStampableWhere`): no stamp yet, still a live choice, the
+   * refund moment not yet reached. Ids outside this request's current round,
+   * or not stampable, are skipped silently — the answer is a count, never a
+   * per-id verdict that could be probed.
+   *
+   * Only the request's own signed-in customer writes. A SUPER_ADMIN may read
+   * the screen and is answered `recorded: 0`; a request with no linked account
+   * has no owner to report for and records nothing either.
+   */
+  async recordRequestOfferImpressions(requestId: string, offerIds: string[], user: AuthUser | null = null) {
+    const request = await this.prisma.serviceRequest.findUnique({
+      where: { id: requestId },
+      select: { id: true, customerId: true, currentRoundId: true },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Service request not found');
+    }
+
+    ensureCustomerCanAccessRequest(request.customerId, user);
+
+    const ids = [...new Set(offerIds)].slice(0, OFFER_IMPRESSIONS_MAX);
+    if (!request.customerId || !isCustomerViewer(request.customerId, user) || ids.length === 0) {
+      return { recorded: 0 };
+    }
+
+    const recorded = await stampCustomerViews(
+      this.prisma,
+      { id: { in: ids }, requestId, matchRoundId: request.currentRoundId },
+      new Date(),
+    );
+
+    return { recorded };
   }
 
   async updateRequestOfferAction(
@@ -615,8 +655,7 @@ export class OffersService {
     // status control, and an admin's decision is not the customer's view, so it
     // must not close a provider's refund window. Same predicate the view
     // endpoint uses, for the same reason.
-    const stampViewedAt =
-      existingOffer.viewedAt === null && isCustomerViewer(existingOffer.request.customerId, user);
+    const customerViewer = isCustomerViewer(existingOffer.request.customerId, user);
 
     /*
      * An administrator deciding on the customer's behalf settles the credit,
@@ -642,7 +681,7 @@ export class OffersService {
       (status === OfferStatus.ACCEPTED || status === OfferStatus.REJECTED);
 
     if (status === OfferStatus.ACCEPTED) {
-      const accepted = await this.acceptRequestOffer(requestId, offerId, stampViewedAt, adminDecision, {
+      const accepted = await this.acceptRequestOffer(requestId, offerId, customerViewer, adminDecision, {
         accepted: dto.contactDisclosureAccepted === true,
         version: dto.contactDisclosureVersion?.trim().toLowerCase() || null,
       });
@@ -690,6 +729,17 @@ export class OffersService {
           assertOfferRoundCurrentAndOpen(offerRound.matchRoundId, current);
         }
 
+        // The stamp first, while the offer still holds the status the stamp
+        // rule asks for, and under that rule's own `where` (OFFER-VIEW-001):
+        // a first look only, and never once the offer's refund moment has
+        // passed (A-2). Same transaction as the status write below.
+        if (customerViewer) {
+          await tx.offer.updateMany({
+            where: { id: offerId, ...viewStampableWhere(now) },
+            data: { viewedAt: now },
+          });
+        }
+
         return tx.offer.updateMany({
           where: {
             id: offerId,
@@ -697,7 +747,6 @@ export class OffersService {
           },
           data: {
             status,
-            ...(stampViewedAt ? { viewedAt: now } : {}),
             // In the same conditional UPDATE as the status it belongs to, so
             // the decision and the fact that it settled the credit either both
             // land or neither does.
@@ -787,7 +836,7 @@ export class OffersService {
   private acceptRequestOffer(
     requestId: string,
     offerId: string,
-    stampViewedAt: boolean,
+    customerViewer: boolean,
     adminDecision: boolean,
     disclosure: { accepted: boolean; version: string | null },
   ) {
@@ -903,7 +952,6 @@ export class OffersService {
           data: {
             status: OfferStatus.ACCEPTED,
             acceptedAt: now,
-            ...(stampViewedAt ? { viewedAt: now } : {}),
             // Inside the accept transaction, so an admin's acceptance and the
             // credit it settles commit together with the match itself.
             ...(adminDecision ? adminDecisionRefundBlock(now) : {}),
@@ -922,6 +970,17 @@ export class OffersService {
             throw offerActionNotAllowedException(current.status);
           }
           throw new ConflictException('This offer can no longer be accepted');
+        }
+
+        // The customer's acceptance implies having read the offer. Its own
+        // conditional write, so a view already on file keeps its first
+        // timestamp; deliberately without the refund-moment clause of
+        // `viewStampableWhere` — see there for why an acceptance always stamps.
+        if (customerViewer) {
+          await tx.offer.updateMany({
+            where: { id: offerId, viewedAt: null },
+            data: { viewedAt: now },
+          });
         }
 
         // BUG-OFFER-REFUND-ACCEPT-001: an offer whose credit came back is

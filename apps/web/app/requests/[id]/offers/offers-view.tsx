@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 // Types only: `lib/api` reaches for next/headers and cannot be bundled here.
 import type { OfferStatus, RequestOfferPreview } from '../../../../lib/api';
 import {
@@ -13,6 +13,8 @@ import {
 } from '../../../../lib/formatters';
 import { IconArrowRight, IconClipList, IconCompare } from '../../../landing-icons';
 import { RatingSummaryLine } from '../../../review-stars';
+import { isImpressionTrackable } from './offer-impressions';
+import { OFFER_IMPRESSION_ATTRIBUTE, useOfferImpressions } from './use-offer-impressions';
 
 type OffersViewProps = {
   requestId: string;
@@ -39,6 +41,12 @@ type OffersViewProps = {
  */
 export function OffersView({ requestId, offers, reviewsEnabled = false, emptyText }: OffersViewProps) {
   const [mode, setMode] = useState<'list' | 'compare'>('list');
+  // OFFER-VIEW-001: which cards this screen has really shown the customer. A
+  // card counts only once its price and content stayed on screen for a second
+  // in the foreground tab — opening the page does not show what is below it.
+  const viewport = useRef<HTMLDivElement>(null);
+  const trackableIds = offers.filter(isImpressionTrackable).map((offer) => offer.id);
+  useOfferImpressions(requestId, mode === 'list' ? 'LIST' : 'COMPARE', trackableIds, viewport);
 
   if (offers.length === 0) {
     return (
@@ -91,7 +99,7 @@ export function OffersView({ requestId, offers, reviewsEnabled = false, emptyTex
       </div>
 
       {mode === 'list' ? (
-        <div>
+        <div ref={viewport}>
           {offers.map((offer) => (
             <OfferRow
               key={offer.id}
@@ -103,7 +111,9 @@ export function OffersView({ requestId, offers, reviewsEnabled = false, emptyTex
           ))}
         </div>
       ) : (
-        <CompareTable offers={offers} requestId={requestId} lowestId={lowestId} />
+        <div ref={viewport}>
+          <CompareTable offers={offers} requestId={requestId} lowestId={lowestId} />
+        </div>
       )}
     </>
   );
@@ -125,7 +135,11 @@ function OfferRow({
   const closed = offerIsClosed(offer);
 
   return (
-    <article className="cdash-offer" data-offer-status={offer.status}>
+    <article
+      className="cdash-offer"
+      data-offer-status={offer.status}
+      {...{ [OFFER_IMPRESSION_ATTRIBUTE]: offer.id }}
+    >
       <div className="cdash-offer-head">
         <div className="cdash-offer-provider">
           <span className="cdash-offer-avatar" aria-hidden="true">
@@ -209,10 +223,17 @@ function OfferRow({
 const COMPARE_ROWS: ReadonlyArray<{
   label: string;
   render: (offer: RequestOfferPreview) => string;
+  /**
+   * OFFER-VIEW-001: the cell whose being on screen counts as the comparison
+   * having shown this offer. The amount is the offer's core, and the column
+   * scrolls sideways, so a column off to the right is not counted.
+   */
+  impression?: true;
 }> = [
   {
     label: 'Teklif tutarı',
     render: (offer) => formatPrice(offer.priceAmount, offer.currency),
+    impression: true,
   },
   {
     label: 'Garanti',
@@ -292,6 +313,7 @@ function CompareTable({
                     <td
                       key={offer.id}
                       className={offer.id === lowestId ? 'compare-col-recommended' : undefined}
+                      {...(row.impression ? { [OFFER_IMPRESSION_ATTRIBUTE]: offer.id } : {})}
                     >
                       {row.render(offer)}
                     </td>
