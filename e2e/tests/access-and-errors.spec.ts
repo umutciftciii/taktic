@@ -170,6 +170,41 @@ test.describe('access boundaries', () => {
   });
 });
 
+test.describe('a stale offer form (RELEASE-GAP-001 G-07)', () => {
+  test('a request closed mid-form lands on the list with a sentence and charges nothing', async ({ browser }) => {
+    const fixture = await publishedRequest(browser);
+    const provider = await Actor.open(browser, 'provider', primaryRuntime);
+
+    try {
+      await provider.loginToWeb(fixture.providerAccount.email, fixture.providerAccount.password);
+      await openRequestAsProvider(provider, fixture.providerAccount.id, fixture.requestId);
+      await fillOfferForm(provider, '1600,00', 'Talep bu arada kapandı.');
+
+      // The customer closes the request while the provider's tab is open: the
+      // API now answers the submit with 404, which used to be the error page.
+      await prisma().serviceRequest.update({
+        where: { id: fixture.requestId },
+        data: { status: 'CANCELLED', cancelledAt: new Date() },
+      });
+
+      await provider.page.getByRole('button', { name: 'Teklifi Gönder' }).click();
+
+      await expect(provider.page).toHaveURL(
+        new RegExp(`/providers/${fixture.providerAccount.id}/requests\\?offerError=requestUnavailable$`),
+      );
+      const notice = provider.page.getByTestId('offer-submit-refusal');
+      await expect(notice).toContainText('Teklif gönderilmedi, kredi düşülmedi.');
+      await expect(notice).toContainText('Bu talep artık teklif almıyor');
+      await assertNoErrorScreen(provider.page);
+
+      expect(await prisma().offer.count({ where: { requestId: fixture.requestId } })).toBe(0);
+      expect(await creditBalance(fixture.providerAccount.id)).toBe(STARTING_CREDITS);
+    } finally {
+      await Promise.all([fixture.customer.close(), provider.close()]);
+    }
+  });
+});
+
 test.describe('pricing conflicts', () => {
   test('a price change mid-form refuses the offer and charges nothing', async ({ browser }) => {
     const fixture = await publishedRequest(browser);

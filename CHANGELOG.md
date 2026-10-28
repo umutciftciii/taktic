@@ -157,6 +157,18 @@ are in [docs/release.md](docs/release.md).
   see the sign-in / sign-up tabs there (D0/G2). The `EMAIL_VERIFIED` campaign
   fact is still written once, by the confirm POST only. No migration, no new
   environment variable.
+- RELEASE-GAP-001 G-07 (UAT B-07): a refused offer submit is a sentence, not
+  the error page. The marketplace offer action used to rethrow everything but
+  the pricing and schedule codes, so a stale tab (request closed or matched →
+  `404`), a closed round (`409 OFFER_ROUND_CLOSED`, `PROVIDER_EXCLUDED`), a
+  second offer, a short balance (`402`) and a refused body (`400`) all reached
+  the error boundary. Each now lands with "Teklif gönderilmedi, kredi
+  düşülmedi." and the reason: on the request list when the request is gone
+  (its own page would answer 404), on the form otherwise. Any other `409` reads
+  as "the request changed, reload"; `5xx`, `401` and `403` still reach the
+  error boundary. The API's duplicate-offer `409` now carries
+  `code: OFFER_ALREADY_SUBMITTED` (status and message unchanged). No credit or
+  offer rule changed, no migration, no new environment variable.
 
 ## 0.2.0 - 2026-10-12
 

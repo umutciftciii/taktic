@@ -21,6 +21,7 @@ import { readCreditBalance } from '../../provider-data';
 import { providerStatusBadgeClass, formatBudgetRange } from '../../provider-ui';
 import { DeliveryModeBadge } from '../../../request-fields/delivery-mode-badge';
 import { DistrictWideLocationTag } from '../../../request-fields/district-wide-location-tag';
+import { OfferSubmitRefusalNotice } from '../../offer-submit-refusal';
 
 type ProviderRequestsPageProps = {
   params: Promise<{ id: string }>;
@@ -32,6 +33,8 @@ type ProviderRequestsPageProps = {
     minQualityLabel?: string;
     /** Retired. Read only to say so; never forwarded and never translated. */
     minQualityScore?: string;
+    /** G-07: a refused offer submit for a request that is gone. Never forwarded. */
+    offerError?: string;
   }>;
 };
 
@@ -47,7 +50,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
   // numeric minimum. It is not applied — a number on the old scale means
   // something else on the current one — and the page says so instead of
   // quietly picking a label for the provider.
-  const { minQualityScore: retiredMinQualityScore, ...filters } = await searchParams;
+  const { minQualityScore: retiredMinQualityScore, offerError, ...filters } = await searchParams;
   const user = await getCurrentUser();
   if (!user) {
     redirect(`/login?redirectTo=/providers/${id}/requests`);
@@ -146,6 +149,8 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
           etiketine göre daraltmak için yukarıdaki “Kalite” seçimini kullanın.
         </div>
       ) : null}
+
+      <OfferSubmitRefusalNotice code={offerError} />
 
       {errorMessage ? <div className="pdash-notice pdash-notice-error">{errorMessage}</div> : null}
 

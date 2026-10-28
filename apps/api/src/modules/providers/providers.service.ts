@@ -213,6 +213,7 @@ type ApplicationRequestMeta = { ipAddress?: string | null; userAgent?: string | 
 export const CATEGORY_PRICE_UNSET_CODE = 'CATEGORY_PRICE_UNSET';
 export const CREDIT_COST_CHANGED_CODE = 'CREDIT_COST_CHANGED';
 export const CATEGORY_INACTIVE_CODE = 'CATEGORY_INACTIVE';
+export const OFFER_ALREADY_SUBMITTED_CODE = 'OFFER_ALREADY_SUBMITTED';
 
 /**
  * Refused when an operator tries to bind a provider to something that is not a
@@ -1605,7 +1606,7 @@ export class ProvidersService implements OnModuleInit {
             select: { id: true },
           });
           if (existingOffer) {
-            throw new ConflictException('Provider already submitted an offer for this request');
+            throw offerAlreadySubmitted();
           }
 
           const category = request.category;
@@ -1912,7 +1913,7 @@ export class ProvidersService implements OnModuleInit {
       );
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-        throw new ConflictException('Provider already submitted an offer for this request');
+        throw offerAlreadySubmitted();
       }
       // The database's own refusal (M3 trigger), for a writer that got past
       // the checks above: the same 409 the application answers.
@@ -2471,6 +2472,20 @@ function canProviderActOnRequest(
 type AllowanceOutcome =
   | { kind: 'CONSUMED'; usage: AllowanceUsageReceipt }
   | { kind: 'PAID_FALLBACK'; showcaseLeadId: string };
+
+/**
+ * A second offer in the same round, from the pre-check or from the unique
+ * index. Same status and message as before; the code is new (G-07), so the web
+ * form can say so instead of reaching its error boundary.
+ */
+function offerAlreadySubmitted() {
+  return new ConflictException({
+    statusCode: HttpStatus.CONFLICT,
+    error: 'Conflict',
+    code: OFFER_ALREADY_SUBMITTED_CODE,
+    message: 'Provider already submitted an offer for this request',
+  });
+}
 
 /** The repriced-offer 409, shared by the marketplace and direct-lead checks. */
 function creditCostChanged(
