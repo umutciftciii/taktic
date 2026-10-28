@@ -18,6 +18,7 @@ import {
   packagePurchaseOmit,
 } from '../package-purchases/package-purchases.service';
 import { CreateCheckoutSessionDto } from './dto/create-checkout-session.dto';
+import { assertMockCheckoutPermitted } from './mock-payment-availability';
 import {
   PaymentProviderKind,
   resolvePaymentProviderKind,
@@ -117,6 +118,12 @@ export class PaymentsService {
     const terms = this.purchaseTerms.requireAcceptance(dto);
 
     const kind = resolvePaymentProviderKind();
+    // G-02: before the reusable-checkout lookup, so a mock purchase left
+    // pending from before is not handed back either.
+    if (kind === 'mock') {
+      assertMockCheckoutPermitted();
+    }
+
     const creditPackage = await this.prisma.offerCreditPackage.findFirst({
       where: { id: readPackageId(dto.packageId), isActive: true },
     });

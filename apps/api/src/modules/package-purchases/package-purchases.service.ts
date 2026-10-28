@@ -29,6 +29,10 @@ import {
   assertPackageIsPurchasable,
   grantEntitlementForPurchase,
 } from '../entitlements/entitlement-grant';
+import {
+  assertMockCheckoutPermitted,
+  assertMockSettlementPermitted,
+} from '../payments/mock-payment-availability';
 import { resolvePaymentProviderKind } from '../payments/payment-provider.config';
 import { CampaignEngineHooks } from '../campaigns/engine/campaign-engine.hooks';
 import { CreditsService } from '../credits/credits.service';
@@ -142,6 +146,12 @@ export class PackagePurchasesService implements OnModuleInit {
      */
     actor?: { user: AuthUser; meta: RequestMeta; channel?: SourceChannel },
   ) {
+    // G-02: a purchase with no payment attached, or one opened against the mock
+    // provider, can only ever be settled by the in-app mock form.
+    if (!payment || payment.provider === 'mock') {
+      assertMockCheckoutPermitted();
+    }
+
     const terms = this.purchaseTerms.requireAcceptance(dto);
     if (terms && actor?.user.role !== UserRole.PROVIDER) {
       // An operator may read a business's screens but may not agree to terms
@@ -259,8 +269,13 @@ export class PackagePurchasesService implements OnModuleInit {
    * purchase opened against a hosted checkout must not be settleable from
    * inside the application while the provider still considers it open — that
    * would be free credit for anyone who could reach the endpoint.
+   *
+   * On production the endpoint does not exist at all (G-02): `mock` is the only
+   * provider production boots with, so the provider check below cannot close it.
    */
   async mockPayProviderPurchase(providerId: string, purchaseId: string, dto: MockPackagePaymentDto) {
+    assertMockSettlementPermitted();
+
     if (resolvePaymentProviderKind() !== 'mock') {
       throw new ConflictException(
         'Mock payment is disabled: this deployment settles credit packages through its payment provider',
