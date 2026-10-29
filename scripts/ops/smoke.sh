@@ -6,8 +6,11 @@
 # Over the loopback ports the host publishes (API_PORT / WEB_PORT /
 # ADMIN_PORT from the shell or .env, defaults 3001 / 3000 / 3002):
 #
-#   api    GET /health answers {"status":"ok"}; GET /uploads/<missing> is a
-#          404, not an error (the static upload root is mounted and readable)
+#   api    GET /health answers {"status":"ok"} (liveness); GET /health/ready
+#          answers 200 with "database":"ok" and an applied migration count
+#          (readiness: the API reaches its database); GET /uploads/<missing>
+#          is a 404, not an error (the static upload root is mounted and
+#          readable)
 #   web    GET /robots.txt answers 200
 #   admin  GET /login answers 200
 #   all    no X-Powered-By; X-Content-Type-Options, X-Frame-Options,
@@ -24,7 +27,7 @@ sha=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --sha) sha="$(resolve_commit "${2:?--sha needs a commit}")"; shift 2 ;;
-    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -61,6 +64,13 @@ check_headers() {
 step "API http://127.0.0.1:$api_port"
 code="$(fetch "http://127.0.0.1:$api_port/health")"
 if [ "$code" = 200 ] && grep -q '"status":"ok"' "$body_file"; then ok "/health 200 ok"; else bad "/health answered $code"; fi
+code="$(fetch "http://127.0.0.1:$api_port/health/ready")"
+applied="$(sed -n 's/.*"applied":\([0-9][0-9]*\).*/\1/p' "$body_file")"
+if [ "$code" = 200 ] && grep -q '"status":"ready"' "$body_file" && grep -q '"database":"ok"' "$body_file" && [ -n "$applied" ]; then
+  ok "/health/ready 200 ready, database ok, $applied migrations applied"
+else
+  bad "/health/ready answered $code ($(head -c 200 "$body_file"))"
+fi
 check_headers api
 code="$(fetch "http://127.0.0.1:$api_port/uploads/category-images/smoke-does-not-exist.png")"
 [ "$code" = 404 ] && ok "/uploads/<missing> 404" || bad "/uploads/<missing> answered $code (expected 404)"

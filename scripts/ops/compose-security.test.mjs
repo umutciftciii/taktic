@@ -8,25 +8,26 @@
 // override file, whatever the .env says about ports.
 
 import { execFileSync } from 'node:child_process';
-import { copyFileSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { API_ONLY_VARIABLES, auditDev, auditProd, resolveConfig } from './compose-security.mjs';
+import { API_ONLY_VARIABLES, auditDev, auditProd, parseLogSize, resolveConfig } from './compose-security.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const image = (name) => `taktic-${name}:0000000000000000000000000000000000000000`;
-const hardened = { security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'] };
+const logging = { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '5' } };
+const hardened = { security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'], logging };
 const loopback = (target) => ({ host_ip: '127.0.0.1', target, published: String(target), protocol: 'tcp' });
 
 function cleanProd() {
   return {
     services: {
-      postgres: { image: 'postgres:16.6-alpine', volumes: [{ type: 'volume', source: 'taktic-postgres-data', target: '/var/lib/postgresql/data' }] },
+      postgres: { image: 'postgres:16.6-alpine', logging, volumes: [{ type: 'volume', source: 'taktic-postgres-data', target: '/var/lib/postgresql/data' }] },
       migrate: { image: image('migrate'), ...hardened },
       api: {
         image: image('api'),
@@ -104,6 +105,69 @@ describe('auditProd rules', () => {
     delete config.services.migrate;
     assert.match(auditProd(config).join('\n'), /migrate: service missing/);
   });
+
+  it('rejects a service without log limits, postgres included', () => {
+    for (const name of ['postgres', 'api', 'web', 'admin', 'migrate']) {
+      const config = cleanProd();
+      delete config.services[name].logging;
+      assert.match(auditProd(config).join('\n'), new RegExp(`${name}: no logging limits`), name);
+    }
+  });
+
+  it('rejects a non-rotating driver and missing or oversized limits', () => {
+    const cases = [
+      [{ driver: 'syslog', options: { 'max-size': '10m', 'max-file': '5' } }, /logging driver "syslog"/],
+      [{ driver: 'json-file' }, /max-size is missing[\s\S]*max-file is missing/],
+      [{ driver: 'json-file', options: { 'max-file': '5' } }, /max-size is missing/],
+      [{ driver: 'json-file', options: { 'max-size': '10m' } }, /max-file is missing/],
+      [{ driver: 'json-file', options: { 'max-size': 'big', 'max-file': '5' } }, /max-size is missing or not a size/],
+      [{ driver: 'json-file', options: { 'max-size': '0', 'max-file': '5' } }, /max-size is missing or not a size/],
+      [{ driver: 'json-file', options: { 'max-size': '2g', 'max-file': '5' } }, /max-size 2g exceeds 100m/],
+      [{ driver: 'json-file', options: { 'max-size': '10m', 'max-file': '0' } }, /max-file is missing or not a positive integer/],
+      [{ driver: 'json-file', options: { 'max-size': '10m', 'max-file': '50' } }, /max-file 50 exceeds 20/],
+    ];
+    for (const [value, expected] of cases) {
+      const config = cleanProd();
+      config.services.api.logging = value;
+      assert.match(auditProd(config).join('\n'), expected, JSON.stringify(value));
+    }
+  });
+
+  it('accepts the local driver and the limits at their bounds', () => {
+    const config = cleanProd();
+    config.services.api.logging = { driver: 'local', options: { 'max-size': '100m', 'max-file': '20' } };
+    assert.deepEqual(auditProd(config), []);
+  });
+});
+
+describe('parseLogSize', () => {
+  it("reads Docker's size notation", () => {
+    assert.equal(parseLogSize('10m'), 10 * 1024 * 1024);
+    assert.equal(parseLogSize('512k'), 512 * 1024);
+    assert.equal(parseLogSize('1G'), 1024 ** 3);
+    assert.equal(parseLogSize('2048'), 2048);
+    assert.equal(parseLogSize('ten'), null);
+    assert.equal(parseLogSize(undefined), null);
+  });
+});
+
+describe('API image healthcheck', () => {
+  // The prod compose file declares no healthcheck for the API: the image's
+  // own HEALTHCHECK is what `up --wait`, the deploy's wait_healthy and the
+  // web/admin `depends_on: service_healthy` read (OBS-READY-001).
+  const dockerfile = readFileSync(join(repoRoot, 'Dockerfile'), 'utf8');
+  const apiStage = dockerfile.slice(dockerfile.indexOf('AS api\n'), dockerfile.indexOf('AS web\n'));
+
+  it('probes readiness, not liveness', () => {
+    const check = /HEALTHCHECK[^\n]*\\\n\s*CMD (.*)/.exec(apiStage);
+    assert.ok(check, 'the api stage declares a HEALTHCHECK');
+    assert.match(check[1], /\/health\/ready'/);
+  });
+
+  it('gives the probe more time than readiness gives the database', () => {
+    const timeout = /HEALTHCHECK[^\n]*--timeout=(\d+)s/.exec(apiStage);
+    assert.ok(timeout && Number(timeout[1]) * 1000 > 2000, 'healthcheck timeout exceeds READINESS_DB_TIMEOUT_MS');
+  });
 });
 
 describe('command line', () => {
@@ -133,9 +197,10 @@ describe('command line', () => {
 });
 
 describe('auditDev rules', () => {
-  it('only checks exposure', () => {
-    assert.deepEqual(auditDev({ services: { api: { image: 'node:22-alpine', ports: [loopback(3001)] } } }), []);
-    assert.equal(auditDev({ services: { postgres: { ports: [{ target: 5432, published: '5433' }] } } }).length, 1);
+  it('checks exposure and log limits only', () => {
+    assert.deepEqual(auditDev({ services: { api: { image: 'node:22-alpine', ports: [loopback(3001)], logging } } }), []);
+    assert.equal(auditDev({ services: { postgres: { ports: [{ target: 5432, published: '5433' }], logging } } }).length, 1);
+    assert.match(auditDev({ services: { web: { ports: [loopback(3000)] } } }).join('\n'), /web: no logging limits/);
   });
 });
 
@@ -223,5 +288,16 @@ describe('repository compose files', { skip: compose ? false : 'docker compose C
 
   it('the local development stack is loopback-only without any override', () => {
     assert.deepEqual(auditDev(resolveConfig('dev')), []);
+  });
+
+  it('every service of both stacks rotates its logs at 10m × 5', () => {
+    for (const stack of ['prod', 'dev']) {
+      const config = resolveConfig(stack);
+      for (const [name, service] of Object.entries(config.services)) {
+        assert.equal(service.logging?.driver, 'json-file', `${stack} ${name}`);
+        assert.equal(service.logging?.options?.['max-size'], '10m', `${stack} ${name}`);
+        assert.equal(String(service.logging?.options?.['max-file']), '5', `${stack} ${name}`);
+      }
+    }
   });
 });

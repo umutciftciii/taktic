@@ -1,8 +1,17 @@
+# Bounded container logs, as in docker-compose.prod.yml (OBS-READY-001): the
+# json-file driver otherwise keeps every line a container printed.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16.6-alpine
     container_name: taktic-postgres
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-taktic}
       POSTGRES_USER: ${POSTGRES_USER:-taktic_user}
@@ -41,6 +50,7 @@ services:
     # Only the API gets it — web and admin never import @prisma/client.
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm db:generate && pnpm --filter @taktic/api dev"
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -180,6 +190,7 @@ services:
     working_dir: /app
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/web dev"
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - api
     environment:
@@ -221,6 +232,7 @@ services:
     working_dir: /app
     command: sh -lc "corepack enable && pnpm install --frozen-lockfile && pnpm --filter @taktic/admin dev"
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - api
     environment:

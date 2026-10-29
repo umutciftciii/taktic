@@ -517,6 +517,44 @@ jobs:
           scripts/ops/smoke.sh --sha "$TAKTIC_IMAGE_TAG"
           test "$(docker exec taktic-api printenv NODE_ENV)" = production
 
+      - name: Readiness through a database outage
+        run: |
+          set -euo pipefail
+          # OBS-READY-001 on the real image: readiness reports the migrations
+          # this commit ships; with PostgreSQL stopped it is a 503 while
+          # liveness stays 200 and the API process neither exits nor restarts;
+          # with PostgreSQL back the same process is ready again.
+          ready() { curl -sS -o /tmp/ready.json -w '%{http_code}' --max-time 10 http://127.0.0.1:3001/health/ready || echo 000; }
+          expected="$(find prisma/migrations -mindepth 2 -maxdepth 2 -name migration.sql | wc -l | tr -d ' ')"
+          test "$(ready)" = 200
+          grep -q "\"applied\":$expected}" /tmp/ready.json || { cat /tmp/ready.json; exit 1; }
+          started="$(docker inspect -f '{{.State.StartedAt}}' taktic-api)"
+          restarts="$(docker inspect -f '{{.RestartCount}}' taktic-api)"
+
+          docker stop taktic-postgres >/dev/null
+          code="$(ready)"; cat /tmp/ready.json; echo
+          test "$code" = 503
+          grep -q '"database":"\(unreachable\|timeout\)"' /tmp/ready.json
+          if grep -qi 'postgres\|5432\|taktic_user' /tmp/ready.json; then echo "readiness names the connection" >&2; exit 1; fi
+          test "$(curl -sS -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:3001/health)" = 200
+          # Long enough for the image's healthcheck (10 s × 6 retries) to call
+          # the container unhealthy: an unhealthy status must restart nothing.
+          sleep 75
+          test "$(docker inspect -f '{{.State.Health.Status}}' taktic-api)" = unhealthy
+          test "$(docker inspect -f '{{.State.Running}}' taktic-api)" = true
+          test "$(docker inspect -f '{{.State.StartedAt}}' taktic-api)" = "$started"
+          test "$(docker inspect -f '{{.RestartCount}}' taktic-api)" = "$restarts"
+
+          docker start taktic-postgres >/dev/null
+          for _ in $(seq 1 60); do [ "$(docker inspect -f '{{.State.Health.Status}}' taktic-postgres)" = healthy ] && break; sleep 2; done
+          for _ in $(seq 1 30); do [ "$(ready)" = 200 ] && break; sleep 2; done
+          test "$(ready)" = 200
+          grep -q "\"applied\":$expected}" /tmp/ready.json
+          # The image's healthcheck agrees on its own, with no recreate.
+          for _ in $(seq 1 30); do [ "$(docker inspect -f '{{.State.Health.Status}}' taktic-api)" = healthy ] && break; sleep 2; done
+          test "$(docker inspect -f '{{.State.Health.Status}}' taktic-api)" = healthy
+          test "$(docker inspect -f '{{.State.StartedAt}}' taktic-api)" = "$started"
+
       - name: Deploy preflight and --check against the running stack
         run: |
           set -euo pipefail
