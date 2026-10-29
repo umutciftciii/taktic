@@ -416,7 +416,6 @@ export type ProviderProfile = {
   contactName?: string;
   phone?: string;
   email?: string | null;
-  rejectionReason?: string | null;
   suspendedAt?: string | null;
   city: string;
   district: string;

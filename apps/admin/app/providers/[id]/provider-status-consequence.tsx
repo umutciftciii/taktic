@@ -10,6 +10,11 @@ import type { ProviderStatus } from '../../../lib/api';
 
 export const PROVIDER_STATUSES: readonly ProviderStatus[] = ['DRAFT', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'];
 
+/** Whether a query value names a provider status (the form's `?durum=`). */
+export function isProviderStatus(value: string | undefined): value is ProviderStatus {
+  return value !== undefined && (PROVIDER_STATUSES as readonly string[]).includes(value);
+}
+
 export const PROVIDER_STATUS_LABELS: Record<ProviderStatus, string> = {
   DRAFT: 'Taslak',
   PENDING_REVIEW: 'İnceleme bekliyor',
@@ -39,7 +44,7 @@ export function providerStatusConsequence(from: ProviderStatus, to: ProviderStat
       {to === 'REJECTED' ? (
         <p>Başvuru reddedilir; yazdığınız ret gerekçesi kayda geçer.</p>
       ) : to === 'SUSPENDED' ? (
-        <p>İşletme askıya alınır.</p>
+        <p>İşletme askıya alınır; yazdığınız askı gerekçesi kayda geçer.</p>
       ) : (
         <p>İşletme “{PROVIDER_STATUS_LABELS[to]}” durumuna geçer ve onaylı olmaktan çıkar.</p>
       )}
@@ -49,6 +54,16 @@ export function providerStatusConsequence(from: ProviderStatus, to: ProviderStat
           ? ' Yayındaki vitrin kartları hemen yayından kalkar; ödenmiş vitrin süresi bu sırada işlemeye devam eder.'
           : ''}
         {to !== 'PENDING_REVIEW' ? ' Kullanılmamış sahiplenme (claim) davet bağlantıları geçersiz olur.' : ''}
+      </p>
+      {leavesApproval ? (
+        <p>
+          Henüz karara bağlanmamış teklifleri müşteriden gizlenir ve kabul edilemez; kabul edilmiş işler, mesajlaşma
+          ve paylaşılan iletişim bilgileri devam eder.
+        </p>
+      ) : null}
+      <p>
+        Gerekçe ve moderasyon notu yalnız yönetici ekranlarında ve durum geçmişinde görünür; hizmet verene
+        gösterilmez.
       </p>
       <p>
         Mevcut teklifleri, kredisi ve geçmişi silinmez; işletmeye otomatik e-posta gitmez. Durum
@@ -82,7 +97,8 @@ export function providerApproveConsequence(from: ProviderStatus): ReactNode {
       )}
       <p>
         Onaylı işletme hizmet kategorileri ve bölgeleriyle eşleşen yayındaki talepleri görebilir ve kredisiyle teklif
-        verebilir. İşletme onaylı olmadığı için askıya alınmış vitrin yayınları varsa yeniden yayına girer.
+        verebilir. İşletme onaylı olmadığı için askıya alınmış vitrin yayınları varsa yeniden yayına girer. Müşteriden
+        gizlenmiş, henüz karara bağlanmamış teklifleri, talebin teklif turu hâlâ açıksa yeniden görünür.
       </p>
       <p>
         İşletmeye başvurusunun onaylandığını bildiren e-posta gider

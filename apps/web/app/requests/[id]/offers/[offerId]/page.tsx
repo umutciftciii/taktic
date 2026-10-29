@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import {
   apiFetch,
+  ApiError,
   fetchOrNotFound,
   getContactDisclosure,
   RequestOfferDetail,
@@ -35,11 +36,23 @@ export default async function RequestOfferDetailPage({
 
   // Unknown offer, offer on another request, another customer's request: all
   // one 404, never the error boundary.
-  const offer = await fetchOrNotFound(() =>
-    apiFetch<RequestOfferDetail>(`/service-requests/${id}/offers/${offerId}/view`, {
-      method: 'POST',
-    }),
-  );
+  const offer = await fetchOrNotFound(() => openOfferOrUnavailable(id, offerId));
+
+  // PROVIDER-STATUS-001: the offer's business cannot take work right now. The
+  // API says only that; so does the screen — no reason, no status.
+  if (offer === null) {
+    return (
+      <CustomerShell user={user} active="requests">
+        <Link className="cdash-page-back" href={`/requests/${id}/offers`}>
+          <IconArrowLeft size={14} />
+          <span>Tekliflere dön</span>
+        </Link>
+        <div className="notice cdash-notice-warn" role="status" data-testid="offer-unavailable-notice">
+          Bu teklif şu anda kullanılamıyor. Talebinize gelen diğer teklifleri inceleyebilirsiniz.
+        </div>
+      </CustomerShell>
+    );
+  }
 
   // Closed by the platform with its request: nothing left to accept or reject.
   const closed = offer.status === 'CANCELLED';
@@ -346,5 +359,32 @@ function offerStatusClass(status: string): string {
     case 'VIEWED':
     default:
       return 'tag tag-neutral';
+  }
+}
+
+/**
+ * Opens the offer (the view stamp is the API's decision), or null when the API
+ * answers 409 PROVIDER_UNAVAILABLE: a live offer whose provider cannot take
+ * work now (PROVIDER-STATUS-001). Every other refusal goes on to
+ * `fetchOrNotFound` as before.
+ */
+async function openOfferOrUnavailable(requestId: string, offerId: string): Promise<RequestOfferDetail | null> {
+  try {
+    return await apiFetch<RequestOfferDetail>(`/service-requests/${requestId}/offers/${offerId}/view`, {
+      method: 'POST',
+    });
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 409 && isProviderUnavailable(error.body)) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function isProviderUnavailable(body: string): boolean {
+  try {
+    return (JSON.parse(body) as { code?: unknown }).code === 'PROVIDER_UNAVAILABLE';
+  } catch {
+    return false;
   }
 }

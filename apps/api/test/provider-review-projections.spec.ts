@@ -333,13 +333,20 @@ describe('public summaries and provider visibility', () => {
     expect(approvedDetail.body.provider.reviewSummary).toEqual({ count: 3, average: 5 });
 
     // SUSPENDED: the public list answers "Provider not found", so the offer
-    // card must not carry a rating for the same provider. The offer itself
-    // is still shown — the card's other fields are not this feature's to
-    // change.
+    // card must not carry a rating for the same provider.
     await ctx.prisma.providerProfile.update({
       where: { id: fixture.provider.id },
       data: { status: ProviderStatus.SUSPENDED },
     });
+    // PROVIDER-STATUS-001: a live offer of a suspended provider is not shown
+    // at all — list and detail.
+    const hidden = await request(ctx.server).get(offersUrl(serviceRequest.id)).set('Cookie', cookie).expect(200);
+    expect(hidden.body).toHaveLength(0);
+    const hiddenDetail = await request(ctx.server).get(offerUrl(serviceRequest.id, offer.id)).set('Cookie', cookie).expect(409);
+    expect(hiddenDetail.body.code).toBe('PROVIDER_UNAVAILABLE');
+    // A decided offer of the same provider is still shown — without the
+    // rating. The card's other fields are not this feature's to change.
+    await ctx.prisma.offer.update({ where: { id: offer.id }, data: { status: OfferStatus.REJECTED, rejectedAt: new Date() } });
     const suspended = await request(ctx.server)
       .get(offersUrl(serviceRequest.id))
       .set('Cookie', cookie)

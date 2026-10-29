@@ -1997,6 +1997,11 @@ model ProviderProfile {
   status                   ProviderStatus @default(PENDING_REVIEW)
   moderationNote           String?
   rejectionReason          String?
+  /// PROVIDER-STATUS-001: why an operator suspended this provider, written with
+  /// every move into SUSPENDED and cleared by any other move. Operator-only:
+  /// no provider- or customer-facing projection carries it. NULL on a profile
+  /// suspended before the column existed.
+  suspensionReason         String?
   approvedAt               DateTime?
   rejectedAt               DateTime?
   suspendedAt              DateTime?
@@ -6471,14 +6476,17 @@ model AccountStatusChange {
 /// none, and a CHECK refuses equal values. The note and the rejection reason
 /// are the values that request wrote — never later edits.
 model ProviderStatusChange {
-  id              String         @id @default(cuid())
-  providerId      String
-  fromStatus      ProviderStatus
-  toStatus        ProviderStatus
-  moderationNote  String?
-  rejectionReason String?
-  actorId         String
-  createdAt       DateTime       @default(now())
+  id               String         @id @default(cuid())
+  providerId       String
+  fromStatus       ProviderStatus
+  toStatus         ProviderStatus
+  moderationNote   String?
+  rejectionReason  String?
+  /// PROVIDER-STATUS-001: required on every move into SUSPENDED recorded after
+  /// the column existed (CHECK, NOT VALID for the older rows). Operator-only.
+  suspensionReason String?
+  actorId          String
+  createdAt        DateTime       @default(now())
 
   provider ProviderProfile @relation(fields: [providerId], references: [id], onDelete: Restrict)
   actor    User            @relation("ProviderStatusChangeActor", fields: [actorId], references: [id], onDelete: Restrict)

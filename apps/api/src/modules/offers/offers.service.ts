@@ -19,6 +19,7 @@ import {
   OfferStatus,
   Prisma,
   PromoConsumptionSource,
+  ProviderStatus,
   ServiceRequestStatus,
   UserRole,
 } from '@prisma/client';
@@ -56,6 +57,12 @@ import {
   offerStatusNotSettableException,
 } from './offer-transitions';
 import { OFFER_IMPRESSIONS_MAX, stampCustomerViews, viewStampableWhere } from './offer-view';
+import {
+  customerVisibleOfferWhere,
+  isHideableOfferStatus,
+  isOfferHiddenFromCustomer,
+  providerUnavailableException,
+} from './provider-availability';
 import {
   ManualRefundReasonCode,
   RefundRecommendedAction,
@@ -457,8 +464,10 @@ export class OffersService {
     // The current round's offers (REL-002 §3.4). With one round per request
     // this is every offer; an earlier round's offers are history and get
     // their own read-only section when a second round exists (Faz 3).
+    // PROVIDER-STATUS-001: a live offer of a provider that is not approved is
+    // not on the list (or the comparison built from it).
     const offers = await this.prisma.offer.findMany({
-      where: { requestId, matchRoundId: request.currentRoundId },
+      where: { requestId, matchRoundId: request.currentRoundId, AND: [customerVisibleOfferWhere()] },
       orderBy: { submittedAt: 'desc' },
       include: {
         provider: {
@@ -717,12 +726,18 @@ export class OffersService {
       async (tx) => {
         const offerRound = await tx.offer.findUniqueOrThrow({
           where: { id: offerId },
-          select: { status: true, matchRoundId: true },
+          select: { status: true, matchRoundId: true, providerId: true },
         });
         // An offer that is already decided keeps its own, more specific
         // answer — classified below from the row as it is now.
         if (!isCustomerActionable(offerRound.status)) {
           return { count: 0 };
+        }
+        // PROVIDER-STATUS-001: read again in this Serializable transaction, so
+        // a suspension committed after the read above refuses this write
+        // rather than racing it.
+        if (await this.isHiddenFromCustomer(tx, offerRound)) {
+          throw providerUnavailableException();
         }
         const current = await getCurrentRound(tx, requestId);
         if (current) {
@@ -902,6 +917,17 @@ export class OffersService {
         // matches in practice — but an acceptance of theirs must not either.
         if (await isProviderExcluded(tx, requestId, target.providerId)) {
           throw providerExcludedException();
+        }
+        // PROVIDER-STATUS-001: a provider that is not approved takes no new
+        // work, so its offer is not accepted — by the customer or an operator.
+        // Read in this Serializable transaction, before anything is written: a
+        // suspension and an acceptance racing each other cannot both commit.
+        const targetProvider = await tx.providerProfile.findUniqueOrThrow({
+          where: { id: target.providerId },
+          select: { status: true },
+        });
+        if (targetProvider.status !== ProviderStatus.APPROVED) {
+          throw providerUnavailableException();
         }
         if (current.status === ServiceRequestStatus.APPROVED && current.matchedOfferId === null) {
           // Only an open request can reach the round check; a matched or
@@ -1083,7 +1109,29 @@ export class OffersService {
 
     ensureCustomerCanAccessRequest(offer.request.customerId, user);
 
+    // PROVIDER-STATUS-001: after the access check, so the refusal tells a
+    // stranger nothing. The detail, the view and every action come through
+    // here; the actions read the provider again inside their transactions.
+    if (await this.isHiddenFromCustomer(this.prisma, offer)) {
+      throw providerUnavailableException();
+    }
+
     return offer;
+  }
+
+  /** Whether this offer is hidden from the customer because its provider is not approved. */
+  private async isHiddenFromCustomer(
+    client: Pick<Prisma.TransactionClient, 'providerProfile'>,
+    offer: { status: OfferStatus; providerId: string },
+  ) {
+    if (!isHideableOfferStatus(offer.status)) {
+      return false;
+    }
+    const provider = await client.providerProfile.findUnique({
+      where: { id: offer.providerId },
+      select: { status: true },
+    });
+    return provider ? isOfferHiddenFromCustomer(offer.status, provider.status) : false;
   }
 }
 

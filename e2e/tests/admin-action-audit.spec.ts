@@ -78,6 +78,8 @@ test.describe('ADMIN-ACTION-AUDIT-001 — admin timelines', () => {
         providerId: provider.id,
         fromStatus: index % 2 === 0 ? ('PENDING_REVIEW' as const) : ('APPROVED' as const),
         toStatus: index % 2 === 0 ? ('APPROVED' as const) : ('SUSPENDED' as const),
+        // PROVIDER-STATUS-001: a suspension row carries its reason (CHECK).
+        suspensionReason: index % 2 === 0 ? null : 'E2E Audit: inceleme',
         actorId: operator.id,
         createdAt: new Date(base + index * 1000),
       })),

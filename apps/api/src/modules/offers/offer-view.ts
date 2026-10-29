@@ -1,4 +1,4 @@
-import { OfferStatus, Prisma } from '@prisma/client';
+import { OfferStatus, Prisma, ProviderStatus } from '@prisma/client';
 import type { PrismaService } from '../../prisma/prisma.service';
 import { CUSTOMER_ACTIONABLE_OFFER_STATUSES } from './offer-transitions';
 
@@ -23,6 +23,11 @@ import { CUSTOMER_ACTIONABLE_OFFER_STATUSES } from './offer-transitions';
  *   yet, and a look in that gap must not take it back (A-2). An offer with no
  *   schedule (from before the policy) refunds nothing either way and is
  *   stamped as before.
+ * - **The provider is approved** (PROVIDER-STATUS-001). A live offer of a
+ *   provider that is not is hidden from the customer, so nothing the customer
+ *   does can be a look at it — not even a list report from a screen that was
+ *   open when the provider was suspended. It keeps the stamp it had, or stays
+ *   unstamped and is paid back by the unviewed-offer rule as before.
  *
  * Every writer — the detail open, the list/compare impression and the
  * customer's shortlist/reject — puts this in its UPDATE's own `where`, so it
@@ -38,6 +43,7 @@ export function viewStampableWhere(now: Date) {
   return {
     viewedAt: null,
     status: { in: [...CUSTOMER_ACTIONABLE_OFFER_STATUSES] },
+    provider: { status: ProviderStatus.APPROVED },
     OR: [{ unviewedRefundEligibleAt: null }, { unviewedRefundEligibleAt: { gt: now } }],
   } satisfies Prisma.OfferWhereInput;
 }
@@ -68,7 +74,8 @@ export async function stampCustomerViews(
       data: { viewedAt: now },
     }),
     prisma.offer.updateMany({
-      where: { ...scope, status: OfferStatus.SUBMITTED, viewedAt: { not: null } },
+      // An approved provider's only, like the stamp: a hidden offer's row is not written.
+      where: { ...scope, status: OfferStatus.SUBMITTED, viewedAt: { not: null }, provider: { status: ProviderStatus.APPROVED } },
       data: { status: OfferStatus.VIEWED },
     }),
   ]);

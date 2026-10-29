@@ -17,6 +17,7 @@ import {
 import { CategoryVisual } from '../../category-visual';
 import { IconArrowRight } from '../../landing-icons';
 import { ProviderShell } from '../provider-shell';
+import { ProviderStatusNotice } from '../provider-status-notice';
 import { providerOfferStatusLabel, providerStatusBadgeClass } from '../provider-ui';
 import { DeliveryModeBadge } from '../../request-fields/delivery-mode-badge';
 
@@ -111,7 +112,7 @@ export default async function MyProviderPage() {
         </div>
       </header>
 
-      <ProviderStatusNotice provider={provider} />
+      <ProviderStatusNotice status={provider.status} />
 
       <section className="metric-strip" aria-label="Özet">
         <div className="metric-cell">
@@ -324,32 +325,4 @@ async function safeList<T>(path: string): Promise<T[]> {
   } catch {
     return [];
   }
-}
-
-function ProviderStatusNotice({ provider }: { provider: NonNullable<ProviderDashboard['provider']> }) {
-  if (provider.status === 'PENDING_REVIEW') {
-    return (
-      <div className="pdash-notice">
-        Başvurunuz inceleniyor. Onaylandıktan sonra uygun taleplere teklif verebilirsiniz.
-      </div>
-    );
-  }
-
-  if (provider.status === 'REJECTED') {
-    return (
-      <div className="pdash-notice pdash-notice-error">
-        Başvurunuz reddedildi. Sebep: {provider.rejectionReason ?? '-'}
-      </div>
-    );
-  }
-
-  if (provider.status === 'SUSPENDED') {
-    return (
-      <div className="pdash-notice pdash-notice-warn">
-        Profiliniz askıya alındı. Bu durumda teklif akışı kullanılamaz.
-      </div>
-    );
-  }
-
-  return null;
 }

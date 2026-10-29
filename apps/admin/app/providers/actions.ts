@@ -44,6 +44,7 @@ export async function updateProviderStatusAction(formData: FormData) {
         status,
         moderationNote: readOptionalFormString(formData, 'moderationNote'),
         rejectionReason: readOptionalFormString(formData, 'rejectionReason'),
+        suspensionReason: readOptionalFormString(formData, 'suspensionReason'),
       }),
     });
   } catch (error) {

@@ -14,6 +14,7 @@ import { describeBusinessRegistration } from '../../../lib/business-registration
 import { readTurnstileWebConfig } from '../../../lib/turnstile';
 import { ReviewSummaryCard } from '../../review-summary-card';
 import { ProviderShell } from '../provider-shell';
+import { ProviderStatusNotice } from '../provider-status-notice';
 import { readCreditBalance } from '../provider-data';
 import { providerStatusBadgeClass } from '../provider-ui';
 import { AccountContactCard } from './account-contact-card';
@@ -206,16 +207,8 @@ export default async function ProviderPreviewPage({ params, searchParams }: Prov
             </div>
           </section>
 
-          {provider.status === 'REJECTED' && provider.rejectionReason ? (
-            <div className="pdash-notice pdash-notice-error">
-              Başvuru reddedildi. Sebep: {provider.rejectionReason}
-            </div>
-          ) : null}
-
-          {provider.status === 'SUSPENDED' ? (
-            <div className="pdash-notice pdash-notice-warn">
-              Profil askıya alındı. Teklif akışı kullanılamaz.
-            </div>
+          {provider.status === 'REJECTED' || provider.status === 'SUSPENDED' ? (
+            <ProviderStatusNotice status={provider.status} />
           ) : null}
         </div>
 

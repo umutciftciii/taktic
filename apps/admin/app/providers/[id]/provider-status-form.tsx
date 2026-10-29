@@ -12,30 +12,33 @@ import {
 } from './provider-status-consequence';
 import { providerStatusProofKey } from './provider-status-proof';
 
+/** Said under both reasons: who reads them, and who does not. */
+const REASON_HINT =
+  'Yalnız yetkili yönetici ekranlarında ve durum geçmişinde görünür; hizmet verene e-postada veya panelde gösterilmez.';
+
 type ProviderStatusFormProps = {
   providerId: string;
   status: ProviderStatus;
-  moderationNote: string | null;
-  rejectionReason: string | null;
+  /** The status chosen when the form opens; the current one by default. */
+  initialSelection?: ProviderStatus;
   action: (formData: FormData) => Promise<void> | void;
 };
 
 /**
- * The full status form: any status, the moderation note, and the rejection
- * reason the API requires for REJECTED. The same action and the same fields
- * the old moderation dialog sent; what changed is that a move that stops the
- * business working (Faz 1), an approval and a move into DRAFT (Faz 2) go
- * through a confirmation that says what they do, each with its own proof key
+ * The full status form: any status, the moderation note, and the reason the
+ * API requires for REJECTED and for SUSPENDED. A move that stops the business
+ * working (Faz 1), an approval and a move into DRAFT (Faz 2) go through a
+ * confirmation that says what they do, each with its own proof key
  * (`providerStatusProofKey`), and a cancelled confirmation sends nothing.
+ *
+ * PROVIDER-STATUS-001: every field starts empty. The note and the reasons
+ * belong to the move being made now — the last move's are on the detail and in
+ * the status history — so nothing is carried into the next one by leaving a
+ * prefilled field alone. Only the reason the chosen status needs is drawn,
+ * and it is required there and again by the API.
  */
-export function ProviderStatusForm({
-  providerId,
-  status,
-  moderationNote,
-  rejectionReason,
-  action,
-}: ProviderStatusFormProps) {
-  const [selected, setSelected] = useState<ProviderStatus>(status);
+export function ProviderStatusForm({ providerId, status, initialSelection, action }: ProviderStatusFormProps) {
+  const [selected, setSelected] = useState<ProviderStatus>(initialSelection ?? status);
   const proofKey = providerStatusProofKey(status, selected);
   const unchanged = selected === status;
   const title = `Durum “${STATUS_LABELS[selected]}” olsun mu?`;
@@ -59,28 +62,28 @@ export function ProviderStatusForm({
           ))}
         </select>
       </label>
+      {selected === 'REJECTED' ? (
+        <label className="detail-form-field" htmlFor="provider-rejection-reason">
+          <span>
+            Ret gerekçesi <span className="badge badge-warn">Zorunlu</span>
+          </span>
+          <textarea id="provider-rejection-reason" name="rejectionReason" required rows={3} />
+          <small className="muted">{REASON_HINT}</small>
+        </label>
+      ) : null}
+      {selected === 'SUSPENDED' ? (
+        <label className="detail-form-field" htmlFor="provider-suspension-reason">
+          <span>
+            Askı gerekçesi <span className="badge badge-warn">Zorunlu</span>
+          </span>
+          <textarea id="provider-suspension-reason" name="suspensionReason" required rows={3} />
+          <small className="muted">{REASON_HINT}</small>
+        </label>
+      ) : null}
       <label className="detail-form-field" htmlFor="provider-moderation-note">
-        <span>Moderasyon notu</span>
-        <textarea
-          id="provider-moderation-note"
-          name="moderationNote"
-          defaultValue={moderationNote ?? ''}
-          rows={3}
-        />
-      </label>
-      <label className="detail-form-field" htmlFor="provider-rejection-reason">
-        <span>
-          Ret gerekçesi{' '}
-          {selected === 'REJECTED' ? <span className="badge badge-warn">Zorunlu</span> : null}
-        </span>
-        <textarea
-          id="provider-rejection-reason"
-          name="rejectionReason"
-          defaultValue={rejectionReason ?? ''}
-          placeholder="Reddetme durumunda zorunlu"
-          required={selected === 'REJECTED'}
-          rows={3}
-        />
+        <span>Moderasyon notu (iç not)</span>
+        <textarea id="provider-moderation-note" name="moderationNote" rows={3} />
+        <small className="muted">Bu işleme ait iç not. Önceki not taşınmaz; geçmiş sekmesinde kalır.</small>
       </label>
       <div className="detail-form-actions">
         {proofKey === 'provider.status' ? (

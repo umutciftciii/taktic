@@ -42,6 +42,7 @@ import { resolveLocation } from '../locations/turkey-locations';
 import { NumberingService } from '../numbering/numbering.service';
 import { refundOfferCreditInTransaction, refundOfferRechargeInTransaction } from '../offers/offers.service';
 import { REQUEST_CANCELLED_REFUND_REASON, REQUEST_REMOVED_REFUND_REASON } from '../offers/refund-policy';
+import { customerVisibleOfferWhere } from '../offers/provider-availability';
 import { hasPermission } from '../auth/admin-permissions';
 import {
   enqueueRequestCancellationNotices,
@@ -2151,8 +2152,10 @@ const customerRequestInclude = {
     // The customer's own count is of offers they can still act on. An
     // offer its provider withdrew is no longer one of them, and counting
     // it would promise a choice that is not there. The admin listing above
-    // keeps the unfiltered total on purpose.
-    select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN } } } },
+    // keeps the unfiltered total on purpose. PROVIDER-STATUS-001: neither is
+    // a live offer whose provider is not approved — the list hides it, so
+    // the count does too.
+    select: { offers: { where: { status: { not: OfferStatus.WITHDRAWN }, AND: [customerVisibleOfferWhere()] } } },
   },
   /*
    * The vitrin lead, when the request came from a card.
