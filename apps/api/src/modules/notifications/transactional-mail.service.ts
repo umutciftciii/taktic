@@ -50,6 +50,7 @@ import {
   providerProfileUrl,
   providerRequestUrl,
   providerRequestsUrl,
+  providerSupportUrl,
   providerReviewsUrl,
   providerShowcaseCardUrl,
   providerShowcaseLeadUrl,
@@ -246,6 +247,61 @@ export class TransactionalMailService {
         dedupeKey: `application-approved:${provider.id}:${approvedAt.toISOString()}`,
       },
     );
+  }
+
+  // ─────────────── PROVIDER-STATUS-001 · provider.status_notices ─────────────
+
+  /**
+   * The rejection notice. `rejectedAt` is in the key for the reason
+   * `approvedAt` is in the approval's: a provider rejected, re-opened and
+   * rejected again has been told twice, and the same rejection replayed once.
+   * The operator's reason is not in the message.
+   */
+  async sendProviderApplicationRejected(providerId: string, rejectedAt: Date) {
+    await this.sendProviderStatusNotice(
+      'provider-application-rejected',
+      providerId,
+      `application-rejected:${providerId}:${rejectedAt.toISOString()}`,
+    );
+  }
+
+  /** The suspension notice, keyed on `suspendedAt`. The reason stays with the operator. */
+  async sendProviderAccountSuspended(providerId: string, suspendedAt: Date) {
+    await this.sendProviderStatusNotice(
+      'provider-account-suspended',
+      providerId,
+      `account-suspended:${providerId}:${suspendedAt.toISOString()}`,
+    );
+  }
+
+  /**
+   * The re-activation notice: a suspended provider approved again is told
+   * their account works again — not that their application was approved,
+   * which is the first approval's message. Keyed on the new `approvedAt`.
+   */
+  async sendProviderAccountReactivated(providerId: string, approvedAt: Date) {
+    await this.sendProviderStatusNotice(
+      'provider-account-reactivated',
+      providerId,
+      `account-reactivated:${providerId}:${approvedAt.toISOString()}`,
+    );
+  }
+
+  private async sendProviderStatusNotice(
+    template: 'provider-application-rejected' | 'provider-account-suspended' | 'provider-account-reactivated',
+    providerId: string,
+    dedupeKey: string,
+  ) {
+    const provider = await loadProvider(this.prisma, providerId);
+    if (!provider?.recipient) {
+      return;
+    }
+
+    await this.send(template, provider.recipient, providerStatusNoticeData(provider), {
+      providerId: provider.id,
+      userId: provider.userId,
+      dedupeKey,
+    });
   }
 
   // ────────────────────────────── 05 · request.created ───────────────────────
@@ -1203,6 +1259,19 @@ export class TransactionalMailService {
         }
 
         return { to: provider.recipient, data: providerApplicationApprovedData(provider) };
+      }
+
+      // PROVIDER-STATUS-001: each notice says what is true of the account
+      // now, so each may only be rebuilt while its status still holds.
+      case 'provider-application-rejected':
+      case 'provider-account-suspended':
+      case 'provider-account-reactivated': {
+        const provider = await loadProvider(this.prisma, source.ids[0]);
+        if (!provider?.recipient || provider.status !== PROVIDER_STATUS_NOTICE_STATUS[source.template]) {
+          return null;
+        }
+
+        return { to: provider.recipient, data: providerStatusNoticeData(provider) };
       }
 
       case 'request-received': {
@@ -2810,6 +2879,28 @@ function providerApplicationReceivedData(provider: LoadedProvider): MailData {
   };
 }
 
+/** The status a provider notice describes; a retry rebuilds it only while it still holds. */
+const PROVIDER_STATUS_NOTICE_STATUS = {
+  'provider-application-rejected': ProviderStatus.REJECTED,
+  'provider-account-suspended': ProviderStatus.SUSPENDED,
+  'provider-account-reactivated': ProviderStatus.APPROVED,
+} as const;
+
+/**
+ * What the three status notices print (PROVIDER-STATUS-001): who they are to,
+ * the business, and the links. An allowlist — nothing of the moderation
+ * (reason, note, actor) is read into it, so none can reach the message.
+ */
+function providerStatusNoticeData(provider: LoadedProvider): MailData {
+  return {
+    fullName: provider.contactName,
+    businessName: provider.businessName,
+    supportUrl: providerSupportUrl(),
+    requestsUrl: providerRequestsUrl(provider.id),
+    accountUrl: providerAccountUrl(),
+  };
+}
+
 function providerApplicationApprovedData(provider: LoadedProvider): MailData {
   return {
     fullName: provider.contactName,
@@ -3444,6 +3535,9 @@ async function loadPackagePurchase(prisma: PrismaService, purchaseId: string) {
 const RETRY_DEDUPE_PREFIXES = {
   'provider-application-received': 'application-received',
   'provider-application-approved': 'application-approved',
+  'provider-application-rejected': 'application-rejected',
+  'provider-account-suspended': 'account-suspended',
+  'provider-account-reactivated': 'account-reactivated',
   'request-received': 'request-received',
   'request-published': 'request-published',
   'offer-received': 'offer-received',
@@ -3584,6 +3678,9 @@ const ROUND_SCOPED_RETRY_TEMPLATES: ReadonlySet<RetryableTransactionalTemplate> 
 const RETRY_SOURCE_ID_COUNT: Record<RetryableTransactionalTemplate, number> = {
   'provider-application-received': 1,
   'provider-application-approved': 1,
+  'provider-application-rejected': 1,
+  'provider-account-suspended': 1,
+  'provider-account-reactivated': 1,
   'request-received': 1,
   'request-published': 1,
   'offer-received': 1,

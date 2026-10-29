@@ -1205,7 +1205,7 @@ export class ProvidersService implements OnModuleInit {
     // engine runs inside this transaction on a transition into APPROVED and
     // its counters are conditional updates that may collide with a concurrent
     // grant. The business rule of the status change is unchanged.
-    const provider = await runSerializable(
+    const { updated: provider, fromStatus } = await runSerializable(
       this.prisma,
       async (tx) => {
         // ADMIN-ACTION-AUDIT-001: the status this transaction replaces, read
@@ -1297,21 +1297,39 @@ export class ProvidersService implements OnModuleInit {
           // later, in the worker's own transaction, and can never undo this
           // approval. Only a database fault that leaves the event unwritten
           // fails this transaction (CMP-001 §8.3; S2B2 rev. 2).
-          await this.campaignHooks.providerApproved(tx, id);
+          //
+          // PROVIDER-STATUS-001: not on a re-activation. A suspended provider
+          // approved again is not newly approved — the campaign fact already
+          // happened, and lifting a sanction must not raise (or reopen) the
+          // approval event a reward hangs on.
+          if (!isReactivation(before.status, dto.status)) {
+            await this.campaignHooks.providerApproved(tx, id);
+          }
         }
 
-        return updated;
+        return { updated, fromStatus: before.status };
       },
       { label: 'providers.updateProviderStatus' },
     );
 
-    // Only a genuine transition into APPROVED. Re-saving an already-approved
-    // application from the moderation screen rewrites `approvedAt` and tells
-    // nobody anything; a suspension followed by a re-approval is a real second
-    // approval and does mail again. The dedupe key carries `approvedAt`, so the
+    // Only genuine transitions mail, judged against the status this
+    // transaction actually replaced: re-saving a status to edit its note tells
+    // nobody anything. Each key carries the transition's own timestamp, so the
     // database enforces the same rule independently.
-    if (dto.status === ProviderStatus.APPROVED && existing.status !== ProviderStatus.APPROVED) {
-      await this.notify(() => this.mail.sendProviderApplicationApproved(id, now), id);
+    //
+    // PROVIDER-STATUS-001: a re-activation is its own notice, not a second
+    // "application approved"; a rejection and a suspension are notices too.
+    // None carries the operator's reason or note.
+    if (fromStatus !== dto.status) {
+      if (isReactivation(fromStatus, dto.status)) {
+        await this.notify(() => this.mail.sendProviderAccountReactivated(id, now), id);
+      } else if (dto.status === ProviderStatus.APPROVED) {
+        await this.notify(() => this.mail.sendProviderApplicationApproved(id, now), id);
+      } else if (dto.status === ProviderStatus.REJECTED) {
+        await this.notify(() => this.mail.sendProviderApplicationRejected(id, now), id);
+      } else if (dto.status === ProviderStatus.SUSPENDED) {
+        await this.notify(() => this.mail.sendProviderAccountSuspended(id, now), id);
+      }
     }
 
     return toProviderRecord(provider);
@@ -2592,6 +2610,14 @@ function toProviderListRecord<
 >(provider: T) {
   const { taxNumberMasked: _legacy, ...rest } = toProviderRecord(provider);
   return rest;
+}
+
+/**
+ * PROVIDER-STATUS-001: a suspended provider approved again. Its own notice,
+ * and no campaign approval fact — the first approval already was one.
+ */
+function isReactivation(from: ProviderStatus, to: ProviderStatus): boolean {
+  return from === ProviderStatus.SUSPENDED && to === ProviderStatus.APPROVED;
 }
 
 /**

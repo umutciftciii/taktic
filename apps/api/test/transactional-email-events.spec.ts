@@ -438,7 +438,8 @@ describe('provider application notifications', () => {
 
     expect(sentTo('provider-application-approved', ownerUser.email!)).toHaveLength(1);
 
-    // A suspension and a genuine second approval is a second announcement.
+    // PROVIDER-STATUS-001: a suspension is its own notice, and the approval
+    // that lifts it is a re-activation notice — not a second "approved".
     await request(ctx.server)
       .patch(`/providers/${providerId}/status`)
       .set('Cookie', admin)
@@ -446,7 +447,9 @@ describe('provider application notifications', () => {
       .expect(200);
     await approve();
 
-    expect(sentTo('provider-application-approved', ownerUser.email!)).toHaveLength(2);
+    expect(sentTo('provider-account-suspended', ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('provider-account-reactivated', ownerUser.email!)).toHaveLength(1);
+    expect(sentTo('provider-application-approved', ownerUser.email!)).toHaveLength(1);
   });
 });
 

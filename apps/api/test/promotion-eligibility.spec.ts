@@ -94,9 +94,14 @@ async function setStatus(providerId: string, status: ProviderStatus) {
 
 const approve = (providerId: string) => setStatus(providerId, ProviderStatus.APPROVED);
 
-/** A suspension and a re-approval: the same PROVIDER_APPROVED key raised again. */
+/**
+ * A move out of approval and a re-approval: the same PROVIDER_APPROVED key
+ * raised again. Through review, not suspension — since PROVIDER-STATUS-001 a
+ * suspended provider approved again is a re-activation, which raises nothing
+ * (campaign-engine-hooks.spec, the suspension and re-approval case).
+ */
 async function reRaise(providerId: string) {
-  await setStatus(providerId, ProviderStatus.SUSPENDED);
+  await setStatus(providerId, ProviderStatus.PENDING_REVIEW);
   await approve(providerId);
 }
 

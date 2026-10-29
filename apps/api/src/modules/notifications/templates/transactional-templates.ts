@@ -80,6 +80,13 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   'email-verification',
   'provider-application-received',
   'provider-application-approved',
+  // PROVIDER-STATUS-001: the three moderation outcomes a provider is told
+  // about besides the first approval. General and neutral on purpose: what the
+  // account can do now and where to ask — never the operator's reason or note,
+  // never an accusation or a finding.
+  'provider-application-rejected',
+  'provider-account-suspended',
+  'provider-account-reactivated',
   'request-received',
   'request-published',
   'offer-received',
@@ -293,6 +300,12 @@ export function transactionalSubject(
       return 'Başvurunuzu aldık — TakTick hizmet veren kaydı';
     case 'provider-application-approved':
       return 'Başvurunuz onaylandı — teklif vermeye başlayabilirsiniz';
+    case 'provider-application-rejected':
+      return 'Başvurunuz hakkında bilgilendirme — TakTick hizmet veren kaydı';
+    case 'provider-account-suspended':
+      return 'Hesabınız hakkında bilgilendirme — TakTick hizmet veren paneli';
+    case 'provider-account-reactivated':
+      return 'Hesabınız yeniden aktif — TakTick hizmet veren paneli';
     case 'request-received':
       return 'Talebiniz alındı — inceleniyor';
     case 'request-published':
@@ -503,6 +516,12 @@ export function buildDocument(
       return providerApplicationReceived(subject, fullName, data);
     case 'provider-application-approved':
       return providerApplicationApproved(subject, fullName, data);
+    case 'provider-application-rejected':
+      return providerApplicationRejected(subject, fullName, data);
+    case 'provider-account-suspended':
+      return providerAccountSuspended(subject, fullName, data);
+    case 'provider-account-reactivated':
+      return providerAccountReactivated(subject, fullName, data);
     case 'request-received':
       return requestReceived(subject, fullName, data);
     case 'request-published':
@@ -788,6 +807,101 @@ function providerApplicationApproved(subject: string, fullName: string, data: Da
         'Teklif maliyeti kategoriye göre değişir; her talebin maliyeti panelinizde talebin ' +
           'yanında görünür. Kredileriniz panelinizdeki bakiye alanında listelenir.',
       ),
+    ]),
+  };
+}
+
+// ─────────────── PROVIDER-STATUS-001 · provider.status_notices ───────────────
+//
+// Three notices a provider receives when an operator moves their status. Each
+// says, in general and neutral terms, what the account can do now and where to
+// ask. None carries the operator's reason or note — those stay on the admin
+// screens — and none asserts a violation, a finding or a fault.
+
+function providerApplicationRejected(subject: string, fullName: string, data: Data): EmailDocument {
+  const businessName = text(data.businessName);
+
+  return {
+    subject,
+    preheader: 'Başvurunuz incelendi ve şu aşamada onaylanmadı.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Başvuru sonucu',
+    heading: 'Başvurunuz şu aşamada onaylanmadı',
+    fullName,
+    // A guest application may have no account to sign in to.
+    accountUrl: null,
+    blocks: compact([
+      paragraph(
+        businessName
+          ? `${businessName} adına yaptığınız hizmet veren başvurusu incelendi ve şu aşamada onaylanmadı.`
+          : 'Hizmet veren başvurunuz incelendi ve şu aşamada onaylanmadı.',
+      ),
+      paragraph("Değerlendirme, TakTick'in hizmet veren başvurularına uyguladığı genel ölçütler çerçevesinde yapılmıştır."),
+      spacer(4),
+      paragraph('Sorularınız veya yeniden değerlendirme talebiniz için destek sayfamız üzerinden bize yazabilirsiniz.'),
+      spacer(12),
+      cta('Destek ile iletişime geçin', text(data.supportUrl), 'primary'),
+    ]),
+  };
+}
+
+function providerAccountSuspended(subject: string, fullName: string, data: Data): EmailDocument {
+  const businessName = text(data.businessName);
+
+  return {
+    subject,
+    preheader: 'Hesabınız şu anda yeni iş almaya kapalı. Kabul edilmiş işleriniz devam eder.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Hesap durumu',
+    heading: 'Hesabınız şu anda yeni iş almaya kapalı',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        businessName
+          ? `${businessName} hesabı, platform tarafından yapılan bir değerlendirme kapsamında şu anda yeni iş almaya kapatılmıştır.`
+          : 'Hizmet veren hesabınız, platform tarafından yapılan bir değerlendirme kapsamında şu anda yeni iş almaya kapatılmıştır.',
+      ),
+      spacer(4),
+      dataTable([
+        row('Yeni talepler ve teklif verme', 'Bu süreçte kapalı'),
+        row('Kabul edilmiş işler ve mesajlar', 'Devam eder'),
+        row('Kredi bakiyesi ve geçmiş', 'Korunur'),
+      ]),
+      spacer(20),
+      paragraph('Bu süreçte henüz karara bağlanmamış teklifleriniz müşterilere gösterilmez.'),
+      paragraph('Bilgi almak veya inceleme talep etmek için destek sayfamız üzerinden bize yazabilirsiniz.'),
+      spacer(12),
+      cta('Destek ile iletişime geçin', text(data.supportUrl), 'primary'),
+    ]),
+  };
+}
+
+function providerAccountReactivated(subject: string, fullName: string, data: Data): EmailDocument {
+  const businessName = text(data.businessName);
+
+  return {
+    subject,
+    preheader: 'Kategori ve bölgelerinizdeki talepleri yeniden görebilir, teklif verebilirsiniz.',
+    audience: 'HİZMET VEREN',
+    kicker: 'Hesap durumu',
+    heading: 'Hesabınız yeniden aktif',
+    fullName,
+    accountUrl: text(data.accountUrl),
+    blocks: compact([
+      paragraph(
+        businessName
+          ? `${businessName} hesabı yeniden aktif. Kategori ve bölgelerinizdeki talepleri görebilir, teklif verebilirsiniz.`
+          : 'Hizmet veren hesabınız yeniden aktif. Kategori ve bölgelerinizdeki talepleri görebilir, teklif verebilirsiniz.',
+      ),
+      paragraph(
+        'Henüz karara bağlanmamış teklifleriniz, ilgili talebin teklif süreci devam ediyorsa müşterilere yeniden gösterilir.',
+      ),
+      spacer(12),
+      cta('Uygun talepleri gör', text(data.requestsUrl), 'primary'),
+      spacer(20),
+      note('Sorularınız için destek sayfamız üzerinden bize yazabilirsiniz.'),
+      cta('Destek', text(data.supportUrl), 'ghost'),
     ]),
   };
 }

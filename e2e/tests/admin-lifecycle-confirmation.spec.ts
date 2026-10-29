@@ -229,10 +229,14 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       await expect(page.getByTestId('provider-status')).toHaveText('Askıya alındı');
       const reactivate = page.getByTestId('provider-approve');
       await expect(reactivate).toHaveText('Tekrar aktif et');
-      await openAndCancel(reactivate, ['Askıya alınmış işletme yeniden onaylı', 'e-posta tekrar gider']);
+      // PROVIDER-STATUS-001: the suspension and the re-activation each mail
+      // their own notice; the approval mail is not sent a second time.
+      await expect.poll(() => emailCountFor(provider.email, 'provider-account-suspended')).toBe(1);
+      await openAndCancel(reactivate, ['Askıya alınmış işletme yeniden onaylı', 'yeniden aktif olduğunu bildiren e-posta gider']);
       await confirmThrough(reactivate, 'Evet, tekrar aktif et');
       await expect(page.getByTestId('provider-status')).toHaveText('Onaylandı');
-      await expect.poll(mails).toBe(2);
+      await expect.poll(() => emailCountFor(provider.email, 'provider-account-reactivated')).toBe(1);
+      expect(mails()).toBe(1);
     } finally {
       await admin.close();
     }
