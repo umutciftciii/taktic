@@ -22,6 +22,11 @@ import { providerStatusBadgeClass, formatBudgetRange } from '../../provider-ui';
 import { DeliveryModeBadge } from '../../../request-fields/delivery-mode-badge';
 import { DistrictWideLocationTag } from '../../../request-fields/district-wide-location-tag';
 import { OfferSubmitRefusalNotice } from '../../offer-submit-refusal';
+import {
+  describeRequestListRefusal,
+  RequestListRefusalNotice,
+  type RequestListRefusal,
+} from '../../request-list-refusal';
 
 type ProviderRequestsPageProps = {
   params: Promise<{ id: string }>;
@@ -65,14 +70,20 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
   ]);
 
   let requests: ProviderRequestListItem[] = [];
-  let errorMessage: string | null = null;
+  // PROVIDER-STATUS-UX-001: a word, never the API's text. The API keeps its
+  // 403 for a provider that is not approved; this only decides the sentence.
+  let refusal: RequestListRefusal | null = null;
 
   try {
     requests = await apiFetch<ProviderRequestListItem[]>(
       `/providers/${id}/requests${toQueryString(filters)}`,
     );
   } catch (error) {
-    errorMessage = error instanceof Error ? error.message : 'Talepler yüklenemedi';
+    refusal = describeRequestListRefusal(error, provider.status);
+  }
+
+  if (refusal === 'signedOut') {
+    redirect(`/login?redirectTo=/providers/${id}/requests`);
   }
 
   return (
@@ -152,7 +163,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
 
       <OfferSubmitRefusalNotice code={offerError} />
 
-      {errorMessage ? <div className="pdash-notice pdash-notice-error">{errorMessage}</div> : null}
+      <RequestListRefusalNotice refusal={refusal} />
 
       <div className="tabstrip-wrap">
         <span className="tabstrip-count">
@@ -163,7 +174,7 @@ export default async function ProviderRequestsPage({ params, searchParams }: Pro
         ) : null}
       </div>
 
-      {!errorMessage && requests.length === 0 ? (
+      {!refusal && requests.length === 0 ? (
         <div className="pdash-empty" style={{ marginTop: 24 }}>
           <h3>Şu an uygun talep yok</h3>
           <p>Yeni talepler geldiğinde burada görüntülenecek.</p>
