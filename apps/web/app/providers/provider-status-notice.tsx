@@ -21,7 +21,7 @@ export function ProviderStatusNotice({ status }: { status: ProviderStatus }) {
 
   if (status === 'REJECTED') {
     return (
-      <div className="pdash-notice pdash-notice-error" role="status" data-testid="provider-status-notice">
+      <div className="pdash-notice pdash-notice-error notice-prose" role="status" data-testid="provider-status-notice">
         Başvurunuz şu aşamada onaylanmadı. Sorularınız veya yeniden değerlendirme talebiniz için{' '}
         <Link href="/destek">Destek</Link> üzerinden bize yazabilirsiniz.
       </div>
@@ -30,7 +30,7 @@ export function ProviderStatusNotice({ status }: { status: ProviderStatus }) {
 
   if (status === 'SUSPENDED') {
     return (
-      <div className="pdash-notice pdash-notice-warn" role="status" data-testid="provider-status-notice">
+      <div className="pdash-notice pdash-notice-warn notice-prose" role="status" data-testid="provider-status-notice">
         Hesabınız şu anda yeni iş almaya kapalı: yeni talepleri göremez ve teklif veremezsiniz. Kabul edilmiş
         işleriniz ve bu işlerdeki mesajlaşmanız devam eder. Bilgi veya inceleme talebi için{' '}
         <Link href="/destek">Destek</Link> üzerinden bize yazabilirsiniz.

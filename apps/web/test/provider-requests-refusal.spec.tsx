@@ -182,6 +182,8 @@ describe('RequestListRefusalNotice', () => {
     expect(html).toContain('Hesabınız geçici olarak sınırlandırılmıştır. Yeni taleplere şu anda erişemiyorsunuz.');
     expect(html).toContain('href="/destek"');
     expect(html).not.toMatch(/statusCode|Forbidden|approved|\{"/);
+    // One paragraph, not the notice box's flex row: the Destek link stays inside the sentence.
+    expect(html.match(/^<div[^>]*class="([^"]*)"/)?.[1]?.split(/\s+/)).toContain('notice-prose');
   });
 
   it('nothing for no refusal', () => {

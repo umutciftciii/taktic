@@ -119,7 +119,7 @@ export default async function ProviderOfferDetailPage({
         it knows whether the credit came back; this screen does not decide that.
       */}
       {offer.matchOutcome === 'FAILED' ? (
-        <div className="pdash-notice" role="status" data-testid="offer-match-failed">
+        <div className="pdash-notice notice-prose" role="status" data-testid="offer-match-failed">
           Müşteri hizmet aksaklığı bildirdi — eşleşme sona erdi
           {offer.matchFailure
             ? ` (${SERVICE_ISSUE_REASON_LABELS[offer.matchFailure.reason]} · bildirim ${offer.matchFailure.incidentNumber}).`

@@ -126,7 +126,7 @@ export default async function SupportTicketPage({ params, searchParams }: Suppor
           {ticket.canReply ? (
             <ReplyForm ticketId={ticket.id} />
           ) : (
-            <div className="cdash-notice" role="status" data-testid="support-closed-notice">
+            <div className="cdash-notice notice-prose" role="status" data-testid="support-closed-notice">
               Bu destek talebi{' '}
               <strong>{supportTicketStatusLabel(ticket.status).toLocaleLowerCase('tr-TR')}</strong>{' '}
               durumunda olduğu için yeni mesaj eklenemiyor. Konu devam ediyorsa{' '}

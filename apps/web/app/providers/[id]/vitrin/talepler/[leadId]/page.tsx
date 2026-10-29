@@ -123,7 +123,7 @@ export default async function ShowcaseLeadPage({ params, searchParams }: LeadPag
           düşülmedi.
         </div>
       ) : error === 'INSUFFICIENT_CREDIT' ? (
-        <div className="pdash-notice pdash-notice-error" role="alert" id="lead-offer-error" data-testid="lead-offer-insufficient">
+        <div className="pdash-notice pdash-notice-error notice-prose" role="alert" id="lead-offer-error" data-testid="lead-offer-insufficient">
           Teklif gönderilmedi: kredi bakiyeniz bu teklif için yetersiz.{' '}
           <Link href={`/providers/${id}/credits`}>Kredi yükleyin</Link> ve tekrar deneyin.
         </div>

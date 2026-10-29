@@ -30,6 +30,12 @@ describe('ProviderStatusNotice', () => {
     expect(said).not.toMatch(/Sebep|gerekçe|ihlal|askıya alındı/i);
   });
 
+  it.each(['REJECTED', 'SUSPENDED'] as const)('%s: laid out as prose, so the Destek link stays in its sentence', (status) => {
+    const classes = html(status).match(/^<div[^>]*class="([^"]*)"/)?.[1]?.split(/\s+/) ?? [];
+    expect(classes).toContain('pdash-notice');
+    expect(classes).toContain('notice-prose');
+  });
+
   it('APPROVED and DRAFT: nothing', () => {
     expect(html('APPROVED')).toBe('');
     expect(html('DRAFT')).toBe('');

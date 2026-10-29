@@ -48,7 +48,7 @@ export function RequestListRefusalNotice({ refusal }: { refusal: Exclude<Request
   }
 
   return (
-    <div className="pdash-notice pdash-notice-warn" role="status" data-testid="request-list-refusal">
+    <div className="pdash-notice pdash-notice-warn notice-prose" role="status" data-testid="request-list-refusal">
       {REQUEST_LIST_REFUSAL_MESSAGES[refusal]} Bilgi veya inceleme talebi için{' '}
       <Link href="/destek">Destek</Link> üzerinden bize yazabilirsiniz.
     </div>
