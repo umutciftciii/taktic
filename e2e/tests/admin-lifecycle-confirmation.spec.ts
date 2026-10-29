@@ -219,8 +219,13 @@ test.describe('ADMIN-DESTRUCTIVE-CONFIRMATION-001 — Faz 2', () => {
       expect((await providerRow(provider.id)).status).toBe('APPROVED');
       await expect.poll(mails).toBe(1);
 
-      // Suspending keeps its Faz 1 dialog; re-activating says it is a second approval.
-      await confirmThrough(page.getByTestId('provider-suspend'), 'Evet, askıya al');
+      // Suspending opens the status form with SUSPENDED chosen and the reason
+      // required (PROVIDER-STATUS-001), then keeps its Faz 1 dialog;
+      // re-activating says it is a second approval.
+      await page.getByTestId('provider-suspend').click();
+      await expect(page.locator('#provider-status-select')).toHaveValue('SUSPENDED');
+      await page.locator('#provider-suspension-reason').fill('E2E: inceleme');
+      await confirmThrough(page.getByTestId('provider-status-save'), 'Evet, askıya al');
       await expect(page.getByTestId('provider-status')).toHaveText('Askıya alındı');
       const reactivate = page.getByTestId('provider-approve');
       await expect(reactivate).toHaveText('Tekrar aktif et');

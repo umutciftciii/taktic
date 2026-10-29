@@ -499,7 +499,7 @@ describe('claim consume — replay, expiry and status', () => {
       await request(ctx.server)
         .patch(`/providers/${providerId}/status`)
         .set('Cookie', cookie)
-        .send({ status, rejectionReason: 'Belgeler eksik' })
+        .send({ status, rejectionReason: 'Belgeler eksik', suspensionReason: 'Belgeler eksik' })
         .expect(200);
 
       const token = await ctx.prisma.providerClaimToken.findFirstOrThrow({

@@ -89,7 +89,7 @@ async function applicant(options: { registration?: RegistrationOption; email?: b
 }
 
 async function setStatus(providerId: string, status: ProviderStatus) {
-  await request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', await rootCookie()).send({ status }).expect(200);
+  await request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', await rootCookie()).send({ status, ...(status === ProviderStatus.SUSPENDED ? { suspensionReason: 'test' } : {}) }).expect(200);
 }
 
 const approve = (providerId: string) => setStatus(providerId, ProviderStatus.APPROVED);

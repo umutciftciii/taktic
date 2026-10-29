@@ -151,7 +151,11 @@ async function newProvider(
 const activeCampaign = (options: Parameters<typeof createCampaignFixture>[1] = {}) => createCampaignFixture(ctx.prisma, options);
 
 const approve = (adminCookie: string, providerId: string, status: ProviderStatus = ProviderStatus.APPROVED) =>
-  request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', adminCookie).send({ status, ...(status === ProviderStatus.REJECTED ? { rejectionReason: 'test' } : {}) });
+  request(ctx.server).patch(`/providers/${providerId}/status`).set('Cookie', adminCookie).send({
+    status,
+    ...(status === ProviderStatus.REJECTED ? { rejectionReason: 'test' } : {}),
+    ...(status === ProviderStatus.SUSPENDED ? { suspensionReason: 'test' } : {}),
+  });
 
 async function requestEmailToken(cookie: string) {
   await request(ctx.server).post('/auth/email-verification/resend').set('Cookie', cookie).expect(201);

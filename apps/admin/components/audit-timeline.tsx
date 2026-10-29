@@ -252,7 +252,11 @@ export function describeAuditEntry(
         note:
           entry.reason || entry.note ? (
             <span className="cell-stack">
-              {entry.reason ? <span>Ret gerekçesi: {entry.reason}</span> : null}
+              {entry.reason ? (
+                // PROVIDER-STATUS-001: a move into SUSPENDED carries the
+                // suspension reason; every other reason is a rejection's.
+                <span>{status?.to === 'SUSPENDED' ? 'Askı gerekçesi' : 'Ret gerekçesi'}: {entry.reason}</span>
+              ) : null}
               {entry.note ? <span>Moderasyon notu: {entry.note}</span> : null}
             </span>
           ) : null,

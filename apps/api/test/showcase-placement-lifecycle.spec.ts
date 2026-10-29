@@ -292,7 +292,7 @@ describe("the clock runs through the provider's own actions", () => {
     await request(ctx.server)
       .patch(`/providers/${profile.id}/status`)
       .set('Cookie', adminCookie)
-      .send({ status: ProviderStatus.SUSPENDED, moderationNote: 'İnceleme' });
+      .send({ status: ProviderStatus.SUSPENDED, moderationNote: 'İnceleme', suspensionReason: 'İnceleme' });
 
     const held = await read(placement.id);
     expect(held.status).toBe('SUSPENDED');

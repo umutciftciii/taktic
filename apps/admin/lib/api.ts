@@ -451,6 +451,8 @@ export type ProviderProfile = {
   status: ProviderStatus;
   moderationNote: string | null;
   rejectionReason: string | null;
+  /** PROVIDER-STATUS-001: the operator's reason for the current suspension; null otherwise. */
+  suspensionReason?: string | null;
   approvedAt: string | null;
   rejectedAt: string | null;
   suspendedAt: string | null;

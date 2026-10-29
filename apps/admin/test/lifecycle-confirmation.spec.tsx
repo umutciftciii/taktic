@@ -190,10 +190,37 @@ describe('provider: the screens draw the dialog with the key', () => {
 
   it('opens on the current status: no dialog, the save shut', () => {
     const markup = html(
-      <ProviderStatusForm providerId="p-1" status="PENDING_REVIEW" moderationNote={null} rejectionReason={null} action={noop} />,
+      <ProviderStatusForm providerId="p-1" status="PENDING_REVIEW" action={noop} />,
     );
     expect(markup).toMatch(/<button type="submit"[^>]*disabled=""[^>]*data-testid="provider-status-save"/);
     expect(markup).not.toContain('aria-haspopup="dialog"');
+  });
+
+  // PROVIDER-STATUS-001
+  it('opened with SUSPENDED: the suspension reason is drawn and required, and asked for with the status key', () => {
+    const markup = html(
+      <ProviderStatusForm providerId="p-1" status="APPROVED" initialSelection="SUSPENDED" action={noop} />,
+    );
+    expect(markup).toMatch(/<textarea id="provider-suspension-reason" name="suspensionReason" required=""/);
+    expect(markup).not.toContain('name="rejectionReason"');
+    expect(markup).toContain('hizmet verene e-postada veya panelde gösterilmez');
+    expect(markup).toMatch(/aria-haspopup="dialog"[^>]*data-testid="provider-status-save"/);
+  });
+
+  it('opened with REJECTED: only the rejection reason, required', () => {
+    const markup = html(
+      <ProviderStatusForm providerId="p-1" status="PENDING_REVIEW" initialSelection="REJECTED" action={noop} />,
+    );
+    expect(markup).toMatch(/<textarea id="provider-rejection-reason" name="rejectionReason" required=""/);
+    expect(markup).not.toContain('name="suspensionReason"');
+  });
+
+  it('carries nothing over: the note and the reasons start empty', () => {
+    const source = read('app/providers/[id]/provider-status-form.tsx');
+    expect(source).not.toContain('defaultValue');
+    const page = read('app/providers/[id]/page.tsx');
+    expect(page).not.toMatch(/name="moderationNote" value=/);
+    expect(page).not.toMatch(/name="rejectionReason" value=/);
   });
 
   it('the header approve/re-activate is a confirmation with the approval key', () => {
@@ -202,8 +229,10 @@ describe('provider: the screens draw the dialog with the key', () => {
     expect(source).toContain('consequence={providerApproveConsequence(provider.status)}');
     expect(source).toContain('testId="provider-approve"');
     expect(source).not.toContain('data-testid="provider-approve"');
-    // The suspension keeps its Faz 1 dialog.
-    expect(source).toMatch(/<ConfirmDialog\s+proof="provider.status"\s+triggerLabel="İş almasını durdur"/);
+    // PROVIDER-STATUS-001: the header's suspend opens the status form with
+    // SUSPENDED chosen, where the reason is written and the Faz 1 dialog asks.
+    expect(source).toContain('href={`/providers/${provider.id}?durum=SUSPENDED#durum-yonetimi`}');
+    expect(source).toContain('data-testid="provider-suspend"');
   });
 });
 

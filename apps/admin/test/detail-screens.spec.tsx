@@ -207,6 +207,21 @@ describe('Neler oldu: the recorded audit, drawn as recorded (ADMIN-ACTION-AUDIT-
     expect(out).toContain('Ret gerekçesi: Belge eksik');
     expect(out).toContain('Moderasyon notu: Arandı');
   });
+
+  it('a suspension carries its suspension reason under its own label (PROVIDER-STATUS-001)', () => {
+    const { note } = describeAuditEntry(
+      auditEntry({
+        domain: 'PROVIDER',
+        action: 'STATUS_CHANGED',
+        changes: [{ field: 'status', from: 'APPROVED', to: 'SUSPENDED' }],
+        reason: 'Şikâyet incelemesi',
+        note: null,
+      }),
+    );
+    const out = html(<>{note}</>);
+    expect(out).toContain('Askı gerekçesi: Şikâyet incelemesi');
+    expect(out).not.toContain('Ret gerekçesi');
+  });
 });
 
 describe('invitation history: recorded instants and operators', () => {

@@ -442,7 +442,7 @@ describe('provider application notifications', () => {
     await request(ctx.server)
       .patch(`/providers/${providerId}/status`)
       .set('Cookie', admin)
-      .send({ status: ProviderStatus.SUSPENDED })
+      .send({ status: ProviderStatus.SUSPENDED, suspensionReason: 'İnceleme' })
       .expect(200);
     await approve();
 

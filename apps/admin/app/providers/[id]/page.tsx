@@ -50,7 +50,7 @@ import {
   updateProviderStatusAction,
 } from '../actions';
 import { TransactionsPanel } from './credits/transactions-panel';
-import { providerApproveConsequence, providerStatusConsequence } from './provider-status-consequence';
+import { isProviderStatus, providerApproveConsequence } from './provider-status-consequence';
 import { ProviderStatusForm } from './provider-status-form';
 import { RawRegistrationReveal } from './raw-registration-reveal';
 import { ProviderReliabilityCard } from './provider-reliability-card';
@@ -99,6 +99,12 @@ type ProviderDetailPageProps = {
     categoryNotice?: string;
     statusSaved?: string;
     statusError?: string;
+    /**
+     * PROVIDER-STATUS-001: the status the form opens with. The header's
+     * "İş almasını durdur" links here with SUSPENDED, because a suspension
+     * needs its reason and the form is where it is written.
+     */
+    durum?: string;
     /** REL-002 Faz 4: what a reliability review action left behind. */
     reliability?: string;
   }>;
@@ -108,7 +114,7 @@ type TabKey = '' | 'kredi' | 'degerlendirmeler' | 'teklifler' | 'gecmis';
 
 /** Said once the status form has been sent (updateProviderStatusAction). */
 const STATUS_ERRORS: Record<string, string> = {
-  invalid: 'Durum kaydedilemedi: istek geçersiz. Ret için gerekçe zorunludur.',
+  invalid: 'Durum kaydedilemedi: istek geçersiz. Ret ve askıya alma için gerekçe zorunludur.',
   error: 'Durum kaydedilemedi. Lütfen tekrar deneyin.',
   confirmation: CONFIRMATION_PROOF_REFUSAL_MESSAGE,
 };
@@ -590,15 +596,19 @@ export default async function ProviderDetailPage({
                   { label: 'Askı', value: provider.suspendedAt ? formatDateTime(provider.suspendedAt) : null },
                   { label: 'Moderasyon notu', value: provider.moderationNote },
                   { label: 'Ret gerekçesi', value: provider.rejectionReason },
+                  { label: 'Askı gerekçesi', value: provider.suspensionReason ?? null },
                 ]}
               />
               {canModerate ? (
                 <div className="provider-status-form-wrap">
                   <ProviderStatusForm
+                    // Remounted whenever the status or the asked-for status
+                    // changes: a soft navigation to `?durum=` keeps client
+                    // state, and the form must open on the status asked for.
+                    key={`${provider.status}:${search.durum ?? ''}`}
                     providerId={provider.id}
                     status={provider.status}
-                    moderationNote={provider.moderationNote}
-                    rejectionReason={provider.rejectionReason}
+                    initialSelection={isProviderStatus(search.durum) ? search.durum : undefined}
                     action={updateProviderStatusAction}
                   />
                 </div>
@@ -1171,36 +1181,27 @@ export default async function ProviderDetailPage({
  * form's, under "Durum yönetimi".
  */
 function ProviderQuickStatus({ provider }: { provider: ProviderProfile }): ReactNode {
-  const hidden = (
-    <>
-      <input type="hidden" name="id" value={provider.id} />
-      <input type="hidden" name="moderationNote" value={provider.moderationNote ?? ''} />
-      <input type="hidden" name="rejectionReason" value={provider.rejectionReason ?? ''} />
-    </>
-  );
-
+  // A suspension needs its reason (PROVIDER-STATUS-001), and the reason is
+  // written in the status form — so the header's button opens the form with
+  // SUSPENDED chosen rather than suspending from here. The form asks first.
   if (provider.status === 'APPROVED') {
     return (
-      <form action={updateProviderStatusAction}>
-        {hidden}
-        <input type="hidden" name="status" value="SUSPENDED" />
-        <ConfirmDialog
-          proof="provider.status"
-          triggerLabel="İş almasını durdur"
-          triggerClassName="btn btn-destructive btn-sm"
-          title="Hizmet veren askıya alınsın mı?"
-          consequence={providerStatusConsequence('APPROVED', 'SUSPENDED')}
-          confirmLabel="Evet, askıya al"
-          testId="provider-suspend"
-        />
-      </form>
+      <Link
+        className="btn btn-destructive btn-sm"
+        href={`/providers/${provider.id}?durum=SUSPENDED#durum-yonetimi`}
+        data-testid="provider-suspend"
+      >
+        İş almasını durdur
+      </Link>
     );
   }
 
+  // Nothing is carried over from the last move: the note and the reasons are
+  // this move's own, and an approval has none (PROVIDER-STATUS-001).
   const reactivate = provider.status === 'SUSPENDED';
   return (
     <form action={updateProviderStatusAction}>
-      {hidden}
+      <input type="hidden" name="id" value={provider.id} />
       <input type="hidden" name="status" value="APPROVED" />
       <ConfirmDialog
         proof="provider.approve"

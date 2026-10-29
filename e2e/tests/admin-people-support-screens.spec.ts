@@ -439,14 +439,18 @@ test.describe('ADMIN-DESIGN-001 Faz 3B — kişiler ve destek', () => {
       await expectOpen(page, new RegExp(`/providers/${provider.id}$`));
       await capture(page, 'provider-detail-bilgiler');
 
-      // Suspend from the header: cancel, then confirm.
+      // Suspend from the header: it opens the status form with SUSPENDED
+      // chosen, the reason required (PROVIDER-STATUS-001); cancel, then confirm.
       await page.getByTestId('provider-suspend').click();
-      const suspend = page.getByTestId('provider-suspend-dialog');
+      await expect(page.locator('#provider-status-select')).toHaveValue('SUSPENDED');
+      await page.locator('#provider-suspension-reason').fill('Faz 3B E2E: inceleme.');
+      await page.getByTestId('provider-status-save').click();
+      const suspend = page.getByTestId('provider-status-save-dialog');
       await expect(suspend).toContainText('vitrin kartları hemen yayından kalkar');
       await capture(page, 'provider-suspend-dialog');
       await suspend.getByRole('button', { name: 'Vazgeç' }).click();
       expect(await statusOf()).toBe('APPROVED');
-      await page.getByTestId('provider-suspend').click();
+      await page.getByTestId('provider-status-save').click();
       await suspend.getByRole('button', { name: 'Evet, askıya al' }).click();
       await expect(page.getByTestId('provider-status-saved')).toBeVisible();
       expect(await statusOf()).toBe('SUSPENDED');

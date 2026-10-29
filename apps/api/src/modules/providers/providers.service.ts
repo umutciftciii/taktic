@@ -305,7 +305,7 @@ export class ProvidersService implements OnModuleInit {
 
     await this.announceNewApplication(provider.id, user, meta);
 
-    return toProviderRecord(withVisibleServiceCategories(provider));
+    return toOwnerProviderRecord(provider);
   }
 
   /**
@@ -608,7 +608,7 @@ export class ProvidersService implements OnModuleInit {
     // release preparation, and its name and slug are exactly what the
     // unreleased catalogue must not leak.
     if (visibility === 'owner') {
-      return { ...toProviderRecord(withVisibleServiceCategories(provider)), visibility };
+      return { ...toOwnerProviderRecord(provider), visibility };
     }
 
     return { ...toProviderRecord(provider), visibility };
@@ -643,6 +643,7 @@ export class ProvidersService implements OnModuleInit {
           toStatus: true,
           moderationNote: true,
           rejectionReason: true,
+          suspensionReason: true,
           createdAt: true,
           actor: staffActorSelect(viewer),
         },
@@ -656,9 +657,10 @@ export class ProvidersService implements OnModuleInit {
         actor: toAuditActor(row.actor),
         target: { type: 'PROVIDER', id },
         changes: [{ field: 'status', from: row.fromStatus, to: row.toStatus }],
-        // A rejection reason is the transition's reason; the moderation note
-        // is the note written with it.
-        reason: row.rejectionReason,
+        // A rejection or suspension reason is the transition's reason (a row
+        // carries at most one of the two); the moderation note is the note
+        // written with it.
+        reason: row.rejectionReason ?? row.suspensionReason,
         note: row.moderationNote,
         createdAt: row.createdAt,
       }),
@@ -974,7 +976,7 @@ export class ProvidersService implements OnModuleInit {
       throw new NotFoundException('Provider profile not found');
     }
 
-    return toProviderRecord(withVisibleServiceCategories(provider));
+    return toOwnerProviderRecord(provider);
   }
 
   async getProviderDashboardForUser(userId: string) {
@@ -1014,7 +1016,7 @@ export class ProvidersService implements OnModuleInit {
     ]);
 
     return {
-      provider: toProviderRecord(withVisibleServiceCategories(provider)),
+      provider: toOwnerProviderRecord(provider),
       creditBalance,
       activeOffersCount,
       recentOffersCount,
@@ -1118,7 +1120,7 @@ export class ProvidersService implements OnModuleInit {
       // save a profile must see the same shape back that they saved.
       return isStaff(user)
         ? toProviderRecord(updated)
-        : toProviderRecord(withVisibleServiceCategories(updated));
+        : toOwnerProviderRecord(updated);
     });
   }
 
@@ -1184,9 +1186,17 @@ export class ProvidersService implements OnModuleInit {
     const existing = await this.ensureProviderExists(id);
     const moderationNote = normalizeNullableString(dto.moderationNote);
     const rejectionReason = normalizeNullableString(dto.rejectionReason);
+    const suspensionReason = normalizeNullableString(dto.suspensionReason);
 
     if (dto.status === ProviderStatus.REJECTED && !rejectionReason) {
       throw new BadRequestException('Rejection reason is required when status is REJECTED');
+    }
+
+    // PROVIDER-STATUS-001: a suspension says why, like a rejection does. The
+    // reason is the operator's record — the admin screens and the status
+    // history read it; nothing the provider or a customer reads carries it.
+    if (dto.status === ProviderStatus.SUSPENDED && !suspensionReason) {
+      throw new BadRequestException('Suspension reason is required when status is SUSPENDED');
     }
 
     const now = new Date();
@@ -1209,6 +1219,7 @@ export class ProvidersService implements OnModuleInit {
             status: dto.status,
             moderationNote,
             rejectionReason: dto.status === ProviderStatus.REJECTED ? rejectionReason : null,
+            suspensionReason: dto.status === ProviderStatus.SUSPENDED ? suspensionReason : null,
             ...(dto.status === ProviderStatus.APPROVED ? { approvedAt: now } : {}),
             ...(dto.status === ProviderStatus.REJECTED ? { rejectedAt: now } : {}),
             ...(dto.status === ProviderStatus.SUSPENDED ? { suspendedAt: now } : {}),
@@ -1227,6 +1238,7 @@ export class ProvidersService implements OnModuleInit {
               toStatus: dto.status,
               moderationNote: updated.moderationNote,
               rejectionReason: updated.rejectionReason,
+              suspensionReason: updated.suspensionReason,
               actorId: actor.id,
             },
             select: { id: true },
@@ -2580,6 +2592,48 @@ function toProviderListRecord<
 >(provider: T) {
   const { taxNumberMasked: _legacy, ...rest } = toProviderRecord(provider);
   return rest;
+}
+
+/**
+ * The provider's own view of their profile: the owner branch of
+ * `GET /providers/:id`, `/providers/me`, the dashboard, and the answers to the
+ * provider's own create and save (PROVIDER-STATUS-001).
+ *
+ * An allow-list, not the operator's record minus a few keys: the moderation
+ * fields — the internal note and the rejection and suspension reasons — are
+ * the operator's record of a decision and stay on the admin screens, and a
+ * column added to the table later stays off this shape until someone adds it
+ * here on purpose. The categories are narrowed the way every non-operator
+ * projection narrows them.
+ */
+function toOwnerProviderRecord(provider: Prisma.ProviderProfileGetPayload<{ include: typeof providerInclude }>) {
+  const record = toProviderRecord(withVisibleServiceCategories(provider));
+  return {
+    id: record.id,
+    userId: record.userId,
+    businessName: record.businessName,
+    contactName: record.contactName,
+    phone: record.phone,
+    email: record.email,
+    taxType: record.taxType,
+    taxNumberMasked: record.taxNumberMasked,
+    city: record.city,
+    district: record.district,
+    addressNote: record.addressNote,
+    description: record.description,
+    status: record.status,
+    approvedAt: record.approvedAt,
+    rejectedAt: record.rejectedAt,
+    suspendedAt: record.suspendedAt,
+    claimedAt: record.claimedAt,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    user: record.user,
+    businessRegistration: record.businessRegistration,
+    serviceCategories: record.serviceCategories,
+    upcomingServiceCategories: record.upcomingServiceCategories,
+    serviceAreas: record.serviceAreas,
+  };
 }
 
 /**
