@@ -48,6 +48,34 @@ Geliştirme stack'inin davranışı değişmedi; tek fark portların artık yaln
 - Tarayıcı source map'i üretilmez (Next varsayılanı); API image'ından `.map` ve
   `.d.ts` dosyaları silinir.
 
+### Sağlık uçları ve log sınırı (OBS-READY-001)
+
+| Uç | Soru | Yanıt |
+|---|---|---|
+| `GET /health` | Süreç cevap veriyor mu? (liveness) | Her zaman `200 {"status":"ok","service":"taktic-api"}`, DB'ye bakmaz |
+| `GET /health/ready` | DB'ye ulaşılıyor mu? (readiness) | `200 {"status":"ready","database":"ok","migrations":{"applied":<n>}}` ya da `503 {"status":"unavailable","database":"unreachable"\|"timeout"}` |
+
+- `applied` = `_prisma_migrations` içinde bitmiş ve geri alınmamış satırlar
+  (`migrate status`'un "applied" saydığıyla aynı).
+- DB'ye 2 sn süre verilir; yanıt host, port, kullanıcı ya da sürücü mesajı
+  taşımaz. Log'a yalnız durum değişimi, hata sınıfı ve kodu yazılır
+  (`readiness: database unreachable (… P1017)` / `reachable again`).
+- API image'ının `HEALTHCHECK`'i readiness'i kullanır: DB yokken container
+  ~60 sn sonra `unhealthy` görünür. Docker `unhealthy` için **restart
+  etmez** (restart politikası yalnız sürecin çıkışına bakar), süreç de DB
+  kesintisinde kapanmaz; PostgreSQL dönünce Prisma yeniden bağlanır ve durum
+  kendiliğinden `healthy` olur. CI'daki "Readiness through a database outage"
+  adımı bunu gerçek image ile doğrular.
+- Sonuç: DB kapalıyken `deploy-staging.sh`'in 8. adımı (`wait_healthy`) ve
+  web/admin'in `depends_on: service_healthy` başlatması durur — DB'siz bir
+  deploy zaten yapılmamalı.
+- `smoke.sh` hem `/health` hem `/health/ready` kontrol eder.
+- Her compose servisi (prod ve dev) `json-file`, `max-size: 10m`,
+  `max-file: 5` ile loglar; `compose-security.mjs` eksik ya da sınırsız log
+  ayarını reddeder. Ayar container yeniden oluşturulunca geçerli olur: deploy
+  api/web/admin'i recreate eder, PostgreSQL ise ancak bir sonraki recreate'te
+  (ör. `postgres-cutover.sh`) alır.
+
 ## 2. Port matrisi
 
 | Servis | Geliştirme (önce) | Geliştirme (şimdi) | Prod compose |

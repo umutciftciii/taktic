@@ -169,8 +169,13 @@ RUN mkdir -p uploads/category-images uploads/showcase-images && \
     chown -R node:node uploads
 USER node
 EXPOSE 3001
+# Readiness, not liveness (OBS-READY-001): healthy means the API can reach its
+# database. The probe answers within 2 s either way, and an unhealthy status
+# restarts nothing — Docker's restart policy reacts to the process exiting,
+# which a database outage does not cause — so the container reports the outage
+# and recovers on its own once PostgreSQL is back.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=6 \
-    CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.API_PORT||3001)+'/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+    CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.API_PORT||3001)+'/health/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["node", "dist/main.js"]
 
 # ---------------------------------------------------------------------------

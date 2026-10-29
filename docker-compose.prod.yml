@@ -52,11 +52,25 @@ x-hardening: &hardening
   cap_drop:
     - ALL
 
+# Bounded container logs (OBS-READY-001). Docker's json-file driver keeps
+# everything a container ever printed unless told otherwise, and on a host
+# with a small disk that is an outage on a timer. 5 × 10 MB per container
+# keeps days of normal traffic and `docker logs` still reads it.
+# scripts/ops/compose-security.mjs fails CI for a service without it.
+# Applies when a container is (re)created; the deploy recreates api, web and
+# admin, while postgres picks it up on its next recreate.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16.6-alpine
     container_name: ${TAKTIC_CONTAINER_PREFIX:-taktic}-postgres
     restart: unless-stopped
+    logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-taktic}
       POSTGRES_USER: ${POSTGRES_USER:-taktic_user}
@@ -81,6 +95,7 @@ services:
     image: taktic-migrate:${TAKTIC_IMAGE_TAG:?TAKTIC_IMAGE_TAG must name the built commit}
     profiles: ["tools"]
     restart: "no"
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,6 +110,7 @@ services:
     image: taktic-api:${TAKTIC_IMAGE_TAG:?TAKTIC_IMAGE_TAG must name the built commit}
     container_name: ${TAKTIC_CONTAINER_PREFIX:-taktic}-api
     restart: unless-stopped
+    logging: *logging
     depends_on:
       postgres:
         condition: service_healthy
@@ -203,6 +219,7 @@ services:
     image: taktic-web:${TAKTIC_IMAGE_TAG:?TAKTIC_IMAGE_TAG must name the built commit}
     container_name: ${TAKTIC_CONTAINER_PREFIX:-taktic}-web
     restart: unless-stopped
+    logging: *logging
     depends_on:
       api:
         condition: service_healthy
@@ -224,6 +241,7 @@ services:
     image: taktic-admin:${TAKTIC_IMAGE_TAG:?TAKTIC_IMAGE_TAG must name the built commit}
     container_name: ${TAKTIC_CONTAINER_PREFIX:-taktic}-admin
     restart: unless-stopped
+    logging: *logging
     depends_on:
       api:
         condition: service_healthy

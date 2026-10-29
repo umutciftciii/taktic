@@ -8,6 +8,17 @@ are in [docs/release.md](docs/release.md).
 
 ### Added
 
+- OBS-READY-001: `GET /health/ready` — 200 with the database state and the
+  applied migration count while PostgreSQL answers, 503 (`unreachable` /
+  `timeout`, 2 s budget) while it does not, never anything about the
+  connection. `GET /health` stays the database-independent liveness answer.
+  The API image's healthcheck and `smoke.sh` use readiness; an outage marks
+  the container unhealthy and restarts nothing, and the same process is ready
+  again once the database is back (CI rehearses it on the real image). Every
+  compose service of both stacks rotates its logs (json-file, 10m × 5), and
+  the compose audit refuses a service without bounded logs. No migration, no
+  new environment variable.
+
 - ADMIN-AUTH-001: "Şifremi Unuttum" on the admin sign-in card. Two new
   signed-out panel screens (`/sifre-unuttum`, `/sifre-sifirla`) on the existing
   `/auth/password-reset` API flow — 30-minute single-use hashed token, three

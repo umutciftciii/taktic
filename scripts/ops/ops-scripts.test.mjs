@@ -161,12 +161,15 @@ const PLACEHOLDER_FINGERPRINT = 'placeholder-fingerprint-key-not-a-secret-0001';
 /** What `docker compose config` resolves for the staging host. */
 function stagingConfig(project = 'taktic-staging') {
   const image = (name) => `taktic-${name}:0000000000000000000000000000000000000000`;
-  const hardened = { security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'] };
+  // Bounded logs on every service, as docker-compose.prod.yml declares them
+  // (OBS-READY-001); the preflight's compose audit refuses a service without.
+  const logging = { driver: 'json-file', options: { 'max-size': '10m', 'max-file': '5' } };
+  const hardened = { security_opt: ['no-new-privileges:true'], cap_drop: ['ALL'], logging };
   const loopback = (target) => ({ host_ip: '127.0.0.1', target, published: String(target), protocol: 'tcp' });
   return {
     name: project,
     services: {
-      postgres: { image: 'postgres:16.6-alpine' },
+      postgres: { image: 'postgres:16.6-alpine', logging },
       migrate: { image: image('migrate'), ...hardened },
       api: {
         image: image('api'),
@@ -341,6 +344,17 @@ describe('deploy-preflight.sh: configuration fails before anything is stopped', 
     assert.equal(result.code, 1);
     assert.match(failLines(result.stderr), /FAIL PROMOTION_FINGERPRINT_KEY: not set/);
     assert.match(failLines(result.stderr), /the new API would refuse to start/);
+    assert.deepEqual(mutatingCalls(result.calls), []);
+  });
+
+  it('fails a service without bounded logs before anything is stopped', () => {
+    const ws = workspace();
+    const state = stagingState({ images: true, sha: ws.sha });
+    delete state.config.services.api.logging;
+    const result = run(ws, state, 'deploy-preflight.sh', ['--sha', ws.sha, '--skip-fetch']);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /FAIL api: no logging limits/);
+    assert.match(failLines(result.stderr), /fails the security audit/);
     assert.deepEqual(mutatingCalls(result.calls), []);
   });
 

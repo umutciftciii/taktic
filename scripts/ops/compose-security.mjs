@@ -28,6 +28,9 @@
 //
 //   ... | node scripts/ops/compose-security.mjs env-keys api
 //
+// Both stacks must also bound their container logs (OBS-READY-001): every
+// service names a rotating driver with a size and a file-count limit.
+//
 // Exit status: 0 clean, 1 findings, 2 the audit itself could not run.
 
 import { execFileSync } from 'node:child_process';
@@ -90,6 +93,53 @@ function auditPorts(name, service, findings) {
   }
 }
 
+/** Logging drivers that rotate on their own when given limits. */
+export const ROTATING_LOG_DRIVERS = new Set(['json-file', 'local']);
+
+/** Upper bounds a service's log limits may not exceed: 100 MB × 20 files. */
+export const MAX_LOG_FILE_BYTES = 100 * 1024 * 1024;
+export const MAX_LOG_FILES = 20;
+
+const SIZE_UNITS = { b: 1, k: 1024, m: 1024 ** 2, g: 1024 ** 3 };
+
+/** Docker's size notation ("10m", "512k", "1g") in bytes, or null when it is not one. */
+export function parseLogSize(value) {
+  const match = /^(\d+)\s*([bkmg])?$/i.exec(String(value ?? '').trim());
+  if (!match) return null;
+  return Number(match[1]) * SIZE_UNITS[(match[2] ?? 'b').toLowerCase()];
+}
+
+/**
+ * Logs every service of any stack must satisfy: a rotating driver with both
+ * limits set, so no container can fill the host's disk with its output.
+ * Without `logging`, Docker's default json-file driver keeps everything.
+ */
+function auditLogging(name, service, findings) {
+  const logging = service.logging;
+  if (!logging) {
+    findings.push(`${name}: no logging limits (the default json-file driver never rotates)`);
+    return;
+  }
+  const driver = logging.driver ?? 'json-file';
+  if (!ROTATING_LOG_DRIVERS.has(driver)) {
+    findings.push(`${name}: logging driver "${driver}" is not a rotating local driver (json-file or local)`);
+    return;
+  }
+  const options = logging.options ?? {};
+  const size = parseLogSize(options['max-size']);
+  if (size === null || size <= 0) {
+    findings.push(`${name}: logging max-size is missing or not a size ("${options['max-size'] ?? ''}")`);
+  } else if (size > MAX_LOG_FILE_BYTES) {
+    findings.push(`${name}: logging max-size ${options['max-size']} exceeds 100m`);
+  }
+  const files = Number(options['max-file']);
+  if (!Number.isInteger(files) || files < 1) {
+    findings.push(`${name}: logging max-file is missing or not a positive integer ("${options['max-file'] ?? ''}")`);
+  } else if (files > MAX_LOG_FILES) {
+    findings.push(`${name}: logging max-file ${files} exceeds ${MAX_LOG_FILES}`);
+  }
+}
+
 /** The deployed stack: loopback, plus everything that makes it immutable. */
 export function auditProd(config) {
   const findings = [];
@@ -101,6 +151,7 @@ export function auditProd(config) {
 
   for (const [name, service] of Object.entries(services)) {
     auditPorts(name, service, findings);
+    auditLogging(name, service, findings);
 
     if (service.privileged) findings.push(`${name}: privileged container`);
 
@@ -146,11 +197,12 @@ export function auditProd(config) {
   return findings;
 }
 
-/** The local development stack: only the network exposure rule applies. */
+/** The local development stack: network exposure and bounded logs. */
 export function auditDev(config) {
   const findings = [];
   for (const [name, service] of Object.entries(config.services ?? {})) {
     auditPorts(name, service, findings);
+    auditLogging(name, service, findings);
   }
   return findings;
 }
