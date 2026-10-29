@@ -54,7 +54,14 @@ describe('provider status confirmation', () => {
     expect(said).toContain('vitrin kartları hemen yayından kalkar');
     expect(said).toContain('claim');
     expect(said).toContain('silinmez');
-    expect(said).toContain('e-posta gitmez');
+    // PROVIDER-STATUS-001: the business is told, without the reason.
+    expect(said).toContain('gerekçe içermeyen, genel bir bilgilendirme e-postası');
+    expect(said).toContain('müşteriden gizlenir ve kabul edilemez');
+  });
+
+  it('a move back to review or draft still mails nothing', () => {
+    expect(text('APPROVED', 'PENDING_REVIEW')).toContain('otomatik e-posta gitmez');
+    expect(text('APPROVED', 'DRAFT')).toContain('otomatik e-posta gitmez');
   });
 
   it('only speaks of placements when the business is leaving approval', () => {

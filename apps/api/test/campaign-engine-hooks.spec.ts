@@ -394,13 +394,16 @@ describe('stage A — every real path commits its write together with a PENDING 
     await worker.runOnce();
     await expectSingleGrant(provider.id, campaign.id, 5);
     const after = await engineWriteSnapshot(ctx.prisma);
+    const eventsAfter = await events();
 
     await approve(adminCookie, provider.id, ProviderStatus.SUSPENDED).expect(200);
     await approve(adminCookie, provider.id).expect(200);
     await approve(adminCookie, provider.id).expect(200);
-    // The re-approval raised the same keys: the SETTLED one stayed settled,
-    // the evaluated approval event was reopened, and no row was added.
+    // PROVIDER-STATUS-001: a re-activation is not a campaign approval fact.
+    // Nothing is raised or reopened — every event row is exactly as it was —
+    // and no row was added.
     expect(await engineWriteSnapshot(ctx.prisma)).toEqual(after);
+    expect(await events()).toEqual(eventsAfter);
     expect((await events()).find((row) => row.triggerEventKey === K1_KEY(provider.id))?.status).toBe('SETTLED');
     await worker.runOnce();
     expect(await ctx.prisma.campaignRedemption.count()).toBe(1);

@@ -126,6 +126,15 @@ export function customerSupportUrl(): string {
   return publicWebUrl('/destek');
 }
 
+/**
+ * Where a provider opens a support ticket — the same `apps/web/app/destek`,
+ * which serves the hizmet veren desk to a provider account. The status notices
+ * (PROVIDER-STATUS-001) point here for a question or a review request.
+ */
+export function providerSupportUrl(): string {
+  return publicWebUrl('/destek');
+}
+
 /** The customer's own support ticket. `apps/web/app/destek/[ticketId]`. */
 export function customerSupportTicketUrl(ticketId: string): string {
   return publicWebUrl(`/destek/${encodeURIComponent(ticketId)}`);

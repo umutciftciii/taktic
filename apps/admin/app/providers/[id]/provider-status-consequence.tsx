@@ -66,8 +66,11 @@ export function providerStatusConsequence(from: ProviderStatus, to: ProviderStat
         gösterilmez.
       </p>
       <p>
-        Mevcut teklifleri, kredisi ve geçmişi silinmez; işletmeye otomatik e-posta gitmez. Durum
-        sonradan yine buradan değiştirilebilir
+        Mevcut teklifleri, kredisi ve geçmişi silinmez.{' '}
+        {to === 'REJECTED' || to === 'SUSPENDED'
+          ? 'İşletmeye gerekçe içermeyen, genel bir bilgilendirme e-postası ve destek yolu gider.'
+          : 'İşletmeye otomatik e-posta gitmez.'}{' '}
+        Durum sonradan yine buradan değiştirilebilir
         {leavesApproval ? '; yeniden onay, vitrin yayınlarını sürdürür.' : '.'}
       </p>
     </>
@@ -100,12 +103,17 @@ export function providerApproveConsequence(from: ProviderStatus): ReactNode {
         verebilir. İşletme onaylı olmadığı için askıya alınmış vitrin yayınları varsa yeniden yayına girer. Müşteriden
         gizlenmiş, henüz karara bağlanmamış teklifleri, talebin teklif turu hâlâ açıksa yeniden görünür.
       </p>
-      <p>
-        İşletmeye başvurusunun onaylandığını bildiren e-posta gider
-        {from === 'SUSPENDED' ? ' (yeniden onay yeni bir onay sayılır; e-posta tekrar gider)' : ''}. Kampanya motoru
-        açıksa ve “hizmet veren onaylandı” koşullu bir kampanya uygunsa bu onay kampanya ödülünü (ör. promosyon
-        kredisi) tetikleyebilir.
-      </p>
+      {from === 'SUSPENDED' ? (
+        <p>
+          İşletmeye hesabının yeniden aktif olduğunu bildiren e-posta gider; başvuru onay e-postası tekrar gitmez.
+          Yeniden aktifleştirme yeni bir onay sayılmaz ve “hizmet veren onaylandı” kampanya ödülünü tetiklemez.
+        </p>
+      ) : (
+        <p>
+          İşletmeye başvurusunun onaylandığını bildiren e-posta gider. Kampanya motoru açıksa ve “hizmet veren
+          onaylandı” koşullu bir kampanya uygunsa bu onay kampanya ödülünü (ör. promosyon kredisi) tetikleyebilir.
+        </p>
+      )}
       <p>Durum sonradan yine buradan değiştirilebilir; gönderilen e-posta ve verilen ödül bununla geri alınmaz.</p>
     </>
   );

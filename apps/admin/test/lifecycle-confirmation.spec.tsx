@@ -156,11 +156,14 @@ describe('provider: what approving says, by the state it leaves', () => {
     expect(said).toContain('Reddedilmiş başvuru onaylanır; kayıtlı ret gerekçesi silinir.');
   });
 
-  it('SUSPENDED: back to work, and the mail goes again', () => {
+  it('SUSPENDED: back to work, its own notice, no campaign approval (PROVIDER-STATUS-001)', () => {
     const said = html(providerApproveConsequence('SUSPENDED'));
-    common(said);
     expect(said).toContain('Askıya alınmış işletme yeniden onaylı');
-    expect(said).toContain('e-posta tekrar gider');
+    expect(said).toContain('yeniden aktif olduğunu bildiren e-posta gider');
+    expect(said).toContain('başvuru onay e-postası tekrar gitmez');
+    expect(said).toContain('kampanya ödülünü tetiklemez');
+    expect(said).not.toContain('Kampanya motoru açıksa');
+    expect(said).toContain('yeniden görünür');
   });
 });
 

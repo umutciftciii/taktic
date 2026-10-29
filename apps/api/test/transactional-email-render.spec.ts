@@ -71,6 +71,27 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     requestsUrl: `${WEB}/providers/p1/requests`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'provider-application-rejected': {
+    fullName: 'Murat Şahin',
+    businessName: 'Şahin Isı Sistemleri',
+    supportUrl: `${WEB}/destek`,
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'provider-account-suspended': {
+    fullName: 'Murat Şahin',
+    businessName: 'Şahin Isı Sistemleri',
+    supportUrl: `${WEB}/destek`,
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
+  'provider-account-reactivated': {
+    fullName: 'Murat Şahin',
+    businessName: 'Şahin Isı Sistemleri',
+    supportUrl: `${WEB}/destek`,
+    requestsUrl: `${WEB}/providers/p1/requests`,
+    accountUrl: `${WEB}/providers/me`,
+  },
   'request-received': {
     fullName: 'Deniz Yılmaz',
     requestNumber: '#T-90412',
@@ -725,7 +746,8 @@ describe('transactional e-mail rendering', () => {
     // customer service issue (REL-002 Faz 3).
     // REL-002 Faz 4 adds the four incident decision / staff follow-up notices.
     // SHOWCASE-ALLOWANCE-004 adds the provider's free-offer void notice.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(62);
+    // PROVIDER-STATUS-001 adds the rejection, suspension and re-activation notices.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(65);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -941,6 +963,9 @@ describe('transactional e-mail rendering', () => {
       'provider-email-verification': 'Hesap e-postanızı doğrulayın — TakTick hizmet veren paneli',
       'provider-application-received': 'Başvurunuzu aldık — TakTick hizmet veren kaydı',
       'provider-application-approved': 'Başvurunuz onaylandı — teklif vermeye başlayabilirsiniz',
+      'provider-application-rejected': 'Başvurunuz hakkında bilgilendirme — TakTick hizmet veren kaydı',
+      'provider-account-suspended': 'Hesabınız hakkında bilgilendirme — TakTick hizmet veren paneli',
+      'provider-account-reactivated': 'Hesabınız yeniden aktif — TakTick hizmet veren paneli',
       'request-received': 'Talebiniz alındı — inceleniyor',
       'request-published': 'Talebiniz yayında — teklifler yolda',
       'offer-received': 'Yeni teklif aldınız — Şahin Isı Sistemleri',
