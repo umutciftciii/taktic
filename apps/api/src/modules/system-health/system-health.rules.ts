@@ -27,6 +27,27 @@ export function worstStatus(statuses: readonly HealthStatus[]): HealthStatus {
   return statuses.reduce((worst, next) => (SEVERITY[next] > SEVERITY[worst] ? next : worst));
 }
 
+/**
+ * ADMIN-SYSTEM-HEALTH-002: the overall state, by what kind of thing failed.
+ *
+ * The core services — API, PostgreSQL, web, admin — are what a person needs
+ * to use the product; only they can make the whole system DOWN. Background
+ * work (scheduled jobs, e-mail) failing or running late is a real problem, but
+ * the system still serves people while it lasts, so a background section
+ * lifts the overall state to DEGRADED at most. Its own section and rows keep
+ * their real state: a job three ticks late still reads DOWN on its own row.
+ *
+ * UNKNOWN is untouched by the cap and still outranks HEALTHY — an unmeasured
+ * background section keeps the overall state from claiming health.
+ */
+export function capBackgroundStatus(status: HealthStatus): HealthStatus {
+  return status === 'DOWN' ? 'DEGRADED' : status;
+}
+
+export function overallStatus(core: readonly HealthStatus[], background: readonly HealthStatus[]): HealthStatus {
+  return worstStatus([...core, ...background.map(capBackgroundStatus)]);
+}
+
 // ---------------------------------------------------------------------------
 // Internal HTTP probes (web, admin)
 // ---------------------------------------------------------------------------

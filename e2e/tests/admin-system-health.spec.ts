@@ -44,7 +44,19 @@ test.describe('system health (ADMIN-SYSTEM-HEALTH-001)', () => {
       await expect(status('system-health-row-admin')).toHaveAttribute('data-status', 'HEALTHY');
       await expect(page.getByTestId('system-health-scope')).toContainText('dışarıdan erişebildiği anlamına gelmez');
 
+      // The deployment is named on the screen (this runtime declares none, so it says so).
+      await expect(page.getByTestId('system-health-environment')).toHaveAttribute(
+        'data-environment',
+        /^(local|staging|production|unset)$/,
+      );
+      await expect(page.getByTestId('system-health-environment')).not.toBeEmpty();
+
       await expect(page.getByTestId('system-health-job-request-expiry')).toBeVisible();
+      // A job reads in its own words; switched off is "Kapalı", not a health state.
+      await expect(page.getByTestId('system-health-job-request-expiry').locator('[data-job-state]')).toHaveAttribute(
+        'data-job-state',
+        /^(OK|RUNNING|FAILED|LATE|OFF|NO_DATA)$/,
+      );
       await expect(page.getByTestId('system-health-email')).toBeVisible();
       await expect(page.getByTestId('system-health-not-measured')).toContainText('Dışarıdan erişilebilirlik');
       // Nothing on the screen acts: no form, no write button beyond "Yenile".

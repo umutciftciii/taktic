@@ -8,6 +8,14 @@ are in [docs/release.md](docs/release.md).
 
 ### Added
 
+- ADMIN-SYSTEM-HEALTH-002: the "Sistem sağlığı" overall state is DOWN only
+  when a core service (API, PostgreSQL, web, admin) is; scheduled jobs and
+  e-mail lift it to DEGRADED at most, while their own rows keep their real
+  state, reason and missed-tick count. Jobs read "Başarısız", "Gecikmiş" or
+  "Kapalı", the screen names the deployment (`environment` from
+  APP_ENVIRONMENT: Yerel / Staging / Production / Belirtilmemiş), and on a
+  local machine late jobs carry a note that a sleeping laptop misses ticks.
+  UNKNOWN and RBAC unchanged; no migration, no new env.
 - ADMIN-SYSTEM-HEALTH-001 (Faz 1): admin "Sistem sağlığı" screen
   (`/system-health`, `GET /system-health`), read-only, refreshed every 60 s
   and by hand. Shows PostgreSQL (the readiness probe), web and admin (internal

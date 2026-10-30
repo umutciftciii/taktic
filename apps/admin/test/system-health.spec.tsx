@@ -31,9 +31,15 @@ vi.mock('../lib/api', async (importOriginal) => {
 
 const { ApiError } = await import('../lib/api');
 const { default: SystemHealthPage } = await import('../app/system-health/page');
-const { apiReachability, worstStatus, PROBE_REASON_TEXT, SCHEDULER_REASON_TEXT, EMAIL_REASON_TEXT } = await import(
-  '../lib/system-health'
-);
+const {
+  apiReachability,
+  worstStatus,
+  jobState,
+  schedulerSummaryLabel,
+  PROBE_REASON_TEXT,
+  SCHEDULER_REASON_TEXT,
+  EMAIL_REASON_TEXT,
+} = await import('../lib/system-health');
 
 const read = (path: string) => readFileSync(resolve(__dirname, '..', path), 'utf8');
 
@@ -42,6 +48,7 @@ const NOW = '2026-10-30T12:00:00.000Z';
 function report(overrides: Partial<SystemHealthReport> = {}): SystemHealthReport {
   return {
     generatedAt: NOW,
+    environment: 'staging',
     overall: 'DEGRADED',
     database: { status: 'HEALTHY', reason: 'OK', checkedAt: NOW, latencyMs: 4, appliedMigrations: 107 },
     web: { status: 'HEALTHY', reason: 'OK', checkedAt: NOW, latencyMs: 12, httpStatus: 200 },
@@ -128,6 +135,32 @@ describe('rules shared with the API', () => {
   });
 });
 
+describe('job wording (ADMIN-SYSTEM-HEALTH-002)', () => {
+  it('keeps failed, late and switched-off apart', () => {
+    expect(jobState({ enabled: true, reason: 'LAST_RUN_FAILED' })).toBe('FAILED');
+    expect(jobState({ enabled: true, reason: 'LAST_RUN_INTERRUPTED' })).toBe('FAILED');
+    expect(jobState({ enabled: true, reason: 'REPEATED_FAILURES' })).toBe('FAILED');
+    expect(jobState({ enabled: true, reason: 'OVERDUE' })).toBe('LATE');
+    expect(jobState({ enabled: false, reason: 'DISABLED' })).toBe('OFF');
+    expect(jobState({ enabled: true, reason: 'LAST_RUN_SUCCEEDED' })).toBe('OK');
+    expect(jobState({ enabled: true, reason: 'RUNNING' })).toBe('RUNNING');
+    expect(jobState({ enabled: true, reason: 'NO_RECORDED_RUN' })).toBe('NO_DATA');
+  });
+
+  it('sums the scheduler section by what is wrong, not by an outage word', () => {
+    const job = (reason: SystemHealthReport['schedulers']['jobs'][number]['reason'], enabled = true) =>
+      ({ ...report().schedulers.jobs[0]!, enabled, reason });
+    expect(
+      schedulerSummaryLabel({ status: 'DOWN', reason: 'OK', jobs: [job('OVERDUE'), job('OVERDUE'), job('LAST_RUN_FAILED')] }),
+    ).toBe('1 başarısız, 2 gecikmiş');
+    expect(schedulerSummaryLabel({ status: 'DOWN', reason: 'OK', jobs: [job('OVERDUE'), job('DISABLED', false)] })).toBe(
+      '1 gecikmiş',
+    );
+    expect(schedulerSummaryLabel({ status: 'HEALTHY', reason: 'OK', jobs: [job('LAST_RUN_SUCCEEDED')] })).toBe('Sağlıklı');
+    expect(schedulerSummaryLabel({ status: 'UNKNOWN', reason: 'QUERY_FAILED', jobs: [] })).toBe('Bilinmiyor');
+  });
+});
+
 describe('the page', () => {
   it('asks for OPERATIONS_SETTINGS_READ only', async () => {
     apiMocks.apiFetch.mockResolvedValue(report());
@@ -180,6 +213,71 @@ describe('the page', () => {
     apiMocks.apiFetch.mockResolvedValue(report({ overall: 'HEALTHY' }));
     const markup = await renderPage();
     expect(markup).toContain('data-testid="system-health-overall" data-status="HEALTHY"');
+  });
+
+  it('names the deployment, and says so when it is not declared', async () => {
+    for (const [environment, label] of [
+      ['local', 'Yerel'],
+      ['staging', 'Staging'],
+      ['production', 'Production'],
+      [null, 'Belirtilmemiş'],
+    ] as const) {
+      apiMocks.apiFetch.mockResolvedValue(report({ environment }));
+      const markup = await renderPage();
+      expect(markup).toMatch(new RegExp(`data-testid="system-health-environment" data-environment="${environment ?? 'unset'}">${label}<`));
+    }
+  });
+
+  it('labels each job by its own state and keeps the real colour and missed count', async () => {
+    const base = report();
+    const late = {
+      ...base.schedulers.jobs[0]!,
+      key: 'request-reminder' as const,
+      status: 'DOWN' as const,
+      reason: 'OVERDUE' as const,
+      missedTicks: 3,
+      lastRun: { status: 'SUCCESS' as const, startedAt: NOW, finishedAt: NOW, errorType: null },
+    };
+    const off = { ...base.schedulers.jobs[1]!, key: 'showcase-lead-sla' as const };
+    apiMocks.apiFetch.mockResolvedValue(
+      report({ schedulers: { ...base.schedulers, status: 'DOWN', jobs: [base.schedulers.jobs[0]!, late, off] } }),
+    );
+    const markup = await renderPage();
+    expect(markup).toMatch(/system-health-job-request-expiry.*?data-status="DEGRADED" data-job-state="FAILED">Başarısız</);
+    expect(markup).toMatch(/system-health-job-request-reminder.*?data-status="DOWN" data-job-state="LATE">Gecikmiş</);
+    expect(markup).toMatch(/system-health-job-request-reminder.*?Kaçırılan çalışma: 3 veya daha fazla\./);
+    expect(markup).toMatch(/system-health-job-showcase-lead-sla.*?data-job-state="OFF">Kapalı</);
+    expect(markup).toMatch(/data-testid="system-health-schedulers-status" data-status="DOWN">1 başarısız, 1 gecikmiş</);
+    expect(markup).not.toMatch(/system-health-job-[a-z-]+".*?>Çalışmıyor</);
+  });
+
+  it('explains late jobs on a local machine, and only there', async () => {
+    const base = report();
+    const late = { ...base.schedulers.jobs[0]!, status: 'DOWN' as const, reason: 'OVERDUE' as const, missedTicks: 3 };
+    const lateReport = (environment: SystemHealthReport['environment']) =>
+      report({ environment, schedulers: { ...base.schedulers, status: 'DOWN', jobs: [late] } });
+
+    apiMocks.apiFetch.mockResolvedValue(lateReport('local'));
+    expect(await renderPage()).toContain('data-testid="system-health-local-late-note"');
+
+    // Staging and production: the delay is shown as it is, with no excuse beside it.
+    for (const environment of ['staging', 'production', null] as const) {
+      apiMocks.apiFetch.mockResolvedValue(lateReport(environment));
+      const markup = await renderPage();
+      expect(markup).not.toContain('system-health-local-late-note');
+      expect(markup).toMatch(/data-job-state="LATE">Gecikmiş</);
+    }
+
+    // Local with nothing late: no note.
+    apiMocks.apiFetch.mockResolvedValue(report({ environment: 'local' }));
+    expect(await renderPage()).not.toContain('system-health-local-late-note');
+  });
+
+  it('draws the overall state the API decided, folded with the API row', async () => {
+    for (const overall of ['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN'] as const) {
+      apiMocks.apiFetch.mockResolvedValue(report({ overall }));
+      expect(await renderPage()).toContain(`data-testid="system-health-overall" data-status="${overall}"`);
+    }
   });
 
   it('is read-only: no form, no server action, no write call', () => {
