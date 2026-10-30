@@ -246,6 +246,14 @@ services:
       # its own random secret, which is all a single instance needs. Set the
       # same value on every instance when the panel runs on more than one.
       ADMIN_CONFIRMATION_PROOF_SECRET: ${ADMIN_CONFIRMATION_PROOF_SECRET:-}
+      # SEC-AUTH-ABUSE-001: the panel's sign-in and password-reset cards carry
+      # a Turnstile token like the web's forms, under the same rule (read at
+      # request time): unset follows APP_ENVIRONMENT — the local file declares
+      # `local`, which renders the test adapter — and a deployed panel needs
+      # the public site key. The secret stays the API's.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:-}
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "127.0.0.1:${ADMIN_PORT:-3002}:3002"
     volumes:

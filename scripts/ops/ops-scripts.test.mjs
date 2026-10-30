@@ -193,7 +193,8 @@ function stagingConfig(project = 'taktic-staging') {
           RESEND_API_KEY: 're_placeholderNotARealKey',
           EMAIL_FROM: 'Taktick <noreply@notify.taktick.com.tr>',
           TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
-          TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test',
+          TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test,admin-staging.example.test',
+          TRUST_PROXY: '1',
         },
         volumes: [{ type: 'volume', source: 'taktic-api-uploads', target: '/app/apps/api/uploads' }],
       },
@@ -201,9 +202,14 @@ function stagingConfig(project = 'taktic-staging') {
         image: image('web'),
         ...hardened,
         ports: [loopback(3000)],
-        environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA' },
+        environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA', WEB_TRUST_PROXY: 'true' },
       },
-      admin: { image: image('admin'), ...hardened, ports: [loopback(3002)], environment: {} },
+      admin: {
+        image: image('admin'),
+        ...hardened,
+        ports: [loopback(3002)],
+        environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA', WEB_TRUST_PROXY: 'true' },
+      },
     },
   };
 }
@@ -394,6 +400,7 @@ describe('deploy-preflight.sh: configuration fails before anything is stopped', 
     const state = stagingState({ images: true, sha: ws.sha });
     state.config.services.api.environment.APP_ENVIRONMENT = 'production';
     state.config.services.web.environment.APP_ENVIRONMENT = 'production';
+    state.config.services.admin.environment.APP_ENVIRONMENT = 'production';
     const result = run(ws, state, 'deploy-preflight.sh', [
       '--sha', ws.sha, '--skip-fetch', '--environment', 'production', '--project', 'taktic-staging',
     ]);

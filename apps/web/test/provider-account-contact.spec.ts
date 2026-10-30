@@ -114,14 +114,15 @@ describe('AccountContactCard', () => {
     expect(markup).not.toContain('x-turnstile-token');
   });
 
-  it('disables the send — and only the send — when the widget cannot run', () => {
+  it('disables both sends — and only the sends — when the widget cannot run', () => {
     turnstileStatus = 'unconfigured';
     try {
       const markup = render({ turnstile: { mode: 'unconfigured' } });
       const button = (testId: string) => markup.match(new RegExp(`<button[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? '';
       expect(button('account-phone-send')).toContain('disabled=""');
-      // The e-mail send and the code verify spend no SMS and carry no token.
-      expect(button('account-email-send')).not.toContain('disabled');
+      // SEC-AUTH-ABUSE-001: the e-mail resend carries a token too now. Only the
+      // code verify spends nothing and needs none.
+      expect(button('account-email-send')).toContain('disabled=""');
       expect(button('account-phone-verify')).not.toContain('disabled');
     } finally {
       turnstileStatus = 'ready';

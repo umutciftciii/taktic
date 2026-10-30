@@ -1,5 +1,7 @@
 import { safeRedirectPathOrNull } from '@taktic/shared';
 import { persistSessionCookie, type ParsedSessionCookie } from '../session-cookie';
+import { clientForwardingHeaders } from '../../lib/forwarded-for';
+import { credentialRefusalOf, readTurnstileFormToken, turnstileHeaders } from '../../lib/turnstile';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -36,12 +38,22 @@ export async function signIn(formData: FormData): Promise<string> {
 
   const response = await fetch(`${apiUrl}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      // SEC-AUTH-ABUSE-001: the client's own address, so the API's address and
+      // pair limits count this person and not the web server (only where
+      // WEB_TRUST_PROXY allows it), and the form's Turnstile token in the one
+      // header the API reads. The token is never put in the body or a URL.
+      ...(await clientForwardingHeaders()),
+      ...turnstileHeaders(readTurnstileFormToken(formData)),
+    },
     body: JSON.stringify({ email, password, rememberMe }),
   });
 
   if (!response.ok) {
-    const params = new URLSearchParams({ error: '1' });
+    // A refused check or a lock reads as itself; everything else — a wrong
+    // password, an unknown e-mail — is the one neutral "1".
+    const params = new URLSearchParams({ error: (await credentialRefusalOf(response)) ?? '1' });
     if (explicitRedirect) {
       params.set('redirectTo', explicitRedirect);
     }

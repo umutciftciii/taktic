@@ -1,8 +1,15 @@
 import Link from 'next/link';
 import { BrandMark } from '../../components/brand-mark';
+import {
+  CREDENTIAL_REFUSAL_MESSAGES,
+  TURNSTILE_ACTIONS,
+  isCredentialRefusal,
+  readTurnstileWebConfig,
+} from '../../lib/turnstile';
+import { TurnstileForm } from '../turnstile';
 
 type ForgotPasswordPageProps = {
-  searchParams: Promise<{ sent?: string }>;
+  searchParams: Promise<{ sent?: string; error?: string }>;
 };
 
 /**
@@ -12,7 +19,7 @@ type ForgotPasswordPageProps = {
  * account's link lands on this app's /sifre-sifirla.
  */
 export default async function AdminForgotPasswordPage({ searchParams }: ForgotPasswordPageProps) {
-  const { sent } = await searchParams;
+  const { sent, error } = await searchParams;
 
   if (sent === '1') {
     return (
@@ -44,7 +51,13 @@ export default async function AdminForgotPasswordPage({ searchParams }: ForgotPa
 
   return (
     <main className="auth-page">
-      <form className="auth-card" action="/sifre-unuttum/submit" method="post">
+      <TurnstileForm
+        className="auth-card"
+        turnstile={readTurnstileWebConfig()}
+        turnstileAction={TURNSTILE_ACTIONS.passwordReset}
+        action="/sifre-unuttum/submit"
+        testId="admin-password-reset-request-form"
+      >
         <div className="auth-brand">
           <BrandMark size="lg" />
           <div className="auth-brand-text">
@@ -52,6 +65,11 @@ export default async function AdminForgotPasswordPage({ searchParams }: ForgotPa
             <p className="auth-subtitle">TakTick Yönetim</p>
           </div>
         </div>
+        {isCredentialRefusal(error) ? (
+          <div className="error-message" role="alert" data-testid="password-reset-error">
+            {CREDENTIAL_REFUSAL_MESSAGES[error]}
+          </div>
+        ) : null}
         <p className="muted">
           Yönetim paneli hesabınızın e-posta adresini girin; şifrenizi yeniden belirlemeniz için
           bir bağlantı gönderelim.
@@ -72,7 +90,7 @@ export default async function AdminForgotPasswordPage({ searchParams }: ForgotPa
           </Link>
           .
         </p>
-      </form>
+      </TurnstileForm>
     </main>
   );
 }

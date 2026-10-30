@@ -11,8 +11,14 @@
 #          (readiness: the API reaches its database); GET /uploads/<missing>
 #          is a 404, not an error (the static upload root is mounted and
 #          readable)
-#   web    GET /robots.txt answers 200
-#   admin  GET /login answers 200
+#          POST /auth/login with no Turnstile token is refused 403
+#          TURNSTILE_REQUIRED (SEC-AUTH-ABUSE-001: the check is enforced; the
+#          guard answers before any account is read or any attempt counted)
+#   web    GET /robots.txt answers 200; GET /login renders the Turnstile
+#          widget in cloudflare mode (not closed)
+#   admin  GET /login answers 200 and renders the Turnstile widget in
+#          cloudflare mode — a panel whose sign-in renders closed is a panel
+#          nobody can sign in to
 #   all    no X-Powered-By; X-Content-Type-Options, X-Frame-Options,
 #          Referrer-Policy and Strict-Transport-Security present — the
 #          security headers each app already sets, unchanged by the runtime
@@ -27,7 +33,7 @@ sha=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --sha) sha="$(resolve_commit "${2:?--sha needs a commit}")"; shift 2 ;;
-    -h | --help) sed -n '2,21p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,27p' "$0"; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -72,6 +78,13 @@ else
   bad "/health/ready answered $code ($(head -c 200 "$body_file"))"
 fi
 check_headers api
+code="$(curl -sS -o "$body_file" -w '%{http_code}' --max-time 20 -X POST -H 'content-type: application/json' \
+  --data '{"email":"smoke-no-token@example.invalid","password":"x"}' "http://127.0.0.1:$api_port/auth/login" || echo 000)"
+if [ "$code" = 403 ] && grep -q '"code":"TURNSTILE_REQUIRED"' "$body_file"; then
+  ok "POST /auth/login without a token: 403 TURNSTILE_REQUIRED"
+else
+  bad "POST /auth/login without a token answered $code (expected 403 TURNSTILE_REQUIRED)"
+fi
 code="$(fetch "http://127.0.0.1:$api_port/uploads/category-images/smoke-does-not-exist.png")"
 [ "$code" = 404 ] && ok "/uploads/<missing> 404" || bad "/uploads/<missing> answered $code (expected 404)"
 
@@ -79,10 +92,21 @@ step "web http://127.0.0.1:$web_port"
 code="$(fetch "http://127.0.0.1:$web_port/robots.txt")"
 [ "$code" = 200 ] && ok "/robots.txt 200" || bad "/robots.txt answered $code"
 check_headers web
+# The sign-in page, as served: a closed widget slot means nobody can sign in.
+code="$(fetch "http://127.0.0.1:$web_port/login")"
+if [ "$code" = 200 ] && grep -q 'data-turnstile-mode="cloudflare"' "$body_file" && ! grep -q 'turnstile-unconfigured' "$body_file"; then
+  ok "/login 200, Turnstile in cloudflare mode"
+else
+  bad "/login answered $code without a usable Turnstile widget (TURNSTILE_SITE_KEY / APP_ENVIRONMENT on the web service)"
+fi
 
 step "admin http://127.0.0.1:$admin_port"
 code="$(fetch "http://127.0.0.1:$admin_port/login")"
-[ "$code" = 200 ] && ok "/login 200" || bad "/login answered $code"
+if [ "$code" = 200 ] && grep -q 'data-turnstile-mode="cloudflare"' "$body_file" && ! grep -q 'turnstile-unconfigured' "$body_file"; then
+  ok "/login 200, Turnstile in cloudflare mode"
+else
+  bad "/login answered $code without a usable Turnstile widget (TURNSTILE_SITE_KEY / APP_ENVIRONMENT on the admin service)"
+fi
 check_headers admin
 
 step "Containers"

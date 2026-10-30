@@ -1,5 +1,7 @@
 import Link from 'next/link';
 import { AuthFrame } from '../../auth-frame';
+import { TurnstileForm } from '../../request-fields/turnstile-form';
+import { TURNSTILE_ACTIONS, readTurnstileWebConfig } from '../../../lib/turnstile';
 import { RoleSwitch } from '../role-switch';
 import { registerErrorMessage } from '../error-message';
 import { PasswordFields } from '../../password-criteria';
@@ -13,10 +15,12 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
 
   return (
     <AuthFrame tab="register" registerHref="/register/provider">
-      <form
+      <TurnstileForm
+        turnstile={readTurnstileWebConfig()}
+        turnstileAction={TURNSTILE_ACTIONS.register}
         action="/register/provider/submit"
-        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+        testId="register-provider-form"
       >
         <h1 className="auth-screen-title">Hesap oluştur</h1>
         <p className="auth-screen-subtitle">
@@ -81,7 +85,7 @@ export default async function ProviderRegisterPage({ searchParams }: ProviderReg
           Zaten hesabınız var mı?
           <Link href="/login">Giriş yapın</Link>
         </p>
-      </form>
+      </TurnstileForm>
     </AuthFrame>
   );
 }

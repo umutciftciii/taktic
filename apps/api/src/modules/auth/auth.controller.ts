@@ -17,6 +17,9 @@ import { AccountIdentityConflictException } from './auth.errors';
 import { AuthThrottlerGuard } from './auth.throttler';
 import { clearSessionCookie, getSessionIdFromRequest, sessionCookie } from './cookie';
 import { LoginDto } from './dto/login.dto';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 import { RegisterDto } from './dto/register.dto';
 
 /** Signals the client that this e-mail needs mailbox verification, not a password. */
@@ -32,8 +35,14 @@ export class AuthController {
     private readonly emailVerification: EmailVerificationService,
   ) {}
 
+  /**
+   * SEC-AUTH-ABUSE-001: the web and the admin panel sign in here alike, under
+   * the same rules — the address throttle, a Turnstile token minted for
+   * `login`, then the persistent attempt scopes inside AuthService.login.
+   */
   @Post('login')
-  @UseGuards(AuthThrottlerGuard)
+  @UseGuards(AuthThrottlerGuard, TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.login)
   async login(@Body() dto: LoginDto, @Req() request: any, @Res({ passthrough: true }) response: any) {
     const result = await this.authService.login(dto, {
       ipAddress: request.ip ?? null,
@@ -49,7 +58,8 @@ export class AuthController {
   }
 
   @Post('register-customer')
-  @UseGuards(AuthThrottlerGuard)
+  @UseGuards(AuthThrottlerGuard, TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.register)
   async registerCustomer(
     @Body() dto: RegisterDto,
     @Req() request: any,
@@ -105,7 +115,8 @@ export class AuthController {
   }
 
   @Post('register-provider')
-  @UseGuards(AuthThrottlerGuard)
+  @UseGuards(AuthThrottlerGuard, TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.register)
   async registerProvider(
     @Body() dto: RegisterDto,
     @Req() request: any,

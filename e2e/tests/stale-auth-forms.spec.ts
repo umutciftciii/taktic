@@ -262,9 +262,10 @@ test.describe('the fixed sign-in endpoint keeps the Server Action’s CSRF rule'
         expect(refused.headers()['set-cookie'] ?? '').not.toContain('taktic_session');
       }
 
-      // The same post from the page's own origin is what the form sends.
+      // The same post from the page's own origin is what the form sends —
+      // with the Turnstile token its hidden field carries (SEC-AUTH-ABUSE-001).
       const accepted = await request.post(`${primaryRuntime.webUrl}/login/submit`, {
-        form,
+        form: { ...form, turnstileToken: `turnstile-test:login:${uniqueSuffix()}${Date.now()}` },
         headers: { origin: primaryRuntime.webUrl },
         maxRedirects: 0,
       });

@@ -15,14 +15,20 @@
 # set, the API and the web app run the deterministic Turnstile test adapter
 # and never contact Cloudflare.
 #
-# Both services carry the same word so the API and the forms it serves agree
-# on where they are. The admin app has no environment-gated behaviour and is
-# left alone.
+# All three services carry the same word so the API and the forms it serves
+# agree on where they are. Since SEC-AUTH-ABUSE-001 that includes the admin
+# panel: its sign-in and password-reset cards carry a Turnstile token too, and
+# without `local` here they would render closed (no site key) and nobody could
+# sign in to the local panel.
 services:
   api:
     environment:
       APP_ENVIRONMENT: local
 
   web:
+    environment:
+      APP_ENVIRONMENT: local
+
+  admin:
     environment:
       APP_ENVIRONMENT: local

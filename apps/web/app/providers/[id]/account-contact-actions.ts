@@ -23,15 +23,13 @@ import { turnstileHeaders } from '../../../lib/turnstile';
 const EMAIL_PARAM = 'email';
 const PHONE_PARAM = 'phone';
 
-export async function sendAccountEmailVerificationAction(providerId: string) {
-  let status: string;
-  try {
-    await apiFetch('/auth/email-verification/resend', { method: 'POST' });
-    status = 'sent';
-  } catch (error) {
-    if (!(error instanceof ApiError)) throw error;
-    status = 'failed';
-  }
+export async function sendAccountEmailVerificationAction(providerId: string, turnstileToken: string | null) {
+  // SEC-AUTH-ABUSE-001: the resend is behind Turnstile now, like the code send.
+  const result = await callVerificationApi('/auth/email-verification/resend', undefined, {
+    headers: { ...(await clientForwardingHeaders()), ...turnstileHeaders(turnstileToken) },
+  });
+  const status =
+    result === 'ok' ? 'sent' : result === 'challenge-failed' || result === 'challenge-unavailable' || result === 'rate-limited' ? result : 'failed';
 
   redirect(profileUrl(providerId, EMAIL_PARAM, status));
 }

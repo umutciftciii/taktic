@@ -250,6 +250,17 @@ services:
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       AUTH_COOKIE_NAME: ${AUTH_COOKIE_NAME:-taktic_session}
       ADMIN_CONFIRMATION_PROOF_SECRET: ${ADMIN_CONFIRMATION_PROOF_SECRET:-}
+      # SEC-AUTH-ABUSE-001: the panel's sign-in and password-reset cards carry
+      # a Turnstile token, judged by the API under the same rules as the web's.
+      # Required like the web's: without the declaration and the public site
+      # key the cards render closed and nobody can sign in, which the deploy
+      # preflight (runtime-contract.mjs) refuses before anything is stopped.
+      # WEB_TRUST_PROXY is the web's own switch, read the same way here, so the
+      # API's sign-in limits count the operator's address and not this server.
+      APP_ENVIRONMENT: ${APP_ENVIRONMENT:?APP_ENVIRONMENT must be staging or production}
+      WEB_TRUST_PROXY: ${WEB_TRUST_PROXY:-}
+      TURNSTILE_MODE: ${TURNSTILE_MODE:-}
+      TURNSTILE_SITE_KEY: ${TURNSTILE_SITE_KEY:-}
     ports:
       - "127.0.0.1:${ADMIN_PORT:-3002}:3002"
 

@@ -57,12 +57,21 @@ export function AccountContactCard({
   const [sendingEmail, startSendingEmail] = useTransition();
   const [sendingCode, startSendingCode] = useTransition();
   const [challengeFailed, setChallengeFailed] = useState(false);
+  const [emailChallengeFailed, setEmailChallengeFailed] = useState(false);
 
   function onSendEmail(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (sendingEmail) return;
+    setEmailChallengeFailed(false);
     startSendingEmail(async () => {
-      await sendAccountEmailVerificationAction(providerId);
+      let token: string | null;
+      try {
+        token = await turnstile.acquire(TURNSTILE_ACTIONS.emailVerificationResend);
+      } catch {
+        setEmailChallengeFailed(true);
+        return;
+      }
+      await sendAccountEmailVerificationAction(providerId, token);
     });
   }
 
@@ -114,18 +123,23 @@ export function AccountContactCard({
               <>
                 {emailState ? (
                   <p
-                    className={`pdash-contact-meta${emailState === 'failed' ? ' pdash-contact-error' : ''}`}
-                    role={emailState === 'failed' ? 'alert' : 'status'}
+                    className={`pdash-contact-meta${emailState !== 'sent' ? ' pdash-contact-error' : ''}`}
+                    role={emailState !== 'sent' ? 'alert' : 'status'}
                     data-testid="account-email-message"
                   >
                     {emailMessage(emailState)}
+                  </p>
+                ) : null}
+                {emailChallengeFailed ? (
+                  <p className="pdash-contact-meta pdash-contact-error" role="alert" data-testid="account-email-message">
+                    {emailMessage('challenge-failed')}
                   </p>
                 ) : null}
                 <form className="pdash-contact-actions" onSubmit={onSendEmail}>
                   <button
                     className="pdash-btn pdash-btn-secondary pdash-btn-sm"
                     type="submit"
-                    disabled={sendingEmail}
+                    disabled={sendingEmail || turnstile.status === 'unconfigured'}
                     aria-busy={sendingEmail || undefined}
                     data-testid="account-email-send"
                   >
@@ -210,8 +224,6 @@ export function AccountContactCard({
                     </button>
                   </form>
                 </div>
-
-                <TurnstileSlot turnstile={turnstile} />
               </>
             ) : (
               <div className="pdash-contact-meta" data-testid="account-phone-missing">
@@ -221,6 +233,13 @@ export function AccountContactCard({
           </dd>
         </div>
       </dl>
+
+      {/*
+        One slot for the card, outside both rows: the e-mail resend and the
+        code send each ask the widget, and either row may be the only one left
+        unproved (SEC-AUTH-ABUSE-001).
+      */}
+      {!emailProof.verified || !phoneProof.verified ? <TurnstileSlot turnstile={turnstile} /> : null}
     </section>
   );
 }
@@ -254,6 +273,12 @@ function emailMessage(state: string): string {
   switch (state) {
     case 'sent':
       return 'Doğrulama bağlantısı e-posta adresinize gönderildi. Bağlantı 7 gün geçerlidir.';
+    case 'rate-limited':
+      return 'Çok fazla istek yapıldı. Lütfen bir süre sonra tekrar deneyin.';
+    case 'challenge-failed':
+      return 'Güvenlik doğrulaması başarısız oldu. Lütfen tekrar deneyin.';
+    case 'challenge-unavailable':
+      return 'Güvenlik doğrulaması şu anda yapılamıyor. Lütfen birkaç saniye sonra tekrar deneyin.';
     default:
       return 'Bağlantı şu anda gönderilemedi. Lütfen daha sonra tekrar deneyin.';
   }

@@ -9487,3 +9487,19 @@ a.dashboard-kpi-note {
   font-size: 15px;
   font-weight: 600;
 }
+
+/*
+ * The Turnstile widget's slot on the sign-in and password-reset cards
+ * (SEC-AUTH-ABUSE-001; app/turnstile.tsx). Empty — zero height — while
+ * Cloudflare is satisfied without the operator; the widget draws itself here
+ * only when it needs them. Never `display: none`: a widget rendered into a
+ * hidden box cannot measure itself.
+ */
+.turnstile-slot {
+  display: grid;
+  gap: 8px;
+}
+
+.turnstile-slot > p {
+  margin: 0;
+}

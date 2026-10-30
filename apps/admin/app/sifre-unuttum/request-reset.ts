@@ -1,3 +1,6 @@
+import { clientForwardingHeaders } from '../../lib/forwarded-for';
+import { credentialRefusalOf, readTurnstileFormToken, turnstileHeaders } from '../../lib/turnstile';
+
 const apiUrl =
   process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -12,18 +15,30 @@ const apiUrl =
  * for this address" is the same signal by another name.
  *
  * The address is never echoed back into the URL it redirects to.
+ *
+ * SEC-AUTH-ABUSE-001: the one exception to "always sent" is the security check
+ * and the throttle, which the API answers before it looks at the address — so
+ * saying so reveals nothing, and claiming "sent" would be untrue.
  */
 export async function requestPasswordReset(formData: FormData): Promise<string> {
   const email = readFormString(formData, 'email').trim();
 
   if (email) {
     try {
-      await fetch(`${apiUrl}/auth/password-reset`, {
+      const response = await fetch(`${apiUrl}/auth/password-reset`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(await clientForwardingHeaders()),
+          ...turnstileHeaders(readTurnstileFormToken(formData)),
+        },
         body: JSON.stringify({ email }),
         cache: 'no-store',
       });
+      const refusal = await credentialRefusalOf(response);
+      if (refusal) {
+        return `/sifre-unuttum?error=${refusal}`;
+      }
     } catch {
       // Deliberately swallowed; see above.
     }

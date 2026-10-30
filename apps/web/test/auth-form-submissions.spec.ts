@@ -25,6 +25,7 @@ vi.mock('next/headers', () => ({
 const { signIn } = await import('../app/login/sign-in');
 const { changePassword } = await import('../app/account/change-password');
 const { registerCustomer } = await import('../app/register/register');
+const { requestPasswordReset } = await import('../app/sifre-unuttum/request-reset');
 const { POST: logout } = await import('../app/logout/route');
 const { POST: loginRoute } = await import('../app/login/submit/route');
 
@@ -83,17 +84,39 @@ describe('signIn', () => {
     );
   });
 
-  it.each([
-    [401, 'a wrong password'],
-    [429, 'the API rate limit'],
-    [500, 'an API failure'],
-  ])('answers %i (%s) with the form’s own error and writes no cookie', async (status) => {
-    apiAnswers(json(status, { message: 'nope' }));
+  it.each<[number, Record<string, string>, string, string]>([
+    [401, { code: 'INVALID_CREDENTIALS' }, '1', 'a wrong password or an unknown e-mail'],
+    [403, { message: 'User is inactive' }, '1', 'an inactive account'],
+    [500, { message: 'nope' }, '1', 'an API failure'],
+    [429, { code: 'AUTH_TEMPORARILY_LOCKED' }, 'locked', 'the account lock'],
+    [429, { message: 'ThrottlerException: Too Many Requests' }, 'locked', 'the address throttle'],
+    [403, { code: 'TURNSTILE_REQUIRED' }, 'verification', 'a missing Turnstile token'],
+    [403, { code: 'TURNSTILE_FAILED' }, 'verification', 'a refused Turnstile token'],
+    [503, { code: 'TURNSTILE_UNAVAILABLE' }, 'verification-unavailable', 'an unreachable Cloudflare'],
+  ])('answers %i %j with error=%s (%s) and writes no cookie', async (status, body, error) => {
+    apiAnswers(json(status, body));
 
     await expect(signIn(form({ email: 'a', password: 'b', redirectTo: '/account/profile' }))).resolves.toBe(
-      '/login?error=1&redirectTo=%2Faccount%2Fprofile',
+      `/login?error=${error}&redirectTo=%2Faccount%2Fprofile`,
     );
     expect(jar.size).toBe(0);
+  });
+
+  it('carries the form’s Turnstile token in the one header the API reads, never in the body', async () => {
+    const calls = apiAnswers(json(200, { id: 'u1', role: 'CUSTOMER' }, { 'set-cookie': SESSION_SET_COOKIE }));
+
+    await signIn(form({ email: 'a@b.c', password: 'pw', turnstileToken: ' turnstile-test:login:n1 ' }));
+
+    const headers = new Headers(calls[0]?.init?.headers);
+    expect(headers.get('x-turnstile-token')).toBe('turnstile-test:login:n1');
+    expect(String(calls[0]?.init?.body)).not.toContain('turnstile');
+  });
+
+  it('sends no token header when the form carried none, so the API answers TURNSTILE_REQUIRED', async () => {
+    const calls = apiAnswers(json(403, { code: 'TURNSTILE_REQUIRED' }));
+
+    await expect(signIn(form({ email: 'a@b.c', password: 'pw' }))).resolves.toBe('/login?error=verification');
+    expect(new Headers(calls[0]?.init?.headers).has('x-turnstile-token')).toBe(false);
   });
 });
 
@@ -124,6 +147,39 @@ describe('registerCustomer', () => {
       '/register/customer?notice=activation-sent',
     );
     expect(jar.size).toBe(0);
+  });
+
+  it('carries the token and maps the security refusals before reading any conflict', async () => {
+    const calls = apiAnswers(json(403, { code: 'TURNSTILE_FAILED' }));
+    await expect(
+      registerCustomer(form({ name: 'A', email: 'a@b.c', password: 'fixture-new-value-1', turnstileToken: 'tok-1' })),
+    ).resolves.toBe('/register/customer?error=verification');
+    expect(new Headers(calls[0]?.init?.headers).get('x-turnstile-token')).toBe('tok-1');
+
+    apiAnswers(json(429, { message: 'Too Many Requests' }));
+    await expect(registerCustomer(form({ name: 'A', email: 'a@b.c', password: 'fixture-new-value-1' }))).resolves.toBe(
+      '/register/customer?error=locked',
+    );
+  });
+});
+
+describe('requestPasswordReset', () => {
+  it('lands on the same "sent" screen for every answer that concerns the address', async () => {
+    for (const response of [json(201, { status: 'accepted' }), json(500, { message: 'x' })]) {
+      apiAnswers(response);
+      await expect(requestPasswordReset(form({ email: 'a@b.c', turnstileToken: 'tok' }))).resolves.toBe('/sifre-unuttum?sent=1');
+    }
+  });
+
+  it('says the check failed instead of claiming a mail that was never asked for', async () => {
+    const calls = apiAnswers(json(403, { code: 'TURNSTILE_REQUIRED' }));
+    await expect(requestPasswordReset(form({ email: 'a@b.c' }))).resolves.toBe('/sifre-unuttum?error=verification');
+    expect(new Headers(calls[0]?.init?.headers).has('x-turnstile-token')).toBe(false);
+
+    apiAnswers(json(503, { code: 'TURNSTILE_UNAVAILABLE' }));
+    await expect(requestPasswordReset(form({ email: 'a@b.c', turnstileToken: 'tok' }))).resolves.toBe(
+      '/sifre-unuttum?error=verification-unavailable',
+    );
   });
 });
 

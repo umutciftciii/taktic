@@ -1,12 +1,19 @@
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
+import { TurnstileForm } from '../request-fields/turnstile-form';
+import {
+  CREDENTIAL_REFUSAL_MESSAGES,
+  TURNSTILE_ACTIONS,
+  isCredentialRefusal,
+  readTurnstileWebConfig,
+} from '../../lib/turnstile';
 
 type ForgotPasswordPageProps = {
-  searchParams: Promise<{ sent?: string }>;
+  searchParams: Promise<{ sent?: string; error?: string }>;
 };
 
 export default async function ForgotPasswordPage({ searchParams }: ForgotPasswordPageProps) {
-  const { sent } = await searchParams;
+  const { sent, error } = await searchParams;
 
   if (sent === '1') {
     return (
@@ -31,16 +38,29 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
 
   return (
     <AuthFrame tab="login">
-      <form
+      <TurnstileForm
+        turnstile={readTurnstileWebConfig()}
+        turnstileAction={TURNSTILE_ACTIONS.passwordReset}
         action="/sifre-unuttum/submit"
-        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+        testId="password-reset-request-form"
       >
         <h1 className="auth-screen-title">Şifrenizi mi unuttunuz?</h1>
         <p className="auth-screen-subtitle">
           Hesabınızın e-posta adresini girin; şifrenizi yeniden belirlemeniz için bir bağlantı
           gönderelim.
         </p>
+
+        {/*
+          Only the security check and the throttle can fail visibly here, and
+          neither depends on the address typed — so this says nothing about
+          whether it is registered.
+        */}
+        {isCredentialRefusal(error) ? (
+          <div className="auth-screen-error" role="alert" data-testid="password-reset-error">
+            {CREDENTIAL_REFUSAL_MESSAGES[error]}
+          </div>
+        ) : null}
 
         <div className="auth-screen-fields">
           <label className="auth-screen-field">
@@ -67,7 +87,7 @@ export default async function ForgotPasswordPage({ searchParams }: ForgotPasswor
           </Link>
           .
         </p>
-      </form>
+      </TurnstileForm>
     </AuthFrame>
   );
 }

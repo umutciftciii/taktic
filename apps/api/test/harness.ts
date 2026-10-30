@@ -257,6 +257,8 @@ export function resetAuthThrottle(app: INestApplication): void {
 }
 
 const TRUNCATED_TABLES = [
+  // SEC-AUTH-ABUSE-001: sign-in attempt counters, no FK.
+  'AuthAttemptCounter',
   // OPS-SCHEDULER-RUN-PERSISTENCE-001: append-only run history, no FK.
   'SchedulerRun',
   // ADMIN-ACTION-AUDIT-001: append-only audit rows, children of User,

@@ -14,6 +14,9 @@ import { ConfirmEmailVerificationDto } from '../email-verification/dto/confirm-e
 import { EmailVerificationService } from '../email-verification/email-verification.service';
 import { AuthGuard } from './auth.guard';
 import { AuthThrottlerGuard } from './auth.throttler';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 
 @Controller('auth/email-verification')
 @UseGuards(AuthThrottlerGuard)
@@ -29,9 +32,14 @@ export class EmailVerificationController {
    * an authenticated caller can only ever ask for a link to their own address —
    * which is the address in question. Registration signs the customer in, so
    * the person who needs this always has a session.
+   *
+   * SEC-AUTH-ABUSE-001: and a Turnstile token, so a stolen or scripted session
+   * cannot turn this into a mail cannon. Checked before the session, like the
+   * other protected writes.
    */
   @Post('resend')
-  @UseGuards(AuthGuard)
+  @UseGuards(TurnstileGuard, AuthGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.emailVerificationResend)
   resend(@Req() request: any) {
     return this.service.resend(request.user.id);
   }
