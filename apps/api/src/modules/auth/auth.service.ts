@@ -23,6 +23,7 @@ import {
 import { AuthUser } from './auth.types';
 import { AccountIdentityConflictException } from './auth.errors';
 import { sessionTouchIntervalSeconds } from './auth.constants';
+import { INVALID_CREDENTIALS_CODE, LoginAttemptService, loginAttemptKeys } from './login-attempts.service';
 import {
   createSessionForUser,
   effectiveExpiry,
@@ -46,7 +47,10 @@ type SessionMeta = {
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(LoginAttemptService) private readonly loginAttempts: LoginAttemptService,
+  ) {}
 
   registerCustomer(dto: RegisterDto, meta: SessionMeta) {
     return this.register(dto, UserRole.CUSTOMER, meta);
@@ -58,6 +62,12 @@ export class AuthService {
 
   async login(dto: LoginDto, meta: SessionMeta) {
     const email = normalizeRequiredEmail(dto.email);
+    // SEC-AUTH-ABUSE-001: one attempt is spent in the address, pair and
+    // account scopes before anything about the account is read, and a locked
+    // scope refuses here — the same refusal for an e-mail nobody holds.
+    const attemptKeys = loginAttemptKeys(email, meta.ipAddress ?? null);
+    await this.loginAttempts.claim(attemptKeys);
+
     const user = await this.prisma.user.findUnique({
       where: { email },
       select: {
@@ -71,17 +81,22 @@ export class AuthService {
       },
     });
 
-    if (!user || !user.passwordHash) {
-      throw new UnauthorizedException('Invalid email or password');
+    // The password is always checked — against a hash of nothing when there is
+    // no account — so an unknown e-mail costs the same bcrypt time as a known
+    // one and the answer's timing does not say which it was.
+    const passwordMatches = await bcrypt.compare(dto.password, user?.passwordHash ?? (await absentAccountHash()));
+    if (!user || !user.passwordHash || !passwordMatches) {
+      await this.loginAttempts.failed(attemptKeys);
+      throw invalidCredentials();
     }
 
+    await this.loginAttempts.succeeded(attemptKeys);
+
+    // Only somebody who knows the password learns that the account is
+    // inactive. Asked before the password, this answer told anybody that the
+    // e-mail belonged to a (deactivated) account.
     if (!user.isActive) {
       throw new ForbiddenException('User is inactive');
-    }
-
-    const passwordMatches = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!passwordMatches) {
-      throw new UnauthorizedException('Invalid email or password');
     }
 
     // Session fixation: the caller arrives with a brand-new session id, and any
@@ -492,4 +507,28 @@ function flattenPermissions(
     }
   }
   return [...held].sort();
+}
+
+/**
+ * The one answer to a wrong e-mail, a wrong password and a password-less
+ * account alike. Neutral by design: it never says which of the two was wrong.
+ */
+function invalidCredentials() {
+  return new UnauthorizedException({
+    statusCode: 401,
+    error: 'Unauthorized',
+    code: INVALID_CREDENTIALS_CODE,
+    message: 'E-posta veya şifre hatalı.',
+  });
+}
+
+let absentHash: Promise<string> | null = null;
+
+/**
+ * A bcrypt hash at the cost real passwords are stored at, made once per
+ * process, for the comparison an absent account still pays for.
+ */
+function absentAccountHash(): Promise<string> {
+  absentHash ??= bcrypt.hash(`absent-account-${Math.random()}`, 12);
+  return absentHash;
 }

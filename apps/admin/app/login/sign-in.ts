@@ -1,4 +1,6 @@
 import { persistSessionCookie } from '../session-cookie';
+import { clientForwardingHeaders } from '../../lib/forwarded-for';
+import { credentialRefusalOf, readTurnstileFormToken, turnstileHeaders } from '../../lib/turnstile';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -16,12 +18,18 @@ export async function signIn(formData: FormData): Promise<string> {
 
   const response = await fetch(`${apiUrl}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      // SEC-AUTH-ABUSE-001: the operator's own address (under WEB_TRUST_PROXY)
+      // and the form's Turnstile token, exactly as the web's sign-in sends them.
+      ...(await clientForwardingHeaders()),
+      ...turnstileHeaders(readTurnstileFormToken(formData)),
+    },
     body: JSON.stringify({ email, password, rememberMe }),
   });
 
   if (!response.ok) {
-    return '/login?error=1';
+    return `/login?error=${(await credentialRefusalOf(response)) ?? '1'}`;
   }
 
   // The API decided how long this session lives, whether its cookie survives

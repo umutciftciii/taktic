@@ -1,6 +1,13 @@
 import { safeRedirectPathOrNull } from '@taktic/shared';
 import Link from 'next/link';
 import { AuthFrame } from '../auth-frame';
+import { TurnstileForm } from '../request-fields/turnstile-form';
+import {
+  CREDENTIAL_REFUSAL_MESSAGES,
+  TURNSTILE_ACTIONS,
+  isCredentialRefusal,
+  readTurnstileWebConfig,
+} from '../../lib/turnstile';
 
 type LoginPageProps = {
   searchParams: Promise<{
@@ -27,11 +34,14 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       {/*
         A plain HTML post to a fixed URL rather than a Server Action: a sign-in
         form left open across a deploy has to keep working. See login/submit.
+        The Turnstile token rides along in a hidden field (SEC-AUTH-ABUSE-001).
       */}
-      <form
+      <TurnstileForm
+        turnstile={readTurnstileWebConfig()}
+        turnstileAction={TURNSTILE_ACTIONS.login}
         action="/login/submit"
-        method="post"
         style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+        testId="login-form"
       >
         <h1 className="auth-screen-title">Tekrar hoş geldin</h1>
         <p className="auth-screen-subtitle">
@@ -39,8 +49,15 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         </p>
 
         {error ? (
-          <div className="auth-screen-error" role="alert">
-            E-posta veya şifre hatalı. Lütfen tekrar deneyin.
+          <div className="auth-screen-error" role="alert" data-testid="login-error">
+            {/*
+              Every message is about the attempt, never the account: a wrong
+              password, an unknown e-mail and a password-less account all read
+              the first, and a lock reads the same whoever holds the address.
+            */}
+            {isCredentialRefusal(error)
+              ? CREDENTIAL_REFUSAL_MESSAGES[error]
+              : 'E-posta veya şifre hatalı. Lütfen tekrar deneyin.'}
           </div>
         ) : null}
 
@@ -116,7 +133,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
         <p className="auth-screen-support">
           Yardıma mı ihtiyacınız var? Destek ile iletişime geçin.
         </p>
-      </form>
+      </TurnstileForm>
     </AuthFrame>
   );
 }

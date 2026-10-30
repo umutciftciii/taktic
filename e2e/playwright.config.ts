@@ -299,10 +299,11 @@ function nextServer(runtime: Runtime, app: 'web' | 'admin') {
       // The web app reads the same flag to decide what its forms and its
       // confirmation screen say, so it has to agree with its own API.
       PROVIDER_CLAIM_ENABLED: String(runtime.providerClaim),
-      // Only the web app forwards a client address to the API — see
-      // trustedProxyWebEnv. The admin app has no such path, and no Turnstile
-      // widget either.
-      ...(app === 'web' ? { ...trustedProxyWebEnv, ...turnstileWebEnv } : {}),
+      // Both apps forward a client address to the API and render the
+      // Turnstile test adapter: since SEC-AUTH-ABUSE-001 the admin panel's
+      // sign-in and password-reset cards carry a token exactly like the web's.
+      ...trustedProxyWebEnv,
+      ...turnstileWebEnv,
     },
   };
 }

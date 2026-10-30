@@ -1,4 +1,6 @@
 import { persistSessionCookie } from '../session-cookie';
+import { clientForwardingHeaders } from '../../lib/forwarded-for';
+import { credentialRefusalOf, readTurnstileFormToken, turnstileHeaders } from '../../lib/turnstile';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -13,7 +15,11 @@ export async function registerProvider(formData: FormData): Promise<string> {
 async function register(path: string, formData: FormData, redirectTo: string): Promise<string> {
   const response = await fetch(`${apiUrl}${path}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(await clientForwardingHeaders()),
+      ...turnstileHeaders(readTurnstileFormToken(formData)),
+    },
     body: JSON.stringify({
       name: readFormString(formData, 'name'),
       email: readFormString(formData, 'email'),
@@ -23,6 +29,11 @@ async function register(path: string, formData: FormData, redirectTo: string): P
   });
 
   if (!response.ok) {
+    const refusal = await credentialRefusalOf(response);
+    if (refusal) {
+      return `${redirectToForPath(path)}?error=${refusal}`;
+    }
+
     const code = response.status === 409 ? await conflictCode(response) : null;
 
     // The API answers 409 + ACTIVATION_REQUIRED when this e-mail belongs to an

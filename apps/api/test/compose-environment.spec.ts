@@ -44,7 +44,7 @@ function readVariable(lines: string[], name: string): string | undefined {
 }
 
 describe('docker-compose.yml — the base file a deployment may run', () => {
-  it.each(['api', 'web'])('forwards APP_ENVIRONMENT to %s as empty-when-unset, never defaulting it to local', (service) => {
+  it.each(['api', 'web', 'admin'])('forwards APP_ENVIRONMENT to %s as empty-when-unset, never defaulting it to local', (service) => {
     const value = readVariable(serviceEnvironmentLines(base, service), 'APP_ENVIRONMENT');
     expect(value).toBe('${APP_ENVIRONMENT:-}');
   });
@@ -54,7 +54,7 @@ describe('docker-compose.yml — the base file a deployment may run', () => {
     expect(base).not.toMatch(/APP_ENVIRONMENT:\s*(local|staging|production)\s*$/m);
   });
 
-  it('forwards every Turnstile variable empty-when-unset, the secret to the api only', () => {
+  it('forwards every Turnstile variable empty-when-unset, the secret to the api only (SEC-AUTH-ABUSE-001: the admin panel renders the widget too)', () => {
     const api = serviceEnvironmentLines(base, 'api');
     const web = serviceEnvironmentLines(base, 'web');
     const admin = serviceEnvironmentLines(base, 'admin');
@@ -64,7 +64,10 @@ describe('docker-compose.yml — the base file a deployment may run', () => {
     expect(readVariable(web, 'TURNSTILE_MODE')).toBe('${TURNSTILE_MODE:-}');
     expect(readVariable(web, 'TURNSTILE_SITE_KEY')).toBe('${TURNSTILE_SITE_KEY:-}');
     expect(readVariable(web, 'TURNSTILE_SECRET_KEY')).toBeUndefined();
-    expect(admin.some((line) => /TURNSTILE|APP_ENVIRONMENT/.test(line))).toBe(false);
+    expect(readVariable(admin, 'TURNSTILE_MODE')).toBe('${TURNSTILE_MODE:-}');
+    expect(readVariable(admin, 'TURNSTILE_SITE_KEY')).toBe('${TURNSTILE_SITE_KEY:-}');
+    expect(readVariable(admin, 'TURNSTILE_SECRET_KEY')).toBeUndefined();
+    expect(readVariable(admin, 'TURNSTILE_EXPECTED_HOSTNAMES')).toBeUndefined();
   });
 
   it('forwards the public origin to the web empty-when-unset, so its SEO gate can only open on a declared value', () => {
@@ -92,7 +95,7 @@ describe('docker-compose.yml — the base file a deployment may run', () => {
 });
 
 describe('docker-compose.local.yml — the explicit local declaration', () => {
-  it.each(['api', 'web'])('declares APP_ENVIRONMENT=local for %s, and nothing else', (service) => {
+  it.each(['api', 'web', 'admin'])('declares APP_ENVIRONMENT=local for %s, and nothing else', (service) => {
     const lines = serviceEnvironmentLines(local, service);
     expect(readVariable(lines, 'APP_ENVIRONMENT')).toBe('local');
     expect(lines).toHaveLength(1);
@@ -100,7 +103,7 @@ describe('docker-compose.local.yml — the explicit local declaration', () => {
 
   it('touches no other service', () => {
     const services = local.split('\n').filter((line) => /^  \S+:$/.test(line)).map((line) => line.trim());
-    expect(services.sort()).toEqual(['api:', 'web:']);
+    expect(services.sort()).toEqual(['admin:', 'api:', 'web:']);
   });
 
   it('is not the implicit override file', () => {

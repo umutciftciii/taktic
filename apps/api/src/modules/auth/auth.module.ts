@@ -8,6 +8,7 @@ import { AuthGuard, OptionalAuthGuard } from './auth.guard';
 import { AuthService } from './auth.service';
 import { EmailVerificationController } from './email-verification.controller';
 import { AUTH_THROTTLE_LIMIT, AUTH_THROTTLE_TTL_MS, AuthThrottlerGuard } from './auth.throttler';
+import { LoginAttemptService } from './login-attempts.service';
 import { ProviderAccessGuard } from './provider-access.guard';
 import { RequestIdentityController } from './request-identity.controller';
 import { RequestIdentityService } from './request-identity.service';
@@ -74,6 +75,7 @@ import { RolesGuard } from './roles.guard';
     ProviderAccessGuard,
     AuthThrottlerGuard,
     RequestIdentityService,
+    LoginAttemptService,
   ],
   exports: [
     AuthService,
@@ -85,6 +87,7 @@ import { RolesGuard } from './roles.guard';
     ProviderAccessGuard,
     RequestIdentityService,
     AuthThrottlerGuard,
+    LoginAttemptService,
   ],
 })
 export class AuthModule {}

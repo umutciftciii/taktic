@@ -88,3 +88,24 @@ export type {
   RequestQualityResult,
   RequestQualitySignals,
 } from './quality-score';
+
+export {
+  CREDENTIAL_REFUSAL_MESSAGES,
+  TURNSTILE_ACTIONS,
+  TURNSTILE_CHALLENGE_FAILED,
+  TURNSTILE_FORM_FIELD,
+  TURNSTILE_TOKEN_HEADER,
+  credentialRefusalOf,
+  isCredentialRefusal,
+  isTurnstileRefusalCode,
+  readTurnstileFormToken,
+  readTurnstileWebConfig,
+  resolveTestTurnstileToken,
+  turnstileHeaders,
+} from './turnstile-web';
+export type {
+  CredentialRefusal,
+  TurnstileAction,
+  TurnstileTestOverride,
+  TurnstileWebConfig,
+} from './turnstile-web';

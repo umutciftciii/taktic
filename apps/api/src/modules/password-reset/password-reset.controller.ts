@@ -1,5 +1,8 @@
 import { BadRequestException, Body, Controller, Get, Inject, Post, Query, UseGuards } from '@nestjs/common';
 import { AuthThrottlerGuard } from '../auth/auth.throttler';
+import { TurnstileAction } from '../turnstile/turnstile.decorators';
+import { TurnstileGuard } from '../turnstile/turnstile.guard';
+import { TURNSTILE_ACTIONS } from '../turnstile/turnstile.constants';
 import { ConfirmPasswordResetDto } from './dto/confirm-password-reset.dto';
 import { RequestPasswordResetDto } from './dto/request-password-reset.dto';
 import { PasswordResetService } from './password-reset.service';
@@ -15,8 +18,14 @@ import { PasswordResetService } from './password-reset.service';
 export class PasswordResetController {
   constructor(@Inject(PasswordResetService) private readonly service: PasswordResetService) {}
 
-  /** Always 200 with the same body, whether or not the address is registered. */
+  /**
+   * Always 200 with the same body, whether or not the address is registered.
+   * Behind Turnstile (SEC-AUTH-ABUSE-001) for the web's form and the admin
+   * panel's alike; the confirm step below needs none, its link is the proof.
+   */
   @Post()
+  @UseGuards(TurnstileGuard)
+  @TurnstileAction(TURNSTILE_ACTIONS.passwordReset)
   request(@Body() dto: RequestPasswordResetDto) {
     return this.service.request(dto);
   }

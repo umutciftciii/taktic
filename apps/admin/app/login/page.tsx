@@ -1,6 +1,13 @@
 import Link from 'next/link';
 import { BrandMark } from '../../components/brand-mark';
 import { isLocalEnvironment } from '../../lib/local-environment';
+import {
+  CREDENTIAL_REFUSAL_MESSAGES,
+  TURNSTILE_ACTIONS,
+  isCredentialRefusal,
+  readTurnstileWebConfig,
+} from '../../lib/turnstile';
+import { TurnstileForm } from '../turnstile';
 
 type LoginPageProps = {
   searchParams: Promise<{ error?: string; reason?: string }>;
@@ -23,8 +30,17 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
       {/*
         A plain HTML post to a fixed URL rather than a Server Action: a sign-in
         form left open across a deploy has to keep working. See login/submit.
+        SEC-AUTH-ABUSE-001: the same Turnstile check the web's sign-in carries,
+        judged by the API under the same rules. Cloudflare Access in front of
+        this host stays where it is; this is a second layer, not its stand-in.
       */}
-      <form className="auth-card" action="/login/submit" method="post">
+      <TurnstileForm
+        className="auth-card"
+        turnstile={readTurnstileWebConfig()}
+        turnstileAction={TURNSTILE_ACTIONS.login}
+        action="/login/submit"
+        testId="admin-login-form"
+      >
         <div className="auth-brand">
           <BrandMark size="lg" />
           <div className="auth-brand-text">
@@ -33,8 +49,10 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
           </div>
         </div>
         {error ? (
-          <div className="error-message" role="alert">
-            Giriş başarısız. E-posta ve şifrenizi kontrol edin.
+          <div className="error-message" role="alert" data-testid="login-error">
+            {isCredentialRefusal(error)
+              ? CREDENTIAL_REFUSAL_MESSAGES[error]
+              : 'Giriş başarısız. E-posta ve şifrenizi kontrol edin.'}
           </div>
         ) : null}
         {sessionEnded && !error ? (
@@ -76,7 +94,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             <code>SEED_SUPER_ADMIN_PASSWORD</code>.
           </p>
         ) : null}
-      </form>
+      </TurnstileForm>
     </main>
   );
 }

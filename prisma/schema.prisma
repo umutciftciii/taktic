@@ -6699,3 +6699,32 @@ model SeoAuditLog {
   @@index([actorId])
   @@index([createdAt, id])
 }
+
+/// SEC-AUTH-ABUSE-001: failed sign-in counters, shared by every API process.
+///
+/// One row per (scope, key). `scope` is ACCOUNT (the e-mail typed, whether or
+/// not an account holds it), IP (the client address) or IP_ACCOUNT (the pair).
+/// Keys are SHA-256 digests — no address or e-mail is stored in the clear —
+/// and an unknown e-mail is counted exactly like a known one, so a lock says
+/// nothing about whether the account exists.
+///
+/// `attempts` counts within a fixed window that starts at the first attempt;
+/// `lockedUntil` is set once a scope's limit is reached and refuses every
+/// attempt in that scope until it passes. Written only through the atomic
+/// upserts in login-attempts.service.ts, never by Prisma's own update calls,
+/// so two concurrent attempts can never both read the same count.
+model AuthAttemptCounter {
+  scope           String
+  keyHash         String
+  /// The ACCOUNT key of an IP_ACCOUNT row, so a completed password reset can
+  /// clear every pair lock of that account without knowing the addresses.
+  accountKeyHash  String?
+  attempts        Int       @default(0)
+  windowStartedAt DateTime
+  lockedUntil     DateTime?
+  updatedAt       DateTime
+
+  @@id([scope, keyHash])
+  @@index([accountKeyHash])
+  @@index([updatedAt])
+}

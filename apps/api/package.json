@@ -8,6 +8,7 @@
     "lint": "tsc -p tsconfig.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run",
+    "auth-lock:clear": "tsx src/scripts/clear-auth-lock.ts",
     "backfill:display-numbers": "tsx src/scripts/backfill-display-numbers.ts",
     "backfill:request-customers": "tsx src/scripts/backfill-request-customers.ts",
     "canonicalize:provider-phones": "tsx src/scripts/canonicalize-provider-phones.ts",

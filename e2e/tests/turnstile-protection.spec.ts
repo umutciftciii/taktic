@@ -459,10 +459,18 @@ test.describe('Turnstile: staging gibi yapılandırılmış ama site key\'siz we
       await open.close();
     }
 
-    const closed = await Actor.open(browser, 'customer', turnstileClosedWebRuntime);
+    // SEC-AUTH-ABUSE-001: the closed stack's own sign-in carries a Turnstile
+    // token too, so it is closed as well — nobody signs in there. The session
+    // is opened on the working stack instead; both are on 127.0.0.1, and a
+    // cookie ignores the port, so the closed stack reads the same session.
+    const closed = await Actor.open(browser, 'customer', primaryRuntime);
     try {
+      await closed.page.goto(`${turnstileClosedWebRuntime.webUrl}/login`, { waitUntil: 'domcontentloaded' });
+      await expect(closed.page.getByTestId('turnstile-unconfigured')).toBeVisible();
       await closed.loginToWeb(account.email, account.password);
-      await closed.gotoWeb(`/requests/${requestId}/offers`);
+      await closed.page.goto(`${turnstileClosedWebRuntime.webUrl}/requests/${requestId}/offers`, {
+        waitUntil: 'domcontentloaded',
+      });
       await expect(closed.page.getByTestId('turnstile-unconfigured')).toBeVisible();
       await expect(closed.page.getByRole('button', { name: 'Doğrulama kodu gönder' })).toBeDisabled();
     } finally {

@@ -2,6 +2,13 @@ import { NextRequest } from 'next/server';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { middleware } from '../middleware';
+
+// The submissions read the incoming request's headers for the forwarded
+// client address (SEC-AUTH-ABUSE-001); outside a request there are none.
+vi.mock('next/headers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('next/headers')>()),
+  headers: async () => new Headers(),
+}));
 import LoginPage from '../app/login/page';
 import ForgotPasswordPage from '../app/sifre-unuttum/page';
 import { requestPasswordReset } from '../app/sifre-unuttum/request-reset';
@@ -62,14 +69,16 @@ describe('the sign-in card', () => {
 });
 
 describe('asking for a link', () => {
-  it('lands on the same confirmation whatever the API answers', async () => {
+  it('lands on the same confirmation whatever the API answers about the address', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
     fetchMock.mockResolvedValueOnce(jsonResponse(201, { status: 'accepted' }));
-    expect(await requestPasswordReset(form({ email: 'ops@example.test' }))).toBe('/sifre-unuttum?sent=1');
+    expect(await requestPasswordReset(form({ email: 'ops@example.test', turnstileToken: 'tok-1' }))).toBe(
+      '/sifre-unuttum?sent=1',
+    );
 
-    fetchMock.mockResolvedValueOnce(jsonResponse(429, { message: 'Too Many Requests' }));
+    fetchMock.mockResolvedValueOnce(jsonResponse(500, { message: 'boom' }));
     expect(await requestPasswordReset(form({ email: 'ops@example.test' }))).toBe('/sifre-unuttum?sent=1');
 
     fetchMock.mockRejectedValueOnce(new Error('connection refused'));
@@ -79,6 +88,22 @@ describe('asking for a link', () => {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toMatch(/\/auth\/password-reset$/);
     expect(JSON.parse(String(init.body))).toEqual({ email: 'ops@example.test' });
+    // SEC-AUTH-ABUSE-001: the token travels in its header, never the body.
+    expect(new Headers(init.headers).get('x-turnstile-token')).toBe('tok-1');
+  });
+
+  it('says so when the security check or the throttle refused — answers that never depend on the address', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    fetchMock.mockResolvedValueOnce(jsonResponse(403, { code: 'TURNSTILE_REQUIRED' }));
+    expect(await requestPasswordReset(form({ email: 'ops@example.test' }))).toBe('/sifre-unuttum?error=verification');
+    fetchMock.mockResolvedValueOnce(jsonResponse(503, { code: 'TURNSTILE_UNAVAILABLE' }));
+    expect(await requestPasswordReset(form({ email: 'ops@example.test' }))).toBe(
+      '/sifre-unuttum?error=verification-unavailable',
+    );
+    fetchMock.mockResolvedValueOnce(jsonResponse(429, { message: 'Too Many Requests' }));
+    expect(await requestPasswordReset(form({ email: 'ops@example.test' }))).toBe('/sifre-unuttum?error=locked');
   });
 
   it('does not call the API for an empty address, and never echoes the address', async () => {

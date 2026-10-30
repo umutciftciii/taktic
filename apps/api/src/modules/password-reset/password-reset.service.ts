@@ -6,6 +6,8 @@ import { assertStaffPasswordPolicy } from '../../common/staff-password-policy';
 import { adminPasswordResetUrl, passwordResetUrl } from '../../common/web-routes';
 import { PrismaService } from '../../prisma/prisma.service';
 import { TransactionalMailService } from '../notifications/transactional-mail.service';
+import { LoginAttemptService } from '../auth/login-attempts.service';
+import { normalizeAccountEmail } from '../../common/account-email';
 import {
   PASSWORD_RESET_MAX_PER_WINDOW,
   PASSWORD_RESET_TOKEN_TTL_MINUTES,
@@ -47,6 +49,7 @@ export class PasswordResetService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(TransactionalMailService) private readonly mail: TransactionalMailService,
+    @Inject(LoginAttemptService) private readonly loginAttempts: LoginAttemptService,
   ) {}
 
   /**
@@ -163,6 +166,14 @@ export class PasswordResetService {
       }
 
       throw error;
+    }
+
+    // SEC-AUTH-ABUSE-001: the mailbox has just been proved, so a sign-in lock
+    // on this e-mail — however it came about — is lifted with the old
+    // password. This is the way out for a person somebody else locked out.
+    const email = normalizeAccountEmail(record.user.email);
+    if (email) {
+      await this.loginAttempts.clearAccount(email);
     }
 
     return { success: true };

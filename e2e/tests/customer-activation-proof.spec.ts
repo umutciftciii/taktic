@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
-import { createAdmin, createClaimableCustomer, generateFixturePassword, prisma } from '../src/fixtures';
+import { createAdmin, createClaimableCustomer, generateFixturePassword, prisma, uniqueSuffix } from '../src/fixtures';
 import { waitForLatestActivationUrl } from '../src/outbox';
 import { primaryRuntime } from '../src/runtime';
 
@@ -106,6 +106,8 @@ test.describe('customer activation and the e-mail proof', () => {
       // claimable account, so the platform mails an activation link to it
       // instead of refusing. The response carries no token.
       const claim = await customer.page.request.post(`${primaryRuntime.apiUrl}/auth/register-customer`, {
+        // SEC-AUTH-ABUSE-001: registration carries a Turnstile token now.
+        headers: { 'x-turnstile-token': `turnstile-test:register:${uniqueSuffix()}${Date.now()}` },
         data: { name: 'E2E Posta', email: claimable.email, password: PASSWORD },
       });
       expect(claim.status()).toBe(409);

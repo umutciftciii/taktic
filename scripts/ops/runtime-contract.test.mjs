@@ -61,10 +61,16 @@ function stagingConfig() {
           EMAIL_FROM: `Taktick <${PRODUCTION_EMAIL_SENDER}>`,
           TURNSTILE_MODE: '',
           TURNSTILE_SECRET_KEY: SECRET_VALUES[4],
-          TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test',
+          TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test,admin-staging.example.test',
+          TRUST_PROXY: '1',
         },
       },
-      web: { environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA' } },
+      web: {
+        environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA', WEB_TRUST_PROXY: 'true' },
+      },
+      admin: {
+        environment: { APP_ENVIRONMENT: 'staging', TURNSTILE_SITE_KEY: '1x00000000000000000000AA', WEB_TRUST_PROXY: 'true' },
+      },
     },
   };
 }
@@ -214,6 +220,7 @@ describe('the staging contract', () => {
     production.name = 'taktic-production';
     production.services.api.environment.APP_ENVIRONMENT = 'production';
     production.services.web.environment.APP_ENVIRONMENT = 'production';
+    production.services.admin.environment.APP_ENVIRONMENT = 'production';
     production.services.api.environment.PAYMENT_PROVIDER = 'mock';
     results = run(production, { environment: 'production', project: 'taktic-production' });
     assert.equal(results.find((r) => r.name === 'SMS transport').status, 'WARN');
@@ -242,6 +249,42 @@ describe('the staging contract', () => {
     for (const { detail } of results.filter((r) => LEGACY_SCHEDULER_FLAGS.includes(r.name))) {
       assert.doesNotMatch(detail, /true|false/);
     }
+  });
+
+  it('SEC-AUTH-ABUSE-001: fails a panel that could not render its sign-in check', () => {
+    const config = stagingConfig();
+    delete config.services.admin.environment.TURNSTILE_SITE_KEY;
+    config.services.admin.environment.APP_ENVIRONMENT = '';
+    const failed = failures(run(config));
+    assert.match(failed['TURNSTILE_SITE_KEY (admin)'], /nobody could sign in to the admin panel/);
+    assert.match(failed['APP_ENVIRONMENT (admin)'], /is not staging/);
+  });
+
+  it('SEC-AUTH-ABUSE-001: fails a hostname list that leaves out the admin origin, naming the origin and not the value', () => {
+    const config = stagingConfig();
+    config.services.api.environment.TURNSTILE_EXPECTED_HOSTNAMES = ' Staging.Example.Test ';
+    const results = run(config);
+    const failed = failures(results);
+    assert.match(failed['TURNSTILE_EXPECTED_HOSTNAMES ∋ ADMIN_ORIGIN'], /HOSTNAME_MISMATCH/);
+    assert.equal(failed['TURNSTILE_EXPECTED_HOSTNAMES ∋ WEB_ORIGIN'], undefined);
+    const text = results.map((r) => `${r.name} ${r.detail}`).join('\n');
+    assert.ok(!text.includes('admin-staging.example.test'), 'a hostname value reached the output');
+  });
+
+  it('SEC-AUTH-ABUSE-001: fails a stack whose sign-in limits would count the web server instead of the visitor', () => {
+    const config = stagingConfig();
+    config.services.api.environment.TRUST_PROXY = '';
+    config.services.admin.environment.WEB_TRUST_PROXY = '';
+    const failed = failures(run(config));
+    assert.match(failed['TRUST_PROXY (api)'], /staff included/);
+    assert.match(failed['WEB_TRUST_PROXY (admin)'], /not "true"/);
+    assert.equal(failed['WEB_TRUST_PROXY (web)'], undefined);
+  });
+
+  it('SEC-AUTH-ABUSE-001: fails a bypass mode named on the web or the panel', () => {
+    const config = stagingConfig();
+    config.services.admin.environment.TURNSTILE_MODE = 'off';
+    assert.match(failures(run(config))['TURNSTILE_MODE (admin)'], /bypass/);
   });
 
   it('reads list-form environments as well as maps', () => {
@@ -308,8 +351,10 @@ describe('docker-compose.prod.yml under the contract', { skip: dockerAvailable()
     RESEND_API_KEY: SECRET_VALUES[3],
     EMAIL_FROM: `Taktick <${PRODUCTION_EMAIL_SENDER}>`,
     TURNSTILE_SECRET_KEY: SECRET_VALUES[4],
-    TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test',
+    TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test,admin-staging.example.test',
     TURNSTILE_SITE_KEY: '1x00000000000000000000AA',
+    TRUST_PROXY: '1',
+    WEB_TRUST_PROXY: 'true',
   };
 
   it('a host .env with the staging contract passes, with NODE_ENV=production from the file itself', () => {

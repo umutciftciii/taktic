@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { Actor, assertNoErrorScreen } from '../src/actors';
 import {
@@ -60,7 +61,9 @@ async function apiSessionHeader(
 ): Promise<string> {
   const response = await fetch(`${runtime.apiUrl}/auth/login`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    // SEC-AUTH-ABUSE-001: the API asks every sign-in for a Turnstile token;
+    // this stack runs the deterministic test verifier, which accepts this shape.
+    headers: { 'content-type': 'application/json', 'x-turnstile-token': `turnstile-test:login:${randomUUID()}` },
     body: JSON.stringify({ email: account.email, password: account.password }),
   });
   expect(response.ok, 'the API must accept the fixture credentials').toBe(true);

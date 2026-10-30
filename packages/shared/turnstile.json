@@ -7,6 +7,10 @@
     "showcaseLeadCreate": "showcase-lead-create",
     "phoneCodeSend": "phone-code-send",
     "identityCheck": "identity-check",
-    "identityActivate": "identity-activate"
+    "identityActivate": "identity-activate",
+    "login": "login",
+    "register": "register",
+    "passwordReset": "password-reset",
+    "emailVerificationResend": "email-verification-resend"
   }
 }

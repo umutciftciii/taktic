@@ -118,7 +118,8 @@ kurallar onu okur:
 | Live ödeme anahtarları (`LEMON_SQUEEZY_LIVE_*`, `PAYMENT_LIVE_ENABLED`, `LEMON_SQUEEZY_MODE`≠`test`) | boot reddi | boot reddi |
 | `PROMOTION_FINGERPRINT_KEY` | zorunlu, ≥ 32 karakter, geliştirme anahtarı değil | aynı |
 | E-posta | `EMAIL_TRANSPORT=resend`, `RESEND_API_KEY`, `EMAIL_FROM` = `noreply@notify.taktick.com.tr` | aynı |
-| Turnstile | `cloudflare`: `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES` (api), `TURNSTILE_SITE_KEY` (web) | aynı |
+| Turnstile | `cloudflare`: `TURNSTILE_SECRET_KEY`, `TURNSTILE_EXPECTED_HOSTNAMES` (api; **web ve admin host'larının ikisini de** listeler), `TURNSTILE_SITE_KEY` (web **ve admin** — SEC-AUTH-ABUSE-001), `APP_ENVIRONMENT` (admin dahil) | aynı |
+| Giriş limitleri (SEC-AUTH-ABUSE-001) | `TRUST_PROXY` (api) + `WEB_TRUST_PROXY=true` (web **ve admin**) zorunlu: yoksa adres kilidi tek bir kilide dönüşür (preflight FAIL). Bkz. [`docs/security/sec-auth-abuse-001.md`](../security/sec-auth-abuse-001.md) | aynı |
 | Public URL'ler | `API_PUBLIC_URL`, `WEB_APP_URL`, `WEB_ORIGIN`, `ADMIN_ORIGIN`, `NEXT_PUBLIC_API_URL`: https, loopback değil; `NEXT_PUBLIC_WEB_URL` önerilir (uyarı) | aynı |
 | SMS (sağlayıcı yok) | Console stand-in: kod **yalnız API container log'una** yazılır (`docker logs taktic-api`, host operatörü okur); telefona, response'a, DB'ye, endpoint'e gitmez (preflight PASS) | Console adapter **her gönderimi reddeder**, kod hiçbir yere yazılmaz, audit `TRANSPORT_UNAVAILABLE` (preflight WARN) |
 | `NOTIFICATION_OUTBOX_DIR` (kayıt transport'u) | boot reddi (`NODE_ENV=production`) | boot reddi |

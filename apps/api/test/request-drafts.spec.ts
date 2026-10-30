@@ -207,6 +207,10 @@ describe('POST /request-drafts', () => {
     expect(loginAfterDraftBudget.headers['x-ratelimit-limit-auth']).toBeDefined();
 
     resetAuthThrottle(ctx.app);
+    // The persistent sign-in scopes (SEC-AUTH-ABUSE-001) would lock this pair
+    // at its sixth wrong password, before the address budget this case is
+    // about; they have their own spec (auth-abuse-protection.spec.ts).
+    await ctx.prisma.authAttemptCounter.deleteMany();
 
     // And the reverse: exhausting the login budget must not touch drafting.
     for (let index = 0; index < 5; index += 1) {

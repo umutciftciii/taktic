@@ -154,8 +154,9 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
 
   const api = environmentOf(config.services?.api);
   const web = environmentOf(config.services?.web);
+  const admin = environmentOf(config.services?.admin);
 
-  for (const [who, env] of [['api', api], ['web', web]]) {
+  for (const [who, env] of [['api', api], ['web', web], ['admin', admin]]) {
     if (value(env, 'APP_ENVIRONMENT') === environment) {
       pass(`APP_ENVIRONMENT (${who})`, `= ${environment}`);
     } else {
@@ -244,7 +245,8 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
   }
 
   // Turnstile: an unset mode on a deployed environment is Cloudflare, which
-  // needs its secret and hostnames (API) and its site key (web).
+  // needs its secret and hostnames (API) and its site key (web, and since
+  // SEC-AUTH-ABUSE-001 the admin panel, whose sign-in carries a token too).
   const turnstileMode = value(api, 'TURNSTILE_MODE') || 'cloudflare';
   if (turnstileMode === 'cloudflare') {
     for (const key of ['TURNSTILE_SECRET_KEY', 'TURNSTILE_EXPECTED_HOSTNAMES']) {
@@ -252,9 +254,31 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
       else fail(`${key} (api)`, 'not set (Turnstile runs in cloudflare mode here)');
     }
     if (value(web, 'TURNSTILE_SITE_KEY')) pass('TURNSTILE_SITE_KEY (web)', 'set');
-    else fail('TURNSTILE_SITE_KEY (web)', 'not set (the request forms cannot render the widget)');
+    else fail('TURNSTILE_SITE_KEY (web)', 'not set (the request and sign-in forms cannot render the widget)');
+    if (value(admin, 'TURNSTILE_SITE_KEY')) pass('TURNSTILE_SITE_KEY (admin)', 'set');
+    else fail('TURNSTILE_SITE_KEY (admin)', 'not set (the panel sign-in renders closed: nobody could sign in to the admin panel)');
+    for (const result of turnstileHostnameCoverage(api)) results.push(result);
   } else {
     fail('TURNSTILE_MODE', 'a bypass mode is refused on a deployed environment');
+  }
+  for (const [who, env] of [['web', web], ['admin', admin]]) {
+    const mode = value(env, 'TURNSTILE_MODE');
+    if (mode && mode !== 'cloudflare') {
+      fail(`TURNSTILE_MODE (${who})`, 'a bypass mode renders the forms closed on a deployed environment');
+    }
+  }
+
+  // SEC-AUTH-ABUSE-001: the sign-in limits count the client's address. Unless
+  // the API trusts the hop in front of it and the web and the panel forward
+  // the address they received, every sign-in arrives from the web server's
+  // own address, and the address lock becomes one lock for everybody: a
+  // stranger's fifty wrong passwords would lock the operators out of the panel
+  // too. Refused here, before anything is stopped.
+  if (value(api, 'TRUST_PROXY')) pass('TRUST_PROXY (api)', 'set');
+  else fail('TRUST_PROXY (api)', 'not set (sign-in limits would count the web server, not the visitor: one address lock would lock everybody out, staff included)');
+  for (const [who, env] of [['web', web], ['admin', admin]]) {
+    if (value(env, 'WEB_TRUST_PROXY') === 'true') pass(`WEB_TRUST_PROXY (${who})`, '= true');
+    else fail(`WEB_TRUST_PROXY (${who})`, 'is not "true" (the client address is not forwarded; see TRUST_PROXY)');
   }
 
   // Deprecated scheduler switches: harmless, but each one set costs a WARN
@@ -279,6 +303,45 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
     warn('SMS transport', 'no SMS provider in this build; on production the console adapter refuses every send and logs no code');
   }
 
+  return results;
+}
+
+/**
+ * Whether the API accepts a token solved on each public origin the forms are
+ * served from. A token is refused unless its hostname is listed
+ * (cloudflare-turnstile.verifier.ts), so an admin origin missing from the list
+ * is a panel nobody can sign in to — found here, not by the first operator
+ * after the deploy. Names, never values: the result says which origin's
+ * hostname is missing, not what it is.
+ */
+export function turnstileHostnameCoverage(api) {
+  const results = [];
+  const listed = new Set(
+    value(api, 'TURNSTILE_EXPECTED_HOSTNAMES')
+      .split(',')
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  if (!listed.size) return results;
+  for (const key of ['WEB_ORIGIN', 'ADMIN_ORIGIN']) {
+    let hostname = '';
+    try {
+      hostname = new URL(value(api, key)).hostname.toLowerCase();
+    } catch {
+      continue; // an unusable origin is already a FAIL of its own above
+    }
+    const name = `TURNSTILE_EXPECTED_HOSTNAMES ∋ ${key}`;
+    if (listed.has(hostname)) results.push({ name, status: 'PASS', detail: `lists the ${key} hostname` });
+    else
+      results.push({
+        name,
+        status: 'FAIL',
+        detail:
+          key === 'ADMIN_ORIGIN'
+            ? 'does not list the ADMIN_ORIGIN hostname (every admin sign-in would be refused: HOSTNAME_MISMATCH)'
+            : 'does not list the WEB_ORIGIN hostname (every web form would be refused: HOSTNAME_MISMATCH)',
+      });
+  }
   return results;
 }
 

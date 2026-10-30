@@ -8,6 +8,24 @@ are in [docs/release.md](docs/release.md).
 
 ### Added
 
+- SEC-AUTH-ABUSE-001 (closes PRE-PAYMENT-READINESS-001 SEC-01): Turnstile is
+  enforced by the API on sign-in, both registrations, the password-reset
+  request and the verification-mail resend, for the web app and the admin
+  panel alike (same endpoints, same rules; no CAPTCHA-less alternative).
+  Failed sign-ins are counted in PostgreSQL across processes in three scopes —
+  address (50 / 15 min), address+e-mail (5 / 15 min), e-mail (10 / 15 min) —
+  each locking for 15 minutes, atomically and race-safe; an unknown e-mail is
+  counted and locked exactly like a known one, wrong-password answers are one
+  neutral `INVALID_CREDENTIALS`, and an inactive account is only reported to
+  somebody who knows its password. A completed password reset, or the
+  `auth-lock:clear` operator script, lifts an e-mail's lock. One additive
+  migration (`AuthAttemptCounter`); no new environment variable name — the
+  admin service now receives `APP_ENVIRONMENT`, `TURNSTILE_MODE`,
+  `TURNSTILE_SITE_KEY` and `WEB_TRUST_PROXY`, and the deploy preflight fails a
+  missing admin site key, an admin or web hostname absent from
+  `TURNSTILE_EXPECTED_HOSTNAMES`, or an untrusted proxy chain. See
+  `docs/security/sec-auth-abuse-001.md` for the manual Cloudflare step.
+
 - OBS-READY-001: `GET /health/ready` — 200 with the database state and the
   applied migration count while PostgreSQL answers, 503 (`unreachable` /
   `timeout`, 2 s budget) while it does not, never anything about the
