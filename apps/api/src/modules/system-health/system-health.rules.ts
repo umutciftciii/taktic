@@ -233,7 +233,14 @@ export function evaluateSchedulerJob(
   now: Date,
 ): { status: HealthStatus; reason: SchedulerReason; missedTicks: number } {
   if (!facts.enabled) return { status: 'UNKNOWN', reason: 'DISABLED', missedTicks: 0 };
-  if (!facts.lastRun) return { status: 'UNKNOWN', reason: 'NO_RECORDED_RUN', missedTicks: 0 };
+  if (!facts.lastRun) {
+    // Never ran: overdue if ticks passed since it was switched on, otherwise
+    // there is nothing to judge yet.
+    const missedTicks = facts.enabledSince ? countMissedTicks(facts.cron, facts.enabledSince, now) : 0;
+    if (missedTicks >= SCHEDULER_MISSED_TICKS_DOWN) return { status: 'DOWN', reason: 'OVERDUE', missedTicks };
+    if (missedTicks > 0) return { status: 'DEGRADED', reason: 'OVERDUE', missedTicks };
+    return { status: 'UNKNOWN', reason: 'NO_RECORDED_RUN', missedTicks: 0 };
+  }
   if (facts.lastRun.status === 'RUNNING') return { status: 'HEALTHY', reason: 'RUNNING', missedTicks: 0 };
 
   const since =

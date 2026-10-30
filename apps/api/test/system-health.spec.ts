@@ -119,6 +119,19 @@ describe('rules', () => {
     it('does not measure a switched-off job, nor one that never ran', () => {
       expect(evaluateSchedulerJob(job({ enabled: false }), now)).toMatchObject({ status: 'UNKNOWN', reason: 'DISABLED' });
       expect(evaluateSchedulerJob(job({ lastRun: null }), now)).toMatchObject({ status: 'UNKNOWN', reason: 'NO_RECORDED_RUN' });
+      // Switched on a moment ago: no tick is due yet.
+      expect(
+        evaluateSchedulerJob(job({ lastRun: null, enabledSince: at('2026-10-30T11:58:00Z') }), now),
+      ).toMatchObject({ status: 'UNKNOWN', reason: 'NO_RECORDED_RUN' });
+    });
+
+    it('calls a switched-on job that never ran overdue once its ticks pass', () => {
+      expect(
+        evaluateSchedulerJob(job({ lastRun: null, enabledSince: at('2026-10-30T11:45:00.020Z') }), now),
+      ).toMatchObject({ status: 'DEGRADED', reason: 'OVERDUE', missedTicks: 1 });
+      expect(
+        evaluateSchedulerJob(job({ lastRun: null, enabledSince: at('2026-10-29T00:00:00Z') }), now),
+      ).toMatchObject({ status: 'DOWN', reason: 'OVERDUE', missedTicks: 3 });
     });
 
     it('is HEALTHY on a recent success and while a run is open', () => {
@@ -503,6 +516,59 @@ describe('GET /system-health', () => {
     it('is UNKNOWN with no mail in the window', async () => {
       const response = await fetchReport(await superAdminSession()).expect(200);
       expect(response.body.email).toMatchObject({ status: 'UNKNOWN', reason: 'NO_TRAFFIC' });
+    });
+  });
+
+  describe('overall', () => {
+    async function seoRanJustNow() {
+      await ctx.prisma.schedulerRun.create({
+        data: { jobKey: 'seo-not-found-retention', status: 'SUCCESS', startedAt: ago(30_000), finishedAt: ago(20_000) },
+      });
+    }
+
+    it('is HEALTHY when every measured source is — switched-off jobs, a quiet mail day and Faz 2 items do not hold it at UNKNOWN', async () => {
+      await seoRanJustNow();
+      const response = await fetchReport(await superAdminSession()).expect(200);
+      expect(response.body.notMeasured.length).toBeGreaterThan(0);
+      expect(response.body.schedulers.jobs.filter((job: { enabled: boolean }) => !job.enabled).length).toBeGreaterThan(0);
+      expect(response.body.email).toMatchObject({ status: 'UNKNOWN', reason: 'NO_TRAFFIC' });
+      expect(response.body.overall).toBe('HEALTHY');
+    });
+
+    it('keeps a failed measurement UNKNOWN and lets DOWN or DEGRADED through', async () => {
+      await seoRanJustNow();
+      const cookie = await superAdminSession();
+
+      // An unmeasurable probe holds the overall state at UNKNOWN, not HEALTHY.
+      delete process.env.ADMIN_INTERNAL_URL;
+      expect((await fetchReport(cookie).expect(200)).body.overall).toBe('UNKNOWN');
+
+      // A real fault beside it is not masked by that UNKNOWN.
+      service().clearCache();
+      web.respond = (_req, res) => {
+        res.writeHead(307, { location: '/elsewhere' });
+        res.end();
+      };
+      expect((await fetchReport(cookie).expect(200)).body.overall).toBe('DEGRADED');
+
+      service().clearCache();
+      web.respond = (_req, res) => {
+        res.writeHead(502);
+        res.end();
+      };
+      expect((await fetchReport(cookie).expect(200)).body.overall).toBe('DOWN');
+    });
+
+    it('still counts e-mail once there is traffic to judge', async () => {
+      await seoRanJustNow();
+      for (let i = 0; i < 3; i += 1) {
+        await ctx.prisma.notificationLog.create({
+          data: { channel: 'EMAIL', template: 'offer-received', maskedRecipient: 'c***@example.test', status: 'FAILED', failedAt: new Date() },
+        });
+      }
+      const response = await fetchReport(await superAdminSession()).expect(200);
+      expect(response.body.email).toMatchObject({ status: 'DOWN', reason: 'MOSTLY_FAILING' });
+      expect(response.body.overall).toBe('DOWN');
     });
   });
 });

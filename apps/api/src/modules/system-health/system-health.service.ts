@@ -211,7 +211,10 @@ export class SystemHealthService {
     ]);
 
     const counted: HealthStatus[] = [database.status, web.status, admin.status, schedulers.status];
-    if (email) counted.push(email.status);
+    // A quiet day is not a fault: e-mail with no traffic shows UNKNOWN in its
+    // own section but does not hold the overall state at UNKNOWN. A failed
+    // read (QUERY_FAILED) still counts.
+    if (email && email.reason !== 'NO_TRAFFIC') counted.push(email.status);
 
     return {
       generatedAt: new Date().toISOString(),
