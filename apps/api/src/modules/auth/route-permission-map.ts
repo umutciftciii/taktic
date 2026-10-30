@@ -225,6 +225,9 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   { method: 'PATCH', path: '/service-requests/:id/status', permission: AdminPermission.REQUESTS_STATUS },
   { method: 'GET', path: '/service-requests/:requestId/contact-reveal', permission: AdminPermission.CONTACT_REVEAL_READ },
   { method: 'GET', path: '/service-requests/reports', permission: AdminPermission.REQUEST_REPORTS_READ },
+  // ADMIN-SYSTEM-HEALTH-001: read-only. The e-mail block inside it is
+  // NOTIFICATION_LOGS_READ's and is absent without it (mayEmbed).
+  { method: 'GET', path: '/system-health', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
   { method: 'GET', path: '/users', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id/status-history', permission: AdminPermission.ADMIN_USERS_READ },

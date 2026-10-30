@@ -209,6 +209,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
     },
     '/credit-packages/[id]': { row: '/credit-packages', gate: ['CREDIT_PACKAGES_READ'] },
     '/operations-settings': { row: '/operations-settings', gate: ['OPERATIONS_SETTINGS_READ'] },
+    '/system-health': { row: '/system-health', gate: ['OPERATIONS_SETTINGS_READ'] },
     '/campaigns': { row: '/campaigns', gate: ['CAMPAIGNS_READ'] },
     '/campaigns/new': {
       row: '/campaigns',
@@ -248,7 +249,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
-    expect(onDisk).toHaveLength(61);
+    expect(onDisk).toHaveLength(62);
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {

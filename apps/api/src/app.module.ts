@@ -9,6 +9,7 @@ import { CustomersModule } from './modules/customers/customers.module';
 import { EmailVerificationModule } from './modules/email-verification/email-verification.module';
 import { EntitlementsModule } from './modules/entitlements/entitlements.module';
 import { HealthModule } from './modules/health/health.module';
+import { SystemHealthModule } from './modules/system-health/system-health.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { QuestionsModule } from './modules/questions/questions.module';
@@ -54,6 +55,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
   imports: [
     ScheduleModule.forRoot(),
     HealthModule,
+    SystemHealthModule,
     PrismaModule,
     TurnstileModule,
     CampaignsModule,

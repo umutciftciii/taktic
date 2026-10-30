@@ -62,7 +62,7 @@ const FULL_MENU: Array<[group: string, rows: string[]]> = [
   ],
   ['Katalog', ['Hizmet kategorileri', 'Vitrin paketleri', 'Kredi paketleri']],
   ['SEO ve adresler', ['Arama motoru durumu', 'İndekslenmeyen sayfalar', 'Adresler', 'Yönlendirmeler']],
-  ['Operasyon', ['Operasyon ayarları', 'Kampanyalar', 'Kampanya uygunluk incelemesi', 'Gönderilen bildirimler']],
+  ['Operasyon', ['Operasyon ayarları', 'Sistem sağlığı', 'Kampanyalar', 'Kampanya uygunluk incelemesi', 'Gönderilen bildirimler']],
   ['Yönetim', ['Yönetici hesapları', 'Roller ve izinler', 'Şirket ve e-posta bilgileri']],
 ];
 

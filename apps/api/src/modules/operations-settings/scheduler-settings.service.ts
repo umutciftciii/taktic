@@ -157,6 +157,21 @@ export class SchedulerSettingsService {
     }
   }
 
+  /**
+   * Every job's stored switch, for a reader that only needs on/off (the system
+   * health screen). Unlike {@link isJobEnabled} a failed read throws: a health
+   * report must say "could not read", not "off".
+   */
+  async readEnabledFlags(): Promise<Record<SchedulerJobKey, boolean>> {
+    const row = await this.prisma.operationsSettings.findUnique({
+      where: { id: OPERATIONS_SETTINGS_ID },
+      select: flagsSelect,
+    });
+    return Object.fromEntries(
+      SCHEDULER_JOB_KEYS.map((job) => [job, row ? row[SCHEDULER_JOB_SETTINGS[job]] : false]),
+    ) as Record<SchedulerJobKey, boolean>;
+  }
+
   async listForAdmin(): Promise<SchedulerSettingsView> {
     const [row, changes, lastRuns, lastManualRefundRun] = await Promise.all([
       this.prisma.operationsSettings.findUnique({

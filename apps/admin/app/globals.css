@@ -9503,3 +9503,30 @@ a.dashboard-kpi-note {
 .turnstile-slot > p {
   margin: 0;
 }
+
+/* ── ADMIN-SYSTEM-HEALTH-001: Sistem sağlığı ── */
+
+.system-health-page .notice {
+  margin-bottom: 16px;
+}
+
+/* Grid items default to min-width: auto; without this a card grows to its
+   table's width instead of letting the table scroll in its own box. */
+.system-health-page .settings-stack > * {
+  min-width: 0;
+}
+
+.system-health-refresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.system-health-not-measured {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

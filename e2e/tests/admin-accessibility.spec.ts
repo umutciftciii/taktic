@@ -57,6 +57,7 @@ const LIST_SCREENS = [
   '/credit-packages',
   '/credit-packages/new',
   '/operations-settings',
+  '/system-health',
   '/campaigns',
   '/campaigns/new',
   '/promotion-eligibility',
