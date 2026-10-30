@@ -165,3 +165,19 @@ describe('the deprecated scheduler switches', () => {
     expect(warn.mock.calls[0]?.[0]).not.toMatch(/false/);
   });
 });
+
+describe('ADMIN-SYSTEM-HEALTH-001 — the internal probe addresses', () => {
+  it.each([
+    ['docker-compose.yml', base],
+    ['docker-compose.prod.yml', prod],
+  ])('%s gives the api the web and admin service names, fixed, and nobody else', (_name, source) => {
+    const api = serviceEnvironmentLines(source, 'api');
+    expect(readVariable(api, 'WEB_INTERNAL_URL')).toBe('http://web:3000');
+    expect(readVariable(api, 'ADMIN_INTERNAL_URL')).toBe('http://admin:3002');
+    for (const service of ['web', 'admin']) {
+      const lines = serviceEnvironmentLines(source, service);
+      expect(readVariable(lines, 'WEB_INTERNAL_URL')).toBeUndefined();
+      expect(readVariable(lines, 'ADMIN_INTERNAL_URL')).toBeUndefined();
+    }
+  });
+});

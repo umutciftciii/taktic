@@ -201,6 +201,10 @@ function apiServer(runtime: Runtime) {
       WEB_ORIGIN: runtime.webUrl,
       ADMIN_ORIGIN: runtime.adminUrl,
       API_PUBLIC_URL: runtime.apiUrl,
+      // ADMIN-SYSTEM-HEALTH-001: the system health screen probes this
+      // runtime's own web and admin servers, as compose points it at its own.
+      WEB_INTERNAL_URL: runtime.webUrl,
+      ADMIN_INTERNAL_URL: runtime.adminUrl,
       // Mock for every runtime but the payments one. The sandbox provider
       // additionally needs its store, variant mapping and secrets — all
       // placeholders that only mean anything to the loopback stub — and the
@@ -452,7 +456,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(action-redirect|login-screen|stale-auth-forms|admin-password-reset|auth-session-cookie|admin-shell|admin-accessibility|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-cross-domain-projection|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|admin-destructive-confirmation(?:-paket-a)?|admin-paket-b-confirmation|admin-lifecycle-confirmation|admin-showcase-review-screens|provider-claim|responsive-shell|mobile-public-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|offer-view-impressions|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|admin-action-audit|admin-backend-truth-002|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|service-issue|service-incident-adjudication|match-review-recovery|remote-hybrid-matching|showcase-[a-z-]+)\.spec\.ts/,
+        /(action-redirect|login-screen|stale-auth-forms|admin-password-reset|auth-session-cookie|admin-shell|admin-accessibility|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-cross-domain-projection|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|admin-destructive-confirmation(?:-paket-a)?|admin-paket-b-confirmation|admin-lifecycle-confirmation|admin-showcase-review-screens|provider-claim|responsive-shell|mobile-public-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|offer-view-impressions|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|admin-system-health|admin-action-audit|admin-backend-truth-002|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|service-issue|service-incident-adjudication|match-review-recovery|remote-hybrid-matching|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

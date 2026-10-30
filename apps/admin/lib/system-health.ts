@@ -1,0 +1,200 @@
+import { SCHEDULER_JOB_COPY, type SchedulerJobKey } from './api';
+
+/**
+ * ADMIN-SYSTEM-HEALTH-001 — the "Sistem sağlığı" screen's vocabulary.
+ *
+ * The API decides every state (`GET /system-health`); this file only says it
+ * in Turkish, and adds the one row the API cannot measure about itself: the
+ * API, as this panel's server reached it.
+ */
+
+export type HealthStatus = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+
+type Component<Reason extends string> = { status: HealthStatus; reason: Reason; checkedAt: string };
+
+export type ProbeReason =
+  | 'OK'
+  | 'SLOW'
+  | 'UNEXPECTED_REDIRECT'
+  | 'UNEXPECTED_STATUS'
+  | 'SERVER_ERROR'
+  | 'TIMEOUT'
+  | 'UNREACHABLE'
+  | 'NOT_CONFIGURED'
+  | 'MISCONFIGURED';
+
+export type SchedulerReason =
+  | 'DISABLED'
+  | 'NO_RECORDED_RUN'
+  | 'RUNNING'
+  | 'LAST_RUN_SUCCEEDED'
+  | 'LAST_RUN_FAILED'
+  | 'LAST_RUN_INTERRUPTED'
+  | 'REPEATED_FAILURES'
+  | 'OVERDUE';
+
+export type SchedulerErrorType = 'PROCESS_INTERRUPTED' | 'DATABASE_ERROR' | 'APPLICATION_ERROR';
+
+export type SystemHealthJobKey = SchedulerJobKey | 'seo-not-found-retention';
+
+export type SystemHealthJob = {
+  key: SystemHealthJobKey;
+  enabled: boolean;
+  switchable: boolean;
+  cron: string;
+  status: HealthStatus;
+  reason: SchedulerReason;
+  missedTicks: number;
+  lastRun: {
+    status: 'RUNNING' | 'SUCCESS' | 'FAILED';
+    startedAt: string;
+    finishedAt: string | null;
+    errorType: SchedulerErrorType | null;
+  } | null;
+  lastSuccessAt: string | null;
+  last24h: { succeeded: number; failed: number };
+};
+
+export type EmailReason = 'OK' | 'NO_TRAFFIC' | 'FAILURES' | 'MOSTLY_FAILING' | 'STUCK_PENDING' | 'QUERY_FAILED';
+
+export type SystemHealthReport = {
+  generatedAt: string;
+  overall: HealthStatus;
+  database: Component<'OK' | 'SLOW' | 'TIMEOUT' | 'UNREACHABLE'> & {
+    latencyMs: number;
+    appliedMigrations: number | null;
+  };
+  web: Component<ProbeReason> & { latencyMs: number | null; httpStatus: number | null };
+  admin: Component<ProbeReason> & { latencyMs: number | null; httpStatus: number | null };
+  schedulers: Component<'OK' | 'QUERY_FAILED'> & {
+    jobs: SystemHealthJob[];
+    recentFailures: Array<{ jobKey: SystemHealthJobKey; errorType: SchedulerErrorType; at: string }>;
+  };
+  /** Absent without NOTIFICATION_LOGS_READ — never an empty stand-in. */
+  email?: Component<EmailReason> & {
+    windowHours: number;
+    counts: { sent: number; failed: number; pending: number; stuckPending: number } | null;
+    lastSentAt: string | null;
+    recentFailures: Array<{
+      id: string;
+      template: string;
+      errorCode: string | null;
+      errorLabel: string | null;
+      at: string;
+    }>;
+  };
+  notMeasured: Array<'EXTERNAL_UPTIME' | 'BACKUPS' | 'HOST_RESOURCES' | 'CAMPAIGN_EVALUATION_WORKER'>;
+};
+
+/** The API row, as this panel's server measured it while fetching the report. */
+export type ApiReachability = {
+  status: HealthStatus;
+  reason: 'OK' | 'REPORT_FAILED' | 'UNREACHABLE';
+  latencyMs: number;
+  checkedAt: string;
+};
+
+export const HEALTH_STATUS_LABELS: Record<HealthStatus, string> = {
+  HEALTHY: 'Sağlıklı',
+  DEGRADED: 'Sorunlu',
+  DOWN: 'Çalışmıyor',
+  UNKNOWN: 'Bilinmiyor',
+};
+
+export const HEALTH_STATUS_BADGES: Record<HealthStatus, string> = {
+  HEALTHY: 'badge badge-good',
+  DEGRADED: 'badge badge-warn',
+  DOWN: 'badge badge-bad',
+  UNKNOWN: 'badge badge-muted',
+};
+
+const SEVERITY: Record<HealthStatus, number> = { HEALTHY: 0, UNKNOWN: 1, DEGRADED: 2, DOWN: 3 };
+
+/** The API's own rule: the worst state wins, and nothing measured is UNKNOWN. */
+export function worstStatus(statuses: readonly HealthStatus[]): HealthStatus {
+  if (statuses.length === 0) return 'UNKNOWN';
+  return statuses.reduce((worst, next) => (SEVERITY[next] > SEVERITY[worst] ? next : worst));
+}
+
+export const PROBE_REASON_TEXT: Record<ProbeReason, string> = {
+  OK: 'Beklenen yanıt geldi.',
+  SLOW: 'Beklenen yanıt geldi ama 1 saniyeden yavaş.',
+  UNEXPECTED_REDIRECT: 'Beklenen sayfa yerine yönlendirme döndü.',
+  UNEXPECTED_STATUS: 'Yanıt verdi ama beklenen durum kodu değil.',
+  SERVER_ERROR: 'Sunucu hata yanıtı verdi (5xx).',
+  TIMEOUT: '1,5 saniye içinde yanıt vermedi.',
+  UNREACHABLE: 'Bağlantı kurulamadı.',
+  NOT_CONFIGURED: 'İç ağ adresi bu ortamda tanımlı değil; ölçülmüyor.',
+  MISCONFIGURED: 'İç ağ adresi geçersiz; ölçülmüyor.',
+};
+
+export const DATABASE_REASON_TEXT: Record<SystemHealthReport['database']['reason'], string> = {
+  OK: 'Hazırlık sorgusu yanıt verdi.',
+  SLOW: 'Hazırlık sorgusu yanıt verdi ama 1 saniyeden yavaş.',
+  TIMEOUT: 'Hazırlık sorgusu 2 saniye içinde yanıt vermedi.',
+  UNREACHABLE: 'Veritabanına ulaşılamadı.',
+};
+
+export const API_REASON_TEXT: Record<ApiReachability['reason'], string> = {
+  OK: 'Panel sunucusu API’ye iç ağdan ulaştı.',
+  REPORT_FAILED: 'API yanıt veriyor ama sağlık raporunu üretemedi.',
+  UNREACHABLE: 'Panel sunucusu API’ye ulaşamadı.',
+};
+
+export const SCHEDULER_REASON_TEXT: Record<SchedulerReason, string> = {
+  DISABLED: 'Kapalı — ölçülmüyor.',
+  NO_RECORDED_RUN: 'Açık ama henüz kayıtlı çalışması yok.',
+  RUNNING: 'Şu anda çalışıyor.',
+  LAST_RUN_SUCCEEDED: 'Son çalışma başarılı ve zamanında.',
+  LAST_RUN_FAILED: 'Son çalışma hata verdi.',
+  LAST_RUN_INTERRUPTED: 'Son çalışma yarıda kaldı (süreç durdu).',
+  REPEATED_FAILURES: 'Son başarılı çalışmadan beri en az 3 kez hata verdi.',
+  OVERDUE: 'Zamanı geçtiği hâlde çalışmadı.',
+};
+
+export const SCHEDULER_ERROR_TYPE_TEXT: Record<SchedulerErrorType, string> = {
+  PROCESS_INTERRUPTED: 'Süreç durdu',
+  DATABASE_ERROR: 'Veritabanı hatası',
+  APPLICATION_ERROR: 'Uygulama hatası',
+};
+
+export const EMAIL_REASON_TEXT: Record<EmailReason, string> = {
+  OK: 'E-postalar gönderiliyor.',
+  NO_TRAFFIC: 'Son 24 saatte tamamlanan gönderim yok; ölçülecek veri yok.',
+  FAILURES: 'Gönderimlerin en az %10’u başarısız.',
+  MOSTLY_FAILING: 'Gönderimlerin en az yarısı başarısız.',
+  STUCK_PENDING: '15 dakikadan uzun bekleyen gönderim var.',
+  QUERY_FAILED: 'Bildirim kayıtları okunamadı.',
+};
+
+export const NOT_MEASURED_TEXT: Record<SystemHealthReport['notMeasured'][number], { name: string; note: string }> = {
+  EXTERNAL_UPTIME: {
+    name: 'Dışarıdan erişilebilirlik',
+    note: 'Harici uptime izleme kurulu değil (Faz 2). Bu ekrandaki web/admin kontrolleri iç ağdandır.',
+  },
+  BACKUPS: { name: 'Otomatik yedekleme', note: 'Yedekleme kaydı bu ekrana bağlı değil (Faz 2).' },
+  HOST_RESOURCES: { name: 'Sunucu CPU / bellek / disk', note: 'Ölçülmüyor (Faz 2).' },
+  CAMPAIGN_EVALUATION_WORKER: {
+    name: 'Kampanya değerlendirme işçisi',
+    note: 'Çalışma kaydı tutmuyor; durumu bu ekrandan ölçülemez.',
+  },
+};
+
+export function schedulerJobName(key: SystemHealthJobKey): string {
+  if (key === 'seo-not-found-retention') return '404 önerisi temizliği (SEO)';
+  return SCHEDULER_JOB_COPY[key]?.name ?? key;
+}
+
+/**
+ * The API row from the report fetch: answered → HEALTHY, answered with a
+ * failure → DEGRADED (the API is up, its report is not), no answer → DOWN.
+ */
+export function apiReachability(
+  outcome: 'ok' | 'report-failed' | 'unreachable',
+  latencyMs: number,
+  checkedAt: string,
+): ApiReachability {
+  if (outcome === 'ok') return { status: 'HEALTHY', reason: 'OK', latencyMs, checkedAt };
+  if (outcome === 'report-failed') return { status: 'DEGRADED', reason: 'REPORT_FAILED', latencyMs, checkedAt };
+  return { status: 'DOWN', reason: 'UNREACHABLE', latencyMs, checkedAt };
+}

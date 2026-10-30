@@ -150,6 +150,13 @@ services:
       NEXT_PUBLIC_WEB_URL: ${NEXT_PUBLIC_WEB_URL:-}
       NEXT_PUBLIC_ADMIN_URL: ${NEXT_PUBLIC_ADMIN_URL:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
+      # ADMIN-SYSTEM-HEALTH-001: where the system health screen probes the web
+      # and the panel (GET /robots.txt, GET /login, 1.5 s). The compose service
+      # names on this file's own network, fixed like API_INTERNAL_URL is for
+      # web and admin: topology, not a host setting. An internal answer means
+      # the process responds, not that the public reaches it.
+      WEB_INTERNAL_URL: http://web:3000
+      ADMIN_INTERNAL_URL: http://admin:3002
       EMAIL_ASSET_BASE_URL: ${EMAIL_ASSET_BASE_URL:-}
       # Scheduler cadence (the on/off switches live in the database).
       UNVIEWED_OFFER_REFUND_CRON: ${UNVIEWED_OFFER_REFUND_CRON:-0 * * * *}

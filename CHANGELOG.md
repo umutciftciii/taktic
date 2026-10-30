@@ -8,6 +8,19 @@ are in [docs/release.md](docs/release.md).
 
 ### Added
 
+- ADMIN-SYSTEM-HEALTH-001 (Faz 1): admin "Sistem sağlığı" screen
+  (`/system-health`, `GET /system-health`), read-only, refreshed every 60 s
+  and by hand. Shows PostgreSQL (the readiness probe), web and admin (internal
+  network probes of `/robots.txt` and `/login`, 1.5 s, expected 200 only —
+  explicitly not external uptime), the API as the panel's server reached it,
+  every recorded scheduler's last run, last success, 24 h counts and overdue
+  ticks, and e-mail SENT / FAILED / PENDING counts with recent failures. States
+  are HEALTHY / DEGRADED / DOWN / UNKNOWN; nothing unmeasured is HEALTHY.
+  OPERATIONS_SETTINGS_READ opens it; the e-mail block is present only with
+  NOTIFICATION_LOGS_READ. No migration and no new permission; the API service
+  receives two fixed compose values, `WEB_INTERNAL_URL=http://web:3000` and
+  `ADMIN_INTERNAL_URL=http://admin:3002` (unset = UNKNOWN).
+
 - SEC-AUTH-ABUSE-001 (closes PRE-PAYMENT-READINESS-001 SEC-01): Turnstile is
   enforced by the API on sign-in, both registrations, the password-reset
   request and the verification-mail resend, for the web app and the admin

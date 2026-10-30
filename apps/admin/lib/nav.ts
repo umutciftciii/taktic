@@ -197,6 +197,9 @@ export const navGroups: NavGroup[] = [
     icon: 'settings',
     items: [
       { href: '/operations-settings', label: 'Operasyon ayarları', permission: 'OPERATIONS_SETTINGS_READ' },
+      // ADMIN-SYSTEM-HEALTH-001: read-only, behind the operations read its
+      // scheduler half already needs. The e-mail half is NOTIFICATION_LOGS_READ's.
+      { href: '/system-health', label: 'Sistem sağlığı', permission: 'OPERATIONS_SETTINGS_READ' },
       { href: '/campaigns', label: 'Kampanyalar', permission: 'CAMPAIGNS_READ' },
       // CMP-006 PR-C: events the promotion eligibility gate held for a person.
       // Right under the campaigns whose benefits it holds back.

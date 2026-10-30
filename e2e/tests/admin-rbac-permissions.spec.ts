@@ -196,7 +196,7 @@ const READ_MATRIX: Array<{ permission: string; rows: string[]; refused: string; 
   { permission: 'CATALOG_READ', rows: ['/categories'], refused: '/credit-packages' },
   { permission: 'SHOWCASE_PACKAGES_READ', rows: ['/showcase/packages'], refused: '/categories' },
   { permission: 'CREDIT_PACKAGES_READ', rows: ['/credit-packages'], refused: '/showcase/packages' },
-  { permission: 'OPERATIONS_SETTINGS_READ', rows: ['/operations-settings'], refused: '/campaigns' },
+  { permission: 'OPERATIONS_SETTINGS_READ', rows: ['/operations-settings', '/system-health'], refused: '/campaigns' },
   { permission: 'CAMPAIGNS_READ', rows: ['/campaigns'], refused: '/promotion-eligibility' },
   // The one row whose permission is a decision, not a read: its queue is where
   // the decisions are taken, so its forms are expected (and gated by it).
