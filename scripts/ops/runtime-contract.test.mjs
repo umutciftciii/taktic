@@ -325,10 +325,10 @@ describe('the staging contract', () => {
     assert.ok(!JSON.stringify(results).includes('-1001234567890'));
     assertNoSecretPrinted(results);
 
-    config.services.api.environment.OPS_ALERT_TELEGRAM_BOT_TOKEN = 're_wrongVariablePasted';
+    config.services.api.environment.OPS_ALERT_TELEGRAM_BOT_TOKEN = 're_placeholderWrongVariable';
     results = run(config);
     assert.match(failures(results).OPS_ALERT_TELEGRAM_BOT_TOKEN, /not a Telegram bot token/);
-    assert.ok(!JSON.stringify(results).includes('re_wrongVariablePasted'));
+    assert.ok(!JSON.stringify(results).includes('re_placeholderWrongVariable'));
   });
 
   it('reads list-form environments as well as maps', () => {

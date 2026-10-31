@@ -242,7 +242,7 @@ describe('configuration', () => {
     [{ OPS_ALERT_EMAIL: 'not-an-address' }, 'OPS_ALERT_EMAIL'],
     [{ OPS_ALERT_TELEGRAM_BOT_TOKEN: TELEGRAM_TOKEN }, 'set together'],
     [{ OPS_ALERT_TELEGRAM_CHAT_ID: TELEGRAM_CHAT }, 'set together'],
-    [{ OPS_ALERT_TELEGRAM_BOT_TOKEN: 'sk_live_wrong_place', OPS_ALERT_TELEGRAM_CHAT_ID: TELEGRAM_CHAT }, 'not a Telegram bot token'],
+    [{ OPS_ALERT_TELEGRAM_BOT_TOKEN: 'wrong-variable-not-real', OPS_ALERT_TELEGRAM_CHAT_ID: TELEGRAM_CHAT }, 'not a Telegram bot token'],
     [{ OPS_ALERT_TELEGRAM_BOT_TOKEN: TELEGRAM_TOKEN, OPS_ALERT_TELEGRAM_CHAT_ID: 'https://t.me/x' }, 'not a Telegram chat id'],
     [{ OPS_ALERT_EMAIL: OPS_EMAIL, OPS_ALERT_TELEGRAM_TIMEOUT_MS: 'soon' }, 'OPS_ALERT_TELEGRAM_TIMEOUT_MS'],
   ])('refuses %j at boot, naming the variable and never the value', (values, message) => {
@@ -893,6 +893,7 @@ describe('the alert engine', () => {
       await run('request-expiry', 'FAILED', ago(5 * MINUTE));
       await failedEmail('TRANSPORT_UNAVAILABLE', ago(5 * MINUTE));
 
+      // From an empty engine state: the first evaluators also race to create its row.
       const outcomes = await Promise.all(Array.from({ length: 5 }, () => evaluator().evaluate()));
       expect(outcomes).toContain('EVALUATED');
       expect(outcomes.every((outcome) => outcome === 'EVALUATED' || outcome === 'BUSY')).toBe(true);

@@ -145,11 +145,12 @@ export class OpsAlertEvaluator {
 
   async evaluateOnly(now: Date = new Date()): Promise<EvaluationOutcome> {
     try {
-      await this.prisma.opsAlertEngineState.upsert({
-        where: { id: OPS_ALERT_ENGINE_STATE_ID },
-        create: { id: OPS_ALERT_ENGINE_STATE_ID, lastStartedAt: now },
-        update: { lastStartedAt: now },
-      });
+      // One atomic statement: evaluators starting together on an empty table
+      // must not race a read-then-insert into a unique violation.
+      await this.prisma.$executeRaw`
+        INSERT INTO "OpsAlertEngineState" ("id", "lastStartedAt", "updatedAt")
+        VALUES (${OPS_ALERT_ENGINE_STATE_ID}, ${now}, ${now})
+        ON CONFLICT ("id") DO UPDATE SET "lastStartedAt" = EXCLUDED."lastStartedAt", "updatedAt" = EXCLUDED."updatedAt"`;
       const { jobs } = await this.health.readSchedulerFacts(now);
       const config = readOpsAlertConfigSafely();
 
@@ -184,11 +185,11 @@ export class OpsAlertEvaluator {
       const type = errorType(error);
       this.logger.error(`ops alert evaluation failed (${type})`);
       try {
-        await this.prisma.opsAlertEngineState.upsert({
-          where: { id: OPS_ALERT_ENGINE_STATE_ID },
-          create: { id: OPS_ALERT_ENGINE_STATE_ID, lastFailedAt: now, lastErrorType: type },
-          update: { lastFailedAt: now, lastErrorType: type },
-        });
+        await this.prisma.$executeRaw`
+          INSERT INTO "OpsAlertEngineState" ("id", "lastFailedAt", "lastErrorType", "updatedAt")
+          VALUES (${OPS_ALERT_ENGINE_STATE_ID}, ${now}, ${type}, ${now})
+          ON CONFLICT ("id") DO UPDATE SET "lastFailedAt" = EXCLUDED."lastFailedAt",
+            "lastErrorType" = EXCLUDED."lastErrorType", "updatedAt" = EXCLUDED."updatedAt"`;
       } catch {
         // The database is the likely cause; the log line above is the record.
       }
