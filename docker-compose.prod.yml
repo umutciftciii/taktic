@@ -195,6 +195,15 @@ services:
       RESEND_TIMEOUT_MS: ${RESEND_TIMEOUT_MS:-}
       SUPPORT_EMAIL: ${SUPPORT_EMAIL:-}
       SUPPORT_INBOX_EMAIL: ${SUPPORT_INBOX_EMAIL:-}
+      # OBS-ALERT-001: operations alerts. Production refuses to boot with no
+      # channel; staging boots and warns. The bot token is a credential: api
+      # only, never logged, never in a response. OPS_ALERT_CRON is the
+      # evaluator's cadence (default every five minutes).
+      OPS_ALERT_EMAIL: ${OPS_ALERT_EMAIL:-}
+      OPS_ALERT_TELEGRAM_BOT_TOKEN: ${OPS_ALERT_TELEGRAM_BOT_TOKEN:-}
+      OPS_ALERT_TELEGRAM_CHAT_ID: ${OPS_ALERT_TELEGRAM_CHAT_ID:-}
+      OPS_ALERT_TELEGRAM_TIMEOUT_MS: ${OPS_ALERT_TELEGRAM_TIMEOUT_MS:-}
+      OPS_ALERT_CRON: ${OPS_ALERT_CRON:-}
       COMPANY_LEGAL_NAME: ${COMPANY_LEGAL_NAME:-}
       COMPANY_POSTAL_ADDRESS: ${COMPANY_POSTAL_ADDRESS:-}
       # Payment provider. Same sandbox-only contract as docker-compose.yml:

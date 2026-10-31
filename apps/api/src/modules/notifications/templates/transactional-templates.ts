@@ -258,6 +258,14 @@ export const TRANSACTIONAL_EMAIL_TEMPLATES = [
   // it took and what it does not touch (the run, the leads, the offers already
   // given) — never the reason code, the operator's note or who did it.
   'showcase-allowance-voided',
+  // OBS-ALERT-001: an operations alert to OPS_ALERT_EMAIL — a job failed or
+  // is late, or e-mail is failing. Sent by the alert engine straight through
+  // NotificationPort, never through the dispatcher: it writes no
+  // NotificationLog row, so its own failure can never become the e-mail
+  // failure it would then alert about. It carries a job key or an error
+  // class, counters, times, the event id and one fixed panel link — never an
+  // address, a message, a token or a provider's error text.
+  'ops-alert',
 ] as const;
 
 export type TransactionalEmailTemplate = (typeof TRANSACTIONAL_EMAIL_TEMPLATES)[number];
@@ -402,6 +410,8 @@ export function transactionalSubject(
       return withSuffix('Vitrin yayınınız sona erdi', text(data.cardTitle));
     case 'showcase-allowance-voided':
       return withSuffix('Vitrin ücretsiz teklif hakkınız iptal edildi', text(data.cardTitle));
+    case 'ops-alert':
+      return opsAlertSubject(data);
     case 'request-removed':
       return 'Talebiniz yayından kaldırıldı';
     case 'request-report-new-for-support':
@@ -601,6 +611,8 @@ export function buildDocument(
       return showcasePlacementExpired(subject, fullName, data);
     case 'showcase-allowance-voided':
       return showcaseAllowanceVoided(subject, fullName, data);
+    case 'ops-alert':
+      return opsAlert(subject, fullName, data);
     case 'request-removed':
       return requestRemoved(subject, fullName, data);
     case 'request-report-new-for-support':
@@ -2026,6 +2038,61 @@ function removedRequestSubject(requestNumber: string | null, categoryName: strin
  * in the panel, where it sits next to the request it is about and behind the
  * operator's own session, and nowhere else.
  */
+/**
+ * OBS-ALERT-001: the subject an operator triages by. The notice kind and the
+ * severity lead, then what is affected; the event id closes it so a reminder
+ * and its recovery thread together in a mail client.
+ */
+function opsAlertSubject(data: Data): string {
+  const kind =
+    text(data.noticeKind) === 'RESOLVED' ? 'Düzeldi' : text(data.noticeKind) === 'REMINDER' ? 'Sürüyor' : 'Yeni sorun';
+  const level = text(data.severity) === 'CRITICAL' ? 'KRİTİK' : 'UYARI';
+  const what = [text(data.subjectLabel), text(data.conditionLabel)].filter(Boolean).join(' — ');
+  const prefix = text(data.noticeKind) === 'RESOLVED' ? `[TakTick operasyon] ${kind}` : `[TakTick operasyon · ${level}] ${kind}`;
+  return withSuffix(`${prefix}: ${what || 'operasyon uyarısı'}`, text(data.alertRef));
+}
+
+/**
+ * OBS-ALERT-001: one operations notice. Every value is a label, a count, a
+ * formatted time or the event id the alert engine composed (ops-alert.rules.ts);
+ * the only link is the system health screen, with no parameter.
+ */
+function opsAlert(subject: string, fullName: string, data: Data): EmailDocument {
+  const resolved = text(data.noticeKind) === 'RESOLVED';
+  const heading = resolved
+    ? 'Operasyon sorunu düzeldi'
+    : text(data.noticeKind) === 'REMINDER'
+      ? 'Operasyon sorunu sürüyor'
+      : 'Yeni operasyon sorunu';
+  return {
+    subject,
+    preheader: text(data.summary) ?? heading,
+    audience: 'OPERASYON',
+    kicker: resolved ? 'Düzeldi' : text(data.severity) === 'CRITICAL' ? 'Kritik' : 'Uyarı',
+    heading,
+    fullName,
+    accountUrl: null,
+    blocks: compact([
+      paragraph(text(data.summary) ?? heading),
+      spacer(4),
+      dataTable([
+        row('Olay kimliği', text(data.alertRef)),
+        row('Kaynak', text(data.sourceLabel)),
+        row('İlgili işlem', text(data.subjectLabel)),
+        row('Hata türü', text(data.conditionLabel)),
+        row('Önem', text(data.severityLabel)),
+        row('İlk görülme', text(data.firstSeenAt)),
+        row('Son görülme', text(data.lastSeenAt)),
+        row('Tekrar sayısı', text(data.occurrenceCount)),
+        row('Etkilenen şablonlar', text(data.templates)),
+        row('Kapanış', text(data.resolvedAt)),
+      ]),
+      spacer(24),
+      cta('Sistem sağlığını aç', text(data.adminUrl), 'primary'),
+    ]),
+  };
+}
+
 function requestReportNewForSupport(subject: string, fullName: string, data: Data): EmailDocument {
   return {
     subject,

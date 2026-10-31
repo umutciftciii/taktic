@@ -8,6 +8,7 @@ import { assertPhoneVerificationTestBypassConfig } from './modules/phone-verific
 import { assertProviderClaimConfig } from './modules/provider-claim/provider-claim.config';
 import { assertTurnstileConfig } from './modules/turnstile/turnstile.config';
 import { assertPromotionFingerprintConfig } from './modules/business-registration/promotion-fingerprint';
+import { assertOpsAlertConfig } from './modules/ops-alerts/ops-alert.config';
 
 /**
  * Every configuration check the API makes before it is allowed to start, in
@@ -93,6 +94,12 @@ export const BOOT_CONFIG_CHECKS: ReadonlyArray<{ name: string; assert: () => voi
   { name: 'turnstile', assert: assertTurnstileConfig },
 
   { name: 'promotion-fingerprint', assert: assertPromotionFingerprintConfig },
+
+  // OBS-ALERT-001: the operations alert channels. A malformed value or half of
+  // the Telegram pair stops the process, and so does a production with no
+  // channel at all — it would fail without telling anyone. Values are never
+  // echoed: the bot token is a credential.
+  { name: 'ops-alert', assert: assertOpsAlertConfig },
 ];
 
 /** main.ts: every check, in order, stopping the process on the first refusal. */

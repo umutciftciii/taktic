@@ -10,6 +10,7 @@ import { EmailVerificationModule } from './modules/email-verification/email-veri
 import { EntitlementsModule } from './modules/entitlements/entitlements.module';
 import { HealthModule } from './modules/health/health.module';
 import { SystemHealthModule } from './modules/system-health/system-health.module';
+import { OpsAlertsModule } from './modules/ops-alerts/ops-alerts.module';
 import { LocationsModule } from './modules/locations/locations.module';
 import { MessagingModule } from './modules/messaging/messaging.module';
 import { QuestionsModule } from './modules/questions/questions.module';
@@ -56,6 +57,7 @@ import { TurnstileModule } from './modules/turnstile/turnstile.module';
     ScheduleModule.forRoot(),
     HealthModule,
     SystemHealthModule,
+    OpsAlertsModule,
     PrismaModule,
     TurnstileModule,
     CampaignsModule,
