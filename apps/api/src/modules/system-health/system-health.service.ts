@@ -1,5 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { NotificationChannel, NotificationStatus, SchedulerRunStatus, SchedulerRunTrigger } from '@prisma/client';
+import { AppEnvironment, readAppEnvironment } from '../../common/app-environment';
 import { readSchedulerCron, readSeoNotFoundRetentionCron } from '../../common/scheduler-cron';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ReadinessService } from '../health/readiness.service';
@@ -32,6 +33,7 @@ import {
   evaluateEmail,
   evaluateProbe,
   evaluateSchedulerJob,
+  overallStatus,
   resolveProbeTarget,
   worstStatus,
 } from './system-health.rules';
@@ -152,7 +154,12 @@ export const NOT_MEASURED = [
 
 export type SystemHealthReport = {
   generatedAt: string;
-  /** Worst of the components below; the panel folds in its own API probe. */
+  /** The deployment this API says it is (APP_ENVIRONMENT); null when unset or unreadable. */
+  environment: AppEnvironment | null;
+  /**
+   * Worst of the core services; schedulers and e-mail count at most as
+   * DEGRADED (`overallStatus`). The panel folds in its own API probe.
+   */
   overall: HealthStatus;
   database: DatabaseReport;
   web: ProbeReport;
@@ -210,15 +217,17 @@ export class SystemHealthService {
       options.includeEmail ? this.cached('email', QUERY_CACHE_MS, () => this.measureEmail()) : undefined,
     ]);
 
-    const counted: HealthStatus[] = [database.status, web.status, admin.status, schedulers.status];
+    const core: HealthStatus[] = [database.status, web.status, admin.status];
+    const background: HealthStatus[] = [schedulers.status];
     // A quiet day is not a fault: e-mail with no traffic shows UNKNOWN in its
     // own section but does not hold the overall state at UNKNOWN. A failed
     // read (QUERY_FAILED) still counts.
-    if (email && email.reason !== 'NO_TRAFFIC') counted.push(email.status);
+    if (email && email.reason !== 'NO_TRAFFIC') background.push(email.status);
 
     return {
       generatedAt: new Date().toISOString(),
-      overall: worstStatus(counted),
+      environment: this.environment(),
+      overall: overallStatus(core, background),
       database,
       web,
       admin,
@@ -226,6 +235,15 @@ export class SystemHealthService {
       ...(email ? { email } : {}),
       notMeasured: NOT_MEASURED,
     };
+  }
+
+  /** A misspelt APP_ENVIRONMENT fails the boot elsewhere; here it only reads as unknown. */
+  private environment(): AppEnvironment | null {
+    try {
+      return readAppEnvironment();
+    } catch {
+      return null;
+    }
   }
 
   /** Drops every held measurement. Tests use it; nothing in the app does. */

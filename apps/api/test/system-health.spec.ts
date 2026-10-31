@@ -18,6 +18,10 @@ import {
   evaluateEmail,
   evaluateProbe,
   evaluateSchedulerJob,
+  HEALTH_STATUSES,
+  type HealthStatus,
+  capBackgroundStatus,
+  overallStatus,
   resolveProbeTarget,
   worstStatus,
 } from '../src/modules/system-health/system-health.rules';
@@ -49,6 +53,48 @@ describe('rules', () => {
     expect(worstStatus(['HEALTHY', 'UNKNOWN'])).toBe('UNKNOWN');
     expect(worstStatus(['UNKNOWN', 'DEGRADED', 'HEALTHY'])).toBe('DEGRADED');
     expect(worstStatus(['DEGRADED', 'DOWN', 'UNKNOWN'])).toBe('DOWN');
+  });
+
+  describe('overall state (ADMIN-SYSTEM-HEALTH-002)', () => {
+    it('lets only a core service make the system DOWN; background counts as DEGRADED at most', () => {
+      expect(capBackgroundStatus('DOWN')).toBe('DEGRADED');
+      expect(capBackgroundStatus('DEGRADED')).toBe('DEGRADED');
+      expect(capBackgroundStatus('UNKNOWN')).toBe('UNKNOWN');
+      expect(capBackgroundStatus('HEALTHY')).toBe('HEALTHY');
+
+      // A late or failing job beside healthy services: a problem, not an outage.
+      expect(overallStatus(['HEALTHY', 'HEALTHY', 'HEALTHY'], ['DOWN'])).toBe('DEGRADED');
+      expect(overallStatus(['HEALTHY', 'HEALTHY', 'HEALTHY'], ['DOWN', 'DOWN'])).toBe('DEGRADED');
+      // A core service down is DOWN, whatever the background says.
+      expect(overallStatus(['DOWN', 'HEALTHY', 'HEALTHY'], ['HEALTHY'])).toBe('DOWN');
+      expect(overallStatus(['HEALTHY', 'DOWN', 'HEALTHY'], ['DOWN'])).toBe('DOWN');
+      // UNKNOWN keeps its place: an unmeasured part is never read as health…
+      expect(overallStatus(['HEALTHY', 'HEALTHY', 'HEALTHY'], ['UNKNOWN'])).toBe('UNKNOWN');
+      expect(overallStatus(['HEALTHY', 'UNKNOWN', 'HEALTHY'], ['HEALTHY'])).toBe('UNKNOWN');
+      // …and never hides a real problem beside it.
+      expect(overallStatus(['HEALTHY', 'UNKNOWN', 'HEALTHY'], ['DOWN'])).toBe('DEGRADED');
+      expect(overallStatus(['DEGRADED', 'HEALTHY', 'HEALTHY'], ['UNKNOWN'])).toBe('DEGRADED');
+      expect(overallStatus(['DOWN', 'UNKNOWN', 'HEALTHY'], ['UNKNOWN'])).toBe('DOWN');
+      expect(overallStatus(['HEALTHY', 'HEALTHY', 'HEALTHY'], [])).toBe('HEALTHY');
+      expect(overallStatus([], [])).toBe('UNKNOWN');
+    });
+
+    it('holds for every combination of one core and one background state', () => {
+      const severity = (status: HealthStatus) => ['HEALTHY', 'UNKNOWN', 'DEGRADED', 'DOWN'].indexOf(status);
+      for (const core of HEALTH_STATUSES) {
+        for (const background of HEALTH_STATUSES) {
+          const overall = overallStatus([core], [background]);
+          // DOWN comes from the core and only from the core.
+          expect(overall === 'DOWN').toBe(core === 'DOWN');
+          // Nothing reads better than the core it contains, and HEALTHY needs both.
+          expect(severity(overall)).toBeGreaterThanOrEqual(severity(core));
+          expect(overall === 'HEALTHY').toBe(core === 'HEALTHY' && background === 'HEALTHY');
+          // A background problem always shows: never masked by UNKNOWN or HEALTHY.
+          if (background === 'DOWN' || background === 'DEGRADED') expect(severity(overall)).toBeGreaterThanOrEqual(severity('DEGRADED'));
+          if (background === 'UNKNOWN' && core === 'HEALTHY') expect(overall).toBe('UNKNOWN');
+        }
+      }
+    });
   });
 
   describe('probe targets', () => {
@@ -567,8 +613,74 @@ describe('GET /system-health', () => {
         });
       }
       const response = await fetchReport(await superAdminSession()).expect(200);
+      // The channel reads DOWN on its own; the system serving people is DEGRADED.
       expect(response.body.email).toMatchObject({ status: 'DOWN', reason: 'MOSTLY_FAILING' });
-      expect(response.body.overall).toBe('DOWN');
+      expect(response.body.overall).toBe('DEGRADED');
+    });
+
+    it('reads a job three ticks late as DEGRADED overall, while the job keeps its DOWN, its reason and its count', async () => {
+      await seoRanJustNow();
+      vi.stubEnv('REQUEST_REMINDER_SCHEDULER_CRON', '45 * * * *');
+      await switchOn('requestReminderSchedulerEnabled');
+      await ctx.prisma.schedulerRun.create({
+        data: { jobKey: 'request-reminder', status: 'SUCCESS', startedAt: ago(6 * HOUR), finishedAt: ago(6 * HOUR) },
+      });
+      const response = await fetchReport(await superAdminSession()).expect(200);
+      const reminder = response.body.schedulers.jobs.find((job: { key: string }) => job.key === 'request-reminder');
+      expect(reminder).toMatchObject({ enabled: true, status: 'DOWN', reason: 'OVERDUE', missedTicks: 3 });
+      expect(response.body.schedulers.status).toBe('DOWN');
+      expect(response.body.overall).toBe('DEGRADED');
+    });
+
+    it('reads a job that keeps failing as DEGRADED overall, and a core service down as DOWN beside it', async () => {
+      await switchOn('requestExpirySchedulerEnabled');
+      await seoRanJustNow();
+      for (const minutes of [3, 2, 1]) {
+        await ctx.prisma.schedulerRun.create({
+          data: { jobKey: 'request-expiry', status: 'FAILED', startedAt: ago(minutes * 60_000), finishedAt: ago(minutes * 60_000), errorCode: 'Error' },
+        });
+      }
+      const cookie = await superAdminSession();
+      const failing = await fetchReport(cookie).expect(200);
+      const expiry = failing.body.schedulers.jobs.find((job: { key: string }) => job.key === 'request-expiry');
+      expect(expiry).toMatchObject({ status: 'DOWN', reason: 'REPEATED_FAILURES' });
+      expect(failing.body.overall).toBe('DEGRADED');
+
+      service().clearCache();
+      web.respond = (_req, res) => {
+        res.writeHead(502);
+        res.end();
+      };
+      expect((await fetchReport(cookie).expect(200)).body.overall).toBe('DOWN');
+    });
+
+    it('keeps a switched-off job out of the state entirely', async () => {
+      await seoRanJustNow();
+      // Off, with a stale run that would be badly overdue were it on.
+      await ctx.prisma.schedulerRun.create({
+        data: { jobKey: 'request-reminder', status: 'FAILED', startedAt: ago(48 * HOUR), finishedAt: ago(48 * HOUR), errorCode: 'Error' },
+      });
+      const response = await fetchReport(await superAdminSession()).expect(200);
+      const reminder = response.body.schedulers.jobs.find((job: { key: string }) => job.key === 'request-reminder');
+      expect(reminder).toMatchObject({ enabled: false, status: 'UNKNOWN', reason: 'DISABLED' });
+      expect(response.body.overall).toBe('HEALTHY');
+    });
+  });
+
+  describe('environment', () => {
+    it('says which deployment answered, from APP_ENVIRONMENT, and unknown when it is unset or misspelt', async () => {
+      const cookie = await superAdminSession();
+      for (const [value, expected] of [
+        ['local', 'local'],
+        ['staging', 'staging'],
+        ['production', 'production'],
+        ['', null],
+        ['prod', null],
+      ] as const) {
+        vi.stubEnv('APP_ENVIRONMENT', value);
+        const response = await fetchReport(cookie).expect(200);
+        expect(response.body.environment).toBe(expected);
+      }
     });
   });
 });

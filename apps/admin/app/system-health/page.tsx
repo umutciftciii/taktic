@@ -17,16 +17,21 @@ import {
   type ApiReachability,
   DATABASE_REASON_TEXT,
   EMAIL_REASON_TEXT,
+  ENVIRONMENT_BADGES,
+  ENVIRONMENT_LABELS,
   HEALTH_STATUS_BADGES,
   HEALTH_STATUS_LABELS,
   type HealthStatus,
+  JOB_STATE_LABELS,
   NOT_MEASURED_TEXT,
   PROBE_REASON_TEXT,
   SCHEDULER_ERROR_TYPE_TEXT,
   SCHEDULER_REASON_TEXT,
   type SystemHealthReport,
   apiReachability,
+  jobState,
   schedulerJobName,
+  schedulerSummaryLabel,
   worstStatus,
 } from '../../lib/system-health';
 import { HealthRefresh } from './health-refresh';
@@ -77,7 +82,9 @@ const FAILURE_COLUMNS: DataColumn[] = [
 const SCREEN_INFO = (
   <>
     Platformun bileşenlerini ölçülebilen verilerle gösterir: Sağlıklı, Sorunlu, Çalışmıyor ya da Bilinmiyor.
-    Ölçülemeyen bir şey hiçbir zaman Sağlıklı gösterilmez. Web ve admin kontrolleri sunucunun iç ağından yapılır;
+    Ölçülemeyen bir şey hiçbir zaman Sağlıklı gösterilmez. Genel durumu yalnız temel servisler (API, veritabanı,
+    web, admin) Çalışmıyor yapar; zamanlanmış iş ve e-posta sorunları genel durumu en fazla Sorunlu yapar ve kendi
+    satırlarında gerçek durumlarıyla görünür. Web ve admin kontrolleri sunucunun iç ağından yapılır;
     dışarıdan erişilebilirliği (uptime) göstermez. Bu ekran hiçbir işi başlatmaz, durdurmaz ya da yeniden denemez.
   </>
 );
@@ -86,6 +93,15 @@ function StatusBadge({ status, testId }: { status: HealthStatus; testId?: string
   return (
     <span className={HEALTH_STATUS_BADGES[status]} data-testid={testId} data-status={status}>
       {HEALTH_STATUS_LABELS[status]}
+    </span>
+  );
+}
+
+function EnvironmentBadge({ environment }: { environment: SystemHealthReport['environment'] | undefined }) {
+  const key = environment ?? 'unset';
+  return (
+    <span className={ENVIRONMENT_BADGES[key]} data-testid="system-health-environment" data-environment={key}>
+      {ENVIRONMENT_LABELS[key]}
     </span>
   );
 }
@@ -115,6 +131,7 @@ export default async function SystemHealthPage() {
 
   const overall = report ? worstStatus([api.status, report.overall]) : worstStatus([api.status, 'UNKNOWN']);
   const generatedAtLabel = formatTime(report?.generatedAt ?? api.checkedAt);
+  const lateJobs = report ? report.schedulers.jobs.filter((job) => jobState(job) === 'LATE').length : 0;
 
   const failures = [
     ...(report?.schedulers.recentFailures ?? []).map((failure) => ({
@@ -143,7 +160,8 @@ export default async function SystemHealthPage() {
         title="Sistem sağlığı"
         subtitle={
           <>
-            Genel durum: <StatusBadge status={overall} testId="system-health-overall" />
+            Genel durum: <StatusBadge status={overall} testId="system-health-overall" /> · Ortam:{' '}
+            <EnvironmentBadge environment={report?.environment} />
           </>
         }
         info={SCREEN_INFO}
@@ -154,6 +172,13 @@ export default async function SystemHealthPage() {
         Web ve admin kontrolleri sunucunun iç ağından yapılır ve yalnız uygulamanın yanıt verdiğini gösterir;
         kullanıcıların siteye dışarıdan erişebildiği anlamına gelmez.
       </div>
+
+      {report?.environment === 'local' && lateJobs > 0 ? (
+        <div className="notice notice-warning" data-testid="system-health-local-late-note">
+          Yerel ortam: bilgisayar ya da Docker kapalıyken zamanlanmış işler çalışmaz ve kaçırılan çalışmalar sonradan
+          yapılmaz. Gecikmiş görünen işler bu yüzden olabilir; servisler çalıştığı sürece bu bir sistem kesintisi değildir.
+        </div>
+      ) : null}
 
       {report ? null : (
         <div className="notice notice-error" role="alert" data-testid="system-health-unavailable">
@@ -216,13 +241,20 @@ export default async function SystemHealthPage() {
           <SectionCard
             title={
               <>
-                Zamanlanmış işler <StatusBadge status={report.schedulers.status} testId="system-health-schedulers-status" />
+                Zamanlanmış işler{' '}
+                <span
+                  className={HEALTH_STATUS_BADGES[report.schedulers.status]}
+                  data-testid="system-health-schedulers-status"
+                  data-status={report.schedulers.status}
+                >
+                  {schedulerSummaryLabel(report.schedulers)}
+                </span>
               </>
             }
             subtitle={
               report.schedulers.reason === 'QUERY_FAILED'
                 ? 'Çalışma kayıtları okunamadı.'
-                : `Kapalı işler genel duruma katılmaz. Son kontrol ${formatDateTime(report.schedulers.checkedAt)}.`
+                : `Kapalı işler hesaba katılmaz; gecikmiş ya da başarısız işler genel durumu en fazla Sorunlu yapar. Son kontrol ${formatDateTime(report.schedulers.checkedAt)}.`
             }
             actions={
               <Link className="btn btn-secondary btn-sm" href="/operations-settings">
@@ -237,7 +269,13 @@ export default async function SystemHealthPage() {
                 <tr key={job.key} data-testid={`system-health-job-${job.key}`}>
                   <td>{schedulerJobName(job.key)}</td>
                   <td>
-                    {job.enabled ? <StatusBadge status={job.status} /> : <span className="badge badge-muted">Kapalı</span>}
+                    <span
+                      className={job.enabled ? HEALTH_STATUS_BADGES[job.status] : 'badge badge-muted'}
+                      data-status={job.status}
+                      data-job-state={jobState(job)}
+                    >
+                      {JOB_STATE_LABELS[jobState(job)]}
+                    </span>
                   </td>
                   <td>
                     {SCHEDULER_REASON_TEXT[job.reason]}

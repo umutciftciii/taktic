@@ -57,8 +57,13 @@ export type SystemHealthJob = {
 
 export type EmailReason = 'OK' | 'NO_TRAFFIC' | 'FAILURES' | 'MOSTLY_FAILING' | 'STUCK_PENDING' | 'QUERY_FAILED';
 
+export type AppEnvironment = 'local' | 'staging' | 'production';
+
 export type SystemHealthReport = {
   generatedAt: string;
+  /** The deployment the API says it is; null when it has not said. */
+  environment: AppEnvironment | null;
+  /** Core services decide DOWN; schedulers and e-mail count at most as DEGRADED. */
   overall: HealthStatus;
   database: Component<'OK' | 'SLOW' | 'TIMEOUT' | 'UNREACHABLE'> & {
     latencyMs: number;
@@ -114,6 +119,70 @@ const SEVERITY: Record<HealthStatus, number> = { HEALTHY: 0, UNKNOWN: 1, DEGRADE
 export function worstStatus(statuses: readonly HealthStatus[]): HealthStatus {
   if (statuses.length === 0) return 'UNKNOWN';
   return statuses.reduce((worst, next) => (SEVERITY[next] > SEVERITY[worst] ? next : worst));
+}
+
+export const ENVIRONMENT_LABELS: Record<AppEnvironment | 'unset', string> = {
+  local: 'Yerel',
+  staging: 'Staging',
+  production: 'Production',
+  unset: 'Belirtilmemiş',
+};
+
+export const ENVIRONMENT_BADGES: Record<AppEnvironment | 'unset', string> = {
+  local: 'badge badge-muted',
+  staging: 'badge badge-info',
+  production: 'badge badge-info',
+  unset: 'badge badge-muted',
+};
+
+/**
+ * A job's own word, kept apart from the health scale: a job that failed, one
+ * that is late and one that is switched off are three different situations,
+ * and "Çalışmıyor" would blur the first two into an outage. The badge colour
+ * still follows the job's real state, so three missed ticks stay red.
+ */
+export type JobState = 'OK' | 'RUNNING' | 'FAILED' | 'LATE' | 'OFF' | 'NO_DATA';
+
+export const JOB_STATE_LABELS: Record<JobState, string> = {
+  OK: 'Sağlıklı',
+  RUNNING: 'Çalışıyor',
+  FAILED: 'Başarısız',
+  LATE: 'Gecikmiş',
+  OFF: 'Kapalı',
+  NO_DATA: 'Bilinmiyor',
+};
+
+export function jobState(job: Pick<SystemHealthJob, 'enabled' | 'reason'>): JobState {
+  if (!job.enabled || job.reason === 'DISABLED') return 'OFF';
+  switch (job.reason) {
+    case 'LAST_RUN_SUCCEEDED':
+      return 'OK';
+    case 'RUNNING':
+      return 'RUNNING';
+    case 'OVERDUE':
+      return 'LATE';
+    case 'LAST_RUN_FAILED':
+    case 'LAST_RUN_INTERRUPTED':
+    case 'REPEATED_FAILURES':
+      return 'FAILED';
+    default:
+      return 'NO_DATA';
+  }
+}
+
+/**
+ * The scheduler section's heading badge: how many running jobs failed or are
+ * late, in the section's real colour — or the plain state when none are.
+ */
+export function schedulerSummaryLabel(
+  section: Pick<SystemHealthReport['schedulers'], 'status' | 'reason' | 'jobs'>,
+): string {
+  if (section.reason === 'QUERY_FAILED') return HEALTH_STATUS_LABELS.UNKNOWN;
+  const states = section.jobs.map(jobState);
+  const failed = states.filter((state) => state === 'FAILED').length;
+  const late = states.filter((state) => state === 'LATE').length;
+  const parts = [failed ? `${failed} başarısız` : null, late ? `${late} gecikmiş` : null].filter(Boolean);
+  return parts.length ? parts.join(', ') : HEALTH_STATUS_LABELS[section.status];
 }
 
 export const PROBE_REASON_TEXT: Record<ProbeReason, string> = {
