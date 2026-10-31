@@ -39,6 +39,7 @@ const {
   PROBE_REASON_TEXT,
   SCHEDULER_REASON_TEXT,
   EMAIL_REASON_TEXT,
+  OPS_ALERT_ENGINE_REASON_TEXT,
 } = await import('../lib/system-health');
 
 const read = (path: string) => readFileSync(resolve(__dirname, '..', path), 'utf8');
@@ -96,7 +97,54 @@ function report(overrides: Partial<SystemHealthReport> = {}): SystemHealthReport
         { id: 'log_1', template: 'offer-received', errorCode: 'UNKNOWN', errorLabel: 'Bilinmeyen hata', at: NOW },
       ],
     },
+    alerts: alertsBlock(),
     notMeasured: ['EXTERNAL_UPTIME', 'BACKUPS', 'HOST_RESOURCES', 'CAMPAIGN_EVALUATION_WORKER'],
+    ...overrides,
+  };
+}
+
+function alertsBlock(overrides: Partial<NonNullable<SystemHealthReport['alerts']>> = {}): NonNullable<SystemHealthReport['alerts']> {
+  return {
+    status: 'HEALTHY',
+    reason: 'OK',
+    checkedAt: NOW,
+    engine: { cron: '*/5 * * * *', missedTicks: 0, lastStartedAt: NOW, lastSucceededAt: NOW, lastFailedAt: null, lastErrorType: null },
+    channels: { email: true, telegram: true },
+    open: [
+      {
+        ref: 'OPS-ABCDEFGH23',
+        source: 'SCHEDULER',
+        subjectKey: 'request-expiry',
+        condition: 'DATABASE_ERROR',
+        severity: 'CRITICAL',
+        state: 'OPEN',
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+        occurrenceCount: 3,
+        resolvedAt: null,
+        resolution: null,
+        deliveries: [
+          { kind: 'OPENED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null },
+          { kind: 'OPENED', sequence: 0, channel: 'TELEGRAM', status: 'FAILED', attemptCount: 2, sentAt: null, errorCode: 'TIMEOUT' },
+        ],
+      },
+    ],
+    recentlyResolved: [
+      {
+        ref: 'OPS-ZXCVBNM234',
+        source: 'EMAIL',
+        subjectKey: 'TRANSPORT_UNAVAILABLE',
+        condition: 'SEND_FAILURES',
+        severity: 'CRITICAL',
+        state: 'RESOLVED',
+        firstSeenAt: NOW,
+        lastSeenAt: NOW,
+        occurrenceCount: 5,
+        resolvedAt: NOW,
+        resolution: 'RECOVERED',
+        deliveries: [{ kind: 'RESOLVED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null }],
+      },
+    ],
     ...overrides,
   };
 }
@@ -278,6 +326,57 @@ describe('the page', () => {
       apiMocks.apiFetch.mockResolvedValue(report({ overall }));
       expect(await renderPage()).toContain(`data-testid="system-health-overall" data-status="${overall}"`);
     }
+  });
+
+  describe('operations alerts (OBS-ALERT-001)', () => {
+    it('draws the engine, the channels, open and recently closed alerts with per-channel delivery', async () => {
+      apiMocks.apiFetch.mockResolvedValue(report());
+      const markup = await renderPage();
+      expect(markup).toContain('data-testid="system-health-alerts-status" data-status="HEALTHY"');
+      expect(markup).toContain('Son başarılı değerlendirme');
+      expect(markup).toContain('data-channel="telegram" data-configured="true"');
+      expect(markup).toContain('data-testid="system-health-alert-OPS-ABCDEFGH23"');
+      expect(markup).toContain('Talep süresi dolumu');
+      expect(markup).toContain('Telegram: Açılış — Yeniden denenecek (2. deneme)');
+      expect(markup).toContain('E-posta: Açılış — Gönderildi');
+      expect(markup).toContain('data-testid="system-health-resolved-alert-OPS-ZXCVBNM234"');
+      expect(markup).toContain('E-posta · Taşıma servisi kullanılamıyor');
+      expect(markup).toContain('Düzeldi');
+    });
+
+    it('shows a late engine as late, and says when no channel is configured', async () => {
+      apiMocks.apiFetch.mockResolvedValue(
+        report({
+          alerts: alertsBlock({
+            status: 'DOWN',
+            reason: 'OVERDUE',
+            engine: { cron: '*/5 * * * *', missedTicks: 3, lastStartedAt: null, lastSucceededAt: null, lastFailedAt: null, lastErrorType: null },
+            channels: { email: false, telegram: false },
+            open: [],
+            recentlyResolved: [],
+          }),
+        }),
+      );
+      const markup = await renderPage();
+      expect(markup).toContain('data-testid="system-health-alerts-status" data-status="DOWN"');
+      expect(markup).toContain(OPS_ALERT_ENGINE_REASON_TEXT.OVERDUE);
+      expect(markup).toContain('kaçırılan çalışma: 3 veya daha fazla');
+      expect(markup).toContain('data-testid="system-health-alerts-no-channel"');
+      expect(markup).toContain('data-testid="system-health-alerts-none"');
+    });
+
+    it('says e-mail alerts are withheld when the e-mail block is', async () => {
+      const { email: _omitted, ...withoutEmail } = report();
+      apiMocks.apiFetch.mockResolvedValue(withoutEmail);
+      const markup = await renderPage();
+      expect(markup).toContain('data-testid="system-health-alerts-email-hidden"');
+    });
+
+    it('has Turkish copy for every engine reason', () => {
+      for (const reason of ['OK', 'NEVER_RAN', 'OVERDUE', 'LAST_EVALUATION_FAILED', 'QUERY_FAILED'] as const) {
+        expect(OPS_ALERT_ENGINE_REASON_TEXT[reason]).toMatch(/\S/);
+      }
+    });
   });
 
   it('is read-only: no form, no server action, no write call', () => {

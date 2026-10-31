@@ -83,6 +83,19 @@ describe('the staging runtime contract', () => {
     expect(refused()['promotion-fingerprint']).not.toContain('x'.repeat(31));
   });
 
+  it('boots staging without an alert channel, and refuses production without one (OBS-ALERT-001)', () => {
+    expect(refused()).not.toHaveProperty('ops-alert');
+
+    process.env.APP_ENVIRONMENT = 'production';
+    expect(refused()['ops-alert']).toMatch(/requires an operations alert channel/);
+    process.env.OPS_ALERT_EMAIL = 'ops@example.test';
+    expect(refused()).not.toHaveProperty('ops-alert');
+
+    process.env.OPS_ALERT_TELEGRAM_BOT_TOKEN = '123456789:placeholderNotARealTelegramBotToken00';
+    expect(refused()['ops-alert']).toMatch(/set together or not at all/);
+    expect(refused()['ops-alert']).not.toContain('placeholderNotARealTelegramBotToken');
+  });
+
   it('reports every refusal in one run instead of stopping at the first', () => {
     delete process.env.PROMOTION_FINGERPRINT_KEY;
     delete process.env.LEMON_SQUEEZY_API_KEY;
@@ -127,6 +140,7 @@ describe('the staging runtime contract', () => {
       'phone-verification-test-bypass',
       'turnstile',
       'promotion-fingerprint',
+      'ops-alert',
     ]);
   });
 });

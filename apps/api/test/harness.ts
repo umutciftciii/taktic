@@ -261,6 +261,10 @@ const TRUNCATED_TABLES = [
   'AuthAttemptCounter',
   // OPS-SCHEDULER-RUN-PERSISTENCE-001: append-only run history, no FK.
   'SchedulerRun',
+  // OBS-ALERT-001: alert history, its deliveries and the engine's state row.
+  'OpsAlertDelivery',
+  'OpsAlert',
+  'OpsAlertEngineState',
   // ADMIN-ACTION-AUDIT-001: append-only audit rows, children of User,
   // ProviderProfile and (by id only) the catalogue. TRUNCATE does not fire the
   // append-only triggers.

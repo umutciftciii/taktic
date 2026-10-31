@@ -24,12 +24,20 @@ import {
   type HealthStatus,
   JOB_STATE_LABELS,
   NOT_MEASURED_TEXT,
+  OPS_ALERT_CONDITION_TEXT,
+  OPS_ALERT_ENGINE_REASON_TEXT,
+  OPS_ALERT_RESOLUTION_TEXT,
+  OPS_ALERT_SEVERITY_BADGES,
+  OPS_ALERT_SEVERITY_LABELS,
+  type OpsAlertView,
   PROBE_REASON_TEXT,
   SCHEDULER_ERROR_TYPE_TEXT,
   SCHEDULER_REASON_TEXT,
   type SystemHealthReport,
   apiReachability,
   jobState,
+  opsAlertChannelSummary,
+  opsAlertSubject,
   schedulerJobName,
   schedulerSummaryLabel,
   worstStatus,
@@ -78,6 +86,47 @@ const FAILURE_COLUMNS: DataColumn[] = [
   { key: 'subject', label: 'İş / şablon' },
   { key: 'type', label: 'Hata türü' },
 ];
+
+const ALERT_COLUMNS: DataColumn[] = [
+  { key: 'ref', label: 'Olay' },
+  { key: 'subject', label: 'İş / kaynak' },
+  { key: 'condition', label: 'Hata türü' },
+  { key: 'severity', label: 'Önem' },
+  { key: 'seen', label: 'İlk / son görülme' },
+  { key: 'count', label: 'Tekrar', align: 'end' },
+  { key: 'channels', label: 'Bildirim' },
+];
+
+function AlertRows({ alerts, testId }: { alerts: OpsAlertView[]; testId: string }) {
+  return (
+    <>
+      {alerts.map((alert) => (
+        <tr key={alert.ref} data-testid={`${testId}-${alert.ref}`} data-alert-state={alert.state}>
+          <td>
+            <code>{alert.ref}</code>
+          </td>
+          <td>{opsAlertSubject(alert)}</td>
+          <td>
+            {OPS_ALERT_CONDITION_TEXT[alert.condition] ?? alert.condition}
+            {alert.state === 'RESOLVED' && alert.resolution
+              ? ` · ${OPS_ALERT_RESOLUTION_TEXT[alert.resolution] ?? alert.resolution} (${formatDateTime(alert.resolvedAt)})`
+              : ''}
+          </td>
+          <td>
+            <span className={OPS_ALERT_SEVERITY_BADGES[alert.severity]} data-severity={alert.severity}>
+              {OPS_ALERT_SEVERITY_LABELS[alert.severity]}
+            </span>
+          </td>
+          <td>
+            {formatDateTime(alert.firstSeenAt)} / {formatDateTime(alert.lastSeenAt)}
+          </td>
+          <td className="is-num">{alert.occurrenceCount}</td>
+          <td>{opsAlertChannelSummary(alert)}</td>
+        </tr>
+      ))}
+    </>
+  );
+}
 
 const SCREEN_INFO = (
   <>
@@ -346,6 +395,64 @@ export default async function SystemHealthPage() {
           <p className="muted" data-testid="system-health-email-hidden">
             E-posta bildirim sayıları, bildirim kayıtlarını görme yetkisi olan hesaplara gösterilir.
           </p>
+        ) : null}
+
+        {report?.alerts ? (
+          <SectionCard
+            title={
+              <>
+                Operasyon alarmları <StatusBadge status={report.alerts.status} testId="system-health-alerts-status" />
+              </>
+            }
+            subtitle={`${OPS_ALERT_ENGINE_REASON_TEXT[report.alerts.reason]} Son başarılı değerlendirme: ${
+              report.alerts.engine.lastSucceededAt ? formatDateTime(report.alerts.engine.lastSucceededAt) : 'kayıt yok'
+            }${
+              report.alerts.reason === 'OVERDUE'
+                ? ` · kaçırılan çalışma: ${report.alerts.engine.missedTicks >= 3 ? '3 veya daha fazla' : report.alerts.engine.missedTicks}`
+                : ''
+            }.`}
+            padded={false}
+            testId="system-health-alerts"
+          >
+            <div className="system-health-alert-channels" data-testid="system-health-alert-channels">
+              <span data-channel="telegram" data-configured={String(report.alerts.channels.telegram)}>
+                Telegram: {report.alerts.channels.telegram ? 'tanımlı (kritik uyarılar)' : 'tanımlı değil'}
+              </span>
+              {' · '}
+              <span data-channel="email" data-configured={String(report.alerts.channels.email)}>
+                E-posta: {report.alerts.channels.email ? 'tanımlı (tüm bildirimler)' : 'tanımlı değil'}
+              </span>
+              {!report.alerts.channels.telegram && !report.alerts.channels.email ? (
+                <div className="notice notice-warning" data-testid="system-health-alerts-no-channel">
+                  Hiçbir alarm kanalı tanımlı değil: sorunlar kaydedilir ama kimseye gönderilmez.
+                </div>
+              ) : null}
+            </div>
+            {report.alerts.open.length === 0 ? (
+              <p className="muted system-health-alerts-empty" data-testid="system-health-alerts-none">
+                Açık alarm yok.
+              </p>
+            ) : (
+              <DataTable caption="Açık operasyon alarmları" columns={ALERT_COLUMNS} minWidth={880} testId="system-health-alert-table">
+                <AlertRows alerts={report.alerts.open} testId="system-health-alert" />
+              </DataTable>
+            )}
+            {report.alerts.recentlyResolved.length > 0 ? (
+              <DataTable
+                caption="Son 7 günde kapanan alarmlar"
+                columns={ALERT_COLUMNS}
+                minWidth={880}
+                testId="system-health-resolved-alert-table"
+              >
+                <AlertRows alerts={report.alerts.recentlyResolved} testId="system-health-resolved-alert" />
+              </DataTable>
+            ) : null}
+            {report.email ? null : (
+              <p className="muted system-health-alerts-empty" data-testid="system-health-alerts-email-hidden">
+                E-posta kaynaklı alarmlar, bildirim kayıtlarını görme yetkisi olan hesaplara gösterilir.
+              </p>
+            )}
+          </SectionCard>
         ) : null}
 
         {report ? (

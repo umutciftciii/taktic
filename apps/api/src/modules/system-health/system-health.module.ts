@@ -10,5 +10,7 @@ import { SystemHealthService } from './system-health.service';
   imports: [PrismaModule, AuthModule, HealthModule, OperationsSettingsModule],
   controllers: [SystemHealthController],
   providers: [SystemHealthService],
+  // OBS-ALERT-001: the alert evaluator reads jobs through the same reader.
+  exports: [SystemHealthService],
 })
 export class SystemHealthModule {}

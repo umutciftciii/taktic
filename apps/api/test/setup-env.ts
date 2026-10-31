@@ -26,6 +26,13 @@ process.env.REQUEST_REMINDER_SCHEDULER_CRON = '0 0 1 1 *';
 // `runOnce` themselves, and a tick landing between "the event is PENDING" and
 // "the worker grants it" would make those assertions race.
 process.env.CAMPAIGN_EVALUATION_RETRY_CRON = '0 0 1 1 *';
+// OBS-ALERT-001: the operations alert evaluator. The specs call `evaluate`
+// themselves; a tick in between would race their assertions. Its channels are
+// unset unless a spec sets them, whatever a developer has exported.
+process.env.OPS_ALERT_CRON = '0 0 1 1 *';
+delete process.env.OPS_ALERT_EMAIL;
+delete process.env.OPS_ALERT_TELEGRAM_BOT_TOKEN;
+delete process.env.OPS_ALERT_TELEGRAM_CHAT_ID;
 // The flags that used to decide this are gone from the application. Dropped
 // rather than pinned, so a developer's exported value cannot make the boot log
 // of every spec file carry a deprecation warning.

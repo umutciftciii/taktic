@@ -58,6 +58,11 @@ test.describe('system health (ADMIN-SYSTEM-HEALTH-001)', () => {
         /^(OK|RUNNING|FAILED|LATE|OFF|NO_DATA)$/,
       );
       await expect(page.getByTestId('system-health-email')).toBeVisible();
+      // OBS-ALERT-001: the alert engine's own state and the channels, never their values.
+      await expect(page.getByTestId('system-health-alerts')).toBeVisible();
+      await expect(page.getByTestId('system-health-alerts-status')).toHaveAttribute('data-status', /^(HEALTHY|DEGRADED|DOWN|UNKNOWN)$/);
+      await expect(page.getByTestId('system-health-alert-channels')).toContainText('Telegram');
+      await expect(page.getByTestId('system-health-alerts')).toContainText('Son başarılı değerlendirme');
       await expect(page.getByTestId('system-health-not-measured')).toContainText('Dışarıdan erişilebilirlik');
       // Nothing on the screen acts: no form, no write button beyond "Yenile".
       await expect(page.locator('main form')).toHaveCount(0);
@@ -86,6 +91,8 @@ test.describe('system health (ADMIN-SYSTEM-HEALTH-001)', () => {
       await expect(admin.page.getByTestId('system-health-services')).toBeVisible();
       await expect(admin.page.getByTestId('system-health-email')).toHaveCount(0);
       await expect(admin.page.getByTestId('system-health-email-hidden')).toBeVisible();
+      await expect(admin.page.getByTestId('system-health-alerts')).toBeVisible();
+      await expect(admin.page.getByTestId('system-health-alerts-email-hidden')).toBeVisible();
       await expect(admin.page.locator('a[href^="/notifications/"]')).toHaveCount(0);
     } finally {
       await admin.close();

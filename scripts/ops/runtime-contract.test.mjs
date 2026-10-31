@@ -19,6 +19,8 @@ import {
   DEVELOPMENT_FINGERPRINT_KEY,
   FINGERPRINT_KEY_MIN_LENGTH,
   LEGACY_SCHEDULER_FLAGS,
+  OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN,
+  OPS_ALERT_TELEGRAM_TOKEN_PATTERN,
   PRODUCTION_EMAIL_SENDER,
   checkRuntimeContract,
   publicUrlProblem,
@@ -33,6 +35,7 @@ const SECRET_VALUES = [
   'placeholder-webhook-secret-not-real',
   're_placeholderNotARealKey',
   '1x0000000000000000000000000000000AA',
+  '123456789:placeholderNotARealTelegramBotToken00',
 ];
 
 /** The staging host's configuration as `docker compose config` resolves it. */
@@ -222,6 +225,8 @@ describe('the staging contract', () => {
     production.services.web.environment.APP_ENVIRONMENT = 'production';
     production.services.admin.environment.APP_ENVIRONMENT = 'production';
     production.services.api.environment.PAYMENT_PROVIDER = 'mock';
+    // OBS-ALERT-001: production needs an alert channel to pass at all.
+    production.services.api.environment.OPS_ALERT_EMAIL = 'ops@example.test';
     results = run(production, { environment: 'production', project: 'taktic-production' });
     assert.equal(results.find((r) => r.name === 'SMS transport').status, 'WARN');
     assert.deepEqual(failures(results), {});
@@ -287,6 +292,45 @@ describe('the staging contract', () => {
     assert.match(failures(run(config))['TURNSTILE_MODE (admin)'], /bypass/);
   });
 
+  it('OBS-ALERT-001: warns on staging without an alert channel and fails production without one', () => {
+    const staging = run(stagingConfig());
+    assert.equal(staging.find((r) => r.name === 'OPS_ALERT channels').status, 'WARN');
+    assert.deepEqual(failures(staging), {});
+
+    const config = stagingConfig();
+    config.name = 'taktic-production';
+    for (const service of ['api', 'web', 'admin']) config.services[service].environment.APP_ENVIRONMENT = 'production';
+    config.services.api.environment.PAYMENT_PROVIDER = 'mock';
+    const production = run(config, { environment: 'production', project: 'taktic-production' });
+    assert.match(failures(production)['OPS_ALERT channels'], /production requires at least one/);
+
+    config.services.api.environment.OPS_ALERT_EMAIL = 'ops@example.test';
+    const withEmail = run(config, { environment: 'production', project: 'taktic-production' });
+    assert.equal(failures(withEmail)['OPS_ALERT channels'], undefined);
+    assert.equal(withEmail.find((r) => r.name === 'OPS_ALERT_EMAIL').status, 'PASS');
+    assert.ok(!JSON.stringify(withEmail).includes('ops@example.test'));
+  });
+
+  it('OBS-ALERT-001: fails half a Telegram pair and a malformed token, never printing either', () => {
+    const config = stagingConfig();
+    config.services.api.environment.OPS_ALERT_TELEGRAM_BOT_TOKEN = SECRET_VALUES[5];
+    let results = run(config);
+    assert.match(failures(results)['OPS_ALERT_TELEGRAM_BOT_TOKEN/OPS_ALERT_TELEGRAM_CHAT_ID'], /together or not at all/);
+    assertNoSecretPrinted(results);
+
+    config.services.api.environment.OPS_ALERT_TELEGRAM_CHAT_ID = '-1001234567890';
+    results = run(config);
+    assert.deepEqual(failures(results), {});
+    assert.equal(results.find((r) => r.name === 'OPS_ALERT_TELEGRAM').status, 'PASS');
+    assert.ok(!JSON.stringify(results).includes('-1001234567890'));
+    assertNoSecretPrinted(results);
+
+    config.services.api.environment.OPS_ALERT_TELEGRAM_BOT_TOKEN = 're_placeholderWrongVariable';
+    results = run(config);
+    assert.match(failures(results).OPS_ALERT_TELEGRAM_BOT_TOKEN, /not a Telegram bot token/);
+    assert.ok(!JSON.stringify(results).includes('re_placeholderWrongVariable'));
+  });
+
   it('reads list-form environments as well as maps', () => {
     const config = stagingConfig();
     config.services.api.environment = Object.entries(config.services.api.environment).map(([k, v]) => `${k}=${v}`);
@@ -314,6 +358,12 @@ describe('kept in step with the API', () => {
     const source = read('apps/api/src/common/legacy-scheduler-flags.ts');
     const list = source.match(/LEGACY_ENABLE_FLAGS = \[([^\]]*)\]/)?.[1] ?? '';
     assert.deepEqual([...list.matchAll(/'([A-Z_]+)'/g)].map((m) => m[1]), LEGACY_SCHEDULER_FLAGS);
+  });
+
+  it('the operations alert channel shapes', () => {
+    const source = read('apps/api/src/modules/ops-alerts/ops-alert.config.ts');
+    assert.ok(source.includes(`TELEGRAM_TOKEN_PATTERN = ${OPS_ALERT_TELEGRAM_TOKEN_PATTERN};`));
+    assert.ok(source.includes(`TELEGRAM_CHAT_ID_PATTERN = ${OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN};`));
   });
 
   it('the pinned production sender', () => {
@@ -374,6 +424,20 @@ describe('docker-compose.prod.yml under the contract', { skip: dockerAvailable()
     const results = run(config);
     assert.equal(results.find((r) => r.name === 'REQUEST_REMINDER_SCHEDULER_ENABLED').status, 'WARN');
     assert.deepEqual(failures(results), {});
+  });
+
+  it('OBS-ALERT-001: forwards the alert channels to the api only, empty unless the host sets them', () => {
+    let config = resolveConfig('prod', { extraEnv: stagingHostEnv });
+    for (const key of ['OPS_ALERT_EMAIL', 'OPS_ALERT_TELEGRAM_BOT_TOKEN', 'OPS_ALERT_TELEGRAM_CHAT_ID']) {
+      assert.equal(config.services.api.environment[key] ?? '', '', `${key} must resolve empty by default`);
+      for (const service of ['web', 'admin']) assert.equal(config.services[service].environment?.[key], undefined);
+    }
+    config = resolveConfig('prod', {
+      extraEnv: { ...stagingHostEnv, OPS_ALERT_TELEGRAM_BOT_TOKEN: SECRET_VALUES[5], OPS_ALERT_TELEGRAM_CHAT_ID: '-1001234567890' },
+    });
+    const results = run(config);
+    assert.deepEqual(failures(results), {});
+    assert.equal(results.find((r) => r.name === 'OPS_ALERT_TELEGRAM').status, 'PASS');
   });
 
   it('the staging .env without the fingerprint key fails before anything runs', () => {

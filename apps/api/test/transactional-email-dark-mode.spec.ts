@@ -143,6 +143,8 @@ const FAMILIES: Record<string, TransactionalEmailTemplate[]> = {
     'showcase-allowance-voided',
   ],
   destek: ['support-ticket-created', 'support-ticket-provider-admin-reply'],
+  // OBS-ALERT-001
+  operasyon: ['ops-alert'],
   // PROVIDER-STATUS-001
   'hizmet veren durumu': ['provider-application-rejected', 'provider-account-suspended', 'provider-account-reactivated'],
 };

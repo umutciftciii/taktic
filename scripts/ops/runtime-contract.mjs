@@ -46,6 +46,15 @@ export const PAYMENT_PROVIDERS_FOR_ENVIRONMENT = {
   production: ['mock'],
 };
 
+/**
+ * OBS-ALERT-001: the operations alert channels' shapes. Mirrors
+ * apps/api/src/modules/ops-alerts/ops-alert.config.ts, so a value the API
+ * would refuse at boot is refused here first.
+ */
+export const OPS_ALERT_TELEGRAM_TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
+export const OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
+const OPS_ALERT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /** What the sandbox provider needs to boot (lemon-squeezy.config.ts). */
 export const LEMON_SQUEEZY_REQUIRED = [
   'LEMON_SQUEEZY_API_KEY',
@@ -289,6 +298,8 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
   }
   if (!legacySet.length) pass('legacy scheduler switches', 'none set; the database settings are the only source');
 
+  for (const result of opsAlertChannelCoverage(api, environment)) results.push(result);
+
   // SMS (apps/api/src/modules/notifications/sms-transport.ts). The build has
   // no SMS provider. The recorder transport is test-only and refused under
   // NODE_ENV=production. The console stand-in follows the shared sandbox rule:
@@ -303,6 +314,54 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
     warn('SMS transport', 'no SMS provider in this build; on production the console adapter refuses every send and logs no code');
   }
 
+  return results;
+}
+
+/**
+ * OBS-ALERT-001: where operations alerts go. A malformed value or half of the
+ * Telegram pair is a boot refusal everywhere; no channel at all is a boot
+ * refusal on production and a WARN on staging (alerts are recorded, sent
+ * nowhere). Names only: never the address, the chat or the token.
+ */
+export function opsAlertChannelCoverage(api, environment) {
+  const results = [];
+  const email = value(api, 'OPS_ALERT_EMAIL');
+  const token = value(api, 'OPS_ALERT_TELEGRAM_BOT_TOKEN');
+  const chat = value(api, 'OPS_ALERT_TELEGRAM_CHAT_ID');
+  let channels = 0;
+
+  if (email) {
+    if (OPS_ALERT_EMAIL_PATTERN.test(email)) {
+      results.push({ name: 'OPS_ALERT_EMAIL', status: 'PASS', detail: 'set' });
+      channels += 1;
+    } else {
+      results.push({ name: 'OPS_ALERT_EMAIL', status: 'FAIL', detail: 'not a plain e-mail address (the API refuses to boot)' });
+    }
+  }
+  if (Boolean(token) !== Boolean(chat)) {
+    results.push({
+      name: 'OPS_ALERT_TELEGRAM_BOT_TOKEN/OPS_ALERT_TELEGRAM_CHAT_ID',
+      status: 'FAIL',
+      detail: 'set together or not at all (the API refuses to boot)',
+    });
+  } else if (token && chat) {
+    const tokenOk = OPS_ALERT_TELEGRAM_TOKEN_PATTERN.test(token);
+    const chatOk = OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN.test(chat);
+    if (!tokenOk) results.push({ name: 'OPS_ALERT_TELEGRAM_BOT_TOKEN', status: 'FAIL', detail: 'not a Telegram bot token (the API refuses to boot)' });
+    if (!chatOk) results.push({ name: 'OPS_ALERT_TELEGRAM_CHAT_ID', status: 'FAIL', detail: 'not a Telegram chat id (the API refuses to boot)' });
+    if (tokenOk && chatOk) {
+      results.push({ name: 'OPS_ALERT_TELEGRAM', status: 'PASS', detail: 'bot token and chat id set' });
+      channels += 1;
+    }
+  }
+
+  if (channels === 0 && !results.some((result) => result.status === 'FAIL')) {
+    if (environment === 'production') {
+      results.push({ name: 'OPS_ALERT channels', status: 'FAIL', detail: 'none set; production requires at least one (the API refuses to boot)' });
+    } else {
+      results.push({ name: 'OPS_ALERT channels', status: 'WARN', detail: 'none set; operations alerts are recorded but sent nowhere' });
+    }
+  }
   return results;
 }
 

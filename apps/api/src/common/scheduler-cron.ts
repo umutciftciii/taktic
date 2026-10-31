@@ -109,3 +109,14 @@ export function readCron(variable: string, fallback: string): string {
 
   return raw;
 }
+
+/**
+ * OBS-ALERT-001: the operations alert evaluator. Every five minutes: a failed
+ * or late job is known within one tick of the health screen showing it, and a
+ * tick costs a handful of index probes (ops-alert-evaluator.service.ts).
+ */
+export const OPS_ALERT_CRON = { variable: 'OPS_ALERT_CRON', fallback: '*/5 * * * *' } as const;
+
+export function readOpsAlertCron(): string {
+  return readCron(OPS_ALERT_CRON.variable, OPS_ALERT_CRON.fallback);
+}

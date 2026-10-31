@@ -854,6 +854,139 @@ model SchedulerRun {
   @@index([actorId])
 }
 
+/// OBS-ALERT-001: where an operations alert came from.
+enum OpsAlertSource {
+  SCHEDULER
+  EMAIL
+}
+
+/// WARNING reaches e-mail only; CRITICAL also reaches Telegram.
+enum OpsAlertSeverity {
+  WARNING
+  CRITICAL
+}
+
+enum OpsAlertState {
+  OPEN
+  RESOLVED
+}
+
+/// The three notices an alert can produce, each kept apart per channel.
+enum OpsAlertNoticeKind {
+  OPENED
+  REMINDER
+  RESOLVED
+}
+
+enum OpsAlertChannel {
+  TELEGRAM
+  EMAIL
+}
+
+/// PENDING → SENDING (claimed, lease live) → SENT, or FAILED (retried when
+/// due) → ABANDONED after the last attempt. CANCELLED: the alert resolved
+/// before this notice ever went out, so it is not sent late.
+enum OpsAlertDeliveryStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  ABANDONED
+  CANCELLED
+}
+
+/// One operations problem (OBS-ALERT-001): a scheduled job that failed or is
+/// late, or e-mail failing with one error class.
+///
+/// `fingerprint` names the problem — source, subject and condition — and a
+/// partial unique index lets at most one OPEN alert carry it, so a second
+/// evaluator (another instance, a restart mid-tick) cannot open it twice.
+/// A RESOLVED alert keeps its row: the history is the audit trail.
+///
+/// Nothing personal or secret is stored: `subjectKey` is a job key or a safe
+/// NotificationErrorCode, `condition` a closed vocabulary, and `detail` the
+/// allow-listed counters the evaluator writes (ops-alert.rules.ts).
+model OpsAlert {
+  id              String           @id @default(cuid())
+  /// The fixed, safe event id every message carries ("OPS-…").
+  ref             String           @unique
+  fingerprint     String
+  source          OpsAlertSource
+  subjectKey      String
+  condition       String
+  severity        OpsAlertSeverity
+  state           OpsAlertState    @default(OPEN)
+  firstSeenAt     DateTime
+  lastSeenAt      DateTime
+  occurrenceCount Int              @default(1)
+  /// The last OPENED/REMINDER notice's moment, for the reminder debounce.
+  lastNotifiedAt  DateTime
+  reminderCount   Int              @default(0)
+  resolvedAt      DateTime?
+  /// RECOVERED | DISABLED | SUPERSEDED — NULL exactly while OPEN.
+  resolution      String?
+  detail          Json?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  deliveries OpsAlertDelivery[]
+
+  @@index([state, lastSeenAt])
+  @@index([fingerprint, createdAt])
+}
+
+/// One notice of one alert to one channel, with its own retry state.
+///
+/// Unique on (alert, kind, sequence, channel): a notice is created once
+/// however many evaluators race. A worker claims a due row with one
+/// conditional UPDATE … FOR UPDATE SKIP LOCKED and finishes it only under its
+/// own `claimToken`, so two workers never hold the same delivery and a
+/// worker whose lease ran out cannot overwrite the next one's outcome.
+///
+/// These rows are never a source the evaluator reads: a failed alert delivery
+/// is retried or abandoned here, and never becomes an alert of its own.
+model OpsAlertDelivery {
+  id                String                 @id @default(cuid())
+  alertId           String
+  kind              OpsAlertNoticeKind
+  /// 0 for OPENED and RESOLVED; the reminder's number for REMINDER.
+  sequence          Int                    @default(0)
+  channel           OpsAlertChannel
+  status            OpsAlertDeliveryStatus @default(PENDING)
+  attemptCount      Int                    @default(0)
+  nextAttemptAt     DateTime
+  claimToken        String?
+  claimedAt         DateTime?
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  /// A closed, safe failure class — never a provider's text.
+  errorCode         String?
+  providerMessageId String?
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  alert OpsAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
+
+  @@unique([alertId, kind, sequence, channel])
+  @@index([status, nextAttemptAt])
+}
+
+/// The evaluator's own state: one row (id = "ops-alert-engine").
+///
+/// It is what the system health screen reads to say whether the alert engine
+/// itself is running — its last successful evaluation and the last failure,
+/// by error type. `emailCursor` is the watermark of failed e-mails already
+/// counted, so a tick reads only what is new.
+model OpsAlertEngineState {
+  id              String    @id
+  lastStartedAt   DateTime?
+  lastSucceededAt DateTime?
+  lastFailedAt    DateTime?
+  lastErrorType   String?
+  emailCursor     DateTime?
+  updatedAt       DateTime  @updatedAt
+}
+
 /// One signed-in session, and the two independent clocks that end it.
 ///
 /// `expiresAt` is the **absolute** lifetime, fixed when the session is created
@@ -4335,16 +4468,16 @@ model ShowcasePlacement {
   categoryId        String
   kindSnapshot      ShowcaseCardKind
 
-  packageNameSnapshot  String
-  priceAmountSnapshot  Int
-  currencySnapshot     String @default("TRY")
-  durationDaysSnapshot Int
+  packageNameSnapshot    String
+  priceAmountSnapshot    Int
+  currencySnapshot       String @default("TRY")
+  durationDaysSnapshot   Int
   /// SHOWCASE-ALLOWANCE-001 — the free offers this run was sold with, copied
   /// from the purchase (card-bound) or the entitlement (package-first) and
   /// granted as the run's OfferAllowanceGrant `quotaTotal` at birth. The
   /// default is the legacy 3 (backfill, and any writer predating the column).
   /// CHECK >= 0; 0 (SHOWCASE-ALLOWANCE-003) means the run has no grant.
-  freeOfferCountSnapshot Int @default(3)
+  freeOfferCountSnapshot Int    @default(3)
 
   /// The price-responsibility terms this run was sold under: the version the
   /// buyer had accepted when they opened the checkout, and the exact sentence
@@ -4904,20 +5037,20 @@ enum OfferAllowanceVoidReason {
 /// `quotaTotal = legacy free offers + 3` and `quotaUsed = legacy free offers`:
 /// past use is counted without being rewritten, and every run still gets three.
 model OfferAllowanceGrant {
-  id                  String                @id @default(cuid())
+  id                  String                    @id @default(cuid())
   providerId          String
   source              OfferAllowanceSource
   benefit             OfferAllowanceBenefit
   /// The scope. NOT NULL exactly when `source = SHOWCASE_PLACEMENT` (CHECK).
-  showcasePlacementId String?               @unique
+  showcasePlacementId String?                   @unique
   /// Snapshotted when granted; CHECK > 0.
   quotaTotal          Int
   /// CHECK 0 <= quotaUsed <= quotaTotal.
-  quotaUsed           Int                   @default(0)
+  quotaUsed           Int                       @default(0)
   /// The placement's `startAt`. For display and reporting only — eligibility
   /// is the lead's binding to the placement, never a clock.
   validFrom           DateTime
-  status              OfferAllowanceStatus  @default(ACTIVE)
+  status              OfferAllowanceStatus      @default(ACTIVE)
   /// SHOWCASE-ALLOWANCE-004: all four set together or none (CHECK), only with
   /// VOID, and only once (trigger). `voidedById` is a SUPER_ADMIN at the time
   /// of writing (trigger); `voidNote` is the internal note, 10..1000 trimmed
@@ -4926,8 +5059,8 @@ model OfferAllowanceGrant {
   voidReason          OfferAllowanceVoidReason?
   voidNote            String?
   voidedById          String?
-  grantedAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
+  grantedAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
 
   provider  ProviderProfile       @relation(fields: [providerId], references: [id], onDelete: Restrict)
   placement ShowcasePlacement?    @relation(fields: [showcasePlacementId], references: [id], onDelete: Restrict)

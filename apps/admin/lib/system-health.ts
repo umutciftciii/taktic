@@ -88,8 +88,140 @@ export type SystemHealthReport = {
       at: string;
     }>;
   };
+  /** OBS-ALERT-001. E-mail alerts are in it only for a NOTIFICATION_LOGS_READ holder. */
+  alerts?: OpsAlertsBlock;
   notMeasured: Array<'EXTERNAL_UPTIME' | 'BACKUPS' | 'HOST_RESOURCES' | 'CAMPAIGN_EVALUATION_WORKER'>;
 };
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-001 — operations alerts
+// ---------------------------------------------------------------------------
+
+export type OpsAlertEngineReason = 'OK' | 'NEVER_RAN' | 'OVERDUE' | 'LAST_EVALUATION_FAILED' | 'QUERY_FAILED';
+export type OpsAlertChannel = 'TELEGRAM' | 'EMAIL';
+export type OpsAlertDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'ABANDONED' | 'CANCELLED';
+export type OpsAlertNoticeKind = 'OPENED' | 'REMINDER' | 'RESOLVED';
+
+export type OpsAlertView = {
+  ref: string;
+  source: 'SCHEDULER' | 'EMAIL';
+  subjectKey: string;
+  condition: string;
+  severity: 'WARNING' | 'CRITICAL';
+  state: 'OPEN' | 'RESOLVED';
+  firstSeenAt: string;
+  lastSeenAt: string;
+  occurrenceCount: number;
+  resolvedAt: string | null;
+  resolution: string | null;
+  deliveries: Array<{
+    kind: OpsAlertNoticeKind;
+    sequence: number;
+    channel: OpsAlertChannel;
+    status: OpsAlertDeliveryStatus;
+    attemptCount: number;
+    sentAt: string | null;
+    errorCode: string | null;
+  }>;
+};
+
+export type OpsAlertsBlock = {
+  status: HealthStatus;
+  reason: OpsAlertEngineReason;
+  checkedAt: string;
+  engine: {
+    cron: string;
+    missedTicks: number;
+    lastStartedAt: string | null;
+    lastSucceededAt: string | null;
+    lastFailedAt: string | null;
+    lastErrorType: string | null;
+  };
+  channels: { email: boolean; telegram: boolean };
+  open: OpsAlertView[];
+  recentlyResolved: OpsAlertView[];
+};
+
+export const OPS_ALERT_ENGINE_REASON_TEXT: Record<OpsAlertEngineReason, string> = {
+  OK: 'Alarm motoru zamanında çalışıyor.',
+  NEVER_RAN: 'Alarm motoru bu süreç başladığından beri henüz çalışmadı.',
+  OVERDUE: 'Alarm motoru zamanında çalışmadı; yeni sorunlar bildirilmiyor olabilir.',
+  LAST_EVALUATION_FAILED: 'Alarm motorunun son değerlendirmesi hata verdi.',
+  QUERY_FAILED: 'Alarm kayıtları okunamadı.',
+};
+
+export const OPS_ALERT_CONDITION_TEXT: Record<string, string> = {
+  PROCESS_INTERRUPTED: 'Çalışma yarıda kaldı',
+  DATABASE_ERROR: 'Veritabanı hatası',
+  APPLICATION_ERROR: 'Uygulama hatası',
+  OVERDUE: 'Zamanında çalışmadı',
+  SEND_FAILURES: 'E-posta gönderilemiyor',
+};
+
+export const OPS_ALERT_SEVERITY_LABELS: Record<OpsAlertView['severity'], string> = {
+  WARNING: 'Uyarı',
+  CRITICAL: 'Kritik',
+};
+
+export const OPS_ALERT_SEVERITY_BADGES: Record<OpsAlertView['severity'], string> = {
+  WARNING: 'badge badge-warn',
+  CRITICAL: 'badge badge-bad',
+};
+
+export const OPS_ALERT_RESOLUTION_TEXT: Record<string, string> = {
+  RECOVERED: 'Düzeldi',
+  DISABLED: 'İş kapatıldı',
+  SUPERSEDED: 'Yeni bir hatayla değişti',
+};
+
+export const OPS_ALERT_CHANNEL_LABELS: Record<OpsAlertChannel, string> = { TELEGRAM: 'Telegram', EMAIL: 'E-posta' };
+
+export const OPS_ALERT_NOTICE_LABELS: Record<OpsAlertNoticeKind, string> = {
+  OPENED: 'Açılış',
+  REMINDER: 'Hatırlatma',
+  RESOLVED: 'Düzelme',
+};
+
+export const OPS_ALERT_DELIVERY_LABELS: Record<OpsAlertDeliveryStatus, string> = {
+  PENDING: 'Bekliyor',
+  SENDING: 'Gönderiliyor',
+  SENT: 'Gönderildi',
+  FAILED: 'Yeniden denenecek',
+  ABANDONED: 'Gönderilemedi',
+  CANCELLED: 'İptal (sorun gönderilmeden düzeldi)',
+};
+
+/** The e-mail error classes an e-mail alert is about, in the panel's words. */
+const EMAIL_ERROR_TEXT: Record<string, string> = {
+  TRANSPORT_UNAVAILABLE: 'Taşıma servisi kullanılamıyor',
+  REJECTED: 'Sağlayıcı reddetti',
+  TIMEOUT: 'Zaman aşımı',
+  EMAIL_BRANDING_INCOMPLETE: 'Şirket ve e-posta ayarları eksik',
+  EMAIL_PUBLIC_URL_INVALID: 'Public adres e-postada kullanılamaz',
+  SOURCE_UNAVAILABLE: 'Kaynak kayıt yeniden oluşturulamıyor',
+  UNKNOWN: 'Bilinmeyen hata',
+};
+
+export function opsAlertSubject(alert: Pick<OpsAlertView, 'source' | 'subjectKey'>): string {
+  if (alert.source === 'EMAIL') return `E-posta · ${EMAIL_ERROR_TEXT[alert.subjectKey] ?? alert.subjectKey}`;
+  return schedulerJobName(alert.subjectKey as SystemHealthJobKey);
+}
+
+/** One line per channel: the latest notice there and how it went. */
+export function opsAlertChannelSummary(alert: Pick<OpsAlertView, 'deliveries'>): string {
+  const latest = new Map<OpsAlertChannel, OpsAlertView['deliveries'][number]>();
+  for (const delivery of alert.deliveries) latest.set(delivery.channel, delivery);
+  if (latest.size === 0) return 'Kanal yok';
+  return (['TELEGRAM', 'EMAIL'] as const)
+    .filter((channel) => latest.has(channel))
+    .map((channel) => {
+      const delivery = latest.get(channel)!;
+      return `${OPS_ALERT_CHANNEL_LABELS[channel]}: ${OPS_ALERT_NOTICE_LABELS[delivery.kind]} — ${OPS_ALERT_DELIVERY_LABELS[delivery.status]}${
+        delivery.attemptCount > 1 ? ` (${delivery.attemptCount}. deneme)` : ''
+      }`;
+    })
+    .join(' · ');
+}
 
 /** The API row, as this panel's server measured it while fetching the report. */
 export type ApiReachability = {

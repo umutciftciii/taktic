@@ -9530,3 +9530,16 @@ a.dashboard-kpi-note {
   padding: 0;
   list-style: none;
 }
+
+/* OBS-ALERT-001: the alert block is unpadded (its tables run edge to edge);
+   its text lines get the card's own inset. */
+.system-health-alert-channels,
+.system-health-alerts-empty {
+  padding: 12px 16px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.system-health-alert-channels .notice {
+  margin: 12px 0 0;
+}

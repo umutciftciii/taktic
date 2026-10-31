@@ -59,6 +59,8 @@ export const API_ONLY_VARIABLES = [
   'LEMON_SQUEEZY_WEBHOOK_SECRET',
   'TURNSTILE_SECRET_KEY',
   'PROMOTION_FINGERPRINT_KEY',
+  // OBS-ALERT-001: the operations alert bot's credential.
+  'OPS_ALERT_TELEGRAM_BOT_TOKEN',
 ];
 
 /** Commands that mean "development server" wherever they appear. */

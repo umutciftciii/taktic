@@ -41,7 +41,7 @@ import { escapeHtml } from './format';
  * an operator glancing at a card has to be able to tell at once which of the
  * two they are looking at.
  */
-export type EmailAudience = 'HESAP' | 'HİZMET ALAN' | 'HİZMET VEREN' | 'DESTEK';
+export type EmailAudience = 'HESAP' | 'HİZMET ALAN' | 'HİZMET VEREN' | 'DESTEK' | 'OPERASYON';
 
 export type EmailDataRow = {
   label: string;

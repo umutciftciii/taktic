@@ -663,6 +663,23 @@ const FULL_DATA: Record<TransactionalEmailTemplate, Record<string, string | null
     showcaseUrl: `${WEB}/providers/p1/vitrin`,
     accountUrl: `${WEB}/providers/me`,
   },
+  'ops-alert': {
+    fullName: 'Operasyon Ekibi',
+    noticeKind: 'OPENED',
+    severity: 'CRITICAL',
+    severityLabel: 'Kritik',
+    alertRef: 'OPS-ABCDEFGH23',
+    sourceLabel: 'Zamanlanmış iş',
+    subjectLabel: 'Talep süresi dolumu',
+    conditionLabel: 'Veritabanı hatası',
+    summary: 'Talep süresi dolumu işi başarısız oldu: Veritabanı hatası.',
+    firstSeenAt: '31 Ekim 2026, 10:00',
+    lastSeenAt: '31 Ekim 2026, 10:05',
+    occurrenceCount: '2',
+    templates: '',
+    resolvedAt: '',
+    adminUrl: `${ADMIN}/system-health`,
+  },
 };
 
 /**
@@ -747,7 +764,8 @@ describe('transactional e-mail rendering', () => {
     // REL-002 Faz 4 adds the four incident decision / staff follow-up notices.
     // SHOWCASE-ALLOWANCE-004 adds the provider's free-offer void notice.
     // PROVIDER-STATUS-001 adds the rejection, suspension and re-activation notices.
-    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(65);
+    // OBS-ALERT-001 adds the operations alert.
+    expect(TRANSACTIONAL_EMAIL_TEMPLATES).toHaveLength(66);
     expect(Object.keys(FULL_DATA).sort()).toEqual([...TRANSACTIONAL_EMAIL_TEMPLATES].sort());
   });
 
@@ -1028,6 +1046,7 @@ describe('transactional e-mail rendering', () => {
       'showcase-placement-ending-3d': 'Vitrin yayınınız 3 gün içinde bitiyor — Kombi bakım paketi',
       'showcase-placement-expired': 'Vitrin yayınınız sona erdi — Kombi bakım paketi',
       'showcase-allowance-voided': 'Vitrin ücretsiz teklif hakkınız iptal edildi — Kombi bakım paketi',
+      'ops-alert': '[TakTick operasyon · KRİTİK] Yeni sorun: Talep süresi dolumu — Veritabanı hatası — OPS-ABCDEFGH23',
     });
   });
 

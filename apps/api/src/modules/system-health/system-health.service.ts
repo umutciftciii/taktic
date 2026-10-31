@@ -4,6 +4,9 @@ import { AppEnvironment, readAppEnvironment } from '../../common/app-environment
 import { readSchedulerCron, readSeoNotFoundRetentionCron } from '../../common/scheduler-cron';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ReadinessService } from '../health/readiness.service';
+import { OpsAlertsReport, readOpsAlertsReport } from '../ops-alerts/ops-alert.report';
+import { opsAlertChannelStatus } from '../ops-alerts/ops-alert.config';
+import { readOpsAlertCron } from '../../common/scheduler-cron';
 import {
   NotificationErrorCode,
   normalizeStoredErrorCode,
@@ -167,6 +170,11 @@ export type SystemHealthReport = {
   schedulers: SchedulersReport;
   /** Present only for a caller holding NOTIFICATION_LOGS_READ. */
   email?: EmailReport;
+  /**
+   * OBS-ALERT-001: the alert engine's own state and its alerts. E-mail
+   * alerts are in it only for a NOTIFICATION_LOGS_READ holder.
+   */
+  alerts: OpsAlertsReport;
   notMeasured: typeof NOT_MEASURED;
 };
 
@@ -209,12 +217,15 @@ export class SystemHealthService {
   ) {}
 
   async report(options: { includeEmail: boolean }): Promise<SystemHealthReport> {
-    const [database, web, admin, schedulers, email] = await Promise.all([
+    const [database, web, admin, schedulers, email, alerts] = await Promise.all([
       this.cached('database', PROBE_CACHE_MS, () => this.measureDatabase()),
       this.cached('web', PROBE_CACHE_MS, () => this.probe('web')),
       this.cached('admin', PROBE_CACHE_MS, () => this.probe('admin')),
       this.cached('schedulers', QUERY_CACHE_MS, () => this.measureSchedulers()),
       options.includeEmail ? this.cached('email', QUERY_CACHE_MS, () => this.measureEmail()) : undefined,
+      this.cached(options.includeEmail ? 'alerts:email' : 'alerts', QUERY_CACHE_MS, () =>
+        this.measureAlerts(options.includeEmail),
+      ),
     ]);
 
     const core: HealthStatus[] = [database.status, web.status, admin.status];
@@ -223,6 +234,10 @@ export class SystemHealthService {
     // own section but does not hold the overall state at UNKNOWN. A failed
     // read (QUERY_FAILED) still counts.
     if (email && email.reason !== 'NO_TRAFFIC') background.push(email.status);
+    // The alert engine counts once it is late or failing. An engine that has
+    // not reached its first tick since boot is UNKNOWN in its own block but,
+    // like a quiet mailbox, does not hold the whole report at UNKNOWN.
+    if (alerts.status === 'DEGRADED' || alerts.status === 'DOWN') background.push(alerts.status);
 
     return {
       generatedAt: new Date().toISOString(),
@@ -233,6 +248,7 @@ export class SystemHealthService {
       admin,
       schedulers,
       ...(email ? { email } : {}),
+      alerts,
       notMeasured: NOT_MEASURED,
     };
   }
@@ -340,8 +356,12 @@ export class SystemHealthService {
    * to one job, run job by job so the report never holds more than a few
    * connections — the table only grows, and a scan of it is what this must
    * not do.
+   *
+   * Uncached and public: the operations alert evaluator (OBS-ALERT-001) reads
+   * the same facts through the same rules, so an alert and this screen never
+   * disagree about a job.
    */
-  private async readSchedulerFacts(now: Date) {
+  async readSchedulerFacts(now: Date) {
     const day = new Date(now.getTime() - 24 * 60 * 60_000);
     const failureSince = new Date(now.getTime() - RECENT_FAILURE_WINDOW_MS);
     const [flags, enabledChanges] = await Promise.all([
@@ -427,6 +447,31 @@ export class SystemHealthService {
 
     recentFailures.sort((a, b) => b.at.localeCompare(a.at));
     return { jobs, recentFailures: recentFailures.slice(0, RECENT_FAILURE_LIMIT) };
+  }
+
+  private async measureAlerts(includeEmail: boolean): Promise<OpsAlertsReport> {
+    const now = new Date();
+    try {
+      return await withTimeout(readOpsAlertsReport(this.prisma, { includeEmail }, now), SECTION_QUERY_TIMEOUT_MS);
+    } catch (error) {
+      this.logger.warn(`system health: alert read failed (${error instanceof Error ? error.name : 'UnknownError'})`);
+      return {
+        status: 'UNKNOWN',
+        reason: 'QUERY_FAILED',
+        checkedAt: now.toISOString(),
+        engine: {
+          cron: readOpsAlertCron(),
+          missedTicks: 0,
+          lastStartedAt: null,
+          lastSucceededAt: null,
+          lastFailedAt: null,
+          lastErrorType: null,
+        },
+        channels: opsAlertChannelStatus(),
+        open: [],
+        recentlyResolved: [],
+      };
+    }
   }
 
   private async measureEmail(): Promise<EmailReport> {
