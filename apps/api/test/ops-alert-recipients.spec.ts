@@ -891,6 +891,70 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'TEST_SENT' } })).toBe(1);
   });
 
+  it('a test send while another is in flight answers 429 at once, never waiting for the lock', async () => {
+    const first = await seed('first@example.test');
+    const second = await seed('second@example.test');
+    const original = ctx.notifications.send.bind(ctx.notifications);
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let entered!: () => void;
+    const inFlight = new Promise<void>((resolve) => (entered = resolve));
+    const slow = vi.spyOn(ctx.notifications, 'send').mockImplementation(async (message) => {
+      entered();
+      await gate;
+      return original(message);
+    });
+    try {
+      const pending = call('post', `/ops-alerts/recipients/${first.id}/test`, rootCookie, {}).then((res) => res);
+      await inFlight;
+      const startedAt = Date.now();
+      const refused = await call('post', `/ops-alerts/recipients/${second.id}/test`, rootCookie, {});
+      expect(refused.status).toBe(429);
+      expect(refused.body.code).toBe('TEST_RATE_LIMITED');
+      expect(Date.now() - startedAt).toBeLessThan(5_000);
+      release();
+      expect((await pending).status).toBe(200);
+    } finally {
+      release();
+      slow.mockRestore();
+    }
+    expect(ctx.notifications.ofTemplate('ops-alert')).toHaveLength(1);
+    expect(ctx.notifications.ofTemplate('ops-alert')[0]!.to).toBe('first@example.test');
+    const rows = await ctx.prisma.opsAlertRecipientAuditLog.findMany({ where: { action: 'TEST_SENT' } });
+    expect(rows.map((row) => row.recipientId)).toEqual([first.id]);
+  });
+
+  it('a send whose audit row cannot be written is logged without the address, and fails', async () => {
+    const r = await seed('unrecorded@example.test');
+    // Unique id collision on the audit row: the send has happened, the write fails.
+    const errors = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    const original = ctx.notifications.send.bind(ctx.notifications);
+    const sendSpy = vi.spyOn(ctx.notifications, 'send').mockImplementation(async (message) => {
+      const result = await original(message);
+      // Pre-empt the row the service is about to write under the same id.
+      const auditId = message.idempotencyKey!.replace('taktic-ops-alert-test-', '');
+      await ctx.prisma.opsAlertRecipientAuditLog.create({
+        data: { id: auditId, recipientId: r.id, actorId: root.id, action: 'REVEALED' },
+      });
+      return result;
+    });
+    try {
+      const response = await call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {});
+      expect(response.status).toBe(500);
+      const lines = errors.mock.calls.map((args) => JSON.stringify(args));
+      const line = lines.find((text) => text.includes('audit row was not recorded'));
+      expect(line).toBeDefined();
+      expect(line).toContain(r.id);
+      expect(line).toContain('(SENT)');
+      for (const text of lines) expect(text.toLowerCase()).not.toMatch(/unrecorded@example\.test|u\*+@example\.test/);
+    } finally {
+      sendSpy.mockRestore();
+      errors.mockRestore();
+    }
+    expect(ctx.notifications.ofTemplate('ops-alert')).toHaveLength(1);
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'TEST_SENT' } })).toBe(0);
+  });
+
   it('composeTestNotice is a synthetic notice with no alert reference', () => {
     const notice = composeTestNotice('https://admin.example.test/system-health');
     expect(notice.emailData.subjectLabel).toBe('Test bildirimi');

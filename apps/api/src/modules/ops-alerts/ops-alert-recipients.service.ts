@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { OpsAlertDeliveryStatus, OpsAlertRecipientAuditAction, OpsAlertRecipientStatus, Prisma } from '@prisma/client';
 import type { AdminAuditPage, AuditPageQueryDto } from '../../common/admin-audit';
 import type { AuthUser } from '../auth/auth.types';
@@ -218,6 +218,8 @@ export function mapDatabaseError(error: unknown): unknown {
 
 @Injectable()
 export class OpsAlertRecipientsService {
+  private readonly logger = new Logger(OpsAlertRecipientsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(NotificationPort) private readonly email: NotificationPort,
@@ -426,13 +428,39 @@ export class OpsAlertRecipientsService {
    *
    * Under OPS_ALERT_TEST_SEND_LOCK_KEY the rate limit is counted, the mail is
    * sent and the TEST_SENT row (its closed result code only) is written, so
-   * two clicks cannot both pass the count. A failed send is an answer, not an
+   * two clicks cannot both pass the count. The lock is only *tried*: while
+   * another test send is in flight the answer is TEST_RATE_LIMITED at once,
+   * so no request ever waits for the lock inside its transaction and runs out
+   * of time after its mail has left. A failed send is an answer, not an
    * error: the result says why.
+   *
+   * A dedicated key, not the recipient lock: an ordinary recipient edit never
+   * waits on a mail provider and never turns into a 429.
    */
   async sendTest(actor: AuthUser, id: string): Promise<{ result: string }> {
+    /** Set once the send was attempted: from then on a failure loses an audit row. */
+    let attempted: string | null = null;
+    try {
+      return await this.sendTestLocked(actor, id, (result) => (attempted = result));
+    } catch (error) {
+      if (attempted !== null) {
+        // The audit write or the commit failed after the send: the mail may
+        // have left. Said here without the address; the error still surfaces.
+        this.logger.error(
+          `ops alert test send for recipient ${id} finished (${attempted}) but its audit row was not recorded ` +
+            `(${error instanceof Error ? error.name : 'UnknownError'})`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private sendTestLocked(actor: AuthUser, id: string, onAttempt: (result: string) => void): Promise<{ result: string }> {
     return this.prisma.$transaction(
       async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OPS_ALERT_TEST_SEND_LOCK_KEY}::bigint)`;
+        const [lock] = await tx.$queryRaw<Array<{ locked: boolean }>>`
+          SELECT pg_try_advisory_xact_lock(${OPS_ALERT_TEST_SEND_LOCK_KEY}::bigint) AS "locked"`;
+        if (!lock?.locked) throw new TestRateLimitedError();
         const row = await tx.opsAlertRecipient.findUnique({
           where: { id },
           select: { status: true, addressCiphertext: true, addressNonce: true, addressTag: true, addressKeyId: true },
@@ -491,6 +519,7 @@ export class OpsAlertRecipientsService {
               ? TEST_DECRYPT_FAILED_RESULT
               : classifyNotificationError(error);
         }
+        onAttempt(result);
         await recordTestAudit(tx, { id: auditId, recipientId: id, actorId: actor.id, result });
         return { result };
       },
