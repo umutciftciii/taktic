@@ -122,6 +122,14 @@ export type OpsAlertView = {
     attemptCount: number;
     sentAt: string | null;
     errorCode: string | null;
+    /**
+     * OBS-ALERT-002: the managed recipient an e-mail notice is bound to; null
+     * for Telegram, OPS_ALERT_EMAIL rows and callers without
+     * OPS_ALERT_RECIPIENTS_READ.
+     */
+    recipientId: string | null;
+    /** That recipient's label, never its address. Null under the same rules. */
+    recipientLabel: string | null;
   }>;
 };
 
