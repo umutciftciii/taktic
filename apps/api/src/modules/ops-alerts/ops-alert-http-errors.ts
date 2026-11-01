@@ -3,10 +3,12 @@ import {
   DuplicateRecipientError,
   LastChannelProtectedError,
   LastCriticalConfirmationRequired,
+  RecipientBusyError,
   RecipientDeletedError,
   RecipientLimitReachedError,
   TestRateLimitedError,
   VersionConflictError,
+  isLockWaitExpired,
 } from './ops-alert-recipients.service';
 import {
   ConfirmCancelRequiredError,
@@ -37,6 +39,7 @@ const CONFLICT_MESSAGES: Record<string, string> = {
   COUNTS_CHANGED: 'Önizlemeden bu yana teslimatlar değişti; yeniden önizleyin.',
   CONFIRM_CANCEL_REQUIRED: 'Geri dönüş bekleyen teslimatları iptal eder; iptali onaylayın.',
   ENV_ADDRESS_MISSING: 'OPS_ALERT_EMAIL tanımlı değil; içe aktarılacak adres yok.',
+  RECIPIENT_BUSY: 'Alarm alıcıları şu anda başka bir işlemle değiştiriliyor; biraz sonra tekrar deneyin.',
 };
 
 const BLOCKER_MESSAGES: Record<RoutingBlocker, string> = {
@@ -75,6 +78,11 @@ export function toOpsAlertHttpError(error: unknown): unknown {
     error instanceof EnvAddressMissingError
   ) {
     return conflict(error.code, CONFLICT_MESSAGES[error.code]!);
+  }
+  // A lock wait that ran out (the service maps its own; P2028 from anywhere
+  // else is the same situation): retryable, never a 500.
+  if (error instanceof RecipientBusyError || isLockWaitExpired(error)) {
+    return conflict('RECIPIENT_BUSY', CONFLICT_MESSAGES.RECIPIENT_BUSY!);
   }
   if (error instanceof RecipientDecryptError) {
     return conflict('DECRYPT_FAILED', CONFLICT_MESSAGES.DECRYPT_FAILED!);

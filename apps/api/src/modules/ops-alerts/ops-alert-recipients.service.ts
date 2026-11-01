@@ -62,6 +62,22 @@ export class DuplicateRecipientError extends Error {
   }
 }
 
+/**
+ * The recipient lock stayed taken for longer than an edit waits: a routing
+ * cutover/revert (which may hold it up to 45 s) or a key rotation is running.
+ * Nothing was changed; the operator tries again.
+ */
+export class RecipientBusyError extends Error {
+  readonly code = 'RECIPIENT_BUSY';
+  override name = 'RecipientBusyError';
+  constructor() {
+    super('Recipients are being changed by another operation; try again shortly.');
+  }
+}
+
+/** How long an edit waits for the recipient lock before it is a RECIPIENT_BUSY. */
+export const RECIPIENT_LOCK_WAIT_MS = 4_000;
+
 export class VersionConflictError extends Error {
   readonly code = 'VERSION_CONFLICT';
   override name = 'VersionConflictError';
@@ -209,10 +225,24 @@ function isUniqueViolation(error: unknown): boolean {
   return false;
 }
 
+/**
+ * A lock wait that ran out: SQLSTATE 55P03 (lock_not_available, our
+ * `lock_timeout`), carried as `meta.code` by a raw query or only in the
+ * message text otherwise; or Prisma's own interactive-transaction expiry
+ * (P2028), the backstop when the wait outlives the transaction.
+ */
+export function isLockWaitExpired(error: unknown): boolean {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2028') return true;
+  if (!(error instanceof Error)) return false;
+  const meta = (error as { meta?: { code?: unknown } }).meta;
+  return meta?.code === '55P03' || error.message.includes('code: "55P03"') || error.message.includes('SQLSTATE 55P03');
+}
+
 /** The database's refusals, as the service's own errors. Anything else is returned untouched. */
 export function mapDatabaseError(error: unknown): unknown {
   if (isLimitRefusal(error)) return new RecipientLimitReachedError();
   if (isUniqueViolation(error)) return new DuplicateRecipientError();
+  if (isLockWaitExpired(error)) return new RecipientBusyError();
   return error;
 }
 
@@ -231,13 +261,27 @@ export class OpsAlertRecipientsService {
     return resolveRecipientCryptoConfig();
   }
 
-  /** Runs `work` in one transaction under the recipient lock, mapping the database's refusals. */
+  /**
+   * Runs `work` in one transaction under the recipient lock, mapping the
+   * database's refusals.
+   *
+   * A routing cutover/revert holds this lock for up to 45 s. An edit does not
+   * wait that long: PostgreSQL's `lock_timeout` (RECIPIENT_LOCK_WAIT_MS, local
+   * to this transaction) ends the wait with 55P03, which is a 409
+   * RECIPIENT_BUSY — the operator retries. Without it the wait would outlive
+   * Prisma's interactive-transaction timeout and surface as P2028, a 500. The
+   * transaction's own timeout leaves room for the wait plus the work.
+   */
   private async locked<T>(work: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
     try {
-      return await this.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OPS_ALERT_RECIPIENT_LOCK_KEY}::bigint)`;
-        return work(tx);
-      });
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '${RECIPIENT_LOCK_WAIT_MS}ms'`);
+          await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OPS_ALERT_RECIPIENT_LOCK_KEY}::bigint)`;
+          return work(tx);
+        },
+        { maxWait: 5_000, timeout: RECIPIENT_LOCK_WAIT_MS + 10_000 },
+      );
     } catch (error) {
       throw mapDatabaseError(error);
     }

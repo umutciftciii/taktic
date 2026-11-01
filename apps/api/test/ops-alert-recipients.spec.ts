@@ -1,10 +1,12 @@
-import { Logger } from '@nestjs/common';
-import { AdminPermission, OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertEmailRouting, OpsAlertNoticeKind, UserRole } from '@prisma/client';
+import { ConflictException, Logger } from '@nestjs/common';
+import { AdminPermission, OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertEmailRouting, OpsAlertNoticeKind, Prisma, UserRole } from '@prisma/client';
 import request from 'supertest';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GRANTABLE_ADMIN_PERMISSIONS, SUPER_ADMIN_RESERVED_PERMISSIONS } from '../src/modules/auth/admin-permissions';
 import { ADMIN_ROUTE_PERMISSIONS } from '../src/modules/auth/route-permission-map';
 import { composeTestNotice } from '../src/modules/ops-alerts/ops-alert.rules';
+import { toOpsAlertHttpError } from '../src/modules/ops-alerts/ops-alert-http-errors';
+import { OPS_ALERT_RECIPIENT_LOCK_KEY } from '../src/modules/ops-alerts/ops-alert-recipient.constants';
 import { OpsAlertRoutingService } from '../src/modules/ops-alerts/ops-alert-routing.service';
 import type { AuthUser } from '../src/modules/auth/auth.types';
 import { decideRecipientRemoval } from '../src/modules/ops-alerts/ops-alert-recipient-guard';
@@ -1076,6 +1078,43 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     expect(response.status).toBe(400);
     expect((await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: r.id } })).version).toBe(1);
     expect(await ctx.prisma.opsAlertRecipient.count()).toBe(1);
+  });
+
+  it('an edit that waits out its transaction behind the recipient lock is a 409 RECIPIENT_BUSY, not a 500', async () => {
+    const r = await seed('busy@example.test');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let locked!: () => void;
+    const isLocked = new Promise<void>((resolve) => (locked = resolve));
+    // A cutover/revert holds this lock for up to 45 s; the edit's own transaction gives up first.
+    const holder = ctx.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OPS_ALERT_RECIPIENT_LOCK_KEY}::bigint)`;
+        locked();
+        await held;
+      },
+      { timeout: 30_000 },
+    );
+    try {
+      await isLocked;
+      const response = await call('patch', `/ops-alerts/recipients/${r.id}`, rootCookie, { version: r.version, label: 'Değişti' });
+      expect(response.status).toBe(409);
+      expect(response.body).toMatchObject({ code: 'RECIPIENT_BUSY' });
+      expect(JSON.stringify(response.body)).not.toContain('busy@example.test');
+    } finally {
+      release();
+      await holder;
+    }
+    expect((await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: r.id } })).label).not.toBe('Değişti');
+  }, 30_000);
+
+  it('maps Prisma\'s transaction timeout (P2028) to RECIPIENT_BUSY', () => {
+    const timeout = new Prisma.PrismaClientKnownRequestError('Transaction already closed', { code: 'P2028', clientVersion: 'test' });
+    const mapped = toOpsAlertHttpError(timeout) as ConflictException;
+    expect(mapped).toBeInstanceOf(ConflictException);
+    expect(mapped.getResponse()).toMatchObject({ statusCode: 409, code: 'RECIPIENT_BUSY' });
+    const other = new Prisma.PrismaClientKnownRequestError('x', { code: 'P2025', clientVersion: 'test' });
+    expect(toOpsAlertHttpError(other)).toBe(other);
   });
 
   it('writes no address into any log line', async () => {

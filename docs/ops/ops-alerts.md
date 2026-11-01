@@ -123,6 +123,9 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
 - **Son kanal koruması:** son kritik e-posta alıcısını silmek/pasifleştirmek
   ayrı bir onay ister; production'da Telegram yoksa son kritik alıcı
   kaldırılamaz (409).
+- **Eşzamanlılık:** geçiş/geri dönüş uygulaması alıcı kilidini 45 sn'ye kadar
+  tutabilir. O sırada gelen bir alıcı düzenlemesi kilidi en fazla 4 sn bekler,
+  sonra **409 `RECIPIENT_BUSY`** döner (hiçbir şey değişmez; tekrar deneyin).
 - **Anahtarlar:** adres AES-256-GCM ile şifreli, kimlik HMAC-SHA256.
   Staging/production anahtarlar tanımlanmadan boot etmez. Üretme, yedekleme,
   geri yükleme, rotasyon, kayıp ve sızma: `docs/ops/ops-alert-recipient-keys.md`.
