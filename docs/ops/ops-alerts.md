@@ -1,4 +1,4 @@
-# Operasyon alarmları (OBS-ALERT-001)
+# Operasyon alarmları (OBS-ALERT-001, OBS-ALERT-002)
 
 Başarısız ya da gecikmiş zamanlanmış işler ve başarısız e-posta gönderimleri için
 otomatik alarm. Motor API sürecinin içinde çalışır, yalnız **dışarıya mesaj
@@ -91,9 +91,48 @@ düğmesi yoktur.
 Motorun kendisi durursa alarm gönderemez; bu ekranda **Gecikmiş/Çalışmıyor**
 görünür ve genel durumu en az Sorunlu yapar. Harici watchdog sonraki fazdadır.
 
+## Yönetilen e-posta alıcıları (OBS-ALERT-002)
+
+E-posta alıcıları admin panelinden de yönetilebilir: **Sistem sağlığı →
+Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
+`/ops-alerts/recipients` ve `/ops-alerts/routing`).
+
+- **Yönlendirme modu:** `ENV_LEGACY` (varsayılan) yukarıdaki OBS-ALERT-001
+  davranışıdır — e-posta yalnız `OPS_ALERT_EMAIL`'e gider, alıcı listesi
+  bildirim almaz. `MANAGED` modunda her e-posta bildirimi, tercihi açık her
+  ACTIVE alıcıya ayrı bir teslimat satırı olarak gider. Geçiş ve geri dönüş
+  yalnız SUPER_ADMIN'in (`OPS_ALERT_ROUTING_MANAGE`), önizleme + sayıya bağlı
+  onayla yaptığı işlemlerdir. Telegram iki modda da değişmez.
+- **Alıcı:** etiket, maskeli adres ve üç tercih (Uyarı / Kritik / Düzelme;
+  varsayılan Kritik + Düzelme). En fazla 10 canlı alıcı. Adres değiştirilemez;
+  "adresi değiştir" yeni alıcı + eskisinin silinmesidir. Silme crypto-shred'dir
+  (şifreli adres ve HMAC silinir). Düzelme yalnız o alarm için daha önce
+  bilgilendirilmiş ve hâlâ ACTIVE alıcıya gider.
+- **Teslimat bağı:** yönetilen satır `recipientId` ile bir alıcıya kalıcı
+  bağlıdır; silinmiş/pasif/tercihi kapalı alıcıya bekleyen satır `CANCELLED`
+  olur, adresi çözülemeyen satır `DECRYPT_FAILED` ile `ABANDONED` olur —
+  hiçbiri başka bir adrese ya da `OPS_ALERT_EMAIL`'e düşmez. Bildirim içeriği
+  kuyruğa girerken satıra donar (`noticeSnapshot`); retry aynı içerik ve aynı
+  `Idempotency-Key` ile gider.
+- **Gizlilik:** yanıtlarda adres maskelidir; tam adres ayrı yetki
+  (`OPS_ALERT_RECIPIENTS_REVEAL`) + onay ister ve her gösterim audit'e yazılır.
+  Loglarda alıcı adresi hiçbir biçimde yer almaz.
+- **Son kanal koruması:** son kritik e-posta alıcısını silmek/pasifleştirmek
+  ayrı bir onay ister; production'da Telegram yoksa son kritik alıcı
+  kaldırılamaz (409).
+- **Anahtarlar:** adres AES-256-GCM ile şifreli, kimlik HMAC-SHA256.
+  Staging/production anahtarlar tanımlanmadan boot etmez. Üretme, yedekleme,
+  geri yükleme, rotasyon, kayıp ve sızma: `docs/ops/ops-alert-recipient-keys.md`.
+
 ## Geri alma
 
-Kod geri alındıktan sonra, API durdurulmuşken:
+**OBS-ALERT-002** (alıcı yönetimi) için: `scripts/ops/obs-alert-002-rollback.md`
+— önce yönlendirmeyi panelden `ENV_LEGACY`'ye döndürmek (R0); kod geri
+alınacaksa açık yönetilen teslimatlar sayı bazında raporlanır ve yalnız
+operatörün onayladığı sayılarla iptal edilir (R2). Şema geri alınmaz.
+
+**OBS-ALERT-001** için (yalnız OBS-ALERT-002 migration'ı uygulanmamış bir
+veritabanında): kod geri alındıktan sonra, API durdurulmuşken:
 
 ```
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/obs-alert-001-rollback.sql
