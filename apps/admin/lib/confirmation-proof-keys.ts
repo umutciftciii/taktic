@@ -44,6 +44,16 @@ export const CONFIRMATION_PROOF_KEYS = [
   'customer.activation-link-reissue',
   'credits.grant',
   'credits.deduct',
+  // OBS-ALERT-002: operations-alert e-mail recipients and the routing switch.
+  'ops-alert-recipient.pause',
+  'ops-alert-recipient.delete',
+  'ops-alert-recipient.replace',
+  'ops-alert-recipient.reveal',
+  'ops-alert-recipient.last-critical',
+  'ops-alert-routing.cutover',
+  'ops-alert-routing.revert',
+  'ops-alert-routing.rewrap',
+  'ops-alert-routing.rehash',
   'offer.refund',
   'offer.accept',
   'offer.reject',
@@ -113,6 +123,17 @@ export const CONFIRMATION_PROOF_KEYS = [
 ] as const;
 
 export type ConfirmationProofKey = (typeof CONFIRMATION_PROOF_KEYS)[number];
+
+/** OBS-ALERT-002 — named so the screens and actions of the recipient panel share one spelling. */
+export const OPS_ALERT_RECIPIENT_PAUSE = 'ops-alert-recipient.pause' satisfies ConfirmationProofKey;
+export const OPS_ALERT_RECIPIENT_DELETE = 'ops-alert-recipient.delete' satisfies ConfirmationProofKey;
+export const OPS_ALERT_RECIPIENT_REPLACE = 'ops-alert-recipient.replace' satisfies ConfirmationProofKey;
+export const OPS_ALERT_RECIPIENT_REVEAL = 'ops-alert-recipient.reveal' satisfies ConfirmationProofKey;
+export const OPS_ALERT_RECIPIENT_LAST_CRITICAL = 'ops-alert-recipient.last-critical' satisfies ConfirmationProofKey;
+export const OPS_ALERT_ROUTING_CUTOVER = 'ops-alert-routing.cutover' satisfies ConfirmationProofKey;
+export const OPS_ALERT_ROUTING_REVERT = 'ops-alert-routing.revert' satisfies ConfirmationProofKey;
+export const OPS_ALERT_ROUTING_REWRAP = 'ops-alert-routing.rewrap' satisfies ConfirmationProofKey;
+export const OPS_ALERT_ROUTING_REHASH = 'ops-alert-routing.rehash' satisfies ConfirmationProofKey;
 
 export function isConfirmationProofKey(value: unknown): value is ConfirmationProofKey {
   return typeof value === 'string' && (CONFIRMATION_PROOF_KEYS as readonly string[]).includes(value);

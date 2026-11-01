@@ -9543,3 +9543,41 @@ a.dashboard-kpi-note {
 .system-health-alert-channels .notice {
   margin: 12px 0 0;
 }
+
+/* ---- OBS-ALERT-002: Bildirim ayarları, the recipient window's switch rows ---- */
+
+.ops-alert-switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.ops-alert-switch-row .toggle {
+  flex: none;
+}
+
+/* OBS-ALERT-002 — routing panel on Bildirim ayarları */
+.ops-alert-routing-steps {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.ops-alert-routing-figures {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.ops-alert-routing-figures > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ops-alert-routing-figures dd {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}

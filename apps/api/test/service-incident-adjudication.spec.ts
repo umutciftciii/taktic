@@ -490,6 +490,7 @@ describe('correction (SUPER_ADMIN, append-only)', () => {
       'MATCH_REVIEW_OPEN_ROUND',
       'SHOWCASE_ALLOWANCE_VOID',
       'OPS_ALERT_ROUTING_MANAGE',
+      'OPS_ALERT_RECIPIENTS_REVEAL',
     ]);
 
     expect(await ctx.prisma.providerIncidentAdjudication.count()).toBe(1);

@@ -10,6 +10,7 @@ import {
   E2E_LEMON_STORE_ID,
   E2E_LEMON_VARIANT_ID,
   E2E_LEMON_WEBHOOK_SECRET,
+  E2E_OPS_ALERT_EMAIL,
   artifactsDir,
   contactSharingRuntime,
   lemonSqueezyRuntime,
@@ -83,6 +84,10 @@ const sharedEnv = {
   SEO_NOT_FOUND_RETENTION_CRON: '0 0 1 1 *',
   // OBS-ALERT-001: the alert evaluator, pinned like the jobs it watches.
   OPS_ALERT_CRON: '0 0 1 1 *',
+  // OBS-ALERT-002: the env address the recipients screen imports and reverts
+  // to (runtime.ts). Same on every runtime: they share one database, and with
+  // it the routing mode.
+  OPS_ALERT_EMAIL: E2E_OPS_ALERT_EMAIL,
   // The credential throttle keys on the client IP, and every actor in the suite
   // is 127.0.0.1 — at the shipped budget of 10 per minute the run would only be
   // measuring how many people it signed in. The limit itself is a configurable
@@ -163,6 +168,13 @@ function apiServer(runtime: Runtime) {
       ...trustedProxyApiEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
+      // No deployment is declared, stated rather than inherited: Playwright
+      // passes the runner's own environment through, and an exported
+      // APP_ENVIRONMENT would quietly change what the API allows (the
+      // last-recipient guard of OBS-ALERT-002 treats "undeclared" as
+      // production; admin-ops-alert-recipients.spec.ts relies on that). The
+      // phone-gate runtime below declares "local" over it.
+      APP_ENVIRONMENT: '',
       // The phone-verification test bypass, and only on the runtime whose
       // subject is phone verification. Every clause of its contract is set
       // here — a declared local environment, the flag, one listed number, the
@@ -458,7 +470,7 @@ function webkitProject() {
     {
       name: 'webkit',
       testMatch:
-        /(action-redirect|login-screen|stale-auth-forms|admin-password-reset|auth-session-cookie|admin-shell|admin-accessibility|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-cross-domain-projection|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|admin-destructive-confirmation(?:-paket-a)?|admin-paket-b-confirmation|admin-lifecycle-confirmation|admin-showcase-review-screens|provider-claim|responsive-shell|mobile-public-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|offer-view-impressions|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|admin-system-health|admin-action-audit|admin-backend-truth-002|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|service-issue|service-incident-adjudication|match-review-recovery|remote-hybrid-matching|showcase-[a-z-]+)\.spec\.ts/,
+        /(action-redirect|login-screen|stale-auth-forms|admin-password-reset|auth-session-cookie|admin-shell|admin-accessibility|admin-dashboard-metrics|admin-route-scan|admin-notifications-list|admin-requests-offers|admin-people-support-screens|admin-cross-domain-projection|admin-finance-package-screens|admin-form-components|admin-rbac-permissions|admin-destructive-confirmation(?:-paket-a)?|admin-paket-b-confirmation|admin-lifecycle-confirmation|admin-showcase-review-screens|provider-claim|responsive-shell|mobile-public-shell|landing-steps|account-menu-reachability|request-identity-gate|request-auto-publish|request-report-flow|request-contact-filter|request-success-screen|request-date-range|request-provider-choice|offer-experience|offer-view-impressions|provider-review-flow|turnstile-protection|landing-publish-copy|customer-request-content|admin-customer-verification|admin-campaign-drafts|admin-campaign-channel|admin-campaign-lifecycle|admin-campaign-operations|admin-campaign-engine-toggle|admin-campaign-settings-screens|admin-catalog-screens|admin-system-screens|admin-system-health|admin-ops-alert-recipients|admin-action-audit|admin-backend-truth-002|provider-promo-credits|customer-activation-proof|provider-contact-proof|purchase-terms-checkout|package-refund-request|provider-package-purchase-detail|provider-business-registration|service-issue|service-incident-adjudication|match-review-recovery|remote-hybrid-matching|showcase-[a-z-]+)\.spec\.ts/,
       use: { ...devices['Desktop Safari'] },
     },
   ];

@@ -124,8 +124,8 @@ function alertsBlock(overrides: Partial<NonNullable<SystemHealthReport['alerts']
         resolvedAt: null,
         resolution: null,
         deliveries: [
-          { kind: 'OPENED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null },
-          { kind: 'OPENED', sequence: 0, channel: 'TELEGRAM', status: 'FAILED', attemptCount: 2, sentAt: null, errorCode: 'TIMEOUT' },
+          { kind: 'OPENED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null, recipientId: null, recipientLabel: null },
+          { kind: 'OPENED', sequence: 0, channel: 'TELEGRAM', status: 'FAILED', attemptCount: 2, sentAt: null, errorCode: 'TIMEOUT', recipientId: null, recipientLabel: null },
         ],
       },
     ],
@@ -142,7 +142,7 @@ function alertsBlock(overrides: Partial<NonNullable<SystemHealthReport['alerts']
         occurrenceCount: 5,
         resolvedAt: NOW,
         resolution: 'RECOVERED',
-        deliveries: [{ kind: 'RESOLVED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null }],
+        deliveries: [{ kind: 'RESOLVED', sequence: 0, channel: 'EMAIL', status: 'SENT', attemptCount: 1, sentAt: NOW, errorCode: null, recipientId: null, recipientLabel: null }],
       },
     ],
     ...overrides,
@@ -337,8 +337,8 @@ describe('the page', () => {
       expect(markup).toContain('data-channel="telegram" data-configured="true"');
       expect(markup).toContain('data-testid="system-health-alert-OPS-ABCDEFGH23"');
       expect(markup).toContain('Talep süresi dolumu');
-      expect(markup).toContain('Telegram: Açılış — Yeniden denenecek (2. deneme)');
-      expect(markup).toContain('E-posta: Açılış — Gönderildi');
+      expect(markup).toContain('Telegram: Yeni sorun — Yeniden denenecek (2. deneme)');
+      expect(markup).toContain('E-posta: Yeni sorun — Gönderildi');
       expect(markup).toContain('data-testid="system-health-resolved-alert-OPS-ZXCVBNM234"');
       expect(markup).toContain('E-posta · Taşıma servisi kullanılamıyor');
       expect(markup).toContain('Düzeldi');
@@ -370,6 +370,77 @@ describe('the page', () => {
       apiMocks.apiFetch.mockResolvedValue(withoutEmail);
       const markup = await renderPage();
       expect(markup).toContain('data-testid="system-health-alerts-email-hidden"');
+    });
+
+    it('counts a notice that fans out to several recipients, per recipient', async () => {
+      const delivery = (over: Record<string, unknown>) => ({
+        kind: 'OPENED',
+        sequence: 1,
+        channel: 'EMAIL',
+        status: 'SENT',
+        attemptCount: 1,
+        sentAt: NOW,
+        errorCode: null,
+        recipientId: 'r1',
+        recipientLabel: 'Nöbetçi',
+        ...over,
+      });
+      const base = alertsBlock();
+      const open = [
+        {
+          ...base.open[0]!,
+          deliveries: [
+            delivery({ recipientId: 'r1' }),
+            delivery({ recipientId: 'r2' }),
+            delivery({ recipientId: 'r3', status: 'FAILED', sentAt: null }),
+          ],
+        },
+      ] as NonNullable<SystemHealthReport['alerts']>['open'];
+      apiMocks.apiFetch.mockResolvedValue(report({ alerts: alertsBlock({ open }) }));
+      const markup = await renderPage();
+      expect(markup).toContain('E-posta: Yeni sorun — 2/3 gönderildi, 1 yeniden denenecek');
+    });
+
+    it('an account without the recipient permissions gets null recipient fields and a page that still renders', async () => {
+      // What the API sends without OPS_ALERT_RECIPIENTS_READ: every recipient field null, on several rows of one notice.
+      const hidden = (over: Record<string, unknown>) => ({
+        kind: 'OPENED',
+        sequence: 0,
+        channel: 'EMAIL',
+        status: 'SENT',
+        attemptCount: 1,
+        sentAt: NOW,
+        errorCode: null,
+        recipientId: null,
+        recipientLabel: null,
+        ...over,
+      });
+      const base = alertsBlock();
+      const open = [
+        {
+          ...base.open[0]!,
+          deliveries: [hidden({}), hidden({ status: 'FAILED', sentAt: null, errorCode: 'TIMEOUT' }), hidden({ channel: 'TELEGRAM' })],
+        },
+      ] as NonNullable<SystemHealthReport['alerts']>['open'];
+      apiMocks.apiFetch.mockResolvedValue(report({ alerts: alertsBlock({ open }) }));
+      apiMocks.requireAdmin.mockResolvedValue({
+        can: (...names: string[]) => !names.includes('OPS_ALERT_RECIPIENTS_READ'),
+        permissions: [],
+        isSuperAdmin: false,
+      });
+      const markup = await renderPage();
+      expect(markup).toContain('Telegram: Yeni sorun — Gönderildi · E-posta: Yeni sorun — 1/2 gönderildi, 1 yeniden denenecek');
+      // No managed row beside them, so nothing is called an old address; no label is invented.
+      expect(markup).not.toContain('eski adres');
+      expect(markup).not.toContain('null');
+      expect(markup).not.toContain('notification-settings');
+    });
+
+    it('links to Bildirim ayarları only for OPS_ALERT_RECIPIENTS_READ', async () => {
+      apiMocks.apiFetch.mockResolvedValue(report());
+      const withLink = await renderPage();
+      expect(withLink).toContain('href="/system-health/notification-settings"');
+      expect(withLink).toContain('data-testid="system-health-notification-settings-link"');
     });
 
     it('has Turkish copy for every engine reason', () => {

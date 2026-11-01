@@ -1,4 +1,5 @@
 import { SCHEDULER_JOB_COPY, type SchedulerJobKey } from './api';
+import type { OpsAlertChannel, OpsAlertDeliveryStatus } from './ops-alert-labels';
 
 /**
  * ADMIN-SYSTEM-HEALTH-001 — the "Sistem sağlığı" screen's vocabulary.
@@ -98,8 +99,10 @@ export type SystemHealthReport = {
 // ---------------------------------------------------------------------------
 
 export type OpsAlertEngineReason = 'OK' | 'NEVER_RAN' | 'OVERDUE' | 'LAST_EVALUATION_FAILED' | 'QUERY_FAILED';
-export type OpsAlertChannel = 'TELEGRAM' | 'EMAIL';
-export type OpsAlertDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'ABANDONED' | 'CANCELLED';
+// The channel and delivery words live in a client-safe module (this one reads lib/api.ts).
+export type { OpsAlertChannel, OpsAlertDeliveryStatus } from './ops-alert-labels';
+export { OPS_ALERT_CHANNEL_LABELS, OPS_ALERT_DELIVERY_LABELS } from './ops-alert-labels';
+
 export type OpsAlertNoticeKind = 'OPENED' | 'REMINDER' | 'RESOLVED';
 
 export type OpsAlertView = {
@@ -122,6 +125,14 @@ export type OpsAlertView = {
     attemptCount: number;
     sentAt: string | null;
     errorCode: string | null;
+    /**
+     * OBS-ALERT-002: the managed recipient an e-mail notice is bound to; null
+     * for Telegram, OPS_ALERT_EMAIL rows and callers without
+     * OPS_ALERT_RECIPIENTS_READ.
+     */
+    recipientId: string | null;
+    /** That recipient's label, never its address. Null under the same rules. */
+    recipientLabel: string | null;
   }>;
 };
 
@@ -174,23 +185,6 @@ export const OPS_ALERT_RESOLUTION_TEXT: Record<string, string> = {
   SUPERSEDED: 'Yeni bir hatayla değişti',
 };
 
-export const OPS_ALERT_CHANNEL_LABELS: Record<OpsAlertChannel, string> = { TELEGRAM: 'Telegram', EMAIL: 'E-posta' };
-
-export const OPS_ALERT_NOTICE_LABELS: Record<OpsAlertNoticeKind, string> = {
-  OPENED: 'Açılış',
-  REMINDER: 'Hatırlatma',
-  RESOLVED: 'Düzelme',
-};
-
-export const OPS_ALERT_DELIVERY_LABELS: Record<OpsAlertDeliveryStatus, string> = {
-  PENDING: 'Bekliyor',
-  SENDING: 'Gönderiliyor',
-  SENT: 'Gönderildi',
-  FAILED: 'Yeniden denenecek',
-  ABANDONED: 'Gönderilemedi',
-  CANCELLED: 'İptal (sorun gönderilmeden düzeldi)',
-};
-
 /** The e-mail error classes an e-mail alert is about, in the panel's words. */
 const EMAIL_ERROR_TEXT: Record<string, string> = {
   TRANSPORT_UNAVAILABLE: 'Taşıma servisi kullanılamıyor',
@@ -205,22 +199,6 @@ const EMAIL_ERROR_TEXT: Record<string, string> = {
 export function opsAlertSubject(alert: Pick<OpsAlertView, 'source' | 'subjectKey'>): string {
   if (alert.source === 'EMAIL') return `E-posta · ${EMAIL_ERROR_TEXT[alert.subjectKey] ?? alert.subjectKey}`;
   return schedulerJobName(alert.subjectKey as SystemHealthJobKey);
-}
-
-/** One line per channel: the latest notice there and how it went. */
-export function opsAlertChannelSummary(alert: Pick<OpsAlertView, 'deliveries'>): string {
-  const latest = new Map<OpsAlertChannel, OpsAlertView['deliveries'][number]>();
-  for (const delivery of alert.deliveries) latest.set(delivery.channel, delivery);
-  if (latest.size === 0) return 'Kanal yok';
-  return (['TELEGRAM', 'EMAIL'] as const)
-    .filter((channel) => latest.has(channel))
-    .map((channel) => {
-      const delivery = latest.get(channel)!;
-      return `${OPS_ALERT_CHANNEL_LABELS[channel]}: ${OPS_ALERT_NOTICE_LABELS[delivery.kind]} — ${OPS_ALERT_DELIVERY_LABELS[delivery.status]}${
-        delivery.attemptCount > 1 ? ` (${delivery.attemptCount}. deneme)` : ''
-      }`;
-    })
-    .join(' · ');
 }
 
 /** The API row, as this panel's server measured it while fetching the report. */
