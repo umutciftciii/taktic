@@ -36,3 +36,27 @@ export const LAST_CRITICAL_WARNING =
 /** Production's last live alert channel: said instead of a confirmation. */
 export const LAST_CHANNEL_PROTECTED_TEXT =
   "Production'da son etkin bildirim kanalı kaldırılamaz. Önce başka bir kritik alıcı ekleyin.";
+
+/** The answers that put a form on its second step (`last-critical-step.tsx`). */
+export type SecondStep = Extract<RecipientActionState, { kind: 'last-critical' | 'last-channel' }>;
+
+/**
+ * A row form's state with its second step held apart from the last answer:
+ * once the API has asked for the second confirmation, a later refusal in that
+ * step (a reason too short, a proof that did not verify) shows its sentence
+ * without dropping the form back to the first step and its `confirmLastCritical`.
+ */
+export type SteppedActionState = { state: RecipientActionState; step: SecondStep | null };
+
+export const STEPPED_ACTION_IDLE: SteppedActionState = { state: RECIPIENT_ACTION_IDLE, step: null };
+
+/** Wraps a row action for `useActionState`, carrying the second step across answers. */
+export function withSecondStep(
+  action: (previous: RecipientActionState, formData: FormData) => Promise<RecipientActionState>,
+): (previous: SteppedActionState, formData: FormData) => Promise<SteppedActionState> {
+  return async (previous, formData) => {
+    const state = await action(previous.state, formData);
+    const step = state.kind === 'last-critical' || state.kind === 'last-channel' ? state : previous.step;
+    return { state, step };
+  };
+}

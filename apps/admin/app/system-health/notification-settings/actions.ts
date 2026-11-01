@@ -23,7 +23,7 @@ import {
   recipientErrorText,
 } from '../../../lib/ops-alert-recipients';
 import { recipientStaleKey } from '../../../lib/status-conflicts';
-import type { RecipientActionState, RevealOutcome } from './recipient-action-state';
+import { LAST_CHANNEL_PROTECTED_TEXT, type RecipientActionState, type RevealOutcome } from './recipient-action-state';
 import type { RecipientFormState } from './recipient-form-state';
 
 /**
@@ -282,6 +282,9 @@ export async function deleteRecipientAction(_previous: RecipientActionState, for
   done('deleted');
 }
 
+const REPLACE_LAST_CRITICAL_TEXT =
+  'Bu, kritik bildirim alan son e-posta alıcısı. Adres değiştirilmedi; önce başka bir kritik alıcı ekleyin.';
+
 /**
  * Replaces the address: the API deletes the old recipient and creates its
  * successor with the same label, switches and status (takes WRITE + DELETE).
@@ -303,7 +306,14 @@ export async function replaceRecipientAddressAction(
   try {
     await replaceOpsAlertRecipientAddress(target.recipientId, { version: target.version, address, reason });
   } catch (error) {
-    return rowRefusal(error);
+    const refused = rowRefusal(error);
+    // The replace window has no second step (its successor keeps status and
+    // preferences): either answer is a sentence there, not a confirmation.
+    if (refused.kind === 'last-critical') {
+      return errorState(REPLACE_LAST_CRITICAL_TEXT, null, 'LAST_CRITICAL_CONFIRM_REQUIRED');
+    }
+    if (refused.kind === 'last-channel') return errorState(LAST_CHANNEL_PROTECTED_TEXT, null, 'LAST_CHANNEL_PROTECTED');
+    return refused;
   }
   done('replaced');
 }

@@ -15,7 +15,7 @@ import {
   testRecipientAction,
 } from './actions';
 import { LastCriticalStep } from './last-critical-step';
-import { RECIPIENT_ACTION_IDLE, type RecipientActionState } from './recipient-action-state';
+import { RECIPIENT_ACTION_IDLE, STEPPED_ACTION_IDLE, withSecondStep, type RecipientActionState } from './recipient-action-state';
 
 /**
  * The actions of one alert recipient (OBS-ALERT-002 PR-B, task B3), and the
@@ -116,15 +116,18 @@ function LastCriticalHint({ recipient }: { recipient: RowRecipient }) {
   ) : null;
 }
 
+// Held once per module: a stable reducer for useActionState.
+const pauseWithSecondStep = withSecondStep(pauseRecipientAction);
+const deleteWithSecondStep = withSecondStep(deleteRecipientAction);
+
 function PauseForm({ recipient }: { recipient: RowRecipient }) {
-  const [state, action] = useActionState(pauseRecipientAction, RECIPIENT_ACTION_IDLE);
-  const stepped = state.kind === 'last-critical' || state.kind === 'last-channel';
+  const [{ state, step }, action] = useActionState(pauseWithSecondStep, STEPPED_ACTION_IDLE);
   return (
     <form action={action} className="inline-form" data-testid="ops-alert-recipient-pause-form">
       <Target recipient={recipient} />
-      {stepped ? (
+      {step ? (
         <LastCriticalStep
-          state={state}
+          state={step}
           leadProof="ops-alert-recipient.pause"
           confirmLabel="Yine de duraklat"
           testId="ops-alert-recipient-pause-last-critical"
@@ -316,10 +319,11 @@ function ReasonField({ value, onChange, state }: { value: string; onChange: (nex
 }
 
 export function RecipientDeleteForm({ recipient, cancelHref }: { recipient: RowRecipient; cancelHref: string }) {
-  const [state, action] = useActionState(deleteRecipientAction, RECIPIENT_ACTION_IDLE);
+  // The second step is held apart from the last answer (`withSecondStep`): a
+  // reason refused in that step keeps the step and its confirmLastCritical.
+  const [{ state, step }, action] = useActionState(deleteWithSecondStep, STEPPED_ACTION_IDLE);
   // Controlled, so a refusal or the second step keeps the reason that was typed.
   const [reason, setReason] = useState('');
-  const stepped = state.kind === 'last-critical' || state.kind === 'last-channel';
   return (
     <form action={action} className="seo-modal-form" data-testid="ops-alert-recipient-delete-form">
       <Target recipient={recipient} />
@@ -330,9 +334,9 @@ export function RecipientDeleteForm({ recipient, cancelHref }: { recipient: RowR
       <ReasonField value={reason} onChange={setReason} state={state} />
       <ActionError state={state} testId="ops-alert-recipient-delete-error" />
       <div className="form-actions">
-        {stepped ? (
+        {step ? (
           <LastCriticalStep
-            state={state}
+            state={step}
             leadProof="ops-alert-recipient.delete"
             confirmLabel="Yine de sil"
             testId="ops-alert-recipient-delete-last-critical"

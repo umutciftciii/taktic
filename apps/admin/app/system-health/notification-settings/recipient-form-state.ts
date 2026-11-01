@@ -19,3 +19,18 @@ export type RecipientFormState =
   | { kind: 'last-channel'; at: number };
 
 export const RECIPIENT_FORM_IDLE: RecipientFormState = { kind: 'idle' };
+
+/**
+ * Which second step the form draws, and whether its ordinary save is hidden.
+ * The step is about Kritik being off on an edit: switched back on, the save is
+ * ordinary again. While it is drawn — the last-critical confirmation or the
+ * last-channel dead end — the plain save would only be refused the same way.
+ */
+export function recipientFormStep(
+  isEdit: boolean,
+  notifyCritical: boolean,
+  state: RecipientFormState,
+): { step: RecipientFormState; saveHidden: boolean } {
+  const step = isEdit && !notifyCritical ? state : RECIPIENT_FORM_IDLE;
+  return { step, saveHidden: step.kind === 'last-critical' || step.kind === 'last-channel' };
+}

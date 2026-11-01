@@ -1167,3 +1167,73 @@ describe('Bildirim Ayarları row actions', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 PR-B (task B4) — carried from the B3 review
+// ---------------------------------------------------------------------------
+
+const { withSecondStep, STEPPED_ACTION_IDLE } = await import('../app/system-health/notification-settings/recipient-action-state');
+const { recipientFormStep, RECIPIENT_FORM_IDLE } = await import('../app/system-health/notification-settings/recipient-form-state');
+
+describe('B3 carry-over: the second step survives, refusals show, no dead save button', () => {
+  it('delete: a reason refused in the second step keeps the second step (component state, not the last answer)', async () => {
+    const run = withSecondStep(settingsActions.deleteRecipientAction);
+    api.deleteOpsAlertRecipient.mockRejectedValueOnce(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
+    const first = await run(STEPPED_ACTION_IDLE, submission({ ...BASE, reason: 'Ekipten ayrıldı' }, [await mint('ops-alert-recipient.delete')]));
+    expect(first.step).toMatchObject({ kind: 'last-critical' });
+
+    const second = await run(
+      first,
+      submission({ ...BASE, reason: 'abc', confirmLastCritical: 'true' }, [
+        await mint('ops-alert-recipient.delete'),
+        await mint('ops-alert-recipient.last-critical'),
+      ]),
+    );
+    expect(second.state).toMatchObject({ kind: 'error', field: 'reason' });
+    expect(second.step).toMatchObject({ kind: 'last-critical' });
+    expect(api.deleteOpsAlertRecipient).toHaveBeenCalledTimes(1);
+
+    // A proof refusal in the second step keeps it too.
+    const third = await run(second, submission({ ...BASE, reason: 'Ekipten ayrıldı', confirmLastCritical: 'true' }));
+    expect(third.state).toMatchObject({ kind: 'error', message: CONFIRMATION_PROOF_REFUSAL_MESSAGE });
+    expect(third.step).toMatchObject({ kind: 'last-critical' });
+  });
+
+  it('the delete and pause forms keep their second step through withSecondStep', () => {
+    const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/recipient-row-actions.tsx'), 'utf8');
+    expect(source).toContain('withSecondStep(deleteRecipientAction)');
+    expect(source).toContain('withSecondStep(pauseRecipientAction)');
+  });
+
+  it('replace: LAST_CRITICAL_CONFIRM_REQUIRED and LAST_CHANNEL_PROTECTED come back as a visible error', async () => {
+    api.replaceOpsAlertRecipientAddress.mockRejectedValueOnce(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
+    const critical = await settingsActions.replaceRecipientAddressAction(
+      RECIPIENT_ACTION_IDLE,
+      submission({ ...BASE, address: 'new@example.test', reason: 'Adres değişti' }, [await mint('ops-alert-recipient.replace')]),
+    );
+    expect(critical).toMatchObject({ kind: 'error', code: 'LAST_CRITICAL_CONFIRM_REQUIRED', field: null });
+    expect(JSON.stringify(critical)).toContain('Adres değiştirilmedi');
+
+    api.replaceOpsAlertRecipientAddress.mockRejectedValueOnce(conflict(409, 'LAST_CHANNEL_PROTECTED'));
+    const channel = await settingsActions.replaceRecipientAddressAction(
+      RECIPIENT_ACTION_IDLE,
+      submission({ ...BASE, address: 'new@example.test', reason: 'Adres değişti' }, [await mint('ops-alert-recipient.replace')]),
+    );
+    expect(channel).toMatchObject({ kind: 'error', code: 'LAST_CHANNEL_PROTECTED', message: LAST_CHANNEL_PROTECTED_TEXT });
+    for (const result of [critical, channel]) expect(JSON.stringify(result)).not.toContain('new@example.test');
+  });
+
+  it('edit: the ordinary save is hidden while the answer is last-channel and Kritik is off', () => {
+    const lastChannel = { kind: 'last-channel', at: 1 } as const;
+    const lastCritical = { kind: 'last-critical', at: 1 } as const;
+    expect(recipientFormStep(true, false, lastChannel)).toEqual({ step: lastChannel, saveHidden: true });
+    expect(recipientFormStep(true, false, lastCritical)).toEqual({ step: lastCritical, saveHidden: true });
+    // Kritik back on: the save is ordinary again.
+    expect(recipientFormStep(true, true, lastChannel)).toEqual({ step: RECIPIENT_FORM_IDLE, saveHidden: false });
+    expect(recipientFormStep(false, false, lastChannel)).toEqual({ step: RECIPIENT_FORM_IDLE, saveHidden: false });
+    const refused = { kind: 'error', message: 'x', field: null, code: null, at: 1 } as const;
+    expect(recipientFormStep(true, false, refused)).toEqual({ step: refused, saveHidden: false });
+    const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/recipient-form.tsx'), 'utf8');
+    expect(source).toContain('recipientFormStep(');
+  });
+});

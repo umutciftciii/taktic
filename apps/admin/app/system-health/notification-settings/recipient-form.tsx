@@ -7,7 +7,7 @@ import { Toggle } from '../../../components/toggle';
 import { RECIPIENT_LABEL_MAX_LENGTH } from '../../../lib/ops-alert-recipients';
 import { createRecipientAction, updateRecipientAction } from './actions';
 import { LastCriticalStep } from './last-critical-step';
-import { RECIPIENT_FORM_IDLE } from './recipient-form-state';
+import { RECIPIENT_FORM_IDLE, recipientFormStep } from './recipient-form-state';
 
 /**
  * The add / edit window of one alert recipient (OBS-ALERT-002).
@@ -64,8 +64,7 @@ export function RecipientForm({
   });
   const error = state.kind === 'error' ? state : null;
   // The second step is about Kritik being off; once it is back on, the save is ordinary again.
-  const step = mode.kind === 'edit' && !notify.notifyCritical ? state : RECIPIENT_FORM_IDLE;
-  const asking = step.kind === 'last-critical';
+  const { step, saveHidden } = recipientFormStep(mode.kind === 'edit', notify.notifyCritical, state);
   const errorOn = (field: 'address' | 'label') => (error?.field === field ? error.message : null);
 
   return (
@@ -149,7 +148,7 @@ export function RecipientForm({
       <LastCriticalStep state={step} leadProof={null} confirmLabel="Yine de kaydet" testId="ops-alert-form-last-critical" />
 
       <div className="form-actions">
-        {asking ? null : <SubmitButton label={mode.kind === 'edit' ? 'Değişiklikleri kaydet' : 'Alıcıyı ekle'} />}
+        {saveHidden ? null : <SubmitButton label={mode.kind === 'edit' ? 'Değişiklikleri kaydet' : 'Alıcıyı ekle'} />}
         <Link className="btn btn-secondary" href={cancelHref} scroll={false}>
           Vazgeç
         </Link>
