@@ -51,6 +51,14 @@ export const PAYMENT_PROVIDERS_FOR_ENVIRONMENT = {
  * apps/api/src/modules/ops-alerts/ops-alert.config.ts, so a value the API
  * would refuse at boot is refused here first.
  */
+// OBS-ALERT-002: mirrors apps/api/src/modules/ops-alerts/recipient-crypto.config.ts
+// (a source-reading test pins these). The key text is 32 bytes of published,
+// non-secret text; the API refuses it, and so does the contract.
+export const DEVELOPMENT_RECIPIENT_ENC_KEY_TEXT = 'taktic-dev-recipient-not-secret!';
+export const DEVELOPMENT_RECIPIENT_HMAC_KEY = 'taktic-local-development-recipient-hmac-key-not-secret';
+export const RECIPIENT_HMAC_KEY_MIN_LENGTH = 32;
+const RECIPIENT_KEY_ID_PATTERN = /^v[1-9]\d{0,3}$/;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
 export const OPS_ALERT_TELEGRAM_TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
 export const OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
 const OPS_ALERT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -299,6 +307,7 @@ export function checkRuntimeContract(config, { environment, project, buildEnv = 
   if (!legacySet.length) pass('legacy scheduler switches', 'none set; the database settings are the only source');
 
   for (const result of opsAlertChannelCoverage(api, environment)) results.push(result);
+  for (const result of opsAlertRecipientKeyCoverage(api, environment)) results.push(result);
 
   // SMS (apps/api/src/modules/notifications/sms-transport.ts). The build has
   // no SMS provider. The recorder transport is test-only and refused under
@@ -363,6 +372,60 @@ export function opsAlertChannelCoverage(api, environment) {
     }
   }
   return results;
+}
+
+/**
+ * OBS-ALERT-002: the keys behind managed alert recipients. Required on every
+ * deployed environment; a development value or a malformed one is a boot
+ * refusal in the API, so it is a FAIL here. Local stacks are not asked.
+ * The detail says how many keys and which versions, never a key.
+ */
+export function opsAlertRecipientKeyCoverage(api, environment) {
+  if (!DEPLOYED_ENVIRONMENTS.includes(environment)) return [];
+  const name = 'OPS_ALERT_RECIPIENT keys';
+  const fail = (detail) => [{ name, status: 'FAIL', detail }];
+  const keys = value(api, 'OPS_ALERT_RECIPIENT_ENC_KEYS');
+  const active = value(api, 'OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE');
+  const hmacKey = value(api, 'OPS_ALERT_RECIPIENT_HMAC_KEY');
+  const rawVersion = value(api, 'OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION');
+
+  const missing = [
+    ['OPS_ALERT_RECIPIENT_ENC_KEYS', keys],
+    ['OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE', active],
+    ['OPS_ALERT_RECIPIENT_HMAC_KEY', hmacKey],
+  ].filter(([, v]) => !v);
+  if (missing.length) {
+    return missing.map(([key]) => ({ name: key, status: 'FAIL', detail: 'not set (the API refuses to boot without it; recipient addresses are encrypted at rest)' }));
+  }
+
+  const version = rawVersion ? Number(rawVersion) : 1;
+  if (!Number.isInteger(version) || version < 1 || version > 1000) {
+    return fail('OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION must be a whole number from 1 to 1000');
+  }
+  if (hmacKey.length < RECIPIENT_HMAC_KEY_MIN_LENGTH) {
+    return fail(`OPS_ALERT_RECIPIENT_HMAC_KEY shorter than ${RECIPIENT_HMAC_KEY_MIN_LENGTH} characters`);
+  }
+  if (hmacKey === DEVELOPMENT_RECIPIENT_HMAC_KEY) {
+    return fail('OPS_ALERT_RECIPIENT_HMAC_KEY is the published development key');
+  }
+
+  const ids = new Set();
+  const development = Buffer.from(DEVELOPMENT_RECIPIENT_ENC_KEY_TEXT, 'utf8');
+  for (const entry of keys.split(',')) {
+    const separator = entry.indexOf(':');
+    const id = separator === -1 ? '' : entry.slice(0, separator).trim();
+    const encoded = separator === -1 ? '' : entry.slice(separator + 1).trim();
+    if (!RECIPIENT_KEY_ID_PATTERN.test(id)) return fail('OPS_ALERT_RECIPIENT_ENC_KEYS must be a comma-separated list of v<n>:<base64 key> entries');
+    if (ids.has(id)) return fail('OPS_ALERT_RECIPIENT_ENC_KEYS has a duplicate key id');
+    if (!BASE64_PATTERN.test(encoded) || encoded.length % 4 !== 0) return fail('OPS_ALERT_RECIPIENT_ENC_KEYS has an entry whose key is not base64');
+    const key = Buffer.from(encoded, 'base64');
+    if (key.length !== 32) return fail('OPS_ALERT_RECIPIENT_ENC_KEYS has an entry that is not exactly 32 bytes');
+    if (key.equals(development)) return fail('OPS_ALERT_RECIPIENT_ENC_KEYS is the published development keyring');
+    ids.add(id);
+  }
+  if (!ids.has(active)) return fail('OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE is not in OPS_ALERT_RECIPIENT_ENC_KEYS');
+
+  return [{ name, status: 'PASS', detail: `keyring ${active} (${ids.size} ${ids.size === 1 ? 'key' : 'keys'}), hmac v${version}` }];
 }
 
 /**

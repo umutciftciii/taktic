@@ -17,6 +17,8 @@ import { describe, it } from 'node:test';
 import { resolveConfig } from './compose-security.mjs';
 import {
   DEVELOPMENT_FINGERPRINT_KEY,
+  DEVELOPMENT_RECIPIENT_ENC_KEY_TEXT,
+  DEVELOPMENT_RECIPIENT_HMAC_KEY,
   FINGERPRINT_KEY_MIN_LENGTH,
   LEGACY_SCHEDULER_FLAGS,
   OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN,
@@ -29,6 +31,12 @@ import {
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 
 const SECRET_FINGERPRINT = 'placeholder-fingerprint-key-not-a-secret-0001';
+// OBS-ALERT-002: generated from repeated bytes and characters, never typed as
+// literals, so nothing here reads as a secret to a scanner.
+const RECIPIENT_ENC_KEY_ONE = Buffer.alloc(32, 1).toString('base64');
+const RECIPIENT_ENC_KEY_TWO = Buffer.alloc(32, 2).toString('base64');
+const RECIPIENT_ENC_KEYS = `v1:${RECIPIENT_ENC_KEY_ONE},v2:${RECIPIENT_ENC_KEY_TWO}`;
+const RECIPIENT_HMAC_KEY = 'q'.repeat(40);
 const SECRET_VALUES = [
   SECRET_FINGERPRINT,
   'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.placeholderNotARealCredential',
@@ -36,6 +44,9 @@ const SECRET_VALUES = [
   're_placeholderNotARealKey',
   '1x0000000000000000000000000000000AA',
   '123456789:placeholderNotARealTelegramBotToken00',
+  RECIPIENT_ENC_KEY_ONE,
+  RECIPIENT_ENC_KEY_TWO,
+  RECIPIENT_HMAC_KEY,
 ];
 
 /** The staging host's configuration as `docker compose config` resolves it. */
@@ -49,6 +60,10 @@ function stagingConfig() {
           APP_ENVIRONMENT: 'staging',
           PROMOTION_FINGERPRINT_KEY: SECRET_FINGERPRINT,
           PROMOTION_FINGERPRINT_KEY_VERSION: '',
+          OPS_ALERT_RECIPIENT_ENC_KEYS: RECIPIENT_ENC_KEYS,
+          OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v2',
+          OPS_ALERT_RECIPIENT_HMAC_KEY: RECIPIENT_HMAC_KEY,
+          OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION: '',
           PAYMENT_PROVIDER: 'lemon-squeezy-test',
           LEMON_SQUEEZY_MODE: '',
           LEMON_SQUEEZY_API_KEY: SECRET_VALUES[1],
@@ -331,6 +346,69 @@ describe('the staging contract', () => {
     assert.ok(!JSON.stringify(results).includes('re_placeholderWrongVariable'));
   });
 
+  it('OBS-ALERT-002: passes valid recipient keys with a detail that never holds a value', () => {
+    const results = run(stagingConfig());
+    const result = results.find((r) => r.name === 'OPS_ALERT_RECIPIENT keys');
+    assert.equal(result.status, 'PASS');
+    assert.equal(result.detail, 'keyring v2 (2 keys), hmac v1');
+    assertNoSecretPrinted(results);
+  });
+
+  it('OBS-ALERT-002: reports the hmac key version when one is set', () => {
+    const config = stagingConfig();
+    config.services.api.environment.OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION = '3';
+    assert.equal(run(config).find((r) => r.name === 'OPS_ALERT_RECIPIENT keys').detail, 'keyring v2 (2 keys), hmac v3');
+  });
+
+  it('OBS-ALERT-002: fails each missing recipient key on staging and production, naming it only', () => {
+    for (const environment of ['staging', 'production']) {
+      for (const key of ['OPS_ALERT_RECIPIENT_ENC_KEYS', 'OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE', 'OPS_ALERT_RECIPIENT_HMAC_KEY']) {
+        const config = stagingConfig();
+        config.name = `taktic-${environment}`;
+        for (const service of ['api', 'web', 'admin']) config.services[service].environment.APP_ENVIRONMENT = environment;
+        if (environment === 'production') {
+          config.services.api.environment.PAYMENT_PROVIDER = 'mock';
+          config.services.api.environment.OPS_ALERT_EMAIL = 'ops@example.test';
+        }
+        delete config.services.api.environment[key];
+        const results = run(config, { environment, project: config.name });
+        assert.match(failures(results)[key], /not set/, `${environment} ${key}`);
+        assertNoSecretPrinted(results);
+      }
+    }
+  });
+
+  it('OBS-ALERT-002: fails the published development keys and malformed keyrings, never printing a key', () => {
+    const devKey = Buffer.from(DEVELOPMENT_RECIPIENT_ENC_KEY_TEXT, 'utf8').toString('base64');
+    const cases = [
+      ['OPS_ALERT_RECIPIENT_ENC_KEYS', `v1:${devKey},v2:${RECIPIENT_ENC_KEY_TWO}`, /published development keyring/],
+      ['OPS_ALERT_RECIPIENT_HMAC_KEY', DEVELOPMENT_RECIPIENT_HMAC_KEY, /published development key/],
+      ['OPS_ALERT_RECIPIENT_HMAC_KEY', 's'.repeat(31), /shorter than 32 characters/],
+      ['OPS_ALERT_RECIPIENT_ENC_KEYS', `v1:${Buffer.alloc(31, 1).toString('base64')}`, /32 bytes/],
+      ['OPS_ALERT_RECIPIENT_ENC_KEYS', `v1:${RECIPIENT_ENC_KEY_ONE},v1:${RECIPIENT_ENC_KEY_TWO}`, /duplicate/],
+      ['OPS_ALERT_RECIPIENT_ENC_KEYS', `one:${RECIPIENT_ENC_KEY_ONE}`, /v<n>:<base64 key>/],
+      ['OPS_ALERT_RECIPIENT_ENC_KEYS', 'v1:@@@@', /base64/],
+      ['OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE', 'v9', /not in OPS_ALERT_RECIPIENT_ENC_KEYS/],
+      ['OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION', '1001', /whole number from 1 to 1000/],
+    ];
+    for (const [key, bad, pattern] of cases) {
+      const config = stagingConfig();
+      config.services.api.environment[key] = bad;
+      const results = run(config);
+      assert.match(failures(results)['OPS_ALERT_RECIPIENT keys'], pattern, `${key}=${pattern}`);
+      const text = JSON.stringify(results);
+      assert.ok(!text.includes(bad) || bad.length < 8, `${key} value reached the output`);
+      assertNoSecretPrinted(results);
+    }
+  });
+
+  it('OBS-ALERT-002: a local stack is not asked for the keys', () => {
+    const config = stagingConfig();
+    delete config.services.api.environment.OPS_ALERT_RECIPIENT_ENC_KEYS;
+    const results = run(config, { environment: 'local' });
+    assert.equal(results.find((r) => r.name === 'OPS_ALERT_RECIPIENT keys'), undefined);
+  });
+
   it('reads list-form environments as well as maps', () => {
     const config = stagingConfig();
     config.services.api.environment = Object.entries(config.services.api.environment).map(([k, v]) => `${k}=${v}`);
@@ -366,6 +444,14 @@ describe('kept in step with the API', () => {
     assert.ok(source.includes(`TELEGRAM_CHAT_ID_PATTERN = ${OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN};`));
   });
 
+  it('the recipient key rules and development constants', () => {
+    const source = read('apps/api/src/modules/ops-alerts/recipient-crypto.config.ts');
+    assert.ok(source.includes(`Buffer.from('${DEVELOPMENT_RECIPIENT_ENC_KEY_TEXT}', 'utf8')`));
+    assert.ok(source.includes(`DEVELOPMENT_RECIPIENT_HMAC_KEY = '${DEVELOPMENT_RECIPIENT_HMAC_KEY}'`));
+    assert.ok(source.includes('RECIPIENT_HMAC_KEY_MIN_LENGTH = 32;'));
+    assert.ok(source.includes('KEY_ID_PATTERN = /^v[1-9]\\d{0,3}$/;'));
+  });
+
   it('the pinned production sender', () => {
     const source = read('apps/api/src/modules/notifications/resend.config.ts');
     const domain = source.match(/RESEND_VERIFIED_DOMAIN = '([^']+)'/)?.[1];
@@ -388,6 +474,9 @@ describe('docker-compose.prod.yml under the contract', { skip: dockerAvailable()
     COMPOSE_PROJECT_NAME: 'taktic-staging',
     APP_ENVIRONMENT: 'staging',
     PROMOTION_FINGERPRINT_KEY: SECRET_FINGERPRINT,
+    OPS_ALERT_RECIPIENT_ENC_KEYS: RECIPIENT_ENC_KEYS,
+    OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v2',
+    OPS_ALERT_RECIPIENT_HMAC_KEY: RECIPIENT_HMAC_KEY,
     PAYMENT_PROVIDER: 'lemon-squeezy-test',
     LEMON_SQUEEZY_API_KEY: SECRET_VALUES[1],
     LEMON_SQUEEZY_STORE_ID: '424242',
@@ -438,6 +527,22 @@ describe('docker-compose.prod.yml under the contract', { skip: dockerAvailable()
     const results = run(config);
     assert.deepEqual(failures(results), {});
     assert.equal(results.find((r) => r.name === 'OPS_ALERT_TELEGRAM').status, 'PASS');
+  });
+
+  it('OBS-ALERT-002: forwards the recipient keys to the api only, and reaches the contract from the host .env', () => {
+    const { OPS_ALERT_RECIPIENT_ENC_KEYS: _a, OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: _b, OPS_ALERT_RECIPIENT_HMAC_KEY: _c, ...without } = stagingHostEnv;
+    const bare = resolveConfig('prod', { extraEnv: without });
+    const keys = ['OPS_ALERT_RECIPIENT_ENC_KEYS', 'OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE', 'OPS_ALERT_RECIPIENT_HMAC_KEY', 'OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION'];
+    for (const key of keys) {
+      assert.equal(bare.services.api.environment[key] ?? '', '', `${key} must resolve empty by default`);
+      for (const service of ['web', 'admin']) assert.equal(bare.services[service].environment?.[key], undefined);
+    }
+    assert.match(failures(run(bare))['OPS_ALERT_RECIPIENT_ENC_KEYS'], /not set/);
+
+    const results = run(resolveConfig('prod', { extraEnv: stagingHostEnv }));
+    assert.deepEqual(failures(results), {});
+    assert.equal(results.find((r) => r.name === 'OPS_ALERT_RECIPIENT keys').detail, 'keyring v2 (2 keys), hmac v1');
+    assertNoSecretPrinted(results);
   });
 
   it('the staging .env without the fingerprint key fails before anything runs', () => {
