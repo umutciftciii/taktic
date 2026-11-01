@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/modules/auth/auth.types';
 import {
   DuplicateRecipientError,
+  mapDatabaseError,
   OpsAlertRecipientsService,
   RecipientDeletedError,
   RecipientLimitReachedError,
@@ -263,5 +264,54 @@ describe('OpsAlertRecipientsService', () => {
     expect(all.total).toBe(3);
     expect(all.items).toHaveLength(2);
     expect(all.hasNextPage).toBe(true);
+  });
+
+  describe('database backstops (the service count bypassed)', () => {
+    const row = (suffix: string, overrides: Record<string, unknown> = {}) => ({
+      label: 'x',
+      addressCiphertext: new Uint8Array([1]),
+      addressNonce: new Uint8Array([1]),
+      addressTag: new Uint8Array([1]),
+      addressKeyId: 'v1',
+      addressHmac: `backstop-${suffix}`,
+      addressHmacVersion: 1,
+      maskedAddress: 'a***@example.test',
+      notifyWarning: true,
+      notifyCritical: true,
+      notifyRecovery: true,
+      createdById: actor.id,
+      updatedById: actor.id,
+      ...overrides,
+    });
+
+    it('maps the limit trigger refusal (23514 + prefix) to RecipientLimitReachedError', async () => {
+      for (let i = 0; i < 10; i += 1) await ctx.prisma.opsAlertRecipient.create({ data: row(String(i)) });
+      const caught = await ctx.prisma
+        .$transaction(async (tx) => tx.opsAlertRecipient.create({ data: row('eleventh') }))
+        .then(
+          () => null,
+          (error: unknown) => error,
+        );
+      expect(caught).not.toBeNull();
+      expect(mapDatabaseError(caught)).toBeInstanceOf(RecipientLimitReachedError);
+    });
+
+    it('maps a live-HMAC unique violation to DuplicateRecipientError', async () => {
+      await ctx.prisma.opsAlertRecipient.create({ data: row('same') });
+      const caught = await ctx.prisma.opsAlertRecipient.create({ data: row('same') }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(mapDatabaseError(caught)).toBeInstanceOf(DuplicateRecipientError);
+    });
+
+    it('does not mistake another check violation for the limit', async () => {
+      const caught = await ctx.prisma.opsAlertRecipient.create({ data: row('label', { label: '' }) }).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      expect(caught).not.toBeNull();
+      expect(mapDatabaseError(caught)).toBe(caught);
+    });
   });
 });

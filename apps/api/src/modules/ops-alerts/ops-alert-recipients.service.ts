@@ -150,9 +150,19 @@ function cleanLabel(raw: string): string {
   return label;
 }
 
+/**
+ * The limit trigger's refusal: SQLSTATE 23514 (check_violation) and the
+ * message prefix. Prisma drops the constraint name and, for a RAISE inside an
+ * interactive transaction, throws PrismaClientUnknownRequestError with no
+ * `code`/`meta`; the SQLSTATE survives only inside the message text
+ * (`PostgresError { code: "23514", message: "ops_alert_recipient_limit: ..." }`).
+ * A raw-query error carries it as `meta.code`. Either way both facts are
+ * required, so another check violation is never mistaken for the limit.
+ */
 function isLimitRefusal(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : '';
-  return message.includes(LIMIT_MESSAGE_PREFIX);
+  if (!(error instanceof Error) || !error.message.includes(LIMIT_MESSAGE_PREFIX)) return false;
+  const meta = (error as { meta?: { code?: unknown } }).meta;
+  return meta?.code === '23514' || error.message.includes('code: "23514"') || error.message.includes('SQLSTATE 23514');
 }
 
 function isUniqueViolation(error: unknown): boolean {
@@ -165,7 +175,7 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /** The database's refusals, as the service's own errors. Anything else is returned untouched. */
-function mapDatabaseError(error: unknown): unknown {
+export function mapDatabaseError(error: unknown): unknown {
   if (isLimitRefusal(error)) return new RecipientLimitReachedError();
   if (isUniqueViolation(error)) return new DuplicateRecipientError();
   return error;
