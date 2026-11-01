@@ -130,6 +130,10 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
 — önce yönlendirmeyi panelden `ENV_LEGACY`'ye döndürmek (R0); kod geri
 alınacaksa açık yönetilen teslimatlar sayı bazında raporlanır ve yalnız
 operatörün onayladığı sayılarla iptal edilir (R2). Şema geri alınmaz.
+R2, `deploy-runtime.md`'nin "eski API image'ını yeni şemada başlatma"
+kuralından bilinçli bir sapmadır (elle container değişimi + operatörün açık
+kararı) ve ürün sahibinin onayı beklenen **açık bir karardır**; tercih edilen
+yollar fix-forward ve dump'tan dönüştür.
 
 **OBS-ALERT-001** için (yalnız OBS-ALERT-002 migration'ı uygulanmamış bir
 veritabanında): kod geri alındıktan sonra, API durdurulmuşken:

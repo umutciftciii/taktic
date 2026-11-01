@@ -32,6 +32,18 @@ kalır. Geri dönüş gerekiyorsa R0'ı API üzerinden yapın.
 
 ## R2 — PR-A kodunu geri al (şema kalır)
 
+> **Bilinçli sapma — karar AÇIK.** R2, `docs/ops/deploy-runtime.md` "Geri
+> dönüş" kuralından ("Migration uygulandıysa: eski API image'ını yeni şemada
+> başlatma") bilerek sapar: 109. migration uygulanmışken eski (`d7c195a2`) API
+> imajını yeni şemada çalıştırır. Repo'nun tercih ettiği yollar **fix-forward**
+> (düzelt, aynı deploy'u yeniden çalıştır) ve gerekirse **pre-deploy dump'tan
+> dönüş**tür (R3). R2 `deploy-staging.sh` ile yapılamaz (eski sürümün deploy
+> kapıları reddeder, adım 6); API container'ının **elle** değiştirilmesini ve
+> operatörün o an verdiği **açık kararı** gerektirir. R2'nin bir seçenek
+> olarak kalıp kalmayacağı ürün sahibinin onayına bağlıdır ve henüz
+> **verilmemiştir**; onay gelene kadar kod geri alımında fix-forward / dump
+> dönüşü kullanılır.
+
 Hedef: API'yi OBS-ALERT-001 sürümüne (`d7c195a2`) döndürmek; 109. migration
 ve tabloları yerinde kalır. Eski kod yeni tabloları ve sütunları yok sayar;
 eski tekilleştirme kısmi indeksle aynen sürer (bkz. "Prova sonuçları").
@@ -73,8 +85,10 @@ eski tekilleştirme kısmi indeksle aynen sürer (bkz. "Prova sonuçları").
 6. **`d7c195a2` API imajını başlatın — `deploy-staging.sh --sha d7c195a2`
    ile değil.** O sürümün preflight'ı (adım 7) veritabanında "bu commit'in
    içermediği uygulanmış migration" görünce (`20261102090000_…`) ve drift
-   kontrolü yeni tabloları görünce deploy'u reddeder; bu tasarım gereğidir
-   (bkz. "Prova sonuçları" §3). Yalnız API container'ı eski imajla yeniden
+   kontrolü yeni tabloları görünce deploy'u reddeder. Bu kapılar tam olarak
+   R2'nin yaptığı şeye karşı korur: daha yeni bir şemanın üzerinde eski kodun
+   habersizce açılmasına (bkz. "Prova sonuçları" §3). Kapıyı aşmak yukarıdaki
+   açık karardır. Yalnız API container'ı eski imajla yeniden
    oluşturulur:
 
    ```bash

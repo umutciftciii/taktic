@@ -139,7 +139,7 @@ içeriyorsa okunur.
    `hmacVersions` alanlarındadır (Bildirim Ayarları ekranındaki sürüm dağılımı).
 3. **Her `addressKeyId` keyring'de olmalı** (yukarıdaki `awk` id listesi).
    Eksik id varsa: o anahtarı parola yöneticisinden / çevrimdışı kopyadan
-   keyring'e geri ekleyin ("Rotasyon" adım 1'deki `awk` ile), API'yi recreate
+   keyring'e geri ekleyin ("Rotasyon → Şifreleme anahtarı" adım 2'deki `awk` ile), API'yi recreate
    edin. Anahtar bulunamıyorsa "Anahtar kaybı" bölümüne geçin.
 4. `addressHmacVersion` şu anki `OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION`'dan
    farklıysa ve o sürümün HMAC anahtarı elinizdeyse, sürümü ona göre ayarlamak
@@ -163,21 +163,28 @@ sonraki çalıştırmaya kalır (`failed` sayısında görünür, satır bozulma
 ### Şifreleme anahtarı (ENC)
 
 1. Yeni anahtarı üretin ve **yedekleyin** (İlk kurulum §1, id `v2`).
+> Bu bölümdeki her `awk … > "$ENV_FILE.new" && mv` bloğu `umask 077` ile
+> başlar ve `chmod 600 "$ENV_FILE"` ile biter: `.new` dosyası sırları taşır ve
+> `mv` onun iznini `.env`'e taşır; varsayılan umask'la (022) dosya herkesçe
+> okunabilir olurdu. Bitince `ls -l "$ENV_FILE"` → `-rw-------`.
+
 2. Keyring'e ekleyin (eski anahtar kalır; değer argümana değil ortama girer):
 
    ```bash
+   umask 077
    cp -p "$ENV_FILE" "$ENV_FILE.pre-rotation"   # aynı sırları taşır; adım 8'de imha
    read -rs NEW_ENC_KEY && export NEW_ENC_KEY
    awk 'index($0, "OPS_ALERT_RECIPIENT_ENC_KEYS=") == 1 { $0 = $0 ",v2:" ENVIRON["NEW_ENC_KEY"] } { print }' \
-     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE"
+     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE" && chmod 600 "$ENV_FILE"
    unset NEW_ENC_KEY
    ```
 
 3. Aktif yapın:
 
    ```bash
+   umask 077
    awk -v id=v2 'index($0, "OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE=") == 1 { $0 = "OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE=" id } { print }' \
-     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE"
+     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE" && chmod 600 "$ENV_FILE"
    ```
 
 4. Preflight: `keyring v2 (2 keys)`. Yalnız API'yi recreate edin. Bundan sonra
@@ -192,11 +199,12 @@ sonraki çalıştırmaya kalır (`failed` sayısında görünür, satır bozulma
 7. Eski id'yi keyring'den çıkarın ve API'yi recreate edin:
 
    ```bash
+   umask 077
    awk -v drop=v1 'BEGIN { p = "OPS_ALERT_RECIPIENT_ENC_KEYS=" }
         index($0, p) == 1 { n = split(substr($0, length(p) + 1), e, ","); out = "";
                             for (i = 1; i <= n; i++) if (index(e[i], drop ":") != 1) out = out (out == "" ? "" : ",") e[i];
                             $0 = p out } { print }' \
-     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE"
+     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE" && chmod 600 "$ENV_FILE"
    ```
 
    Preflight: `keyring v2 (1 key)`.
@@ -211,13 +219,31 @@ HMAC anahtarı tek değerdir, keyring'i yoktur; geçiş sürüm numarasıyla yap
 HMAC anahtarına ihtiyaç duymaz.
 
 1. Yeni HMAC anahtarını üretin ve yedekleyin (kayıt adı `... HMAC v2`).
-2. `.env`'de `OPS_ALERT_RECIPIENT_HMAC_KEY` değerini (`read -rs` + `ENVIRON`
-   ile, yukarıdaki `awk` kalıbı: `$0 = "OPS_ALERT_RECIPIENT_HMAC_KEY=" ENVIRON["NEW_HMAC_KEY"]`)
-   ve `OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION`'ı `2` yapın; API'yi recreate edin.
+2. `.env`'de anahtarı ve sürümü değiştirin (değer yapıştırılır, ekrana ve
+   argümana girmez; sürüm satırı yoksa eklenir):
+
+   ```bash
+   umask 077
+   cp -p "$ENV_FILE" "$ENV_FILE.pre-rotation"   # eski HMAC anahtarını taşır; adım 4'te imha
+   read -rs NEW_HMAC_KEY && export NEW_HMAC_KEY
+   awk -v version=2 '
+     index($0, "OPS_ALERT_RECIPIENT_HMAC_KEY=") == 1         { $0 = "OPS_ALERT_RECIPIENT_HMAC_KEY=" ENVIRON["NEW_HMAC_KEY"] }
+     index($0, "OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION=") == 1 { $0 = "OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION=" version; seen = 1 }
+     { print }
+     END { if (!seen) print "OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION=" version }' \
+     "$ENV_FILE" > "$ENV_FILE.new" && mv "$ENV_FILE.new" "$ENV_FILE" && chmod 600 "$ENV_FILE"
+   unset NEW_HMAC_KEY
+   grep -c '^OPS_ALERT_RECIPIENT_HMAC_KEY=' "$ENV_FILE"   # 1
+   ```
+
+   Preflight: `hmac v2`. Yalnız API'yi recreate edin.
 3. **Hemen** `rehash` (`POST /ops-alerts/routing/rehash`) ve
    `hmacVersions` yalnız `{ "2": n }` olana kadar tekrarlayın. Arada alıcı
    eklemeyin ve geçiş/geri dönüş yapmayın: eski sürümlü satırlar tekilleştirme
    ve env adresi eşleşmesinde görünmez.
+4. `$ENV_FILE.pre-rotation` dosyasını silin. Eski HMAC anahtarının yedeği yalnız
+   eski dump'lar için anlamlıdır (onlar da `rehash` ile düzelir); planlı
+   rotasyonda "eski" olarak işaretlenir, sızmada imha edilir.
 
 ## Anahtar kaybı
 
