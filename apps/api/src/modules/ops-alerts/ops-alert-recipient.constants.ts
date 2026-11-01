@@ -10,5 +10,12 @@ export const OPS_ALERT_RECIPIENT_LIMIT = 10;
  */
 export const OPS_ALERT_RECIPIENT_LOCK_KEY = 0x0b5a1e02;
 
+/**
+ * pg_advisory_xact_lock key a test send holds while it counts recent test
+ * sends, sends and writes its audit row, so the rate limit cannot be raced.
+ * Only test sends take it: recipient edits never wait on a mail provider.
+ */
+export const OPS_ALERT_TEST_SEND_LOCK_KEY = 0x0b5a1e03;
+
 /** The one OpsAlertRoutingSettings row (its migration creates it; a CHECK pins the id). */
 export const OPS_ALERT_ROUTING_ID = 'ops-alert-routing';

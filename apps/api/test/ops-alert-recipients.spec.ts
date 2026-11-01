@@ -1,5 +1,11 @@
-import { OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertEmailRouting, OpsAlertNoticeKind, UserRole } from '@prisma/client';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { AdminPermission, OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertEmailRouting, OpsAlertNoticeKind, UserRole } from '@prisma/client';
+import request from 'supertest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GRANTABLE_ADMIN_PERMISSIONS, SUPER_ADMIN_RESERVED_PERMISSIONS } from '../src/modules/auth/admin-permissions';
+import { ADMIN_ROUTE_PERMISSIONS } from '../src/modules/auth/route-permission-map';
+import { composeTestNotice } from '../src/modules/ops-alerts/ops-alert.rules';
+import { OpsAlertRoutingService } from '../src/modules/ops-alerts/ops-alert-routing.service';
 import type { AuthUser } from '../src/modules/auth/auth.types';
 import { decideRecipientRemoval } from '../src/modules/ops-alerts/ops-alert-recipient-guard';
 import {
@@ -12,7 +18,7 @@ import {
   RecipientLimitReachedError,
   VersionConflictError,
 } from '../src/modules/ops-alerts/ops-alert-recipients.service';
-import { createTestApp, createUser, resetDatabase, type TestContext } from './harness';
+import { createAdminWithPermissions, createTestApp, createUser, loginAs, resetDatabase, type TestContext } from './harness';
 
 /**
  * OBS-ALERT-002 — the managed recipient service: the address is stored only
@@ -441,5 +447,614 @@ describe('OpsAlertRecipientsService', () => {
       const live = await ctx.prisma.opsAlertRecipient.count({ where: { status: { not: 'DELETED' } } });
       expect(live).toBe(1);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// HTTP: the recipient and routing endpoints (OBS-ALERT-002 A9)
+// ---------------------------------------------------------------------------
+
+describe('OBS-ALERT-002 HTTP endpoints', () => {
+  let ctx: TestContext;
+  let service: OpsAlertRecipientsService;
+  let routing: OpsAlertRoutingService;
+  let root: AuthUser;
+  let rootCookie: string;
+
+  const ENV_ADDRESS = 'env.ops@example.test';
+  const saved: Record<string, string | undefined> = {};
+  const ENV_KEYS = ['OPS_ALERT_EMAIL', 'APP_ENVIRONMENT', 'OPS_ALERT_TELEGRAM_BOT_TOKEN', 'OPS_ALERT_TELEGRAM_CHAT_ID'] as const;
+
+  beforeAll(async () => {
+    ctx = await createTestApp();
+    service = ctx.app.get(OpsAlertRecipientsService);
+    routing = ctx.app.get(OpsAlertRoutingService);
+  });
+
+  afterAll(async () => {
+    await ctx.app.close();
+  });
+
+  beforeEach(async () => {
+    for (const key of ENV_KEYS) saved[key] = process.env[key];
+    process.env.OPS_ALERT_EMAIL = ENV_ADDRESS;
+    process.env.APP_ENVIRONMENT = 'local';
+    delete process.env.OPS_ALERT_TELEGRAM_BOT_TOKEN;
+    delete process.env.OPS_ALERT_TELEGRAM_CHAT_ID;
+    await resetDatabase(ctx.prisma);
+    ctx.notifications.clear();
+    const user = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, name: 'Kök' });
+    root = { id: user.id, email: user.email, phone: user.phone, name: user.name, role: user.role, isActive: true };
+    rootCookie = await loginAs(ctx.prisma, user.id);
+  });
+
+  afterEach(() => {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+
+  const quietPrefs = { notifyWarning: true, notifyCritical: false, notifyRecovery: false };
+  const seed = (address: string, label = 'Nöbetçi', prefs = quietPrefs) => service.create(root, { address, label, ...prefs });
+
+  type Verb = 'get' | 'post' | 'patch' | 'delete';
+  const call = (verb: Verb, path: string, cookie: string | null, body?: object) => {
+    const req = request(ctx.server)[verb](path);
+    if (cookie) req.set('Cookie', cookie);
+    return body === undefined ? req : req.send(body);
+  };
+
+  async function adminCookie(permissions: AdminPermission[]) {
+    const { admin } = await createAdminWithPermissions(ctx.prisma, permissions);
+    return loginAs(ctx.prisma, admin.id);
+  }
+
+  async function openAlertWithDelivery(recipientId: string | null, channel: OpsAlertChannel = OpsAlertChannel.EMAIL) {
+    const now = new Date();
+    const alert = await ctx.prisma.opsAlert.create({
+      data: {
+        ref: `OPS-A9-${Math.random().toString(36).slice(2, 8)}`,
+        fingerprint: `fp-${Math.random()}`,
+        source: 'SCHEDULER',
+        subjectKey: 'unviewed-offer-refund',
+        condition: 'OVERDUE',
+        severity: 'CRITICAL',
+        firstSeenAt: now,
+        lastSeenAt: now,
+        lastNotifiedAt: now,
+      },
+    });
+    const delivery = await ctx.prisma.opsAlertDelivery.create({
+      data: { alertId: alert.id, kind: OpsAlertNoticeKind.OPENED, channel, recipientId, status: OpsAlertDeliveryStatus.PENDING, nextAttemptAt: now },
+    });
+    return { alert, delivery };
+  }
+
+  // -------------------------------------------------------------------------
+  // The RBAC matrix
+  // -------------------------------------------------------------------------
+
+  type Prepared = { path: string; body?: object };
+  type RouteCase = {
+    name: string;
+    verb: Verb;
+    needs: AdminPermission[];
+    /** Reserved for SUPER_ADMIN: an ADMIN holding it through a role is still refused. */
+    reserved?: boolean;
+    prepare: () => Promise<Prepared>;
+  };
+
+  const P = AdminPermission;
+  const ROUTES: RouteCase[] = [
+    { name: 'GET /ops-alerts/recipients', verb: 'get', needs: [P.OPS_ALERT_RECIPIENTS_READ], prepare: async () => ({ path: '/ops-alerts/recipients' }) },
+    {
+      name: 'POST /ops-alerts/recipients',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_WRITE],
+      prepare: async () => ({ path: '/ops-alerts/recipients', body: { address: 'new.one@example.test', label: 'Yeni', ...quietPrefs } }),
+    },
+    { name: 'GET /ops-alerts/recipients/audit', verb: 'get', needs: [P.OPS_ALERT_RECIPIENTS_READ], prepare: async () => ({ path: '/ops-alerts/recipients/audit' }) },
+    {
+      name: 'PATCH /ops-alerts/recipients/:id',
+      verb: 'patch',
+      needs: [P.OPS_ALERT_RECIPIENTS_WRITE],
+      prepare: async () => {
+        const r = await seed('patch@example.test');
+        return { path: `/ops-alerts/recipients/${r.id}`, body: { version: r.version, label: 'Değişti' } };
+      },
+    },
+    {
+      name: 'DELETE /ops-alerts/recipients/:id',
+      verb: 'delete',
+      needs: [P.OPS_ALERT_RECIPIENTS_DELETE],
+      prepare: async () => {
+        const r = await seed('delete@example.test');
+        return { path: `/ops-alerts/recipients/${r.id}`, body: { version: r.version, reason: 'Ekipten ayrıldı' } };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/recipients/:id/pause',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_WRITE],
+      prepare: async () => {
+        const r = await seed('pause@example.test');
+        return { path: `/ops-alerts/recipients/${r.id}/pause`, body: { version: r.version } };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/recipients/:id/resume',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_WRITE],
+      prepare: async () => {
+        const r = await seed('resume@example.test');
+        const paused = await service.pause(root, r.id, { version: r.version });
+        return { path: `/ops-alerts/recipients/${r.id}/resume`, body: { version: paused.version } };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/recipients/:id/replace-address',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_WRITE, P.OPS_ALERT_RECIPIENTS_DELETE],
+      prepare: async () => {
+        const r = await seed('replace@example.test');
+        return {
+          path: `/ops-alerts/recipients/${r.id}/replace-address`,
+          body: { version: r.version, address: 'replaced@example.test', reason: 'Adres değişti' },
+        };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/recipients/:id/reveal',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_REVEAL],
+      prepare: async () => ({ path: `/ops-alerts/recipients/${(await seed('reveal@example.test')).id}/reveal`, body: {} }),
+    },
+    {
+      name: 'POST /ops-alerts/recipients/:id/test',
+      verb: 'post',
+      needs: [P.OPS_ALERT_RECIPIENTS_TEST],
+      prepare: async () => ({ path: `/ops-alerts/recipients/${(await seed('test@example.test')).id}/test`, body: {} }),
+    },
+    {
+      name: 'GET /ops-alerts/recipients/:id/audit',
+      verb: 'get',
+      needs: [P.OPS_ALERT_RECIPIENTS_READ],
+      prepare: async () => ({ path: `/ops-alerts/recipients/${(await seed('audit@example.test')).id}/audit` }),
+    },
+    { name: 'GET /ops-alerts/routing', verb: 'get', needs: [P.OPS_ALERT_RECIPIENTS_READ], prepare: async () => ({ path: '/ops-alerts/routing' }) },
+    {
+      name: 'POST /ops-alerts/routing/import-env',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => ({ path: '/ops-alerts/routing/import-env', body: {} }),
+    },
+    {
+      name: 'POST /ops-alerts/routing/cutover/preview',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => ({ path: '/ops-alerts/routing/cutover/preview', body: {} }),
+    },
+    {
+      name: 'POST /ops-alerts/routing/cutover',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => {
+        await seed('critical@example.test', 'Kritik', { notifyWarning: true, notifyCritical: true, notifyRecovery: true });
+        const preview = await routing.previewCutover();
+        return { path: '/ops-alerts/routing/cutover', body: { token: preview.token } };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/routing/revert/preview',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => ({ path: '/ops-alerts/routing/revert/preview', body: {} }),
+    },
+    {
+      name: 'POST /ops-alerts/routing/revert',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => {
+        await ctx.prisma.opsAlertRoutingSettings.update({ where: { id: 'ops-alert-routing' }, data: { emailRouting: OpsAlertEmailRouting.MANAGED } });
+        const preview = await routing.previewRevert();
+        return { path: '/ops-alerts/routing/revert', body: { token: preview.token, cancelUnmatched: true } };
+      },
+    },
+    {
+      name: 'POST /ops-alerts/routing/rewrap',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => ({ path: '/ops-alerts/routing/rewrap', body: {} }),
+    },
+    {
+      name: 'POST /ops-alerts/routing/rehash',
+      verb: 'post',
+      needs: [P.OPS_ALERT_ROUTING_MANAGE],
+      reserved: true,
+      prepare: async () => ({ path: '/ops-alerts/routing/rehash', body: {} }),
+    },
+  ];
+
+  it('route map covers every new route', () => {
+    const mapped = new Set(ADMIN_ROUTE_PERMISSIONS.map((entry) => `${entry.method} ${entry.path}`));
+    for (const route of ROUTES) expect(mapped.has(route.name), route.name).toBe(true);
+    const replace = ADMIN_ROUTE_PERMISSIONS.find((entry) => entry.path === '/ops-alerts/recipients/:id/replace-address')!;
+    expect([replace.permission, ...(replace.alsoRequires ?? [])].sort()).toEqual(
+      [P.OPS_ALERT_RECIPIENTS_DELETE, P.OPS_ALERT_RECIPIENTS_WRITE].sort(),
+    );
+  });
+
+  it.each(ROUTES.map((route) => [route.name, route] as const))('%s: an ADMIN without the permission gets 403', async (_name, route) => {
+    const { path, body } = await route.prepare();
+    // Everything grantable except what this route needs: the strongest refusal.
+    const cookie = await adminCookie(GRANTABLE_ADMIN_PERMISSIONS.filter((p) => !route.needs.includes(p)));
+    const response = await call(route.verb, path, cookie, body);
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('INSUFFICIENT_PERMISSION');
+  });
+
+  it.each(ROUTES.map((route) => [route.name, route] as const))('%s: the right ADMIN gets 2xx (403 when reserved)', async (_name, route) => {
+    const { path, body } = await route.prepare();
+    // A reserved permission smuggled in through a role row grants nothing.
+    const cookie = await adminCookie(route.needs);
+    const response = await call(route.verb, path, cookie, body);
+    if (route.reserved) {
+      expect(response.status).toBe(403);
+    } else {
+      expect(response.status, JSON.stringify(response.body)).toBeGreaterThanOrEqual(200);
+      expect(response.status).toBeLessThan(300);
+    }
+  });
+
+  it.each(ROUTES.map((route) => [route.name, route] as const))('%s: SUPER_ADMIN gets 2xx', async (_name, route) => {
+    const { path, body } = await route.prepare();
+    const response = await call(route.verb, path, rootCookie, body);
+    expect(response.status, JSON.stringify(response.body)).toBeGreaterThanOrEqual(200);
+    expect(response.status).toBeLessThan(300);
+  });
+
+  it('refuses anonymous and customer callers', async () => {
+    await call('get', '/ops-alerts/recipients', null).expect(401);
+    const customer = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const response = await call('get', '/ops-alerts/recipients', await loginAs(ctx.prisma, customer.id));
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe('NOT_STAFF');
+  });
+
+  it('replace-address needs DELETE as well as WRITE', async () => {
+    const r = await seed('replace@example.test');
+    const body = { version: r.version, address: 'replaced@example.test', reason: 'Adres değişti' };
+    const writeOnly = await adminCookie([P.OPS_ALERT_RECIPIENTS_WRITE]);
+    expect((await call('post', `/ops-alerts/recipients/${r.id}/replace-address`, writeOnly, body)).status).toBe(403);
+    const deleteOnly = await adminCookie([P.OPS_ALERT_RECIPIENTS_DELETE]);
+    expect((await call('post', `/ops-alerts/recipients/${r.id}/replace-address`, deleteOnly, body)).status).toBe(403);
+    expect((await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('ACTIVE');
+  });
+
+  it('OPS_ALERT_ROUTING_MANAGE is reserved: the role editor refuses it and the catalogue lists it as reserved', async () => {
+    expect(SUPER_ADMIN_RESERVED_PERMISSIONS).toContain(P.OPS_ALERT_ROUTING_MANAGE);
+    expect(GRANTABLE_ADMIN_PERMISSIONS).not.toContain(P.OPS_ALERT_ROUTING_MANAGE);
+    const catalogue = await call('get', '/admin/permissions', rootCookie).expect(200);
+    expect(catalogue.body.permissions).not.toContain('OPS_ALERT_ROUTING_MANAGE');
+    expect(catalogue.body.reservedForSuperAdmin).toContain('OPS_ALERT_ROUTING_MANAGE');
+    const created = await call('post', '/admin/roles', rootCookie, {
+      key: `routing-${Math.random().toString(36).slice(2, 8)}`,
+      name: 'Yönlendirme',
+      permissions: ['OPS_ALERT_ROUTING_MANAGE'],
+    });
+    expect(created.status).toBe(400);
+    expect(created.body.code).toBe('PERMISSION_RESERVED_FOR_SUPER_ADMIN');
+  });
+
+  // -------------------------------------------------------------------------
+  // Projection, reveal, test send
+  // -------------------------------------------------------------------------
+
+  it('list never returns ciphertext, nonce, tag or hmac', async () => {
+    await seed('Projection.Person@example.test');
+    const response = await call('get', '/ops-alerts/recipients', rootCookie).expect(200);
+    expect(response.body).toHaveLength(1);
+    expect(Object.keys(response.body[0]).sort()).toEqual(
+      [
+        'consecutiveFailures',
+        'createdAt',
+        'id',
+        'isLastCritical',
+        'keyId',
+        'label',
+        'lastErrorCode',
+        'lastSentAt',
+        'maskedAddress',
+        'notifyCritical',
+        'notifyRecovery',
+        'notifyWarning',
+        'status',
+        'updatedAt',
+        'version',
+      ].sort(),
+    );
+    const row = await ctx.prisma.opsAlertRecipient.findFirstOrThrow();
+    const text = JSON.stringify(response.body);
+    expect(text).not.toContain('projection.person@example.test');
+    expect(text).not.toContain(row.addressHmac!);
+    expect(text).not.toMatch(/ciphertext|nonce|addressTag|hmac/i);
+  });
+
+  it('create answers 201 with the masked view and the same key set', async () => {
+    const response = await call('post', '/ops-alerts/recipients', rootCookie, {
+      address: '  New.Person@Example.test ',
+      label: '  Nöbetçi  ',
+      notifyWarning: true,
+      notifyCritical: true,
+      notifyRecovery: true,
+    }).expect(201);
+    expect(response.body).toMatchObject({ label: 'Nöbetçi', maskedAddress: 'n*********@example.test', status: 'ACTIVE', version: 1 });
+    expect(JSON.stringify(response.body)).not.toContain('new.person@example.test');
+  });
+
+  it('reveal sets no-store and audits every reveal', async () => {
+    const r = await seed('Reveal.Me@example.test');
+    const cookie = await adminCookie([P.OPS_ALERT_RECIPIENTS_REVEAL]);
+    const response = await call('post', `/ops-alerts/recipients/${r.id}/reveal`, cookie, {}).expect(200);
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.body).toEqual({ address: 'reveal.me@example.test' });
+    await call('post', `/ops-alerts/recipients/${r.id}/reveal`, cookie, {}).expect(200);
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'REVEALED', recipientId: r.id } })).toBe(2);
+  });
+
+  it('test send goes synchronously to the recipient, hidden in logs, and audits a closed result', async () => {
+    const r = await seed('tester@example.test');
+    const response = await call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}).expect(200);
+    expect(response.body).toEqual({ result: 'SENT' });
+    const sent = ctx.notifications.ofTemplate('ops-alert');
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.to).toBe('tester@example.test');
+    expect(sent[0]!.recipientLogPolicy).toBe('hidden');
+    expect(sent[0]!.data?.subjectLabel).toBe('Test bildirimi');
+    expect(sent[0]!.data?.alertRef).toBe('');
+    const audit = await ctx.prisma.opsAlertRecipientAuditLog.findFirstOrThrow({ where: { action: 'TEST_SENT' } });
+    expect(sent[0]!.idempotencyKey).toBe(`taktic-ops-alert-test-${audit.id}`);
+    expect(audit.recipientId).toBe(r.id);
+    expect(audit.actorId).toBe(root.id);
+    expect(audit.after).toEqual({ result: 'SENT' });
+    expect(JSON.stringify(audit)).not.toContain('tester@example.test');
+    const page = await call('get', `/ops-alerts/recipients/${r.id}/audit`, rootCookie).expect(200);
+    expect(page.body.items[0]).toMatchObject({ action: 'TEST_SENT', changes: [{ field: 'result', from: null, to: 'SENT' }] });
+  });
+
+  it('test send records the transport failure code and still answers', async () => {
+    const r = await seed('tester@example.test');
+    ctx.notifications.failNextSend = true;
+    const response = await call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}).expect(200);
+    expect(response.body).toEqual({ result: 'TRANSPORT_UNAVAILABLE' });
+    const audit = await ctx.prisma.opsAlertRecipientAuditLog.findFirstOrThrow({ where: { action: 'TEST_SENT' } });
+    expect(audit.after).toEqual({ result: 'TRANSPORT_UNAVAILABLE' });
+  });
+
+  it('test send works for a PAUSED recipient and refuses a DELETED one with 409', async () => {
+    const paused = await seed('paused@example.test');
+    await service.pause(root, paused.id, { version: paused.version });
+    await call('post', `/ops-alerts/recipients/${paused.id}/test`, rootCookie, {}).expect(200);
+    const gone = await seed('gone@example.test');
+    await service.remove(root, gone.id, { version: gone.version, reason: 'Ayrıldı' });
+    const response = await call('post', `/ops-alerts/recipients/${gone.id}/test`, rootCookie, {}).expect(409);
+    expect(response.body.code).toBe('RECIPIENT_DELETED');
+    await call('post', '/ops-alerts/recipients/does-not-exist/test', rootCookie, {}).expect(404);
+  });
+
+  it('test send is rate limited', async () => {
+    // The audit log is append-only, so time is moved by seeding rows in the past.
+    const r = await seed('tester@example.test');
+    const other = await seed('other@example.test');
+    const third = await seed('third@example.test');
+    const at = (msAgo: number) => new Date(Date.now() - msAgo);
+    const seedTests = (recipientId: string, count: number, createdAt: Date) =>
+      ctx.prisma.opsAlertRecipientAuditLog.createMany({
+        data: Array.from({ length: count }, () => ({ recipientId, actorId: root.id, action: 'TEST_SENT' as const, createdAt })),
+      });
+
+    // Rows older than an hour count for nothing.
+    await seedTests(r.id, 20, at(61 * 60_000));
+    await call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}).expect(200);
+    const again = await call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}).expect(429);
+    expect(again.body.code).toBe('TEST_RATE_LIMITED');
+    expect(typeof again.body.message).toBe('string');
+    expect(ctx.notifications.ofTemplate('ops-alert')).toHaveLength(1);
+
+    // A test more than a minute ago does not hold the same recipient back.
+    await seedTests(other.id, 1, at(61_000));
+    await call('post', `/ops-alerts/recipients/${other.id}/test`, rootCookie, {}).expect(200);
+
+    // Ten in the last hour across all recipients stop the next one, wherever it goes.
+    await seedTests(r.id, 7, at(30 * 60_000));
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'TEST_SENT', createdAt: { gt: at(60 * 60_000) } } })).toBe(10);
+    const limited = await call('post', `/ops-alerts/recipients/${third.id}/test`, rootCookie, {}).expect(429);
+    expect(limited.body.code).toBe('TEST_RATE_LIMITED');
+    expect(ctx.notifications.ofTemplate('ops-alert')).toHaveLength(2);
+  });
+
+  it('two concurrent test sends to one recipient: exactly one is sent', async () => {
+    const r = await seed('tester@example.test');
+    const results = await Promise.all([
+      call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}),
+      call('post', `/ops-alerts/recipients/${r.id}/test`, rootCookie, {}),
+    ]);
+    expect(results.map((res) => res.status).sort()).toEqual([200, 429]);
+    expect(ctx.notifications.ofTemplate('ops-alert')).toHaveLength(1);
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'TEST_SENT' } })).toBe(1);
+  });
+
+  it('composeTestNotice is a synthetic notice with no alert reference', () => {
+    const notice = composeTestNotice('https://admin.example.test/system-health');
+    expect(notice.emailData.subjectLabel).toBe('Test bildirimi');
+    expect(notice.emailData.alertRef).toBe('');
+    expect(notice.emailData.adminUrl).toBe('https://admin.example.test/system-health');
+    expect(JSON.stringify(notice)).not.toMatch(/OPS-/);
+    expect(notice.telegramText).toContain('Test bildirimi');
+    expect(composeTestNotice(null).emailData.adminUrl).toBe('');
+  });
+
+  // -------------------------------------------------------------------------
+  // HTTP mapping and validation
+  // -------------------------------------------------------------------------
+
+  it('maps the service refusals to 409 with a stable code and no values', async () => {
+    const r = await seed('dupe@example.test');
+    const dup = await call('post', '/ops-alerts/recipients', rootCookie, { address: 'DUPE@example.test', label: 'x', ...quietPrefs }).expect(409);
+    expect(dup.body.code).toBe('RECIPIENT_DUPLICATE');
+    expect(JSON.stringify(dup.body)).not.toContain('dupe@example.test');
+
+    const stale = await call('patch', `/ops-alerts/recipients/${r.id}`, rootCookie, { version: r.version + 5, label: 'x' }).expect(409);
+    expect(stale.body.code).toBe('VERSION_CONFLICT');
+
+    for (let i = 0; i < 9; i += 1) await seed(`fill${i}@example.test`);
+    const limit = await call('post', '/ops-alerts/recipients', rootCookie, { address: 'eleven@example.test', label: 'x', ...quietPrefs }).expect(409);
+    expect(limit.body.code).toBe('RECIPIENT_LIMIT');
+
+    const missing = await call('patch', '/ops-alerts/recipients/nope', rootCookie, { version: 1, label: 'x' }).expect(404);
+    expect(missing.body.code).toBe('RECIPIENT_NOT_FOUND');
+    for (const body of [dup.body, stale.body, limit.body, missing.body]) expect(typeof body.message).toBe('string');
+  });
+
+  it('asks for confirmation before the last critical recipient goes, and blocks the last channel in production', async () => {
+    const r = await seed('last@example.test', 'Son', { notifyWarning: true, notifyCritical: true, notifyRecovery: true });
+    const confirm = await call('post', `/ops-alerts/recipients/${r.id}/pause`, rootCookie, { version: r.version }).expect(409);
+    expect(confirm.body.code).toBe('LAST_CRITICAL_CONFIRM_REQUIRED');
+    process.env.APP_ENVIRONMENT = 'production';
+    await ctx.prisma.opsAlertRoutingSettings.update({ where: { id: 'ops-alert-routing' }, data: { emailRouting: OpsAlertEmailRouting.MANAGED } });
+    const blocked = await call('delete', `/ops-alerts/recipients/${r.id}`, rootCookie, {
+      version: r.version,
+      reason: 'Ekipten ayrıldı',
+      confirmLastCritical: true,
+    }).expect(409);
+    expect(blocked.body.code).toBe('LAST_CHANNEL_PROTECTED');
+    process.env.APP_ENVIRONMENT = 'local';
+    await call('post', `/ops-alerts/recipients/${r.id}/pause`, rootCookie, { version: r.version, confirmLastCritical: true }).expect(200);
+  });
+
+  it('maps the routing refusals to 409', async () => {
+    const bogus = 'a'.repeat(64);
+    const changed = await call('post', '/ops-alerts/routing/cutover', rootCookie, { token: bogus });
+    expect(changed.status).toBe(409);
+    // No critical recipient yet: the cutover is blocked before the token is looked at.
+    expect(changed.body.code).toBe('NO_LIVE_CRITICAL_CHANNEL');
+
+    await seed('critical@example.test', 'Kritik', { notifyWarning: true, notifyCritical: true, notifyRecovery: true });
+    const counts = await call('post', '/ops-alerts/routing/cutover', rootCookie, { token: bogus }).expect(409);
+    expect(counts.body.code).toBe('COUNTS_CHANGED');
+
+    delete process.env.OPS_ALERT_EMAIL;
+    const missing = await call('post', '/ops-alerts/routing/import-env', rootCookie, {}).expect(409);
+    expect(missing.body.code).toBe('ENV_ADDRESS_MISSING');
+    process.env.OPS_ALERT_EMAIL = ENV_ADDRESS;
+    await call('post', '/ops-alerts/routing/import-env', rootCookie, {}).expect(201);
+    const again = await call('post', '/ops-alerts/routing/import-env', rootCookie, {}).expect(409);
+    expect(again.body.code).toBe('RECIPIENT_DUPLICATE');
+
+    const already = await call('post', '/ops-alerts/routing/revert', rootCookie, { token: bogus, cancelUnmatched: true }).expect(409);
+    expect(already.body.code).toBe('ALREADY_IN_MODE');
+  });
+
+  it('revert refuses to cancel pending deliveries without confirmation', async () => {
+    const other = await seed('other@example.test');
+    await ctx.prisma.opsAlertRoutingSettings.update({ where: { id: 'ops-alert-routing' }, data: { emailRouting: OpsAlertEmailRouting.MANAGED } });
+    await openAlertWithDelivery(other.id);
+    const preview = await call('post', '/ops-alerts/routing/revert/preview', rootCookie, {}).expect(200);
+    expect(preview.body.counts.PENDING.cancel).toBe(1);
+    const refused = await call('post', '/ops-alerts/routing/revert', rootCookie, { token: preview.body.token }).expect(409);
+    expect(refused.body.code).toBe('CONFIRM_CANCEL_REQUIRED');
+    const state = await call('post', '/ops-alerts/routing/revert', rootCookie, { token: preview.body.token, cancelUnmatched: true }).expect(200);
+    expect(state.body.emailRouting).toBe('ENV_LEGACY');
+  });
+
+  it.each<[string, Verb, (id: string, version: number) => string, object]>([
+    ['empty label', 'post', () => '/ops-alerts/recipients', { address: 'x@example.test', label: '   ', ...quietPrefs }],
+    ['label over 80', 'post', () => '/ops-alerts/recipients', { address: 'x@example.test', label: 'x'.repeat(81), ...quietPrefs }],
+    ['address over 254', 'post', () => '/ops-alerts/recipients', { address: `${'a'.repeat(250)}@example.test`, label: 'x', ...quietPrefs }],
+    ['malformed address', 'post', () => '/ops-alerts/recipients', { address: 'Ad Soyad <x@example.test>', label: 'x', ...quietPrefs }],
+    ['string boolean', 'post', () => '/ops-alerts/recipients', { address: 'x@example.test', label: 'x', ...quietPrefs, notifyWarning: 'true' }],
+    ['missing preference', 'post', () => '/ops-alerts/recipients', { address: 'x@example.test', label: 'x', notifyWarning: true, notifyCritical: true }],
+    ['unknown field', 'post', () => '/ops-alerts/recipients', { address: 'x@example.test', label: 'x', ...quietPrefs, status: 'ACTIVE' }],
+    ['version zero', 'patch', (id) => `/ops-alerts/recipients/${id}`, { version: 0, label: 'x' }],
+    ['version as text', 'patch', (id) => `/ops-alerts/recipients/${id}`, { version: '1', label: 'x' }],
+    ['address in patch', 'patch', (id, v) => `/ops-alerts/recipients/${id}`, { version: 1, address: 'y@example.test' }],
+    ['delete without reason', 'delete', (id) => `/ops-alerts/recipients/${id}`, { version: 1 }],
+    ['delete with short reason', 'delete', (id) => `/ops-alerts/recipients/${id}`, { version: 1, reason: '  abc  ' }],
+    ['delete with long reason', 'delete', (id) => `/ops-alerts/recipients/${id}`, { version: 1, reason: 'x'.repeat(501) }],
+    ['replace without reason', 'post', (id) => `/ops-alerts/recipients/${id}/replace-address`, { version: 1, address: 'y@example.test' }],
+    ['pause with string confirm', 'post', (id) => `/ops-alerts/recipients/${id}/pause`, { version: 1, confirmLastCritical: 'yes' }],
+    ['cutover without token', 'post', () => '/ops-alerts/routing/cutover', {}],
+    ['revert with string cancel', 'post', () => '/ops-alerts/routing/revert', { token: 'a'.repeat(64), cancelUnmatched: 'true' }],
+  ])('rejects %s with 400', async (_name, verb, path, body) => {
+    const r = await seed('valid@example.test');
+    const response = await call(verb, path(r.id, r.version), rootCookie, body);
+    expect(response.status).toBe(400);
+    expect((await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: r.id } })).version).toBe(1);
+    expect(await ctx.prisma.opsAlertRecipient.count()).toBe(1);
+  });
+
+  it('writes no address into any log line', async () => {
+    const spies = (['log', 'warn', 'error', 'debug', 'verbose'] as const).map((level) =>
+      vi.spyOn(Logger.prototype, level).mockImplementation(() => undefined),
+    );
+    try {
+      const created = await call('post', '/ops-alerts/recipients', rootCookie, { address: 'Logged.Never@example.test', label: 'x', ...quietPrefs }).expect(201);
+      await call('post', `/ops-alerts/recipients/${created.body.id}/reveal`, rootCookie, {}).expect(200);
+      ctx.notifications.failNextSend = true;
+      await call('post', `/ops-alerts/recipients/${created.body.id}/test`, rootCookie, {}).expect(200);
+      await call('post', '/ops-alerts/recipients', rootCookie, { address: 'logged.never@example.test', label: 'x', ...quietPrefs }).expect(409);
+      await call('post', `/ops-alerts/recipients/${created.body.id}/replace-address`, rootCookie, {
+        version: 1,
+        address: 'Next.Logged@example.test',
+        reason: 'Adres değişti',
+      }).expect(200);
+      const lines = spies.flatMap((spy) => spy.mock.calls.map((args) => JSON.stringify(args)));
+      for (const line of lines) {
+        expect(line.toLowerCase()).not.toContain('logged.never@example.test');
+        expect(line.toLowerCase()).not.toContain('next.logged@example.test');
+        expect(line).not.toMatch(/l\*+@example\.test|n\*+@example\.test/);
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // The system health report
+  // -------------------------------------------------------------------------
+
+  it('system health report lists recipient labels, never addresses', async () => {
+    const r = await seed('Health.Person@example.test', 'Nöbetçi Ayşe');
+    await seed('second@example.test', 'İkinci');
+    const gone = await seed('gone@example.test', 'Giden');
+    await service.remove(root, gone.id, { version: gone.version, reason: 'Ayrıldı' });
+    await openAlertWithDelivery(r.id);
+    await openAlertWithDelivery(null, OpsAlertChannel.TELEGRAM);
+    const response = await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ])).expect(200);
+    const block = response.body.alerts;
+    expect(block.channels).toEqual({ email: true, telegram: false, emailRouting: 'ENV_LEGACY', managedRecipients: 2 });
+    const deliveries = block.open.flatMap((alert: { deliveries: unknown[] }) => alert.deliveries);
+    expect(deliveries).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ channel: 'EMAIL', recipientId: r.id, recipientLabel: 'Nöbetçi Ayşe' }),
+        expect.objectContaining({ channel: 'TELEGRAM', recipientId: null, recipientLabel: null }),
+      ]),
+    );
+    for (const delivery of deliveries) {
+      expect(Object.keys(delivery).sort()).toEqual(
+        ['attemptCount', 'channel', 'errorCode', 'kind', 'recipientId', 'recipientLabel', 'sentAt', 'sequence', 'status'].sort(),
+      );
+    }
+    const text = JSON.stringify(response.body);
+    expect(text.toLowerCase()).not.toContain('health.person@example.test');
+    expect(text).not.toContain(r.maskedAddress);
+    expect(text).not.toContain(ENV_ADDRESS);
   });
 });

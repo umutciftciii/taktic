@@ -1,23 +1,34 @@
 import { randomBytes } from 'node:crypto';
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { OpsAlertDeliveryStatus, OpsAlertRecipientAuditAction, OpsAlertRecipientStatus, Prisma } from '@prisma/client';
 import type { AdminAuditPage, AuditPageQueryDto } from '../../common/admin-audit';
 import type { AuthUser } from '../auth/auth.types';
 import { maskEmail } from '../notifications/mask';
+import { classifyNotificationError } from '../notifications/notification-errors';
+import { NotificationPort } from '../notifications/notification.port';
+import { transactionalSubject } from '../notifications/templates/transactional-templates';
+import { getAdminAppBaseUrl } from '../users/admin-invite.constants';
 import { PrismaService } from '../../prisma/prisma.service';
-import { OPS_ALERT_RECIPIENT_LIMIT, OPS_ALERT_RECIPIENT_LOCK_KEY, OPS_ALERT_ROUTING_ID } from './ops-alert-recipient.constants';
+import {
+  OPS_ALERT_RECIPIENT_LIMIT,
+  OPS_ALERT_RECIPIENT_LOCK_KEY,
+  OPS_ALERT_ROUTING_ID,
+  OPS_ALERT_TEST_SEND_LOCK_KEY,
+} from './ops-alert-recipient.constants';
 import {
   RecipientAuditSnapshot,
   changedRecipientFields,
   readRecipientAudit,
   recipientAuditSnapshot,
   recordRecipientAudit,
+  recordTestAudit,
 } from './ops-alert-recipient.audit';
 import { readAppEnvironment } from '../../common/app-environment';
 import { readOpsAlertConfigSafely } from './ops-alert.config';
+import { composeTestNotice, systemHealthUrl } from './ops-alert.rules';
 import { decideRecipientRemoval } from './ops-alert-recipient-guard';
-import { addressHmac, decryptAddress, encryptAddress, normalizeAddress } from './recipient-crypto';
-import { RecipientCryptoConfig, resolveRecipientCryptoConfig } from './recipient-crypto.config';
+import { RecipientDecryptError, addressHmac, decryptAddress, encryptAddress, normalizeAddress } from './recipient-crypto';
+import { OpsAlertRecipientCryptoConfigError, RecipientCryptoConfig, resolveRecipientCryptoConfig } from './recipient-crypto.config';
 
 /**
  * OBS-ALERT-002 — admin-managed operations-alert e-mail recipients.
@@ -83,6 +94,27 @@ export class RecipientDeletedError extends Error {
   }
 }
 
+export class TestRateLimitedError extends Error {
+  readonly code = 'TEST_RATE_LIMITED';
+  override name = 'TestRateLimitedError';
+  constructor() {
+    super('Too many test e-mails; wait and try again.');
+  }
+}
+
+/** Test sends: one per recipient a minute, ten in all an hour, counted from TEST_SENT audit rows. */
+export const TEST_SEND_RECIPIENT_WINDOW_MS = 60_000;
+export const TEST_SEND_RECIPIENT_MAX = 1;
+export const TEST_SEND_GLOBAL_WINDOW_MS = 60 * 60_000;
+export const TEST_SEND_GLOBAL_MAX = 10;
+/** Set when the address could not be opened (key gone from the keyring, or no usable key config). */
+export const TEST_DECRYPT_FAILED_RESULT = 'DECRYPT_FAILED';
+
+/** The idempotency key of a test e-mail: its TEST_SENT audit row, nothing else. */
+export function opsAlertTestIdempotencyKey(auditId: string): string {
+  return `taktic-ops-alert-test-${auditId}`;
+}
+
 export type RecipientView = {
   id: string;
   label: string;
@@ -140,8 +172,8 @@ const RECIPIENT_SELECT = {
 
 type RecipientRow = Prisma.OpsAlertRecipientGetPayload<{ select: typeof RECIPIENT_SELECT }>;
 
-/** A new id for a recipient; random, as the schema's cuid would be, but known before the insert. */
-function newRecipientId(): string {
+/** A new row id; random, as the schema's cuid would be, but known before the insert. */
+function newRowId(): string {
   return `c${Date.now().toString(36)}${randomBytes(10).toString('hex')}`;
 }
 
@@ -186,7 +218,10 @@ export function mapDatabaseError(error: unknown): unknown {
 
 @Injectable()
 export class OpsAlertRecipientsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(NotificationPort) private readonly email: NotificationPort,
+  ) {}
 
   private crypto(): RecipientCryptoConfig {
     // Resolved per call, like the worker and the rotation service: a rotated
@@ -384,6 +419,87 @@ export class OpsAlertRecipientsService {
     });
   }
 
+  /**
+   * One test e-mail to an ACTIVE or PAUSED recipient, sent now (OBS-ALERT-002,
+   * Ruling 25): the `ops-alert` template with a synthetic notice, the address
+   * hidden from every log line, the idempotency key naming the audit row.
+   *
+   * Under OPS_ALERT_TEST_SEND_LOCK_KEY the rate limit is counted, the mail is
+   * sent and the TEST_SENT row (its closed result code only) is written, so
+   * two clicks cannot both pass the count. A failed send is an answer, not an
+   * error: the result says why.
+   */
+  async sendTest(actor: AuthUser, id: string): Promise<{ result: string }> {
+    return this.prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${OPS_ALERT_TEST_SEND_LOCK_KEY}::bigint)`;
+        const row = await tx.opsAlertRecipient.findUnique({
+          where: { id },
+          select: { status: true, addressCiphertext: true, addressNonce: true, addressTag: true, addressKeyId: true },
+        });
+        if (!row) throw new NotFoundException('Recipient not found.');
+        if (
+          row.status === OpsAlertRecipientStatus.DELETED ||
+          !row.addressCiphertext ||
+          !row.addressNonce ||
+          !row.addressTag ||
+          !row.addressKeyId
+        ) {
+          throw new RecipientDeletedError();
+        }
+
+        const now = Date.now();
+        const [mine, all] = await Promise.all([
+          tx.opsAlertRecipientAuditLog.count({
+            where: {
+              action: OpsAlertRecipientAuditAction.TEST_SENT,
+              recipientId: id,
+              createdAt: { gt: new Date(now - TEST_SEND_RECIPIENT_WINDOW_MS) },
+            },
+          }),
+          tx.opsAlertRecipientAuditLog.count({
+            where: {
+              action: OpsAlertRecipientAuditAction.TEST_SENT,
+              createdAt: { gt: new Date(now - TEST_SEND_GLOBAL_WINDOW_MS) },
+            },
+          }),
+        ]);
+        if (mine >= TEST_SEND_RECIPIENT_MAX || all >= TEST_SEND_GLOBAL_MAX) throw new TestRateLimitedError();
+
+        const auditId = newRowId();
+        let result: string;
+        try {
+          const address = decryptAddress(this.crypto(), id, {
+            ciphertext: Buffer.from(row.addressCiphertext),
+            nonce: Buffer.from(row.addressNonce),
+            tag: Buffer.from(row.addressTag),
+            keyId: row.addressKeyId,
+          });
+          const notice = composeTestNotice(systemHealthUrl(getAdminAppBaseUrl()));
+          await this.email.send({
+            template: 'ops-alert',
+            to: address,
+            subject: transactionalSubject('ops-alert', notice.emailData),
+            data: notice.emailData,
+            idempotencyKey: opsAlertTestIdempotencyKey(auditId),
+            recipientLogPolicy: 'hidden',
+          });
+          result = 'SENT';
+        } catch (error) {
+          result =
+            error instanceof RecipientDecryptError || error instanceof OpsAlertRecipientCryptoConfigError
+              ? TEST_DECRYPT_FAILED_RESULT
+              : classifyNotificationError(error);
+        }
+        await recordTestAudit(tx, { id: auditId, recipientId: id, actorId: actor.id, result });
+        return { result };
+      },
+      // The send runs inside, so the transaction outlives the longest Resend
+      // timeout the config accepts (60 s); only the test-send lock is held.
+      { timeout: 75_000, maxWait: 5_000 },
+    );
+  }
+
   auditPage(id: string | null, query: AuditPageQueryDto, viewer?: AuthUser): Promise<AdminAuditPage> {
     return readRecipientAudit(this.prisma, id, query, viewer);
   }
@@ -532,7 +648,7 @@ export class OpsAlertRecipientsService {
     if (live >= OPS_ALERT_RECIPIENT_LIMIT) throw new RecipientLimitReachedError();
 
     const config = this.crypto();
-    const id = newRecipientId();
+    const id = newRowId();
     const sealed = encryptAddress(config, id, input.normalized);
     const identity = addressHmac(config, input.normalized);
     return tx.opsAlertRecipient.create({

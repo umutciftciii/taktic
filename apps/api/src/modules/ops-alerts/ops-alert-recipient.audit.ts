@@ -37,6 +37,12 @@ export const RECIPIENT_AUDIT_FIELDS = [
  */
 export const ROTATION_AUDIT_FIELDS = ['keyId', 'hmacVersion'] as const;
 
+/**
+ * Stored only by TEST_SENT: the closed result code of the test send (`SENT`,
+ * a NotificationErrorCode or DECRYPT_FAILED). Never the address or a message.
+ */
+export const TEST_AUDIT_FIELDS = ['result'] as const;
+
 export type RecipientAuditField = (typeof RECIPIENT_AUDIT_FIELDS)[number];
 export type RecipientAuditSnapshot = {
   label: string;
@@ -90,6 +96,28 @@ export async function recordRotationAudit(
       action: input.action,
       before: { ...input.before },
       after: { ...input.after },
+    },
+    select: { id: true },
+  });
+}
+
+/**
+ * One TEST_SENT row: `after` is `{ result }`, nothing else. The id is the
+ * caller's, because the test e-mail's idempotency key names it before the
+ * row is written.
+ */
+export async function recordTestAudit(
+  tx: Prisma.TransactionClient,
+  input: { id: string; recipientId: string; actorId: string; result: string },
+): Promise<void> {
+  await tx.opsAlertRecipientAuditLog.create({
+    data: {
+      id: input.id,
+      recipientId: input.recipientId,
+      actorId: input.actorId,
+      action: OpsAlertRecipientAuditAction.TEST_SENT,
+      before: Prisma.DbNull,
+      after: { result: input.result },
     },
     select: { id: true },
   });
@@ -161,7 +189,7 @@ export async function readRecipientAudit(
     const before = readSide(row.before);
     const after = readSide(row.after);
     const changes: AuditChange[] = [];
-    for (const field of [...RECIPIENT_AUDIT_FIELDS, ...ROTATION_AUDIT_FIELDS]) {
+    for (const field of [...RECIPIENT_AUDIT_FIELDS, ...ROTATION_AUDIT_FIELDS, ...TEST_AUDIT_FIELDS]) {
       if (!(field in before) && !(field in after)) continue;
       changes.push({
         field,

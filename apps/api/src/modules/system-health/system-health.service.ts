@@ -467,7 +467,8 @@ export class SystemHealthService {
           lastFailedAt: null,
           lastErrorType: null,
         },
-        channels: opsAlertChannelStatus(),
+        // Routing and the recipient count are database facts; unread, they are unknown.
+        channels: { ...opsAlertChannelStatus(), emailRouting: null, managedRecipients: null },
         open: [],
         recentlyResolved: [],
       };

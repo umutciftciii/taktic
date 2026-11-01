@@ -228,6 +228,35 @@ export const ADMIN_ROUTE_PERMISSIONS: readonly AdminRoutePermission[] = [
   // ADMIN-SYSTEM-HEALTH-001: read-only. The e-mail block inside it is
   // NOTIFICATION_LOGS_READ's and is absent without it (mayEmbed).
   { method: 'GET', path: '/system-health', permission: AdminPermission.OPERATIONS_SETTINGS_READ },
+  // OBS-ALERT-002: managed operations-alert e-mail recipients. Every address
+  // read in full is its own permission (REVEAL) and audited; replacing an
+  // address deletes the old recipient, so it needs DELETE as well as WRITE.
+  { method: 'GET', path: '/ops-alerts/recipients', permission: AdminPermission.OPS_ALERT_RECIPIENTS_READ },
+  { method: 'POST', path: '/ops-alerts/recipients', permission: AdminPermission.OPS_ALERT_RECIPIENTS_WRITE },
+  { method: 'GET', path: '/ops-alerts/recipients/audit', permission: AdminPermission.OPS_ALERT_RECIPIENTS_READ },
+  { method: 'PATCH', path: '/ops-alerts/recipients/:id', permission: AdminPermission.OPS_ALERT_RECIPIENTS_WRITE },
+  { method: 'DELETE', path: '/ops-alerts/recipients/:id', permission: AdminPermission.OPS_ALERT_RECIPIENTS_DELETE },
+  { method: 'POST', path: '/ops-alerts/recipients/:id/pause', permission: AdminPermission.OPS_ALERT_RECIPIENTS_WRITE },
+  { method: 'POST', path: '/ops-alerts/recipients/:id/resume', permission: AdminPermission.OPS_ALERT_RECIPIENTS_WRITE },
+  {
+    method: 'POST',
+    path: '/ops-alerts/recipients/:id/replace-address',
+    permission: AdminPermission.OPS_ALERT_RECIPIENTS_WRITE,
+    alsoRequires: [AdminPermission.OPS_ALERT_RECIPIENTS_DELETE],
+  },
+  { method: 'POST', path: '/ops-alerts/recipients/:id/reveal', permission: AdminPermission.OPS_ALERT_RECIPIENTS_REVEAL },
+  { method: 'POST', path: '/ops-alerts/recipients/:id/test', permission: AdminPermission.OPS_ALERT_RECIPIENTS_TEST },
+  { method: 'GET', path: '/ops-alerts/recipients/:id/audit', permission: AdminPermission.OPS_ALERT_RECIPIENTS_READ },
+  // Reading the routing state is a recipient reader's; switching it, importing
+  // OPS_ALERT_EMAIL and rotating keys are reserved for SUPER_ADMIN.
+  { method: 'GET', path: '/ops-alerts/routing', permission: AdminPermission.OPS_ALERT_RECIPIENTS_READ },
+  { method: 'POST', path: '/ops-alerts/routing/import-env', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/cutover/preview', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/cutover', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/revert/preview', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/revert', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/rewrap', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
+  { method: 'POST', path: '/ops-alerts/routing/rehash', permission: AdminPermission.OPS_ALERT_ROUTING_MANAGE },
   { method: 'GET', path: '/users', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id', permission: AdminPermission.ADMIN_USERS_READ },
   { method: 'GET', path: '/users/:id/status-history', permission: AdminPermission.ADMIN_USERS_READ },

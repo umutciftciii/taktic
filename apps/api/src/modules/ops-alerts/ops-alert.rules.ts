@@ -487,6 +487,37 @@ export function composeNotice(kind: OpsAlertNoticeKind, alert: NoticeAlert, admi
   return { emailData, telegramText: lines.join('\n') };
 }
 
+/** The headline of a test notice (OBS-ALERT-002). */
+export const TEST_NOTICE_HEADLINE = 'Test bildirimi';
+
+/**
+ * OBS-ALERT-002 — the synthetic notice an operator sends to one recipient to
+ * prove the mailbox receives alert e-mail. Same `ops-alert` template, fixed
+ * text: no alert, no reference, no OPS id, the one system health link.
+ */
+export function composeTestNotice(adminUrl: string | null): ComposedNotice {
+  const summary = 'Bu bir test bildirimidir: operasyon alarmı e-postaları bu adrese ulaşıyor. Herhangi bir işlem gerekmiyor.';
+  const emailData: Record<string, string> = {
+    fullName: 'Operasyon Ekibi',
+    noticeKind: 'TEST',
+    severity: OpsAlertSeverity.WARNING,
+    severityLabel: 'Bilgi',
+    alertRef: '',
+    sourceLabel: 'Bildirim ayarları',
+    subjectLabel: TEST_NOTICE_HEADLINE,
+    conditionLabel: '',
+    summary,
+    firstSeenAt: '',
+    lastSeenAt: '',
+    occurrenceCount: '',
+    templates: '',
+    resolvedAt: '',
+    adminUrl: adminUrl ?? '',
+  };
+  const lines = [`TakTick operasyon · ${TEST_NOTICE_HEADLINE}`, summary, ...(adminUrl ? ['', adminUrl] : [])];
+  return { emailData, telegramText: lines.join('\n') };
+}
+
 /**
  * OBS-ALERT-002 — what a delivery row carries from the moment it is queued.
  * Content is fixed here so a retry under the same idempotency key can never

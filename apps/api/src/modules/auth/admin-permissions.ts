@@ -90,11 +90,18 @@ export function mayReachAdminPanel(user: PermissionPrincipal | null | undefined)
  * remaining free offers takes away part of what a business paid for, by
  * product decision a SUPER_ADMIN act. An ADMIN still reads the allowance
  * (SHOWCASE_PLACEMENTS_READ).
+ *
+ * OPS_ALERT_ROUTING_MANAGE (OBS-ALERT-002): switching operations-alert e-mail
+ * between OPS_ALERT_EMAIL and the managed recipients, importing that address
+ * and rotating the recipient keys decide where every alert goes, by product
+ * decision a SUPER_ADMIN act. An ADMIN still reads the routing state
+ * (OPS_ALERT_RECIPIENTS_READ).
  */
 export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [
   AdminPermission.SERVICE_INCIDENTS_CORRECT,
   AdminPermission.MATCH_REVIEW_OPEN_ROUND,
   AdminPermission.SHOWCASE_ALLOWANCE_VOID,
+  AdminPermission.OPS_ALERT_ROUTING_MANAGE,
 ];
 
 export function isReservedPermission(permission: AdminPermission): boolean {
