@@ -572,6 +572,11 @@ model User {
   accountStatusChanges            AccountStatusChange[]                @relation("AccountStatusChangeTarget")
   accountStatusChangesMade        AccountStatusChange[]                @relation("AccountStatusChangeActor")
   schedulerRunsStarted            SchedulerRun[]                       @relation("SchedulerRunActor")
+  opsAlertRecipientsCreated       OpsAlertRecipient[]                  @relation("OpsAlertRecipientCreatedBy")
+  opsAlertRecipientsUpdated       OpsAlertRecipient[]                  @relation("OpsAlertRecipientUpdatedBy")
+  opsAlertRecipientsDeleted       OpsAlertRecipient[]                  @relation("OpsAlertRecipientDeletedBy")
+  opsAlertRecipientAuditEntries   OpsAlertRecipientAuditLog[]          @relation("OpsAlertRecipientAuditActor")
+  opsAlertRoutingChanges          OpsAlertRoutingSettings[]            @relation("OpsAlertRoutingChangedBy")
   providerStatusChangesMade       ProviderStatusChange[]               @relation("ProviderStatusChangeActor")
   companySettingsChanges          CompanySettingsChange[]              @relation("CompanySettingsChangeActor")
   catalogAuditEntries             CatalogAuditLog[]                    @relation("CatalogAuditActor")
@@ -937,8 +942,10 @@ model OpsAlert {
 
 /// One notice of one alert to one channel, with its own retry state.
 ///
-/// Unique on (alert, kind, sequence, channel): a notice is created once
-/// however many evaluators race. A worker claims a due row with one
+/// A notice is created once however many evaluators race: partial unique
+/// indexes (raw SQL, migration 20261102090000) hold one row per (alert, kind,
+/// sequence, channel) among legacy rows (`recipientId` NULL) and one per
+/// (alert, kind, sequence, recipient) among managed ones. A worker claims a due row with one
 /// conditional UPDATE … FOR UPDATE SKIP LOCKED and finishes it only under its
 /// own `claimToken`, so two workers never hold the same delivery and a
 /// worker whose lease ran out cannot overwrite the next one's outcome.
@@ -962,13 +969,127 @@ model OpsAlertDelivery {
   /// A closed, safe failure class — never a provider's text.
   errorCode         String?
   providerMessageId String?
+  /// OBS-ALERT-002: the managed recipient this e-mail is bound to, for good.
+  /// NULL for Telegram and for legacy (OPS_ALERT_EMAIL) rows.
+  recipientId       String?
+  /// OBS-ALERT-002: the notice content frozen when the row was queued, so a
+  /// retry sends exactly what the first attempt would have. NULL on rows from
+  /// before the snapshot existed — those are still composed live.
+  noticeSnapshot    Json?
   createdAt         DateTime               @default(now())
   updatedAt         DateTime               @updatedAt
 
-  alert OpsAlert @relation(fields: [alertId], references: [id], onDelete: Restrict)
+  alert     OpsAlert           @relation(fields: [alertId], references: [id], onDelete: Restrict)
+  recipient OpsAlertRecipient? @relation(fields: [recipientId], references: [id], onDelete: Restrict)
 
-  @@unique([alertId, kind, sequence, channel])
   @@index([status, nextAttemptAt])
+  @@index([recipientId, createdAt])
+}
+
+enum OpsAlertRecipientStatus {
+  ACTIVE
+  PAUSED
+  DELETED
+}
+
+enum OpsAlertEmailRouting {
+  /// OBS-ALERT-001 behaviour: the OPS_ALERT_EMAIL address.
+  ENV_LEGACY
+  /// Recipients managed in the admin panel.
+  MANAGED
+}
+
+enum OpsAlertRecipientAuditAction {
+  CREATED
+  IMPORTED_FROM_ENV
+  LABEL_CHANGED
+  PREFERENCES_CHANGED
+  PAUSED
+  RESUMED
+  DELETED
+  ADDRESS_REPLACED
+  REVEALED
+  TEST_SENT
+  ROUTING_CUTOVER
+  ROUTING_REVERTED
+  REWRAPPED
+  REHASHED
+}
+
+/// OBS-ALERT-002: one operations-alert e-mail recipient, managed from the
+/// admin panel.
+///
+/// The address is stored only encrypted (AES-256-GCM, AAD
+/// `ops-alert-recipient:<id>`) with a keyed HMAC for identity and
+/// de-duplication; `maskedAddress` is the only readable form. The address of a
+/// row never changes: replacing one is a new row plus a delete. Deleting is a
+/// crypto-shred — status DELETED with the ciphertext, nonce, tag, key id and
+/// HMAC all NULL — and the shred CHECK, the live-HMAC unique index and the
+/// ten-live-recipients trigger live in the migration as raw SQL.
+model OpsAlertRecipient {
+  id                 String                  @id @default(cuid())
+  channel            OpsAlertChannel         @default(EMAIL)
+  label              String
+  addressCiphertext  Bytes?
+  addressNonce       Bytes?
+  addressTag         Bytes?
+  addressKeyId       String?
+  addressHmac        String?
+  addressHmacVersion Int?
+  maskedAddress      String
+  notifyWarning      Boolean
+  notifyCritical     Boolean
+  notifyRecovery     Boolean
+  status             OpsAlertRecipientStatus @default(ACTIVE)
+  /// Optimistic-concurrency counter for edits.
+  version            Int                     @default(1)
+  createdById        String
+  updatedById        String
+  deletedAt          DateTime?
+  deletedById        String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+
+  createdBy  User                       @relation("OpsAlertRecipientCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy  User                       @relation("OpsAlertRecipientUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+  deletedBy  User?                      @relation("OpsAlertRecipientDeletedBy", fields: [deletedById], references: [id], onDelete: Restrict)
+  deliveries OpsAlertDelivery[]
+  auditLogs  OpsAlertRecipientAuditLog[]
+
+  @@index([status, createdAt])
+}
+
+/// OBS-ALERT-002: which source the alert e-mails come from. One row, by name
+/// (CHECK `id = 'ops-alert-routing'`), inserted by the migration as
+/// ENV_LEGACY.
+model OpsAlertRoutingSettings {
+  id           String               @id
+  emailRouting OpsAlertEmailRouting @default(ENV_LEGACY)
+  changedAt    DateTime?
+  changedById  String?
+  updatedAt    DateTime             @updatedAt
+
+  changedBy User? @relation("OpsAlertRoutingChangedBy", fields: [changedById], references: [id], onDelete: Restrict)
+}
+
+/// OBS-ALERT-002: append-only record of recipient and routing changes
+/// (trigger `cmp006_append_only_fn`). `recipientId` is NULL for routing
+/// events. `before`/`after` hold allow-listed fields only — never an address.
+model OpsAlertRecipientAuditLog {
+  id          String                       @id @default(cuid())
+  recipientId String?
+  actorId     String
+  action      OpsAlertRecipientAuditAction
+  before      Json?
+  after       Json?
+  reason      String?
+  createdAt   DateTime                     @default(now())
+
+  recipient OpsAlertRecipient? @relation(fields: [recipientId], references: [id], onDelete: Restrict)
+  actor     User               @relation("OpsAlertRecipientAuditActor", fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([recipientId, createdAt])
+  @@index([createdAt])
 }
 
 /// The evaluator's own state: one row (id = "ops-alert-engine").
@@ -6080,6 +6201,17 @@ enum AdminPermission {
   /// run's grant. Reserved for SUPER_ADMIN (`SUPER_ADMIN_RESERVED_PERMISSIONS`):
   /// it takes away part of what a business paid for, so no role may carry it.
   SHOWCASE_ALLOWANCE_VOID
+
+  /// OBS-ALERT-002: managing operations-alert e-mail recipients. Read lists
+  /// them masked; write adds and edits; delete shreds; reveal shows one full
+  /// address (audited); test sends a test notice.
+  OPS_ALERT_RECIPIENTS_READ
+  OPS_ALERT_RECIPIENTS_WRITE
+  OPS_ALERT_RECIPIENTS_DELETE
+  OPS_ALERT_RECIPIENTS_REVEAL
+  OPS_ALERT_RECIPIENTS_TEST
+  /// Switching e-mail routing between OPS_ALERT_EMAIL and managed recipients.
+  OPS_ALERT_ROUTING_MANAGE
 
   SHOWCASE_PACKAGES_READ
   SHOWCASE_PACKAGES_WRITE
