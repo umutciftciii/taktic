@@ -1132,4 +1132,68 @@ describe('OpsAlertRoutingService', () => {
       expect(await deliveries({ id: theirs.id })).toMatchObject([{ recipientId: other.id, status: 'SENT' }]);
     });
   });
+
+  describe('a switch between the worker reading its row and routing it', () => {
+    /**
+     * Runs `apply` — a real cutover or revert — right after the worker has read
+     * the e-mail row it claimed (its recipientId) and before it routes it.
+     */
+    function switchAfterTheWorkerReadsItsRow(apply: () => Promise<unknown>): () => boolean {
+      const delegate = ctx.prisma.opsAlertDelivery;
+      const original = delegate.findUnique.bind(delegate);
+      let fired = false;
+      vi.spyOn(delegate, 'findUnique').mockImplementation((async (args: Prisma.OpsAlertDeliveryFindUniqueArgs) => {
+        const row = (await original(args as never)) as { channel?: string } | null;
+        const select = args.select as Record<string, unknown> | undefined;
+        if (!fired && row?.channel === 'EMAIL' && select?.noticeSnapshot) {
+          fired = true;
+          await apply();
+        }
+        return row;
+      }) as never);
+      return () => fired;
+    }
+
+    it('a revert landing there: the row goes to the env address, once', async () => {
+      noTelegram();
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [mine] = await deliveries({ channel: 'EMAIL' });
+      expect(mine).toMatchObject({ recipientId: imported.id, status: 'PENDING' });
+
+      const fired = switchAfterTheWorkerReadsItsRow(() => revert(false));
+      await worker().deliverDue();
+      expect(fired()).toBe(true);
+      expect(await mode()).toBe('ENV_LEGACY');
+
+      expect(await deliveries({ id: mine!.id })).toMatchObject([{ recipientId: null, status: 'SENT', claimToken: null }]);
+      expect(alertMails().map((mail) => [mail.to, mail.idempotencyKey])).toEqual([[OPS_EMAIL, opsAlertIdempotencyKey(mine!.id)]]);
+      vi.restoreAllMocks();
+      await makeDue();
+      await worker().deliverDue();
+      expect(alertMails()).toHaveLength(1);
+    });
+
+    it('a cutover landing there: the row goes to the imported recipient, once', async () => {
+      noTelegram();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      const imported = await routing().importFromEnv(actor);
+
+      const fired = switchAfterTheWorkerReadsItsRow(() => cutover());
+      await worker().deliverDue();
+      expect(fired()).toBe(true);
+      expect(await mode()).toBe('MANAGED');
+
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ recipientId: imported.id, status: 'SENT', claimToken: null }]);
+      expect(alertMails().map((mail) => [mail.to, mail.idempotencyKey])).toEqual([[OPS_EMAIL, opsAlertIdempotencyKey(legacy!.id)]]);
+      vi.restoreAllMocks();
+      await makeDue();
+      await worker().deliverDue();
+      expect(alertMails()).toHaveLength(1);
+    });
+  });
 });

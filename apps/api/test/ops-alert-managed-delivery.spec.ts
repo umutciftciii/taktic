@@ -523,18 +523,84 @@ describe('managed alert delivery', () => {
       expect(alertMails()).toEqual([]);
     });
 
-    it("in ENV_LEGACY, the env address's own recipient row goes to it when no legacy row has the notice", async () => {
-      // A worker that read MANAGED bound a legacy row just as the revert committed.
+    it("in ENV_LEGACY, the env address's own row with no legacy row is un-bound and sent the legacy way, paused or not", async () => {
+      // Left bound by hand (or across an env address change): the mailbox's only copy.
       const own = await add(OPS_EMAIL, WARN);
       await setRouting(OpsAlertEmailRouting.MANAGED);
       await warningAlert();
       await evaluator().evaluateOnly();
       await setRouting(OpsAlertEmailRouting.ENV_LEGACY);
+      // ENV_LEGACY does not read the recipient's pause or preferences, as it does not for OPS_ALERT_EMAIL.
+      await pause(own.id);
+      await ctx.prisma.opsAlertRecipient.update({ where: { id: own.id }, data: { notifyWarning: false } });
 
       await worker().deliverDue();
 
-      expect(await deliveries()).toMatchObject([{ recipientId: own.id, status: 'SENT' }]);
+      const [row] = await deliveries({ channel: OpsAlertChannel.EMAIL });
+      expect(row).toMatchObject({ recipientId: null, status: 'SENT' });
+      expect(alertMails().map((mail) => [mail.to, mail.idempotencyKey])).toEqual([[OPS_EMAIL, opsAlertIdempotencyKey(row!.id)]]);
+
+      // Told as the env address: the RESOLVED goes there.
+      await run('request-expiry', 'SUCCESS', ago(MINUTE));
+      await evaluator().evaluate();
+      expect(await deliveries({ kind: 'RESOLVED', channel: OpsAlertChannel.EMAIL })).toMatchObject([
+        { recipientId: null, status: 'SENT' },
+      ]);
+      expect(alertMails().filter((mail) => mail.data!.noticeKind === 'RESOLVED').map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it("in ENV_LEGACY, the env address's own row beside only a dead legacy row goes to it, still bound", async () => {
+      const own = await add(OPS_EMAIL, WARN);
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [row] = await deliveries({ channel: OpsAlertChannel.EMAIL });
+      await ctx.prisma.opsAlertDelivery.create({
+        data: {
+          alertId: row!.alertId,
+          kind: row!.kind,
+          sequence: row!.sequence,
+          channel: OpsAlertChannel.EMAIL,
+          status: OpsAlertDeliveryStatus.CANCELLED,
+          errorCode: 'LEGACY_AFTER_CUTOVER',
+          nextAttemptAt: new Date(),
+        },
+      });
+      await setRouting(OpsAlertEmailRouting.ENV_LEGACY);
+      await pause(own.id);
+
+      await worker().deliverDue();
+
+      expect(await deliveries({ id: row!.id })).toMatchObject([{ recipientId: own.id, status: 'SENT' }]);
       expect(alertMails().map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it("in ENV_LEGACY, the env address's own row beside a live legacy row is cancelled", async () => {
+      const own = await add(OPS_EMAIL, WARN);
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [row] = await deliveries({ channel: OpsAlertChannel.EMAIL });
+      const legacy = await ctx.prisma.opsAlertDelivery.create({
+        data: {
+          alertId: row!.alertId,
+          kind: row!.kind,
+          sequence: row!.sequence,
+          channel: OpsAlertChannel.EMAIL,
+          status: OpsAlertDeliveryStatus.SENT,
+          sentAt: new Date(),
+          nextAttemptAt: new Date(),
+        },
+      });
+      await setRouting(OpsAlertEmailRouting.ENV_LEGACY);
+
+      await worker().deliverDue();
+
+      expect(await deliveries({ id: row!.id })).toMatchObject([
+        { recipientId: own.id, status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' },
+      ]);
+      expect(await deliveries({ id: legacy.id })).toMatchObject([{ status: 'SENT' }]);
+      expect(alertMails()).toEqual([]);
     });
 
     it('two workers never deliver the same recipient row twice', async () => {

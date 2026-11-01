@@ -53,7 +53,7 @@ type EmailRoute =
   | { kind: 'recipient'; address: string }
   | { kind: 'cancel'; code: string }
   | { kind: 'abandon'; code: string }
-  /** The claim was taken over while binding; the other worker owns the row now. */
+  /** The claim was taken over before routing; the other worker owns the row now. */
   | { kind: 'lost' };
 
 type ClaimedDelivery = {
@@ -98,7 +98,10 @@ type ClaimedDelivery = {
  * abandons it (`DECRYPT_FAILED`). Such a row never falls back to
  * OPS_ALERT_EMAIL, in any routing mode; in ENV_LEGACY it is cancelled
  * (`ROUTING_REVERTED`) unless it is the env address's own last copy of the
- * notice (see {@link emailRoute}). A row without a recipient follows the
+ * notice (see {@link emailRoute}). The route is decided, and a no-send
+ * outcome written, in one transaction under the row's lock, on the row's
+ * recipient and the mode as they are then — a cutover or revert can move a
+ * claimed row. A row without a recipient follows the
  * OBS-ALERT-001 path in ENV_LEGACY; in MANAGED it is first bound to the
  * ACTIVE recipient whose identity is the env address, or cancelled
  * (`LEGACY_AFTER_CUTOVER`). Every one of these outcomes is written under the
@@ -213,8 +216,8 @@ export class OpsAlertDeliveryWorker {
       } else {
         // Where this e-mail may go is settled before anything is sent.
         const route = await this.emailRoute(delivery, token, config, snapshot?.severity ?? delivery.alert.severity);
-        if (route.kind === 'cancel') return this.stop(delivery, token, OpsAlertDeliveryStatus.CANCELLED, route.code);
-        if (route.kind === 'abandon') return this.stop(delivery, token, OpsAlertDeliveryStatus.ABANDONED, route.code);
+        if (route.kind === 'cancel') return this.stopped(delivery, OpsAlertDeliveryStatus.CANCELLED, route.code);
+        if (route.kind === 'abandon') return this.stopped(delivery, OpsAlertDeliveryStatus.ABANDONED, route.code);
         if (route.kind === 'lost') return 'failed';
         let to: string;
         if (route.kind === 'recipient') {
@@ -270,14 +273,26 @@ export class OpsAlertDeliveryWorker {
    *                                 be retried to its recipient. Except the
    *                                 env address's own recipient (same HMAC)
    *                                 when no live legacy row exists for the
-   *                                 notice — then this row is that mailbox's
-   *                                 only copy and goes as in MANAGED
+   *                                 notice: that row is the mailbox's only
+   *                                 copy (see envAddressOwnRoute)
    *   no recipient, ENV_LEGACY      the OBS-ALERT-001 path: OPS_ALERT_EMAIL
    *   no recipient, MANAGED         bound now to the ACTIVE recipient whose
    *                                 identity is the env address, then as
    *                                 above; with no such recipient, cancelled
    *
    * A row with a recipient never reaches the env address, whatever the mode.
+   *
+   * **Decided on fresh state, under the row's lock.** A cutover or revert
+   * moves a SENDING row by its link column alone and keeps its claim, so the
+   * `recipientId` read when the row was loaded may be stale by now. The
+   * decision is therefore one transaction that locks the row — still SENDING
+   * under this worker's claim — and only then reads its `recipientId` and the
+   * routing mode. A switch locks the same row FOR UPDATE: it either committed
+   * before this read (and both reads see it) or waits until this transaction
+   * commits. A no-send outcome (cancel, abandon) is written inside it, so it
+   * can never land on a row a switch has moved since. A send happens after
+   * it, to the address decided here: a switch landing in between finds the
+   * row in flight and keeps the claim, and the outcome is recorded as it is.
    */
   private async emailRoute(
     delivery: ClaimedDelivery,
@@ -285,51 +300,111 @@ export class OpsAlertDeliveryWorker {
     config: OpsAlertConfig,
     severity: OpsAlertSeverity,
   ): Promise<EmailRoute> {
-    const settings = await this.prisma.opsAlertRoutingSettings.findUnique({
+    try {
+      return await this.prisma.$transaction((tx) => this.routeLocked(tx, delivery, token, config, severity));
+    } catch (error) {
+      // A managed row for the same notice appeared between the check and the
+      // bind; the failed statement aborted the transaction. Decide again: it is found now.
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return this.prisma.$transaction((tx) => this.routeLocked(tx, delivery, token, config, severity));
+      }
+      throw error;
+    }
+  }
+
+  private async routeLocked(
+    tx: Prisma.TransactionClient,
+    delivery: ClaimedDelivery,
+    token: string,
+    config: OpsAlertConfig,
+    severity: OpsAlertSeverity,
+  ): Promise<EmailRoute> {
+    const [row] = await tx.$queryRaw<Array<{ recipientId: string | null }>>`
+      SELECT "recipientId" FROM "OpsAlertDelivery"
+      WHERE "id" = ${delivery.id} AND "claimToken" = ${token} AND "status" = 'SENDING'
+      FOR UPDATE`;
+    if (!row) {
+      this.logger.warn(`ops alert ${delivery.alert.ref} ${delivery.kind} not routed: its claim was taken over`);
+      return { kind: 'lost' };
+    }
+    const settings = await tx.opsAlertRoutingSettings.findUnique({
       where: { id: OPS_ALERT_ROUTING_ID },
       select: { emailRouting: true },
     });
     const managed = (settings?.emailRouting ?? OpsAlertEmailRouting.ENV_LEGACY) === OpsAlertEmailRouting.MANAGED;
-    let recipientId = delivery.recipientId;
-    if (recipientId === null) {
+
+    let route: EmailRoute;
+    if (row.recipientId === null) {
       if (!managed) return { kind: 'legacy' };
-      const bound = await this.bindLegacyRow(delivery, token, config);
-      if (bound.kind !== 'bound') return bound;
-      recipientId = bound.recipientId;
-    } else if (!managed && !(await this.lastCopyForEnvAddress(delivery, recipientId, config))) {
-      return { kind: 'cancel', code: ROUTING_REVERTED_ERROR_CODE };
+      const bound = await this.bindLegacyRow(tx, delivery, config);
+      route = bound.kind === 'bound' ? await this.recipientRoute(tx, delivery.kind, severity, bound.recipientId) : bound;
+    } else if (managed) {
+      route = await this.recipientRoute(tx, delivery.kind, severity, row.recipientId);
+    } else {
+      route = await this.envAddressOwnRoute(tx, delivery, row.recipientId, config);
     }
-    return this.recipientRoute(delivery.kind, severity, recipientId);
+
+    if (route.kind === 'cancel' || route.kind === 'abandon') {
+      // Under the lock taken above, so the claim is still this worker's.
+      await tx.opsAlertDelivery.updateMany({
+        where: { id: delivery.id, claimToken: token, status: OpsAlertDeliveryStatus.SENDING },
+        data: {
+          status: route.kind === 'cancel' ? OpsAlertDeliveryStatus.CANCELLED : OpsAlertDeliveryStatus.ABANDONED,
+          errorCode: route.code,
+          claimToken: null,
+          claimedAt: null,
+        },
+      });
+    }
+    return route;
   }
 
   /**
-   * ENV_LEGACY, a bound row: is it the env address's only copy of the notice?
-   * Yes when its recipient is the env address (same HMAC and key version) and
-   * no legacy row for the notice is live (PENDING/FAILED/SENDING/SENT) — e.g.
-   * a worker that read MANAGED bound a legacy row just after a revert. Then
-   * it goes to that recipient, the same mailbox; otherwise the legacy row
-   * owns the notice, or the recipient is somebody else, and this row stops.
+   * ENV_LEGACY, a bound row. ENV_LEGACY e-mails the env address and nobody
+   * else, so the row is cancelled (ROUTING_REVERTED) — unless its recipient
+   * is the env address itself (same HMAC and key version) and no legacy row
+   * for the notice is live (PENDING/FAILED/SENDING/SENT): then this row is
+   * that mailbox's only copy (left bound by hand, or by an env address that
+   * changed). It goes the ENV_LEGACY way: the recipient's pause and
+   * preferences do not apply, as they do not to OPS_ALERT_EMAIL.
+   *
+   *   no legacy row at all   un-bound and sent on the legacy path, so the
+   *                          env address's "told" is what resolve() reads
+   *   only dead legacy rows  the legacy key is taken: sent to the recipient's
+   *                          address (the same mailbox), still bound
    */
-  private async lastCopyForEnvAddress(delivery: ClaimedDelivery, recipientId: string, config: OpsAlertConfig): Promise<boolean> {
+  private async envAddressOwnRoute(
+    tx: Prisma.TransactionClient,
+    delivery: ClaimedDelivery,
+    recipientId: string,
+    config: OpsAlertConfig,
+  ): Promise<EmailRoute> {
+    const reverted = { kind: 'cancel', code: ROUTING_REVERTED_ERROR_CODE } as const;
     const identity = envIdentity(config);
-    if (!identity) return false;
-    const recipient = await this.prisma.opsAlertRecipient.findFirst({
+    if (!identity) return reverted;
+    const own = await tx.opsAlertRecipient.findFirst({
       where: { id: recipientId, addressHmac: identity.hmac, addressHmacVersion: identity.version },
       select: { id: true },
     });
-    if (!recipient) return false;
-    const legacy = await this.prisma.opsAlertDelivery.findFirst({
+    if (!own) return reverted;
+    const legacy = await tx.opsAlertDelivery.findMany({
       where: {
+        id: { not: delivery.id },
         alertId: delivery.alertId,
         kind: delivery.kind,
         sequence: delivery.sequence,
         channel: OpsAlertChannel.EMAIL,
         recipientId: null,
-        status: { notIn: [OpsAlertDeliveryStatus.CANCELLED, OpsAlertDeliveryStatus.ABANDONED] },
       },
-      select: { id: true },
+      select: { status: true },
     });
-    return legacy === null;
+    const dead: OpsAlertDeliveryStatus[] = [OpsAlertDeliveryStatus.CANCELLED, OpsAlertDeliveryStatus.ABANDONED];
+    if (legacy.some((row) => !dead.includes(row.status))) return reverted;
+    if (legacy.length === 0) {
+      await tx.opsAlertDelivery.update({ where: { id: delivery.id }, data: { recipientId: null } });
+      return { kind: 'legacy' };
+    }
+    return this.recipientAddress(tx, recipientId);
   }
 
   /**
@@ -342,19 +417,15 @@ export class OpsAlertDeliveryWorker {
    * A recipient deleted while a send to it is in flight may still get that
    * one letter; the delete shreds the ciphertext, so no retry can follow it.
    */
-  private async recipientRoute(kind: OpsAlertNoticeKind, severity: OpsAlertSeverity, recipientId: string): Promise<EmailRoute> {
-    const recipient = await this.prisma.opsAlertRecipient.findUnique({
+  private async recipientRoute(
+    client: Prisma.TransactionClient,
+    kind: OpsAlertNoticeKind,
+    severity: OpsAlertSeverity,
+    recipientId: string,
+  ): Promise<EmailRoute> {
+    const recipient = await client.opsAlertRecipient.findUnique({
       where: { id: recipientId },
-      select: {
-        status: true,
-        notifyWarning: true,
-        notifyCritical: true,
-        notifyRecovery: true,
-        addressCiphertext: true,
-        addressNonce: true,
-        addressTag: true,
-        addressKeyId: true,
-      },
+      select: { status: true, notifyWarning: true, notifyCritical: true, notifyRecovery: true },
     });
     // A missing row cannot happen (the foreign key restricts deletes); it reads as removed.
     if (!recipient || recipient.status === OpsAlertRecipientStatus.DELETED) {
@@ -362,7 +433,18 @@ export class OpsAlertDeliveryWorker {
     }
     if (recipient.status === OpsAlertRecipientStatus.PAUSED) return { kind: 'cancel', code: RECIPIENT_PAUSED_ERROR_CODE };
     if (!recipientWants(kind, severity, recipient)) return { kind: 'cancel', code: PREFERENCE_OFF_ERROR_CODE };
+    return this.recipientAddress(client, recipientId);
+  }
 
+  /** The recipient's address, decrypted now; removed → cancelled, undecryptable → abandoned. */
+  private async recipientAddress(client: Prisma.TransactionClient, recipientId: string): Promise<EmailRoute> {
+    const recipient = await client.opsAlertRecipient.findUnique({
+      where: { id: recipientId },
+      select: { status: true, addressCiphertext: true, addressNonce: true, addressTag: true, addressKeyId: true },
+    });
+    if (!recipient || recipient.status === OpsAlertRecipientStatus.DELETED) {
+      return { kind: 'cancel', code: RECIPIENT_REMOVED_ERROR_CODE };
+    }
     const { addressCiphertext, addressNonce, addressTag, addressKeyId } = recipient;
     if (!addressCiphertext || !addressNonce || !addressTag || !addressKeyId) {
       return { kind: 'abandon', code: DECRYPT_FAILED_ERROR_CODE };
@@ -385,20 +467,20 @@ export class OpsAlertDeliveryWorker {
    * A legacy row (no recipient) found in MANAGED mode: it was queued for the
    * env address before the cutover. It is bound to the ACTIVE recipient whose
    * identity HMAC (same key version) is the env address's — the same mailbox
-   * — inside this worker's claim, and only while the row is still unbound.
-   * Without such a recipient, or when that recipient already has its own row
-   * for this notice (the managed unique key would refuse the bind, and the
-   * notice is already theirs), the legacy row is cancelled.
+   * — under the routing transaction's lock on the row. Without such a
+   * recipient, or when that recipient already has its own row for this notice
+   * (the managed unique key would refuse the bind, and the notice is already
+   * theirs), the legacy row is cancelled.
    */
   private async bindLegacyRow(
+    tx: Prisma.TransactionClient,
     delivery: ClaimedDelivery,
-    token: string,
     config: OpsAlertConfig,
-  ): Promise<{ kind: 'bound'; recipientId: string } | { kind: 'cancel'; code: string } | { kind: 'lost' }> {
+  ): Promise<{ kind: 'bound'; recipientId: string } | { kind: 'cancel'; code: string }> {
     const unmatched = { kind: 'cancel', code: LEGACY_AFTER_CUTOVER_ERROR_CODE } as const;
     const identity = envIdentity(config);
     if (!identity) return unmatched;
-    const match = await this.prisma.opsAlertRecipient.findFirst({
+    const match = await tx.opsAlertRecipient.findFirst({
       where: {
         status: OpsAlertRecipientStatus.ACTIVE,
         channel: OpsAlertChannel.EMAIL,
@@ -408,41 +490,33 @@ export class OpsAlertDeliveryWorker {
       select: { id: true },
     });
     if (!match) return unmatched;
-    const existing = await this.prisma.opsAlertDelivery.findFirst({
-      where: { alertId: delivery.alertId, kind: delivery.kind, sequence: delivery.sequence, recipientId: match.id },
+    const existing = await tx.opsAlertDelivery.findFirst({
+      where: {
+        id: { not: delivery.id },
+        alertId: delivery.alertId,
+        kind: delivery.kind,
+        sequence: delivery.sequence,
+        recipientId: match.id,
+      },
       select: { id: true },
     });
     if (existing) return unmatched;
-
-    try {
-      const bound = await this.prisma.opsAlertDelivery.updateMany({
-        where: { id: delivery.id, claimToken: token, status: OpsAlertDeliveryStatus.SENDING, recipientId: null },
-        data: { recipientId: match.id },
-      });
-      if (bound.count === 0) {
-        this.logger.warn(`ops alert ${delivery.alert.ref} ${delivery.kind} not bound: its claim was taken over`);
-        return { kind: 'lost' };
-      }
-    } catch (error) {
-      // A managed row for the same notice appeared since the check above.
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return unmatched;
-      throw error;
-    }
+    // The row is locked and still unbound (read under the lock); a P2002 here is a managed
+    // row for the notice that appeared since the check above, and emailRoute decides again.
+    await tx.opsAlertDelivery.update({ where: { id: delivery.id }, data: { recipientId: match.id } });
     return { kind: 'bound', recipientId: match.id };
   }
 
-  /** A final outcome without a send: cancelled or abandoned, under this worker's claim. */
-  private async stop(
+  /** A final outcome without a send, already written by the routing transaction under this worker's claim. */
+  private stopped(
     delivery: ClaimedDelivery,
-    token: string,
     status: typeof OpsAlertDeliveryStatus.CANCELLED | typeof OpsAlertDeliveryStatus.ABANDONED,
     code: string,
-  ): Promise<DeliveryResult> {
+  ): DeliveryResult {
     this.logger.warn(
       `ops alert ${delivery.alert.ref} ${delivery.kind} via ${delivery.channel} ` +
         `${status === OpsAlertDeliveryStatus.CANCELLED ? 'cancelled' : 'abandoned'} (${code}); nothing sent`,
     );
-    await this.finish(delivery.id, token, { status, errorCode: code });
     return status === OpsAlertDeliveryStatus.CANCELLED ? 'cancelled' : 'abandoned';
   }
 
