@@ -1,4 +1,5 @@
 import { SCHEDULER_JOB_COPY, type SchedulerJobKey } from './api';
+import type { OpsAlertChannel, OpsAlertDeliveryStatus } from './ops-alert-labels';
 
 /**
  * ADMIN-SYSTEM-HEALTH-001 — the "Sistem sağlığı" screen's vocabulary.
@@ -98,8 +99,10 @@ export type SystemHealthReport = {
 // ---------------------------------------------------------------------------
 
 export type OpsAlertEngineReason = 'OK' | 'NEVER_RAN' | 'OVERDUE' | 'LAST_EVALUATION_FAILED' | 'QUERY_FAILED';
-export type OpsAlertChannel = 'TELEGRAM' | 'EMAIL';
-export type OpsAlertDeliveryStatus = 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | 'ABANDONED' | 'CANCELLED';
+// The channel and delivery words live in a client-safe module (this one reads lib/api.ts).
+export type { OpsAlertChannel, OpsAlertDeliveryStatus } from './ops-alert-labels';
+export { OPS_ALERT_CHANNEL_LABELS, OPS_ALERT_DELIVERY_LABELS } from './ops-alert-labels';
+
 export type OpsAlertNoticeKind = 'OPENED' | 'REMINDER' | 'RESOLVED';
 
 export type OpsAlertView = {
@@ -180,17 +183,6 @@ export const OPS_ALERT_RESOLUTION_TEXT: Record<string, string> = {
   RECOVERED: 'Düzeldi',
   DISABLED: 'İş kapatıldı',
   SUPERSEDED: 'Yeni bir hatayla değişti',
-};
-
-export const OPS_ALERT_CHANNEL_LABELS: Record<OpsAlertChannel, string> = { TELEGRAM: 'Telegram', EMAIL: 'E-posta' };
-
-export const OPS_ALERT_DELIVERY_LABELS: Record<OpsAlertDeliveryStatus, string> = {
-  PENDING: 'Bekliyor',
-  SENDING: 'Gönderiliyor',
-  SENT: 'Gönderildi',
-  FAILED: 'Yeniden denenecek',
-  ABANDONED: 'Gönderilemedi',
-  CANCELLED: 'İptal (sorun gönderilmeden düzeldi)',
 };
 
 /** The e-mail error classes an e-mail alert is about, in the panel's words. */

@@ -12,7 +12,7 @@ import {
   type RoutingPreview,
   type RoutingState,
 } from '../../../lib/ops-alert-recipients';
-import { OPS_ALERT_DELIVERY_LABELS } from '../../../lib/system-health';
+import { OPS_ALERT_DELIVERY_LABELS } from '../../../lib/ops-alert-labels';
 import {
   importEnvRecipientAction,
   rehashRecipientsAction,

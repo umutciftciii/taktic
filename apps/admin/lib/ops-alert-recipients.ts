@@ -1,4 +1,5 @@
-import { OPS_ALERT_CHANNEL_LABELS, OPS_ALERT_DELIVERY_LABELS, type OpsAlertChannel, type OpsAlertView } from './system-health';
+import { OPS_ALERT_CHANNEL_LABELS, OPS_ALERT_DELIVERY_LABELS, type OpsAlertChannel } from './ops-alert-labels';
+import type { OpsAlertView } from './system-health';
 import type { AdminAuditEntry } from './api';
 
 /**
