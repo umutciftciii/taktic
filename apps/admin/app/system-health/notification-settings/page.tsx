@@ -151,6 +151,8 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
   // The window is a query parameter: `yeni`, or the id of the recipient to edit.
   const openKey = canWrite ? (params.alici ?? '').trim() : '';
   const adding = openKey === 'yeni' && !atLimit;
+  // A typed or stale `?alici=yeni` at the limit: say why no window opened.
+  const addRefused = openKey === 'yeni' && atLimit;
   const editing = openKey && openKey !== 'yeni' ? (recipients.find((recipient) => recipient.id === openKey) ?? null) : null;
   const missing = openKey !== '' && openKey !== 'yeni' && !editing;
 
@@ -299,6 +301,11 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
           <RecipientForm mode={{ kind: 'create' }} cancelHref={PATH} />
         </RouteDialog>
       ) : null}
+      {addRefused ? (
+        <div className="notice notice-warning detail-notice" role="status" data-testid="ops-alert-recipient-limit-notice">
+          En fazla {OPS_ALERT_RECIPIENT_LIMIT} alıcı eklenebilir; yeni alıcı için önce birini silin.
+        </div>
+      ) : null}
       {missing ? (
         <div className="notice notice-error detail-notice" role="alert" data-testid="ops-alert-recipient-missing">
           Bu bağlantının gösterdiği alıcı bulunamadı; silinmiş olabilir.
@@ -307,6 +314,7 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
       {editing ? (
         <RouteDialog title="Alıcıyı düzenle" closeHref={PATH} testId="ops-alert-recipient-dialog">
           <RecipientForm
+            key={editing.id}
             mode={{ kind: 'edit', recipientId: editing.id, version: editing.version, maskedAddress: editing.maskedAddress }}
             defaults={{
               label: editing.label,

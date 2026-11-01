@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -459,6 +459,23 @@ describe('Bildirim Ayarları page', () => {
     expect(markup).toContain('value="Nöbetçi mühendis"');
     expect(markup).not.toContain('name="address"');
     expect(markup).toContain('o***@example.test');
+  });
+
+  it('?alici=yeni at 10/10 says why no add window opens, instead of drawing nothing', async () => {
+    api.held = new Set([READ, WRITE]);
+    load({ recipients: Array.from({ length: 10 }, (_, i) => recipient({ id: `r${i}` })) });
+    const markup = await renderSettings({ alici: 'yeni' });
+    expect(markup).not.toContain('ops-alert-recipient-form');
+    expect(markup).toContain('data-testid="ops-alert-recipient-limit-notice"');
+    expect(markup).toContain('En fazla 10 alıcı eklenebilir; yeni alıcı için önce birini silin.');
+    load();
+    expect(await renderSettings({ alici: 'yeni' })).not.toContain('ops-alert-recipient-limit-notice');
+  });
+
+  it('remounts the edit form when the edited recipient changes (no state carried across ids)', () => {
+    expect(readFileSync(resolve(__dirname, '../app/system-health/notification-settings/page.tsx'), 'utf8')).toMatch(
+      /<RecipientForm\s+key=\{editing\.id\}/,
+    );
   });
 
   it('an unknown ?alici= says the recipient is gone instead of drawing a form', async () => {

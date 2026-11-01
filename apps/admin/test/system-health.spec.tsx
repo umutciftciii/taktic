@@ -402,14 +402,37 @@ describe('the page', () => {
     });
 
     it('an account without the recipient permissions gets null recipient fields and a page that still renders', async () => {
-      apiMocks.apiFetch.mockResolvedValue(report());
+      // What the API sends without OPS_ALERT_RECIPIENTS_READ: every recipient field null, on several rows of one notice.
+      const hidden = (over: Record<string, unknown>) => ({
+        kind: 'OPENED',
+        sequence: 0,
+        channel: 'EMAIL',
+        status: 'SENT',
+        attemptCount: 1,
+        sentAt: NOW,
+        errorCode: null,
+        recipientId: null,
+        recipientLabel: null,
+        ...over,
+      });
+      const base = alertsBlock();
+      const open = [
+        {
+          ...base.open[0]!,
+          deliveries: [hidden({}), hidden({ status: 'FAILED', sentAt: null, errorCode: 'TIMEOUT' }), hidden({ channel: 'TELEGRAM' })],
+        },
+      ] as NonNullable<SystemHealthReport['alerts']>['open'];
+      apiMocks.apiFetch.mockResolvedValue(report({ alerts: alertsBlock({ open }) }));
       apiMocks.requireAdmin.mockResolvedValue({
         can: (...names: string[]) => !names.includes('OPS_ALERT_RECIPIENTS_READ'),
         permissions: [],
         isSuperAdmin: false,
       });
       const markup = await renderPage();
-      expect(markup).toContain('E-posta: Yeni sorun — Gönderildi');
+      expect(markup).toContain('Telegram: Yeni sorun — Gönderildi · E-posta: Yeni sorun — 1/2 gönderildi, 1 yeniden denenecek');
+      // No managed row beside them, so nothing is called an old address; no label is invented.
+      expect(markup).not.toContain('eski adres');
+      expect(markup).not.toContain('null');
       expect(markup).not.toContain('notification-settings');
     });
 
