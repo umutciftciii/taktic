@@ -45,6 +45,13 @@ const api = vi.hoisted(() => ({
   replaceOpsAlertRecipientAddress: vi.fn(),
   revealOpsAlertRecipient: vi.fn(),
   testOpsAlertRecipient: vi.fn(),
+  importOpsAlertEnvRecipient: vi.fn(),
+  previewOpsAlertCutover: vi.fn(),
+  applyOpsAlertCutover: vi.fn(),
+  previewOpsAlertRevert: vi.fn(),
+  applyOpsAlertRevert: vi.fn(),
+  rewrapOpsAlertRecipients: vi.fn(),
+  rehashOpsAlertRecipients: vi.fn(),
 }));
 
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -65,6 +72,13 @@ vi.mock('../lib/api', async (importOriginal) => ({
   replaceOpsAlertRecipientAddress: api.replaceOpsAlertRecipientAddress,
   revealOpsAlertRecipient: api.revealOpsAlertRecipient,
   testOpsAlertRecipient: api.testOpsAlertRecipient,
+  importOpsAlertEnvRecipient: api.importOpsAlertEnvRecipient,
+  previewOpsAlertCutover: api.previewOpsAlertCutover,
+  applyOpsAlertCutover: api.applyOpsAlertCutover,
+  previewOpsAlertRevert: api.previewOpsAlertRevert,
+  applyOpsAlertRevert: api.applyOpsAlertRevert,
+  rewrapOpsAlertRecipients: api.rewrapOpsAlertRecipients,
+  rehashOpsAlertRecipients: api.rehashOpsAlertRecipients,
 }));
 
 import { ApiError, adminPermissionLabel } from '../lib/api';
@@ -359,6 +373,13 @@ beforeEach(() => {
     api.replaceOpsAlertRecipientAddress,
     api.revealOpsAlertRecipient,
     api.testOpsAlertRecipient,
+    api.importOpsAlertEnvRecipient,
+    api.previewOpsAlertCutover,
+    api.applyOpsAlertCutover,
+    api.previewOpsAlertRevert,
+    api.applyOpsAlertRevert,
+    api.rewrapOpsAlertRecipients,
+    api.rehashOpsAlertRecipients,
     session.cookieSet,
     cache.revalidatePath,
   ]) {
@@ -1235,5 +1256,388 @@ describe('B3 carry-over: the second step survives, refusals show, no dead save b
     expect(recipientFormStep(true, false, refused)).toEqual({ step: refused, saveHidden: false });
     const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/recipient-form.tsx'), 'utf8');
     expect(source).toContain('recipientFormStep(');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 PR-B (task B4) — the SUPER_ADMIN routing panel
+// ---------------------------------------------------------------------------
+
+const { RoutingSwitchBody } = await import('../app/system-health/notification-settings/routing-panel');
+const { ROUTING_COUNTS_CHANGED_TEXT, ROUTING_SWITCH_IDLE, ROUTING_OP_IDLE } = await import(
+  '../app/system-health/notification-settings/routing-panel-state'
+);
+import type { RoutingPreview } from '../lib/ops-alert-recipients';
+
+const MANAGE = 'OPS_ALERT_ROUTING_MANAGE';
+const TOKEN = 'a'.repeat(64);
+
+function preview(over: Partial<RoutingPreview> = {}): RoutingPreview {
+  return {
+    direction: 'CUTOVER',
+    counts: { PENDING: { rebind: 7, cancel: 2 }, FAILED: { rebind: 5, cancel: 3 }, SENDING: { rebind: 4, cancel: 0 } },
+    told: 11,
+    inFlight: 13,
+    collisions: 0,
+    confirmRequired: false,
+    blockers: [],
+    token: TOKEN,
+    ...over,
+  };
+}
+
+function panelOf(markup: string): string {
+  const start = markup.indexOf('data-testid="ops-alert-routing-panel"');
+  if (start < 0) return '';
+  return markup.slice(start, markup.indexOf('data-testid="ops-alert-recipients"', start));
+}
+
+const renderBody = (direction: 'CUTOVER' | 'REVERT', state: Parameters<typeof RoutingSwitchBody>[0]['state']) =>
+  renderToStaticMarkup(
+    <form>
+      <RoutingSwitchBody direction={direction} state={state} />
+    </form>,
+  );
+
+describe('routing panel: who sees it and which steps it draws', () => {
+  it('an ADMIN gets no panel — even holding OPS_ALERT_ROUTING_MANAGE and every recipient permission through a role', async () => {
+    api.held = new Set([READ, WRITE, DELETE, TEST, REVEAL, MANAGE]);
+    load({ routing: { emailRouting: 'ENV_LEGACY', envAddressManaged: false } });
+    const markup = await renderSettings();
+    for (const id of ['panel', 'import', 'cutover-form', 'revert-form', 'rewrap', 'rehash']) {
+      expect(markup).not.toContain(`ops-alert-routing-${id}`);
+    }
+    // The status strip still says which mode is on.
+    expect(markup).toContain('data-testid="ops-alert-routing-mode"');
+    expect(api.previewOpsAlertCutover).not.toHaveBeenCalled();
+  });
+
+  it('a SUPER_ADMIN gets it between the status strip and the ENV_LEGACY notice', async () => {
+    api.isSuperAdmin = true;
+    load({ routing: { emailRouting: 'ENV_LEGACY', envAddressManaged: false } });
+    const markup = await renderSettings();
+    const strip = markup.indexOf('data-testid="ops-alert-status-strip"');
+    const panel = markup.indexOf('data-testid="ops-alert-routing-panel"');
+    const notice = markup.indexOf('data-testid="ops-alert-env-legacy-notice"');
+    expect(strip).toBeGreaterThan(-1);
+    expect(panel).toBeGreaterThan(strip);
+    expect(notice).toBeGreaterThan(panel);
+    // Drawing the panel previews nothing: a preview is the operator's click.
+    expect(api.previewOpsAlertCutover).not.toHaveBeenCalled();
+    expect(api.previewOpsAlertRevert).not.toHaveBeenCalled();
+  });
+
+  it('ENV_LEGACY: import (when the env address exists and is not managed yet), the test reminder, then the cutover preview', async () => {
+    api.isSuperAdmin = true;
+    load({ routing: { emailRouting: 'ENV_LEGACY', envAddressConfigured: true, envAddressManaged: false } });
+    const fresh = panelOf(await renderSettings());
+    expect(fresh).toContain('data-testid="ops-alert-routing-import"');
+    expect(fresh).toContain('OPS_ALERT_EMAIL&#x27;i içe aktar');
+    expect(fresh).toContain('data-testid="ops-alert-routing-test-reminder"');
+    expect(fresh).toContain('Test gönder');
+    expect(fresh).toContain('data-testid="ops-alert-routing-cutover-form"');
+    expect(fresh).toContain('Geçişi önizle');
+    expect(fresh).not.toContain('ops-alert-routing-revert-form');
+    expect(fresh.indexOf('ops-alert-routing-import')).toBeLessThan(fresh.indexOf('ops-alert-routing-test-reminder'));
+    expect(fresh.indexOf('ops-alert-routing-test-reminder')).toBeLessThan(fresh.indexOf('ops-alert-routing-cutover-form'));
+
+    load({ routing: { emailRouting: 'ENV_LEGACY', envAddressConfigured: true, envAddressManaged: true } });
+    const managed = panelOf(await renderSettings());
+    expect(managed).toContain('data-testid="ops-alert-routing-imported"');
+    expect(managed).toContain('Env adresi yönetilen listede ✓');
+    expect(managed).not.toContain('data-testid="ops-alert-routing-import"');
+
+    load({ routing: { emailRouting: 'ENV_LEGACY', envAddressConfigured: false, envAddressManaged: false } });
+    const noEnv = panelOf(await renderSettings());
+    expect(noEnv).not.toContain('ops-alert-routing-import');
+    expect(noEnv).toContain('data-testid="ops-alert-routing-cutover-form"');
+  });
+
+  it('MANAGED: the revert preview, and neither import nor cutover', async () => {
+    api.isSuperAdmin = true;
+    load({ routing: { emailRouting: 'MANAGED', envAddressManaged: false } });
+    const panel = panelOf(await renderSettings());
+    expect(panel).toContain('data-testid="ops-alert-routing-revert-form"');
+    expect(panel).toContain('Geri dönüşü önizle');
+    expect(panel).not.toContain('ops-alert-routing-cutover-form');
+    expect(panel).not.toContain('ops-alert-routing-import');
+  });
+
+  it('rewrap shows only with several key ids, rehash only with several HMAC versions — both behind the rewrap proof', async () => {
+    api.isSuperAdmin = true;
+    load();
+    const single = panelOf(await renderSettings());
+    expect(single).not.toContain('ops-alert-routing-rewrap');
+    expect(single).not.toContain('ops-alert-routing-rehash');
+
+    load({ routing: { keyIds: { k1: 2, k2: 1 } } });
+    const keys = panelOf(await renderSettings());
+    expect(keys).toContain('data-testid="ops-alert-routing-rewrap"');
+    expect(keys).toContain('data-testid="ops-alert-routing-rewrap-dialog"');
+    expect(keys).not.toContain('ops-alert-routing-rehash');
+
+    load({ routing: { hmacVersions: { '1': 2, '2': 1 } } });
+    const hmac = panelOf(await renderSettings());
+    expect(hmac).toContain('data-testid="ops-alert-routing-rehash"');
+    expect(hmac).not.toContain('ops-alert-routing-rewrap"');
+  });
+
+  it('says what an import, a cutover and a revert did', async () => {
+    load();
+    for (const ok of ['imported', 'cutover', 'reverted']) {
+      expect(await renderSettings({ ok })).toContain('data-testid="ops-alert-recipients-ok"');
+    }
+  });
+});
+
+describe('routing preview: what the operator approves is what the API previewed', () => {
+  it('prints the API numbers as they came, per status, with told, in flight and collisions', () => {
+    const markup = renderBody('CUTOVER', { kind: 'preview', preview: preview(), at: 1 });
+    const cell = (status: string, column: string) =>
+      new RegExp(`data-testid="ops-alert-routing-count-${status}-${column}"[^>]*>(\\d+)<`).exec(markup)?.[1];
+    expect(cell('PENDING', 'rebind')).toBe('7');
+    expect(cell('PENDING', 'cancel')).toBe('2');
+    expect(cell('FAILED', 'rebind')).toBe('5');
+    expect(cell('FAILED', 'cancel')).toBe('3');
+    expect(cell('SENDING', 'rebind')).toBe('4');
+    expect(cell('SENDING', 'cancel')).toBe('0');
+    expect(/data-testid="ops-alert-routing-told"[^>]*>(\d+)</.exec(markup)?.[1]).toBe('11');
+    expect(/data-testid="ops-alert-routing-in-flight"[^>]*>(\d+)</.exec(markup)?.[1]).toBe('13');
+    expect(/data-testid="ops-alert-routing-collisions"[^>]*>(\d+)</.exec(markup)?.[1]).toBe('0');
+    for (const heading of ['Bağlanacak', 'İptal edilecek', 'Bilgilendirilmiş aktarılacak']) expect(markup).toContain(heading);
+    // The approval carries the preview's own token, and the gate asks before it goes.
+    expect(markup).toContain(`<input type="hidden" name="token" value="${TOKEN}"/>`);
+    expect(markup).toContain('data-testid="ops-alert-routing-cutover-confirm"');
+    expect(markup).toContain('data-testid="ops-alert-routing-cutover-confirm-dialog"');
+    expect(markup).toContain('Yönetilen moda geç');
+    expect(markup).not.toContain('cancelUnmatched');
+  });
+
+  it('a blocker is said in words, and then there is no confirm button and no token', () => {
+    for (const blockers of [['ROUTING_COLLISION_PENDING'], ['LEGACY_ROWS_UNMATCHED'], ['LEGACY_ROWS_UNMATCHED', 'NO_LIVE_CRITICAL_CHANNEL']] as const) {
+      const markup = renderBody('CUTOVER', { kind: 'preview', preview: preview({ blockers: [...blockers], collisions: 2 }), at: 1 });
+      for (const blocker of blockers) {
+        expect(markup).toContain(`data-code="${blocker}"`);
+        expect(markup).toContain(RECIPIENT_ERROR_TEXT[blocker]!.replace(/'/g, '&#x27;'));
+      }
+      expect(markup).not.toContain('ops-alert-routing-cutover-confirm');
+      expect(markup).not.toContain('name="token"');
+      expect(markup).not.toContain('<dialog');
+      // The numbers are still shown, so the operator sees what waits.
+      expect(/data-testid="ops-alert-routing-collisions"[^>]*>(\d+)</.exec(markup)?.[1]).toBe('2');
+    }
+  });
+
+  it('revert with confirmRequired asks a separate, required "Eşleşmeyen N teslimatı iptal et" box', () => {
+    const required = renderBody('REVERT', {
+      kind: 'preview',
+      preview: preview({ direction: 'REVERT', confirmRequired: true }),
+      at: 1,
+    });
+    expect(required).toContain('Eşleşmeyen 5 teslimatı iptal et');
+    const box = /<input type="checkbox"[^>]*>/.exec(required)?.[0] ?? '';
+    for (const attribute of ['name="cancelUnmatched"', 'value="true"', 'required=""']) expect(box).toContain(attribute);
+    expect(required).toContain('data-testid="ops-alert-routing-revert-confirm"');
+
+    const plain = renderBody('REVERT', {
+      kind: 'preview',
+      preview: preview({ direction: 'REVERT', confirmRequired: false, counts: { PENDING: { rebind: 1, cancel: 0 }, FAILED: { rebind: 0, cancel: 0 }, SENDING: { rebind: 0, cancel: 0 } } }),
+      at: 1,
+    });
+    expect(plain).not.toContain('cancelUnmatched');
+    expect(plain).toContain('data-testid="ops-alert-routing-revert-confirm"');
+  });
+
+  it('COUNTS_CHANGED drops the preview and says to preview again, word for word', () => {
+    expect(ROUTING_COUNTS_CHANGED_TEXT).toBe('Önizlemeden bu yana sayılar değişti; yeniden önizleyin.');
+    const markup = renderBody('CUTOVER', { kind: 'error', message: ROUTING_COUNTS_CHANGED_TEXT, code: 'COUNTS_CHANGED', at: 1 });
+    expect(markup).toContain(ROUTING_COUNTS_CHANGED_TEXT);
+    expect(markup).not.toContain('name="token"');
+    expect(markup).not.toContain('ops-alert-routing-cutover-confirm');
+    expect(markup).toContain('Geçişi önizle');
+  });
+
+  it('idle: only the preview button', () => {
+    const markup = renderBody('REVERT', ROUTING_SWITCH_IDLE);
+    expect(markup).toContain('Geri dönüşü önizle');
+    expect(markup).not.toContain('name="token"');
+    expect(markup).not.toContain('<table');
+  });
+});
+
+describe('routing server actions', () => {
+  const switchForm = (fields: Record<string, string>, proofs: Array<string | null> = []) => submission(fields, proofs);
+
+  it('preview answers the API preview verbatim and writes nothing; no proof is asked', async () => {
+    const cut = preview();
+    api.previewOpsAlertCutover.mockResolvedValueOnce(cut);
+    expect(await settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'CUTOVER', intent: 'preview' }))).toMatchObject({
+      kind: 'preview',
+      preview: cut,
+    });
+    const back = preview({ direction: 'REVERT', confirmRequired: true });
+    api.previewOpsAlertRevert.mockResolvedValueOnce(back);
+    expect(await settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'REVERT', intent: 'preview' }))).toMatchObject({
+      kind: 'preview',
+      preview: back,
+    });
+    expect(api.applyOpsAlertCutover).not.toHaveBeenCalled();
+    expect(api.applyOpsAlertRevert).not.toHaveBeenCalled();
+  });
+
+  it('cutover sends only the preview token; revert adds cancelUnmatched only when the box is ticked', async () => {
+    api.applyOpsAlertCutover.mockResolvedValue(routing());
+    const cut = await settle(async () =>
+      settingsActions.routingSwitchAction(
+        ROUTING_SWITCH_IDLE,
+        switchForm({ direction: 'CUTOVER', intent: 'apply', token: TOKEN, counts: '99', told: '99' }, [await mint('ops-alert-routing.cutover')]),
+      ),
+    );
+    expect(cut.redirect).toBe(`${SETTINGS}?ok=cutover`);
+    expect(api.applyOpsAlertCutover).toHaveBeenCalledWith({ token: TOKEN });
+
+    api.applyOpsAlertRevert.mockResolvedValue(routing({ emailRouting: 'ENV_LEGACY' }));
+    const ticked = await settle(async () =>
+      settingsActions.routingSwitchAction(
+        ROUTING_SWITCH_IDLE,
+        switchForm({ direction: 'REVERT', intent: 'apply', token: TOKEN, cancelUnmatched: 'true' }, [await mint('ops-alert-routing.revert')]),
+      ),
+    );
+    expect(ticked.redirect).toBe(`${SETTINGS}?ok=reverted`);
+    expect(api.applyOpsAlertRevert).toHaveBeenLastCalledWith({ token: TOKEN, cancelUnmatched: true });
+    await settle(async () =>
+      settingsActions.routingSwitchAction(
+        ROUTING_SWITCH_IDLE,
+        switchForm({ direction: 'REVERT', intent: 'apply', token: TOKEN }, [await mint('ops-alert-routing.revert')]),
+      ),
+    );
+    expect(api.applyOpsAlertRevert).toHaveBeenLastCalledWith({ token: TOKEN });
+  });
+
+  type RoutingGuard = { name: string; key: Parameters<typeof issueConfirmationProof>[0]; write: ReturnType<typeof vi.fn>; run: (proofs: Array<string | null>) => Promise<unknown> };
+  const ROUTING_GUARDED: RoutingGuard[] = [
+    {
+      name: 'Geçiş',
+      key: 'ops-alert-routing.cutover',
+      write: api.applyOpsAlertCutover,
+      run: (proofs) => settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'CUTOVER', intent: 'apply', token: TOKEN }, proofs)),
+    },
+    {
+      name: 'Geri dönüş',
+      key: 'ops-alert-routing.revert',
+      write: api.applyOpsAlertRevert,
+      run: (proofs) =>
+        settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'REVERT', intent: 'apply', token: TOKEN, cancelUnmatched: 'true' }, proofs)),
+    },
+    {
+      name: 'Rewrap',
+      key: 'ops-alert-routing.rewrap',
+      write: api.rewrapOpsAlertRecipients,
+      run: (proofs) => settingsActions.rewrapRecipientsAction(ROUTING_OP_IDLE, switchForm({}, proofs)),
+    },
+    {
+      name: 'Rehash',
+      key: 'ops-alert-routing.rewrap',
+      write: api.rehashOpsAlertRecipients,
+      run: (proofs) => settingsActions.rehashRecipientsAction(ROUTING_OP_IDLE, switchForm({}, proofs)),
+    },
+  ];
+
+  for (const testCase of ROUTING_GUARDED) {
+    it(`${testCase.name}: refused without its proof, with a forged one or another confirmation's; a real one goes once`, async () => {
+      api.applyOpsAlertCutover.mockResolvedValue(routing());
+      api.applyOpsAlertRevert.mockResolvedValue(routing({ emailRouting: 'ENV_LEGACY' }));
+      api.rewrapOpsAlertRecipients.mockResolvedValue({ rewrapped: 1, failed: 0 });
+      api.rehashOpsAlertRecipients.mockResolvedValue({ rehashed: 1, failed: 0 });
+      for (const proofs of [[], ['yes'], ['eyJrIjoieCJ9.Zm9yZ2Vk'], [await mint('ops-alert-recipient.pause')]]) {
+        expect(JSON.stringify((await settle(() => testCase.run(proofs))).value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+      }
+      // A cutover proof is not a revert proof, and the other way round.
+      if (testCase.key !== 'ops-alert-routing.rewrap') {
+        const other = testCase.key === 'ops-alert-routing.cutover' ? 'ops-alert-routing.revert' : 'ops-alert-routing.cutover';
+        expect(JSON.stringify((await settle(async () => testCase.run([await mint(other)]))).value)).toContain(
+          CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+        );
+      }
+      expect(testCase.write).not.toHaveBeenCalled();
+      const proof = await mint(testCase.key);
+      expect(JSON.stringify(await settle(() => testCase.run([proof])))).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+      expect(testCase.write).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify((await settle(() => testCase.run([proof]))).value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+      expect(testCase.write).toHaveBeenCalledTimes(1);
+    });
+  }
+
+  it('an apply without a preview token is refused before the proof is spent', async () => {
+    const proof = await mint('ops-alert-routing.cutover');
+    const refused = await settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'CUTOVER', intent: 'apply' }, [proof]));
+    expect(refused).toMatchObject({ kind: 'error' });
+    expect(api.applyOpsAlertCutover).not.toHaveBeenCalled();
+    api.applyOpsAlertCutover.mockResolvedValue(routing());
+    expect(
+      (await settle(() => settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'CUTOVER', intent: 'apply', token: TOKEN }, [proof])))).redirect,
+    ).toBe(`${SETTINGS}?ok=cutover`);
+  });
+
+  it('an unknown direction is refused and calls nothing', async () => {
+    const refused = await settingsActions.routingSwitchAction(ROUTING_SWITCH_IDLE, switchForm({ direction: 'SIDEWAYS', intent: 'preview' }));
+    expect(refused).toMatchObject({ kind: 'error' });
+    expect(api.previewOpsAlertCutover).not.toHaveBeenCalled();
+    expect(api.previewOpsAlertRevert).not.toHaveBeenCalled();
+  });
+
+  it('COUNTS_CHANGED says to preview again; a blocker met at apply and CONFIRM_CANCEL_REQUIRED are said in words', async () => {
+    api.applyOpsAlertCutover.mockRejectedValueOnce(conflict(409, 'COUNTS_CHANGED'));
+    expect(
+      await settingsActions.routingSwitchAction(
+        { kind: 'preview', preview: preview(), at: 1 },
+        switchForm({ direction: 'CUTOVER', intent: 'apply', token: TOKEN }, [await mint('ops-alert-routing.cutover')]),
+      ),
+    ).toMatchObject({ kind: 'error', code: 'COUNTS_CHANGED', message: ROUTING_COUNTS_CHANGED_TEXT });
+
+    api.applyOpsAlertCutover.mockRejectedValueOnce(conflict(409, 'ROUTING_COLLISION_PENDING'));
+    expect(
+      await settingsActions.routingSwitchAction(
+        ROUTING_SWITCH_IDLE,
+        switchForm({ direction: 'CUTOVER', intent: 'apply', token: TOKEN }, [await mint('ops-alert-routing.cutover')]),
+      ),
+    ).toMatchObject({ kind: 'error', code: 'ROUTING_COLLISION_PENDING', message: RECIPIENT_ERROR_TEXT.ROUTING_COLLISION_PENDING });
+
+    api.applyOpsAlertRevert.mockRejectedValueOnce(conflict(409, 'CONFIRM_CANCEL_REQUIRED'));
+    expect(
+      await settingsActions.routingSwitchAction(
+        ROUTING_SWITCH_IDLE,
+        switchForm({ direction: 'REVERT', intent: 'apply', token: TOKEN }, [await mint('ops-alert-routing.revert')]),
+      ),
+    ).toMatchObject({ kind: 'error', code: 'CONFIRM_CANCEL_REQUIRED', message: RECIPIENT_ERROR_TEXT.CONFIRM_CANCEL_REQUIRED });
+  });
+
+  it('import: one API call and ok=imported; the missing or already managed env address is said in words', async () => {
+    api.importOpsAlertEnvRecipient.mockResolvedValueOnce(recipient({ label: 'OPS_ALERT_EMAIL (içe aktarıldı)' }));
+    expect((await settle(() => settingsActions.importEnvRecipientAction(ROUTING_OP_IDLE, switchForm({})))).redirect).toBe(
+      `${SETTINGS}?ok=imported`,
+    );
+    expect(api.importOpsAlertEnvRecipient).toHaveBeenCalledTimes(1);
+    for (const code of ['ENV_ADDRESS_MISSING', 'RECIPIENT_DUPLICATE', 'RECIPIENT_LIMIT']) {
+      api.importOpsAlertEnvRecipient.mockRejectedValueOnce(conflict(409, code));
+      expect(await settingsActions.importEnvRecipientAction(ROUTING_OP_IDLE, switchForm({}))).toMatchObject({
+        kind: 'error',
+        code,
+        message: RECIPIENT_ERROR_TEXT[code],
+      });
+    }
+  });
+
+  it('rewrap and rehash say how many moved and how many failed, and refresh the page', async () => {
+    api.rewrapOpsAlertRecipients.mockResolvedValueOnce({ rewrapped: 3, failed: 1 });
+    const rewrap = await settingsActions.rewrapRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rewrap')]));
+    expect(rewrap).toMatchObject({ kind: 'done' });
+    expect(JSON.stringify(rewrap)).toContain('3 alıcı');
+    expect(JSON.stringify(rewrap)).toContain('1 alıcı');
+    api.rehashOpsAlertRecipients.mockResolvedValueOnce({ rehashed: 2, failed: 0 });
+    const rehash = await settingsActions.rehashRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rewrap')]));
+    expect(rehash).toMatchObject({ kind: 'done' });
+    expect(JSON.stringify(rehash)).toContain('2 alıcı');
+    expect(cache.revalidatePath).toHaveBeenCalledWith(SETTINGS);
   });
 });

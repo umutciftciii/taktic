@@ -26,6 +26,7 @@ import {
 import { recipientStaleMessage } from '../../../lib/status-conflicts';
 import { RecipientForm } from './recipient-form';
 import { RecipientDeleteForm, RecipientReplaceForm, RecipientRowActions, type RecipientRowPermissions } from './recipient-row-actions';
+import { RoutingPanel } from './routing-panel';
 
 /**
  * Admin > Sistem sağlığı > Operasyon alarmları > Bildirim ayarları
@@ -42,8 +43,10 @@ import { RecipientDeleteForm, RecipientReplaceForm, RecipientRowActions, type Re
  * resume, address replacement and delete (both in a window of their own,
  * `?alici=<id>&islem=adres|sil`), and — for a SUPER_ADMIN only — reveal. The
  * risky ones sit behind confirmation gates whose proofs the server actions
- * verify. The SUPER_ADMIN routing panel (cutover, revert, key operations) goes
- * between the status strip and the table.
+ * verify. The routing panel (`routing-panel.tsx`: import OPS_ALERT_EMAIL, the
+ * cutover and the revert, key operations) sits between the status strip and
+ * the table, for a SUPER_ADMIN only — never through `can()`: its routes need
+ * OPS_ALERT_ROUTING_MANAGE, which the API reserves to the root role.
  *
  * Not drawn on purpose: no loading.tsx above this page (the window is a query
  * parameter on it, and a loading boundary above a query window re-suspends the
@@ -65,6 +68,9 @@ const OK_MESSAGES: Record<string, string> = {
   resumed: 'Alıcı yeniden etkinleştirildi.',
   deleted: 'Alıcı silindi.',
   replaced: 'Adres değiştirildi: eski alıcı silindi, yeni adres aynı etiket ve tercihlerle eklendi.',
+  imported: 'OPS_ALERT_EMAIL yönetilen alıcı olarak eklendi; üç bildirim türü de açık. Geçişten önce ona bir test e-postası gönderin.',
+  cutover: 'Yönlendirme yönetilen alıcılara geçirildi. Alarm e-postaları artık yalnız listedeki alıcılara gidiyor.',
+  reverted: 'Yönlendirme OPS_ALERT_EMAIL adresine döndürüldü. Alarm e-postaları artık yalnız o adrese gidiyor.',
 };
 
 const COLUMNS: DataColumn[] = [
@@ -230,7 +236,24 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
           <StatusStrip routing={routing} count={recipients.length} />
         </SectionCard>
 
-        {/* SUPER_ADMIN routing panel (task B4) attaches here. */}
+        {isSuperAdmin ? (
+          <SectionCard
+            title="E-posta yönlendirmesi"
+            subtitle="Alarm e-postalarının OPS_ALERT_EMAIL adresine mi, yönetilen alıcılara mı gideceği. Yalnız SUPER_ADMIN değiştirebilir."
+            testId="ops-alert-routing-panel"
+          >
+            <RoutingPanel
+              key={routing.emailRouting}
+              routing={{
+                emailRouting: routing.emailRouting,
+                envAddressConfigured: routing.envAddressConfigured,
+                envAddressManaged: routing.envAddressManaged,
+                keyIds: routing.keyIds,
+                hmacVersions: routing.hmacVersions,
+              }}
+            />
+          </SectionCard>
+        ) : null}
 
         {routing.emailRouting === 'ENV_LEGACY' ? (
           <div className="notice notice-warning" data-testid="ops-alert-env-legacy-notice">

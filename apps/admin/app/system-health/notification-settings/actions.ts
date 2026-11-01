@@ -4,12 +4,19 @@ import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import {
   ApiError,
+  applyOpsAlertCutover,
+  applyOpsAlertRevert,
   createOpsAlertRecipient,
   deleteOpsAlertRecipient,
+  importOpsAlertEnvRecipient,
   pauseOpsAlertRecipient,
+  previewOpsAlertCutover,
+  previewOpsAlertRevert,
+  rehashOpsAlertRecipients,
   replaceOpsAlertRecipientAddress,
   resumeOpsAlertRecipient,
   revealOpsAlertRecipient,
+  rewrapOpsAlertRecipients,
   testOpsAlertRecipient,
   updateOpsAlertRecipient,
 } from '../../../lib/api';
@@ -25,6 +32,7 @@ import {
 import { recipientStaleKey } from '../../../lib/status-conflicts';
 import { LAST_CHANNEL_PROTECTED_TEXT, type RecipientActionState, type RevealOutcome } from './recipient-action-state';
 import type { RecipientFormState } from './recipient-form-state';
+import { ROUTING_COUNTS_CHANGED_TEXT, type RoutingOpState, type RoutingSwitchState } from './routing-panel-state';
 
 /**
  * Bildirim Ayarları writes (OBS-ALERT-002 PR-B). Each is the API route PR-A
@@ -40,6 +48,15 @@ import type { RecipientFormState } from './recipient-form-state';
  * (`last-critical-step.tsx`), and a hand-typed one without both proofs writes
  * nothing. Resuming and a test send are plain submits.
  *
+ * The routing panel's writes (task B4) are a SUPER_ADMIN's: the API reserves
+ * OPS_ALERT_ROUTING_MANAGE to the root role and the page draws the panel for
+ * no one else. Importing OPS_ALERT_EMAIL is a plain submit (a recipient like
+ * any other, deletable); the cutover and the revert verify their own proof and
+ * send only the preview's token (and, for a revert, the operator's
+ * `cancelUnmatched` tick) — never a number the client could choose; the API
+ * recomputes the preview under its locks and answers COUNTS_CHANGED when it
+ * moved. Rewrap and rehash verify the rewrap proof.
+ *
  * Nothing here logs or returns an address — with one exception by design:
  * `revealRecipientAction` answers it to the dialog that asked, and nowhere
  * else (no redirect, no cookie, no revalidation, no log line).
@@ -52,6 +69,9 @@ const DELETE: ConfirmationProofKey = 'ops-alert-recipient.delete';
 const REPLACE: ConfirmationProofKey = 'ops-alert-recipient.replace';
 const REVEAL: ConfirmationProofKey = 'ops-alert-recipient.reveal';
 const LAST_CRITICAL: ConfirmationProofKey = 'ops-alert-recipient.last-critical';
+const CUTOVER: ConfirmationProofKey = 'ops-alert-routing.cutover';
+const REVERT: ConfirmationProofKey = 'ops-alert-routing.revert';
+const REWRAP: ConfirmationProofKey = 'ops-alert-routing.rewrap';
 
 function readString(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -359,5 +379,106 @@ export async function testRecipientAction(_previous: RecipientActionState, formD
     rethrowNextControlFlow(error);
     const code = readCode(error);
     return errorState(refusalText(error, code), null, code);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Routing panel (task B4) — SUPER_ADMIN only; the API enforces it again
+// ---------------------------------------------------------------------------
+
+type RoutingRefusal = { kind: 'error'; message: string; code: string | null; at: number };
+
+function routingError(error: unknown): RoutingRefusal {
+  rethrowNextControlFlow(error);
+  const code = readCode(error);
+  const message = code === 'COUNTS_CHANGED' ? ROUTING_COUNTS_CHANGED_TEXT : refusalText(error, code);
+  return { kind: 'error', message, code, at: Date.now() };
+}
+
+function routingRefused(message: string): RoutingRefusal {
+  return { kind: 'error', message, code: null, at: Date.now() };
+}
+
+/** OPS_ALERT_EMAIL as a managed recipient (every notice kind on); the API reads the address itself. */
+export async function importEnvRecipientAction(_previous: RoutingOpState, _formData: FormData): Promise<RoutingOpState> {
+  try {
+    await importOpsAlertEnvRecipient();
+  } catch (error) {
+    return routingError(error);
+  }
+  done('imported');
+}
+
+/** The API's token is 64 hex characters; the DTO caps it at 128. Anything else was not previewed. */
+const TOKEN_MAX_LENGTH = 128;
+
+/**
+ * One cutover or revert form: `intent=preview` asks the API what the switch
+ * would do and answers it as it came; `intent=apply` sends that preview's
+ * token behind the direction's own proof. The token and the tick are checked
+ * for shape before the proof, so a malformed submission does not spend it.
+ */
+export async function routingSwitchAction(_previous: RoutingSwitchState, formData: FormData): Promise<RoutingSwitchState> {
+  const direction = readString(formData, 'direction');
+  if (direction !== 'CUTOVER' && direction !== 'REVERT') return routingRefused(recipientErrorText(null));
+
+  if (readString(formData, 'intent') !== 'apply') {
+    try {
+      const preview = direction === 'CUTOVER' ? await previewOpsAlertCutover() : await previewOpsAlertRevert();
+      return { kind: 'preview', preview, at: Date.now() };
+    } catch (error) {
+      return routingError(error);
+    }
+  }
+
+  const token = readString(formData, 'token');
+  if (token.length === 0 || token.length > TOKEN_MAX_LENGTH) return routingRefused('Önce önizleyin; onay önizlemenin sayılarına bağlıdır.');
+  if (!(await hasConfirmationProof(formData, direction === 'CUTOVER' ? CUTOVER : REVERT))) {
+    return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  }
+
+  try {
+    if (direction === 'CUTOVER') {
+      await applyOpsAlertCutover({ token });
+    } else {
+      const cancelUnmatched = readString(formData, 'cancelUnmatched') === 'true';
+      await applyOpsAlertRevert(cancelUnmatched ? { token, cancelUnmatched: true } : { token });
+    }
+  } catch (error) {
+    return routingError(error);
+  }
+  done(direction === 'CUTOVER' ? 'cutover' : 'reverted');
+}
+
+function rotationDone(message: string): RoutingOpState {
+  revalidatePath(PATH);
+  return { kind: 'done', message, at: Date.now() };
+}
+
+/** Re-encrypts every live recipient not on the active key; the answer is a count, never an address. */
+export async function rewrapRecipientsAction(_previous: RoutingOpState, formData: FormData): Promise<RoutingOpState> {
+  if (!(await hasConfirmationProof(formData, REWRAP))) return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  try {
+    const { rewrapped, failed } = await rewrapOpsAlertRecipients();
+    return rotationDone(
+      `${rewrapped} alıcının adresi etkin şifreleme anahtarına taşındı.` +
+        (failed > 0 ? ` ${failed} alıcı taşınamadı; anahtarları kontrol edip yeniden deneyin.` : ''),
+    );
+  } catch (error) {
+    return routingError(error);
+  }
+}
+
+/** Re-computes every live recipient's address digest with the current HMAC version (the same key operation proof). */
+export async function rehashRecipientsAction(_previous: RoutingOpState, formData: FormData): Promise<RoutingOpState> {
+  if (!(await hasConfirmationProof(formData, REWRAP))) return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  try {
+    const { rehashed, failed } = await rehashOpsAlertRecipients();
+    return rotationDone(
+      `${rehashed} alıcının adres özeti güncel sürümle yenilendi.` +
+        (failed > 0 ? ` ${failed} alıcı yenilenemedi; anahtarları kontrol edip yeniden deneyin.` : ''),
+    );
+  } catch (error) {
+    return routingError(error);
   }
 }
