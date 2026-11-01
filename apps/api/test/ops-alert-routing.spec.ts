@@ -124,6 +124,65 @@ describe('OpsAlertRoutingService', () => {
     return expect.unreachable('expected a refusal') as never;
   }
 
+  async function revert(cancelUnmatched = true) {
+    const preview = await routing().previewRevert();
+    expect(preview.blockers).toEqual([]);
+    await routing().applyRevert(actor, { token: preview.token, cancelUnmatched });
+    return preview;
+  }
+
+  /** Another row for the notice `of` carries: bound to `recipientId`, or legacy when null. */
+  function twin(
+    of: { alertId: string; kind: OpsAlertNoticeKind; sequence: number },
+    recipientId: string | null,
+    status: OpsAlertDeliveryStatus,
+    extra: Partial<Prisma.OpsAlertDeliveryUncheckedCreateInput> = {},
+  ) {
+    return ctx.prisma.opsAlertDelivery.create({
+      data: {
+        alertId: of.alertId,
+        kind: of.kind,
+        sequence: of.sequence,
+        channel: OpsAlertChannel.EMAIL,
+        recipientId,
+        status,
+        nextAttemptAt: new Date(),
+        ...(status === OpsAlertDeliveryStatus.SENT ? { sentAt: new Date() } : {}),
+        ...(status === OpsAlertDeliveryStatus.SENDING ? { claimToken: 'worker-0', claimedAt: new Date(), attemptCount: 1 } : {}),
+        ...extra,
+      },
+    });
+  }
+
+  /** A worker's claim on a row, as `claim()` leaves it: SENDING under a token, lease fresh. */
+  const inFlight = (id: string, token = 'worker-1') =>
+    ctx.prisma.opsAlertDelivery.update({
+      where: { id },
+      data: { status: 'SENDING', claimToken: token, claimedAt: new Date(), attemptCount: 1 },
+    });
+
+  /**
+   * The in-flight worker's outcome write, exactly as the worker writes it: only
+   * while its claim is still on the row. Returns whether it landed.
+   */
+  async function outcome(id: string, result: 'SENT' | 'FAILED', token = 'worker-1'): Promise<boolean> {
+    const data =
+      result === 'SENT'
+        ? { status: OpsAlertDeliveryStatus.SENT, sentAt: new Date(), errorCode: null, providerMessageId: 'in-flight' }
+        : { status: OpsAlertDeliveryStatus.FAILED, errorCode: 'TIMEOUT', nextAttemptAt: ago(MINUTE) };
+    const updated = await ctx.prisma.opsAlertDelivery.updateMany({
+      where: { id, claimToken: token, status: OpsAlertDeliveryStatus.SENDING },
+      data: { ...data, claimToken: null, claimedAt: null },
+    });
+    return updated.count === 1;
+  }
+
+  const makeDue = () =>
+    ctx.prisma.opsAlertDelivery.updateMany({
+      where: { status: { in: ['PENDING', 'FAILED'] } },
+      data: { nextAttemptAt: ago(MINUTE) },
+    });
+
   beforeAll(async () => {
     ctx = await createTestApp();
   });
@@ -239,7 +298,7 @@ describe('OpsAlertRoutingService', () => {
       });
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ recipientId: null, actorId: actor.id, before: { emailRouting: 'ENV_LEGACY' } });
-      expect(audit[0]!.after).toEqual({ emailRouting: 'MANAGED', counts: preview.counts, told: 0 });
+      expect(audit[0]!.after).toEqual({ emailRouting: 'MANAGED', counts: preview.counts, told: 0, inFlight: 0 });
 
       // The change log reads the switch: the mode on each side and the numbers, flattened.
       const page = await recipients().auditPage(null, {});
@@ -254,6 +313,7 @@ describe('OpsAlertRoutingService', () => {
         { field: 'counts.SENDING.rebind', from: null, to: 0 },
         { field: 'counts.SENDING.cancel', from: null, to: 0 },
         { field: 'told', from: null, to: 0 },
+        { field: 'inFlight', from: null, to: 0 },
       ]);
     });
 
@@ -624,7 +684,7 @@ describe('OpsAlertRoutingService', () => {
       });
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ recipientId: null, before: { emailRouting: 'MANAGED' } });
-      expect(audit[0]!.after).toEqual({ emailRouting: 'ENV_LEGACY', counts: preview.counts, told: 0 });
+      expect(audit[0]!.after).toEqual({ emailRouting: 'ENV_LEGACY', counts: preview.counts, told: 0, inFlight: 0 });
       const reverted = (await recipients().auditPage(null, {})).items.find((item) => item.action === 'ROUTING_REVERTED')!;
       expect(reverted.changes).toEqual(
         expect.arrayContaining([
@@ -761,6 +821,315 @@ describe('OpsAlertRoutingService', () => {
       const error = await errorOf(routing().applyRevert(actor, { token: stale.token, cancelUnmatched: true }));
       expect(error).toBeInstanceOf(RoutingCountsChangedError);
       expect(await mode()).toBe('MANAGED');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // Round trips, collisions and rows in flight
+  // -------------------------------------------------------------------------
+
+  describe('round trips', () => {
+    /** Every e-mail of one notice that reached the fake outbox. */
+    const mailsOf = (ids: string[]) => alertMails().filter((mail) => ids.some((id) => mail.idempotencyKey === opsAlertIdempotencyKey(id)));
+
+    it('cutover → revert → cutover with a collision loses nothing and sends once', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      const imported = await routing().importFromEnv(actor);
+      const managed = await twin(legacy!, imported.id, OpsAlertDeliveryStatus.PENDING);
+
+      // Both pending: the recipient's own row delivers, the legacy copy goes.
+      expect((await cutover()).counts).toEqual(counts({ PENDING: { rebind: 0, cancel: 1 } }));
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'LEGACY_AFTER_CUTOVER' }]);
+
+      // Going back now would cancel the only live copy: the revert waits.
+      const waiting = await routing().previewRevert();
+      expect(waiting.blockers).toEqual(['ROUTING_COLLISION_PENDING']);
+      expect(waiting.collisions).toBe(1);
+      const error = await errorOf(routing().applyRevert(actor, { token: waiting.token, cancelUnmatched: true }));
+      expect(error).toBeInstanceOf(RoutingBlockedError);
+      expect(error.code).toBe('ROUTING_COLLISION_PENDING');
+      expect(await mode()).toBe('MANAGED');
+      expect(await deliveries({ id: managed.id })).toMatchObject([{ recipientId: imported.id, status: 'PENDING' }]);
+
+      // The worker delivers it where it is; then the switch is free.
+      await worker().deliverDue();
+      expect(await deliveries({ id: managed.id })).toMatchObject([{ status: 'SENT' }]);
+      const back = await revert();
+      expect(back).toMatchObject({ counts: counts(), told: 0, inFlight: 0, collisions: 0 });
+      expect(await deliveries({ id: managed.id })).toMatchObject([{ recipientId: imported.id, status: 'SENT' }]);
+      expect((await cutover()).collisions).toBe(0);
+
+      await makeDue();
+      await worker().deliverDue();
+      expect(mailsOf([legacy!.id, managed.id]).map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it('revert → cutover with a collision loses nothing and sends once', async () => {
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [managed] = await deliveries({ channel: 'EMAIL' });
+      expect(managed).toMatchObject({ recipientId: imported.id, status: 'PENDING' });
+      const legacy = await twin(managed!, null, OpsAlertDeliveryStatus.PENDING);
+
+      // Both pending: the legacy row delivers in ENV_LEGACY, the managed copy goes.
+      expect((await revert()).counts).toEqual(counts({ PENDING: { rebind: 0, cancel: 1 } }));
+      expect(await deliveries({ id: managed!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' }]);
+
+      const waiting = await routing().previewCutover();
+      expect(waiting).toMatchObject({ blockers: ['ROUTING_COLLISION_PENDING'], collisions: 1 });
+      expect((await errorOf(routing().applyCutover(actor, { token: waiting.token }))).code).toBe('ROUTING_COLLISION_PENDING');
+      expect(await deliveries({ id: legacy.id })).toMatchObject([{ recipientId: null, status: 'PENDING' }]);
+
+      await worker().deliverDue();
+      expect(await deliveries({ id: legacy.id })).toMatchObject([{ recipientId: null, status: 'SENT' }]);
+      expect(await cutover()).toMatchObject({ counts: counts(), collisions: 0 });
+      await revert();
+
+      await makeDue();
+      await worker().deliverDue();
+      expect(mailsOf([legacy.id, managed!.id]).map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it.each([
+      ['SENT', 'cancels the legacy copy', null],
+      ['PENDING', 'cancels the legacy copy', null],
+      ['FAILED', 'cancels the legacy copy', null],
+      ['SENDING', 'waits', 'ROUTING_COLLISION_PENDING'],
+      ['CANCELLED', 'waits', 'ROUTING_COLLISION_PENDING'],
+      ['ABANDONED', 'waits', 'ROUTING_COLLISION_PENDING'],
+    ] as const)('cutover beside a %s managed row %s', async (partner, _what, blocker) => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      const imported = await routing().importFromEnv(actor);
+      const managed = await twin(legacy!, imported.id, partner);
+
+      const preview = await routing().previewCutover();
+      if (blocker) {
+        expect(preview).toMatchObject({ blockers: [blocker], collisions: 1, counts: counts() });
+        expect((await errorOf(routing().applyCutover(actor, { token: preview.token }))).code).toBe(blocker);
+        expect(await deliveries({ id: legacy!.id })).toMatchObject([{ recipientId: null, status: 'PENDING' }]);
+        return;
+      }
+      expect(preview).toMatchObject({ blockers: [], collisions: 0, counts: counts({ PENDING: { rebind: 0, cancel: 1 } }) });
+      await routing().applyCutover(actor, { token: preview.token });
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'LEGACY_AFTER_CUTOVER' }]);
+      expect(await deliveries({ id: managed.id })).toMatchObject([{ recipientId: imported.id, status: partner }]);
+    });
+
+    it.each([
+      ['SENT', 'cancels the managed copy', null],
+      ['PENDING', 'cancels the managed copy', null],
+      ['FAILED', 'cancels the managed copy', null],
+      ['SENDING', 'waits', 'ROUTING_COLLISION_PENDING'],
+      ['CANCELLED', 'waits', 'ROUTING_COLLISION_PENDING'],
+      ['ABANDONED', 'waits', 'ROUTING_COLLISION_PENDING'],
+    ] as const)('revert beside a %s legacy row %s', async (partner, _what, blocker) => {
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [managed] = await deliveries({ channel: 'EMAIL' });
+      const legacy = await twin(managed!, null, partner);
+
+      const preview = await routing().previewRevert();
+      if (blocker) {
+        expect(preview).toMatchObject({ blockers: [blocker], collisions: 1, counts: counts() });
+        expect((await errorOf(routing().applyRevert(actor, { token: preview.token, cancelUnmatched: true }))).code).toBe(blocker);
+        expect(await deliveries({ id: managed!.id })).toMatchObject([{ recipientId: imported.id, status: 'PENDING' }]);
+        return;
+      }
+      expect(preview).toMatchObject({ blockers: [], collisions: 0, counts: counts({ PENDING: { rebind: 0, cancel: 1 } }) });
+      await routing().applyRevert(actor, { token: preview.token, cancelUnmatched: true });
+      expect(await deliveries({ id: managed!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' }]);
+      expect(await deliveries({ id: legacy.id })).toMatchObject([{ recipientId: null, status: partner }]);
+    });
+
+    it('a SENT legacy row beside a pending managed row holds the cutover until the worker drops the duplicate', async () => {
+      await warningAlert();
+      await evaluator().evaluate();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      expect(legacy).toMatchObject({ recipientId: null, status: 'SENT' });
+      const imported = await routing().importFromEnv(actor);
+      const managed = await twin(legacy!, imported.id, OpsAlertDeliveryStatus.PENDING);
+      ctx.notifications.clear();
+
+      expect((await routing().previewCutover()).blockers).toEqual(['ROUTING_COLLISION_PENDING']);
+      // ENV_LEGACY: the env address's copy was sent, the bound duplicate is dropped.
+      await worker().deliverDue();
+      expect(await deliveries({ id: managed.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' }]);
+      await cutover();
+      await makeDue();
+      await worker().deliverDue();
+      expect(alertMails()).toEqual([]);
+    });
+
+    it('a SENT managed row beside a pending legacy row holds the revert until the worker drops the duplicate', async () => {
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluate();
+      const [managed] = await deliveries({ channel: 'EMAIL' });
+      expect(managed).toMatchObject({ recipientId: imported.id, status: 'SENT' });
+      const legacy = await twin(managed!, null, OpsAlertDeliveryStatus.FAILED);
+      ctx.notifications.clear();
+
+      expect((await routing().previewRevert()).blockers).toEqual(['ROUTING_COLLISION_PENDING']);
+      // MANAGED: the recipient's copy was sent, the legacy duplicate is dropped.
+      await worker().deliverDue();
+      expect(await deliveries({ id: legacy.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'LEGACY_AFTER_CUTOVER' }]);
+      await revert();
+      await makeDue();
+      await worker().deliverDue();
+      expect(alertMails()).toEqual([]);
+    });
+  });
+
+  describe('rows in flight', () => {
+    it('cutover rebinds an in-flight row the recipient does not want, keeping its claim; a send that lands is SENT and told', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      await inFlight(legacy!.id);
+      const imported = await routing().importFromEnv(actor);
+      await ctx.prisma.opsAlertRecipient.update({ where: { id: imported.id }, data: { notifyWarning: false } });
+
+      const preview = await routing().previewCutover();
+      expect(preview).toMatchObject({ counts: counts({ SENDING: { rebind: 1, cancel: 0 } }), inFlight: 0, blockers: [] });
+      await routing().applyCutover(actor, { token: preview.token });
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([
+        { recipientId: imported.id, status: 'SENDING', claimToken: 'worker-1' },
+      ]);
+
+      // The send that was in flight lands: recorded truthfully, and it tells the recipient.
+      expect(await outcome(legacy!.id, 'SENT')).toBe(true);
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ recipientId: imported.id, status: 'SENT' }]);
+      await run('request-expiry', 'SUCCESS', ago(MINUTE));
+      await evaluator().evaluate();
+      expect(await deliveries({ kind: OpsAlertNoticeKind.RESOLVED, channel: 'EMAIL' })).toMatchObject([
+        { recipientId: imported.id, status: 'SENT' },
+      ]);
+    });
+
+    it('a failed in-flight send the recipient does not want is cancelled PREFERENCE_OFF on the retry', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      await inFlight(legacy!.id);
+      const imported = await routing().importFromEnv(actor);
+      await ctx.prisma.opsAlertRecipient.update({ where: { id: imported.id }, data: { notifyWarning: false } });
+      await cutover();
+
+      expect(await outcome(legacy!.id, 'FAILED')).toBe(true);
+      await worker().deliverDue();
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([
+        { recipientId: imported.id, status: 'CANCELLED', errorCode: 'PREFERENCE_OFF' },
+      ]);
+      expect(alertMails()).toEqual([]);
+    });
+
+    it('cutover leaves an in-flight legacy row beside a SENT managed row to the worker', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      await inFlight(legacy!.id);
+      const imported = await routing().importFromEnv(actor);
+      await twin(legacy!, imported.id, OpsAlertDeliveryStatus.SENT);
+
+      const preview = await routing().previewCutover();
+      expect(preview).toMatchObject({ counts: counts(), inFlight: 1, collisions: 0, blockers: [] });
+      await routing().applyCutover(actor, { token: preview.token });
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([
+        { recipientId: null, status: 'SENDING', claimToken: 'worker-1' },
+      ]);
+
+      // It fails: the retry finds the recipient's own row and sends nothing.
+      expect(await outcome(legacy!.id, 'FAILED')).toBe(true);
+      await worker().deliverDue();
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'LEGACY_AFTER_CUTOVER' }]);
+      expect(alertMails()).toEqual([]);
+    });
+
+    it("revert leaves the match's in-flight row beside a SENT legacy row; a failed retry is cancelled, not sent again", async () => {
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [mine] = await deliveries({ channel: 'EMAIL' });
+      await inFlight(mine!.id);
+      await twin(mine!, null, OpsAlertDeliveryStatus.SENT);
+
+      const preview = await routing().previewRevert();
+      expect(preview).toMatchObject({ counts: counts(), inFlight: 1, collisions: 0, blockers: [] });
+      // The env address already has it: nothing of another recipient's is cancelled, no confirmation.
+      await routing().applyRevert(actor, { token: preview.token, cancelUnmatched: false });
+      expect(await deliveries({ id: mine!.id })).toMatchObject([
+        { recipientId: imported.id, status: 'SENDING', claimToken: 'worker-1' },
+      ]);
+
+      expect(await outcome(mine!.id, 'FAILED')).toBe(true);
+      await worker().deliverDue();
+      expect(await deliveries({ id: mine!.id })).toMatchObject([{ status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' }]);
+      expect(alertMails()).toEqual([]);
+    });
+
+    it('cutover waits for an in-flight legacy row beside a pending managed row', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      await inFlight(legacy!.id);
+      const imported = await routing().importFromEnv(actor);
+      await twin(legacy!, imported.id, OpsAlertDeliveryStatus.PENDING);
+
+      const preview = await routing().previewCutover();
+      expect(preview).toMatchObject({ blockers: ['ROUTING_COLLISION_PENDING'], collisions: 1 });
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([{ status: 'SENDING', claimToken: 'worker-1' }]);
+    });
+
+    it('revert leaves another recipient\'s in-flight row to the worker, which cancels a failed retry', async () => {
+      await routing().importFromEnv(actor);
+      const other = await add('other@example.test', WARN);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const theirs = (await deliveries({ recipientId: other.id }))[0]!;
+      await inFlight(theirs.id);
+
+      const preview = await routing().previewRevert();
+      expect(preview).toMatchObject({ counts: counts({ PENDING: { rebind: 1, cancel: 0 } }), inFlight: 1, blockers: [] });
+      // Its retry would be cancelled: that needs the operator's confirmation too.
+      expect((await errorOf(routing().applyRevert(actor, { token: preview.token, cancelUnmatched: false }))).code).toBe(
+        'CONFIRM_CANCEL_REQUIRED',
+      );
+      await routing().applyRevert(actor, { token: preview.token, cancelUnmatched: true });
+      expect(await deliveries({ id: theirs.id })).toMatchObject([
+        { recipientId: other.id, status: 'SENDING', claimToken: 'worker-1' },
+      ]);
+
+      expect(await outcome(theirs.id, 'FAILED')).toBe(true);
+      await worker().deliverDue();
+      expect(await deliveries({ id: theirs.id })).toMatchObject([
+        { recipientId: other.id, status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' },
+      ]);
+      expect(alertMails().map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it('revert: another recipient\'s in-flight send that lands stays SENT', async () => {
+      await routing().importFromEnv(actor);
+      const other = await add('other@example.test', WARN);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const theirs = (await deliveries({ recipientId: other.id }))[0]!;
+      await inFlight(theirs.id);
+      await revert();
+
+      expect(await outcome(theirs.id, 'SENT')).toBe(true);
+      expect(await deliveries({ id: theirs.id })).toMatchObject([{ recipientId: other.id, status: 'SENT' }]);
     });
   });
 });

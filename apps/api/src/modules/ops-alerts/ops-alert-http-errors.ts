@@ -45,6 +45,8 @@ const CONFLICT_MESSAGES: Record<string, string> = {
 const BLOCKER_MESSAGES: Record<RoutingBlocker, string> = {
   NO_LIVE_CRITICAL_CHANNEL: 'Geçişten sonra kritik alarmlar için etkin bir kanal kalmıyor.',
   LEGACY_ROWS_UNMATCHED: 'Bekleyen eski teslimatların eşleşen etkin bir alıcısı yok.',
+  ROUTING_COLLISION_PENDING:
+    'Aynı bildirimin iki teslimat satırı henüz sonuçlanmadı; worker bunları gönderene ya da düşürene kadar bekleyip yeniden önizleyin.',
   ALREADY_IN_MODE: 'E-posta yönlendirmesi zaten bu modda.',
 };
 

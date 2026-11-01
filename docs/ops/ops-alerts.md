@@ -103,6 +103,27 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
   ACTIVE alıcıya ayrı bir teslimat satırı olarak gider. Geçiş ve geri dönüş
   yalnız SUPER_ADMIN'in (`OPS_ALERT_ROUTING_MANAGE`), önizleme + sayıya bağlı
   onayla yaptığı işlemlerdir. Telegram iki modda da değişmez.
+- **Geçiş önizlemesi:** `counts` durum bazında yeniden bağlanacak / iptal
+  edilecek satırlardır; `told` "bilgilendirildi" bilgisi taşınan SENT
+  satırlardır. Geçiş **gönderimi süren (`SENDING`) bir satırı asla iptal
+  etmez ve claim'ini silmez**: ya claim korunarak bağlanır (`counts.SENDING.rebind`;
+  örn. alıcının tercihi kapalı olsa da — sonuç SENT/FAILED doğru yazılır,
+  retry worker'ın `PREFERENCE_OFF` iptalidir) ya da hiç dokunulmadan worker'a
+  bırakılır (`inFlight`; geri dönüşte başka alıcının satırı da buradadır ve
+  iptal onayı ister — retry'ı ENV_LEGACY'de worker `ROUTING_REVERTED` ile iptal
+  eder). Aynı bildirim için env adresinin hem eski (legacy) hem eşleşen
+  alıcıya bağlı satırı varsa (aynı posta kutusu) karşı satırın durumu
+  belirler: karşı satır bekliyor/SENT ise taşınan bekleyen kopya iptal edilir;
+  karşı satır ölü (CANCELLED/ABANDONED) ya da gönderimdeyse, veya taşınan
+  satır SENT iken karşısı hâlâ bekliyorsa geçiş **409
+  `ROUTING_COLLISION_PENDING`** ile bekler (`collisions` sayısı). Bu kendiliğinden
+  çözülür: worker mevcut modda tek canlı kopyayı gönderir ya da gönderilmiş
+  olanın kopyasını düşürür; sonra yeniden önizleyin. Önizleme token'ı
+  `counts`, `told`, `inFlight` ve `collisions`'ı kapsar.
+- **ENV_LEGACY'de alıcıya bağlı satır:** worker onu `ROUTING_REVERTED` ile
+  iptal eder (bu modda e-posta yalnız `OPS_ALERT_EMAIL`'e gider). Tek istisna,
+  env adresinin kendi alıcısına bağlı ve o bildirim için canlı legacy satırı
+  olmayan satırdır — o posta kutusunun tek kopyasıdır ve o alıcıya gider.
 - **Alıcı:** etiket, maskeli adres ve üç tercih (Uyarı / Kritik / Düzelme).
   API üç tercihi de açıkça ister; "Kritik + Düzelme" ön seçimi admin
   ekranının (PR-B) varsayılanıdır, API'nin değil. En fazla 10 canlı alıcı. Adres değiştirilemez;

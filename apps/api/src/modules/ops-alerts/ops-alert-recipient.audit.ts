@@ -53,9 +53,10 @@ export type RecipientReplacementLink = { replaces: string } | { replacedBy: stri
 
 /**
  * ROUTING_CUTOVER / ROUTING_REVERTED rows (no recipient) store
- * `{ emailRouting }` before and `{ emailRouting, counts, told }` after. They
- * are read back as the mode on each side and the numbers, flattened to
- * `counts.<STATUS>.<rebind|cancel>` and `told` — numbers only.
+ * `{ emailRouting }` before and `{ emailRouting, counts, told, inFlight }`
+ * after. They are read back as the mode on each side and the numbers,
+ * flattened to `counts.<STATUS>.<rebind|cancel>`, `told` and `inFlight` —
+ * numbers only.
  */
 const ROUTING_ACTIONS: readonly OpsAlertRecipientAuditAction[] = [
   OpsAlertRecipientAuditAction.ROUTING_CUTOVER,
@@ -202,6 +203,7 @@ function routingChanges(before: Record<string, Prisma.JsonValue>, after: Record<
     }
   }
   changes.push({ field: 'told', from: null, to: asNumber(after.told) });
+  changes.push({ field: 'inFlight', from: null, to: asNumber(after.inFlight) });
   return changes;
 }
 
