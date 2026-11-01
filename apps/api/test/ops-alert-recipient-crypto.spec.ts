@@ -52,6 +52,23 @@ function config(overrides: Record<string, string | undefined> = {}): RecipientCr
   return resolveRecipientCryptoConfig(stagingEnv(overrides));
 }
 
+/**
+ * The error `work` throws. Outside any try/catch, so a call that does not
+ * throw fails the test here instead of being swallowed with the assertions
+ * that were meant for the error.
+ */
+function thrownBy(work: () => unknown): Error {
+  let thrown: unknown = null;
+  try {
+    work();
+  } catch (error) {
+    thrown = error;
+  }
+  if (thrown === null) expect.unreachable('expected a refusal');
+  expect(thrown).toBeInstanceOf(Error);
+  return thrown as Error;
+}
+
 describe('recipient address encryption', () => {
   it('round-trips an address under the active key', () => {
     const c = config();
@@ -113,13 +130,10 @@ describe('recipient address encryption', () => {
   it('a decrypt failure message carries no value', () => {
     const c = config();
     const sealed = encryptAddress(c, 'recipient-1', 'ops@example.test');
-    try {
-      decryptAddress(c, 'recipient-9', sealed);
-      expect.unreachable();
-    } catch (error) {
-      expect((error as Error).message).not.toContain('ops@example.test');
-      expect((error as Error).message).not.toContain('recipient-9');
-    }
+    const error = thrownBy(() => decryptAddress(c, 'recipient-9', sealed));
+    expect(error).toBeInstanceOf(RecipientDecryptError);
+    expect(error.message).not.toContain('ops@example.test');
+    expect(error.message).not.toContain('recipient-9');
   });
 });
 
@@ -164,12 +178,9 @@ describe('normalizeAddress', () => {
     const long = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`;
     expect(long).toHaveLength(254);
     expect(normalizeAddress(long)).toBe(long);
-    try {
-      normalizeAddress('Ad <secret-value@x.com>');
-      expect.unreachable('a display-name form must be refused');
-    } catch (error) {
-      expect((error as Error).message).not.toContain('secret-value');
-    }
+    const error = thrownBy(() => normalizeAddress('Ad <secret-value@x.com>'));
+    expect(error).toBeInstanceOf(InvalidRecipientAddressError);
+    expect(error.message).not.toContain('secret-value');
   });
 });
 
@@ -182,13 +193,9 @@ describe('recipient crypto configuration', () => {
     expect(() => resolveRecipientCryptoConfig(noHmac)).toThrow(/OPS_ALERT_RECIPIENT_HMAC_KEY is required/);
 
     const short = stagingEnv({ OPS_ALERT_RECIPIENT_HMAC_KEY: 's'.repeat(31) });
-    try {
-      resolveRecipientCryptoConfig(short);
-      expect.unreachable();
-    } catch (error) {
-      expect((error as Error).message).toMatch(/at least 32 characters/);
-      expect((error as Error).message).not.toContain('s'.repeat(31));
-    }
+    const error = thrownBy(() => resolveRecipientCryptoConfig(short));
+    expect(error.message).toMatch(/at least 32 characters/);
+    expect(error.message).not.toContain('s'.repeat(31));
   });
 
   it('an undeclared environment is as strict as staging', () => {
@@ -255,12 +262,9 @@ describe('recipient crypto configuration', () => {
 
   it('a keyring refusal never prints a key', () => {
     const short = Buffer.alloc(31, 1).toString('base64');
-    try {
-      config({ OPS_ALERT_RECIPIENT_ENC_KEYS: `v1:${short}`, OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v1' });
-      expect.unreachable();
-    } catch (error) {
-      expect((error as Error).message).not.toContain(short);
-    }
+    const error = thrownBy(() => config({ OPS_ALERT_RECIPIENT_ENC_KEYS: `v1:${short}`, OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v1' }));
+    expect(error).toBeInstanceOf(OpsAlertRecipientCryptoConfigError);
+    expect(error.message).not.toContain(short);
   });
 
   it('the hmac key version is a whole number from 1 to 1000', () => {
