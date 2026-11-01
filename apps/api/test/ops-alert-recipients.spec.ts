@@ -337,7 +337,9 @@ describe('OpsAlertRecipientsService', () => {
       ['MANAGED, 0 left, production, telegram, confirmed', { environment: 'production', telegramConfigured: true, confirmed: true }, 'ALLOW'],
       ['MANAGED, 0 left, staging, no telegram, unconfirmed', { environment: 'staging' }, 'CONFIRM_REQUIRED'],
       ['MANAGED, 0 left, staging, no telegram, confirmed', { environment: 'staging', confirmed: true }, 'ALLOW'],
-      ['MANAGED, 0 left, undeclared environment, unconfirmed', { environment: null }, 'CONFIRM_REQUIRED'],
+      ['MANAGED, 0 left, undeclared environment, no telegram, unconfirmed', { environment: null }, 'BLOCKED'],
+      ['MANAGED, 0 left, undeclared environment, no telegram, confirmed', { environment: null, confirmed: true }, 'BLOCKED'],
+      ['MANAGED, 0 left, undeclared environment, telegram, unconfirmed', { environment: null, telegramConfigured: true }, 'CONFIRM_REQUIRED'],
       ['ENV_LEGACY, 0 left, production, no telegram, unconfirmed', { routing: OpsAlertEmailRouting.ENV_LEGACY, environment: 'production' }, 'CONFIRM_REQUIRED'],
       ['ENV_LEGACY, 0 left, production, no telegram, confirmed', { routing: OpsAlertEmailRouting.ENV_LEGACY, environment: 'production', confirmed: true }, 'ALLOW'],
     ])('decides: %s', (_name, patch, expected) => {
