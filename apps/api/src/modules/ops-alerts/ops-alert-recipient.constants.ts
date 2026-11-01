@@ -9,3 +9,6 @@ export const OPS_ALERT_RECIPIENT_LIMIT = 10;
  * evaluator's lock).
  */
 export const OPS_ALERT_RECIPIENT_LOCK_KEY = 0x0b5a1e02;
+
+/** The one OpsAlertRoutingSettings row (its migration creates it; a CHECK pins the id). */
+export const OPS_ALERT_ROUTING_ID = 'ops-alert-routing';

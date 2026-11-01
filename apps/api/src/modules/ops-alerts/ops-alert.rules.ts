@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { OpsAlertChannel, OpsAlertNoticeKind, OpsAlertSeverity, OpsAlertSource } from '@prisma/client';
+import { OpsAlertChannel, OpsAlertEmailRouting, OpsAlertNoticeKind, OpsAlertSeverity, OpsAlertSource } from '@prisma/client';
 import { formatDateTime } from '../notifications/templates/format';
 import {
   NOTIFICATION_ERROR_CODES,
@@ -30,6 +30,8 @@ import type { OpsAlertConfig } from './ops-alert.config';
  *
  * Each notice becomes one delivery per channel it is routed to, and each
  * delivery retries on its own; a channel that is down never holds the other.
+ * With managed recipients (OBS-ALERT-002, routing MANAGED) e-mail is one
+ * delivery per recipient, bound to it for good ({@link noticeTargets}).
  */
 
 // ---------------------------------------------------------------------------
@@ -296,6 +298,78 @@ export function noticeChannels(
   if (config.telegram && severity === OpsAlertSeverity.CRITICAL) channels.push(OpsAlertChannel.TELEGRAM);
   if (config.email) channels.push(OpsAlertChannel.EMAIL);
   return channels;
+}
+
+/**
+ * OBS-ALERT-002 — one delivery row a notice becomes. An e-mail target names
+ * the managed recipient it is bound to for good, or `null` for the
+ * OPS_ALERT_EMAIL address (ENV_LEGACY).
+ */
+export type NoticeTarget = { channel: 'TELEGRAM' } | { channel: 'EMAIL'; recipientId: string | null };
+
+/** A managed recipient as routing reads it: who, and what they asked for. */
+export type NoticeRecipient = { id: string; notifyWarning: boolean; notifyCritical: boolean; notifyRecovery: boolean };
+
+/**
+ * Whether a recipient's preferences take a notice of this kind and severity:
+ * OPENED/REMINDER by the severity, RESOLVED by recovery. Whether the recipient
+ * was told about the alert at all is a separate question ({@link noticeTargets}).
+ */
+export function recipientWants(
+  kind: OpsAlertNoticeKind,
+  severity: OpsAlertSeverity,
+  recipient: Omit<NoticeRecipient, 'id'>,
+): boolean {
+  if (kind === OpsAlertNoticeKind.RESOLVED) return recipient.notifyRecovery;
+  return severity === OpsAlertSeverity.CRITICAL ? recipient.notifyCritical : recipient.notifyWarning;
+}
+
+/**
+ * Where a notice goes, by the e-mail routing mode.
+ *
+ *   ENV_LEGACY   exactly {@link noticeChannels} — the OBS-ALERT-001 rule has
+ *                one home, and managed recipients are not consulted at all
+ *   MANAGED      Telegram as in OBS-ALERT-001; e-mail one row per ACTIVE
+ *                recipient (the caller passes only those) whose preference
+ *                takes the severity — and for RESOLVED, only a recipient that
+ *                was told about the alert and still wants recovery notices.
+ *                The env address is never a target in this mode.
+ *
+ * `told` is what the alert's SENT/SENDING rows say: Telegram, the legacy
+ * address, and the managed recipients by id.
+ */
+export function noticeTargets(
+  kind: OpsAlertNoticeKind,
+  severity: OpsAlertSeverity,
+  ctx: {
+    routing: OpsAlertEmailRouting;
+    config: Pick<OpsAlertConfig, 'email' | 'telegram'>;
+    recipients: ReadonlyArray<NoticeRecipient>;
+    told: { telegram: boolean; legacyEmail: boolean; recipientIds: ReadonlySet<string> };
+  },
+): NoticeTarget[] {
+  if (ctx.routing !== OpsAlertEmailRouting.MANAGED) {
+    const toldChannels = new Set<OpsAlertChannel>();
+    if (ctx.told.telegram) toldChannels.add(OpsAlertChannel.TELEGRAM);
+    if (ctx.told.legacyEmail) toldChannels.add(OpsAlertChannel.EMAIL);
+    return noticeChannels(kind, severity, ctx.config, toldChannels).map((channel) =>
+      channel === OpsAlertChannel.TELEGRAM ? { channel: 'TELEGRAM' as const } : { channel: 'EMAIL' as const, recipientId: null },
+    );
+  }
+
+  const targets: NoticeTarget[] = [];
+  // Telegram is not managed: its rule is noticeChannels' with no e-mail.
+  const telegramOnly = { email: null, telegram: ctx.config.telegram };
+  const toldTelegram = new Set<OpsAlertChannel>(ctx.told.telegram ? [OpsAlertChannel.TELEGRAM] : []);
+  if (noticeChannels(kind, severity, telegramOnly, toldTelegram).includes(OpsAlertChannel.TELEGRAM)) {
+    targets.push({ channel: 'TELEGRAM' });
+  }
+  for (const recipient of ctx.recipients) {
+    if (kind === OpsAlertNoticeKind.RESOLVED && !ctx.told.recipientIds.has(recipient.id)) continue;
+    if (!recipientWants(kind, severity, recipient)) continue;
+    targets.push({ channel: 'EMAIL', recipientId: recipient.id });
+  }
+  return targets;
 }
 
 // ---------------------------------------------------------------------------

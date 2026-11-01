@@ -5,7 +5,7 @@ import type { AdminAuditPage, AuditPageQueryDto } from '../../common/admin-audit
 import type { AuthUser } from '../auth/auth.types';
 import { maskEmail } from '../notifications/mask';
 import { PrismaService } from '../../prisma/prisma.service';
-import { OPS_ALERT_RECIPIENT_LIMIT, OPS_ALERT_RECIPIENT_LOCK_KEY } from './ops-alert-recipient.constants';
+import { OPS_ALERT_RECIPIENT_LIMIT, OPS_ALERT_RECIPIENT_LOCK_KEY, OPS_ALERT_ROUTING_ID } from './ops-alert-recipient.constants';
 import {
   RecipientAuditSnapshot,
   changedRecipientFields,
@@ -425,7 +425,7 @@ export class OpsAlertRecipientsService {
       where: { status: OpsAlertRecipientStatus.ACTIVE, notifyCritical: true, id: { not: removedId } },
     });
     const settings = await tx.opsAlertRoutingSettings.findUnique({
-      where: { id: 'ops-alert-routing' },
+      where: { id: OPS_ALERT_ROUTING_ID },
       select: { emailRouting: true },
     });
     const decision = decideRecipientRemoval({
