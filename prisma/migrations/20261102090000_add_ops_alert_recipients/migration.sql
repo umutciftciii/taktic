@@ -18,7 +18,7 @@
 -- so there is no moment without uniqueness. Prisma cannot express partial
 -- indexes, so they exist only here and in the database.
 --
--- Rollback: scripts/ops/obs-alert-002-rollback.sql (to be added with the
+-- Rollback: scripts/ops/obs-alert-002-rollback.md (to be added with the
 -- rollback tooling); until then it is dropping the three tables, three enums
 -- and two columns, and recreating the old unique index. The AdminPermission
 -- values stay, as PostgreSQL cannot drop an enum value.
