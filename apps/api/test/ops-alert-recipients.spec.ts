@@ -1101,7 +1101,7 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     await service.remove(root, gone.id, { version: gone.version, reason: 'Ayrıldı' });
     await openAlertWithDelivery(r.id);
     await openAlertWithDelivery(null, OpsAlertChannel.TELEGRAM);
-    const response = await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ])).expect(200);
+    const response = await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ, P.OPS_ALERT_RECIPIENTS_READ])).expect(200);
     const block = response.body.alerts;
     expect(block.channels).toEqual({ email: true, telegram: false, emailRouting: 'ENV_LEGACY', managedRecipients: 2 });
     const deliveries = block.open.flatMap((alert: { deliveries: unknown[] }) => alert.deliveries);
@@ -1120,5 +1120,29 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     expect(text.toLowerCase()).not.toContain('health.person@example.test');
     expect(text).not.toContain(r.maskedAddress);
     expect(text).not.toContain(ENV_ADDRESS);
+  });
+
+  it('system health report hides recipient id, label and count without OPS_ALERT_RECIPIENTS_READ', async () => {
+    const r = await seed('Hidden.Person@example.test', 'Gizli Nöbetçi');
+    await seed('second@example.test', 'İkinci');
+    await openAlertWithDelivery(r.id);
+    // The report is cached for a short window per key: a wide report cached
+    // just before (the test above, or this one's last call) must never answer
+    // the narrow caller, and the narrow one must never answer a wide caller.
+    await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ, P.OPS_ALERT_RECIPIENTS_READ])).expect(200);
+
+    const narrow = await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ])).expect(200);
+    const block = narrow.body.alerts;
+    expect(block.channels).toEqual({ email: true, telegram: false, emailRouting: 'ENV_LEGACY', managedRecipients: null });
+    const deliveries = block.open.flatMap((alert: { deliveries: unknown[] }) => alert.deliveries);
+    expect(deliveries).toEqual([expect.objectContaining({ channel: 'EMAIL', recipientId: null, recipientLabel: null })]);
+    const text = JSON.stringify(narrow.body);
+    expect(text).not.toContain(r.id);
+    expect(text).not.toContain('Gizli Nöbetçi');
+
+    const wide = await call('get', '/system-health', await adminCookie([P.OPERATIONS_SETTINGS_READ, P.OPS_ALERT_RECIPIENTS_READ])).expect(200);
+    expect(typeof wide.body.alerts.channels.managedRecipients).toBe('number');
+    const wideDeliveries = wide.body.alerts.open.flatMap((alert: { deliveries: Array<{ channel: string; recipientLabel: string | null }> }) => alert.deliveries);
+    expect(wideDeliveries.some((d: { channel: string; recipientLabel: string | null }) => d.channel === 'EMAIL' && d.recipientLabel)).toBe(true);
   });
 });
