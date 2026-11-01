@@ -28,7 +28,8 @@ export type AdminAuditDomain =
   | 'CREDIT_PACKAGE'
   | 'SHOWCASE_PACKAGE'
   | 'SEO_REDIRECT'
-  | 'SEO_NOT_FOUND_PATH';
+  | 'SEO_NOT_FOUND_PATH'
+  | 'OPS_ALERT_RECIPIENT';
 
 /** A reference to another record, with the name it had when the row was written. */
 export type AuditRef = { id: string; name: string | null };

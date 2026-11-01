@@ -3,6 +3,7 @@ import { PrismaModule } from '../../prisma/prisma.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { SystemHealthModule } from '../system-health/system-health.module';
 import { OpsAlertDeliveryWorker } from './ops-alert-delivery.worker';
+import { OpsAlertRecipientsService } from './ops-alert-recipients.service';
 import { OpsAlertEvaluator } from './ops-alert-evaluator.service';
 import { TelegramAlertPort, TelegramBotApiAdapter } from './telegram-alert.port';
 
@@ -17,8 +18,9 @@ import { TelegramAlertPort, TelegramBotApiAdapter } from './telegram-alert.port'
   providers: [
     OpsAlertEvaluator,
     OpsAlertDeliveryWorker,
+    OpsAlertRecipientsService,
     { provide: TelegramAlertPort, useFactory: () => new TelegramBotApiAdapter() },
   ],
-  exports: [OpsAlertEvaluator, OpsAlertDeliveryWorker, TelegramAlertPort],
+  exports: [OpsAlertEvaluator, OpsAlertDeliveryWorker, OpsAlertRecipientsService, TelegramAlertPort],
 })
 export class OpsAlertsModule {}
