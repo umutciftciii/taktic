@@ -275,6 +275,7 @@ describe('OpsAlertRoutingService', () => {
 
       const preview = await routing().previewCutover();
       expect(preview.counts).toEqual(counts({ SENDING: { rebind: 1, cancel: 0 } }));
+      expect(preview.told).toBe(1);
       await routing().applyCutover(actor, { token: preview.token });
 
       expect(await deliveries({ id: legacy!.id })).toMatchObject([
@@ -304,6 +305,28 @@ describe('OpsAlertRoutingService', () => {
       expect(resolved.some((row) => row.recipientId === other.id)).toBe(false);
       const recovery = alertMails().filter((mail) => mail.data!.noticeKind === 'RESOLVED');
       expect(recovery.map((mail) => mail.to)).toEqual([OPS_EMAIL]);
+    });
+
+    it('cutover leaves the sent history of a resolved alert unbound', async () => {
+      await warningAlert();
+      await evaluator().evaluate();
+      await run('request-expiry', 'SUCCESS', ago(MINUTE));
+      await evaluator().evaluate();
+      const history = await deliveries({ channel: 'EMAIL' });
+      expect(history.map((row) => [row.kind, row.status, row.recipientId])).toEqual([
+        ['OPENED', 'SENT', null],
+        ['RESOLVED', 'SENT', null],
+      ]);
+      expect((await ctx.prisma.opsAlert.findFirstOrThrow()).state).toBe('RESOLVED');
+      await routing().importFromEnv(actor);
+
+      const preview = await routing().previewCutover();
+      expect(preview).toMatchObject({ counts: counts(), told: 0, blockers: [] });
+      await routing().applyCutover(actor, { token: preview.token });
+
+      expect((await deliveries({ channel: 'EMAIL' })).map((row) => [row.id, row.status, row.recipientId])).toEqual(
+        history.map((row) => [row.id, 'SENT', null]),
+      );
     });
 
     it('cutover cancels a legacy row whose notice the recipient already has, instead of colliding', async () => {

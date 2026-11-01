@@ -28,10 +28,13 @@ import { resolveRecipientCryptoConfig } from './recipient-crypto.config';
  * HMAC is the env address's is that same mailbox, so only that recipient may
  * take legacy rows over, and only its rows may go back to being legacy.
  *
- *   cutover   legacy e-mail rows PENDING/FAILED/SENDING/SENT get the matching
- *             ACTIVE recipient's id — only the link column changes (a SENDING
- *             row keeps its claim); SENT rows carry "told", so that recipient
- *             gets the RESOLVED. When the recipient already has its own row
+ *   cutover   legacy e-mail rows get the matching ACTIVE recipient's id —
+ *             only the link column changes (a SENDING row keeps its claim):
+ *             PENDING/FAILED on any alert, SENDING/SENT only on OPEN alerts,
+ *             where they carry "told" so that recipient gets the RESOLVED.
+ *             Resolved alerts' sent history stays untouched (a SENDING row
+ *             there is left to the worker, which binds it on a retry). When
+ *             the recipient already has its own row
  *             for that notice, the legacy row is cancelled instead
  *             (LEGACY_AFTER_CUTOVER; a SENT one is left as it is). Pending
  *             legacy rows with no matching ACTIVE recipient block the cutover.
@@ -77,7 +80,7 @@ export type RoutingCounts = Record<PendingStatus, { rebind: number; cancel: numb
 export type RoutingPreview = {
   direction: RoutingDirection;
   counts: RoutingCounts;
-  /** SENT rows whose "told" moves with the switch. */
+  /** SENT/SENDING rows whose "told" moves with the switch (cutover: OPEN alerts only). */
   told: number;
   blockers: RoutingBlocker[];
   token: string;
@@ -132,7 +135,7 @@ export class RoutingBlockedError extends Error {
 }
 
 type Client = Prisma.TransactionClient;
-type PlanRow = { id: string; status: OpsAlertDeliveryStatus; matched: boolean; collides: boolean };
+type PlanRow = { id: string; status: OpsAlertDeliveryStatus; matched: boolean; collides: boolean; open: boolean };
 
 /** What one switch would do, row by row, and the numbers the operator approves. */
 type Plan = {
@@ -303,13 +306,14 @@ export class OpsAlertRoutingService {
     const matchId = await this.matchingRecipient(client, true);
     // `collides`: the recipient already has its own row for this notice.
     const rows = await client.$queryRaw<PlanRow[]>`
-      SELECT d."id", d."status", FALSE AS "matched",
+      SELECT d."id", d."status", FALSE AS "matched", (a."state" = 'OPEN') AS "open",
         EXISTS (
           SELECT 1 FROM "OpsAlertDelivery" m
           WHERE m."alertId" = d."alertId" AND m."kind" = d."kind" AND m."sequence" = d."sequence"
             AND m."recipientId" = ${matchId}
         ) AS "collides"
       FROM "OpsAlertDelivery" d
+      JOIN "OpsAlert" a ON a."id" = d."alertId"
       WHERE d."channel" = 'EMAIL' AND d."recipientId" IS NULL
         AND d."status" IN ('PENDING', 'FAILED', 'SENDING', 'SENT')
       ORDER BY d."id"
@@ -328,6 +332,13 @@ export class OpsAlertRoutingService {
     let unmatchedPending = 0;
     for (const row of rows) {
       const pending = isPending(row.status);
+      const carriesTold = row.status === OpsAlertDeliveryStatus.SENT || row.status === OpsAlertDeliveryStatus.SENDING;
+      if (carriesTold && !row.open) {
+        // A resolved alert's history is not rewritten. An unmatched SENDING row
+        // there would still be cancelled by the worker on a retry, so it blocks.
+        if (matchId === null && pending) unmatchedPending += 1;
+        continue;
+      }
       if (matchId === null) {
         // Shown as what would be lost; the blocker below keeps it from happening.
         if (pending) {
@@ -343,7 +354,7 @@ export class OpsAlertRoutingService {
       } else {
         plan.rebindIds.push(row.id);
         if (pending) plan.counts[row.status as PendingStatus].rebind += 1;
-        else plan.told += 1;
+        if (carriesTold) plan.told += 1;
       }
     }
 
