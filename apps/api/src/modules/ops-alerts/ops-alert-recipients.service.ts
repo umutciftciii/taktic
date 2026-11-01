@@ -691,6 +691,11 @@ export class OpsAlertRecipientsService {
     });
     if (result.count !== 1) throw new VersionConflictError();
     // SENDING rows are the worker's: it re-checks the recipient at send time.
+    // This takes row locks on the recipient's pending deliveries while the
+    // evaluator's resolve() may be cancelling some of the same rows under its
+    // own lock: a rare 40P01 deadlock is possible. PostgreSQL aborts one side
+    // — this delete (the transaction rolls back whole, the admin retries) or
+    // the evaluator's tick (FAILED; the next tick re-evaluates).
     await tx.opsAlertDelivery.updateMany({
       where: {
         recipientId: before.id,

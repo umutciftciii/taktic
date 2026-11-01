@@ -482,6 +482,12 @@ export class OpsAlertEvaluator {
     open.delete(alert.fingerprint);
     if (closed.count === 0) return;
 
+    // Row locks: this update and a recipient delete's (shred, which holds only
+    // the recipient lock, not ours) can touch the same delivery rows in
+    // different orders. That is a rare 40P01 deadlock, not a hang: PostgreSQL
+    // aborts one side. If it is this tick, the whole evaluation rolls back
+    // (FAILED) and the next tick re-evaluates from scratch; if it is the
+    // delete, the admin gets an error and nothing was changed.
     await tx.opsAlertDelivery.updateMany({
       where: {
         alertId: alert.id,
