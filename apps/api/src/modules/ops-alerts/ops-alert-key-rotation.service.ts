@@ -1,10 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { OpsAlertRecipientStatus, Prisma } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OPS_ALERT_RECIPIENT_LOCK_KEY } from './ops-alert-recipient.constants';
 import { recordRotationAudit } from './ops-alert-recipient.audit';
-import { addressHmac, decryptAddress, encryptAddress, normalizeAddress } from './recipient-crypto';
+import { RecipientDecryptError, addressHmac, decryptAddress, encryptAddress, normalizeAddress } from './recipient-crypto';
 import { resolveRecipientCryptoConfig } from './recipient-crypto.config';
 
 /**
@@ -29,6 +29,25 @@ export type RehashResult = { rehashed: number; failed: number };
 
 const LIVE: OpsAlertRecipientStatus[] = [OpsAlertRecipientStatus.ACTIVE, OpsAlertRecipientStatus.PAUSED];
 
+/** Thrown by rehashOne when the new HMAC equals another live row's. */
+class HmacCollisionError extends Error {
+  constructor() {
+    super('hmac collision');
+  }
+}
+
+/**
+ * The coarse reason a row failed, for the log line. Never the error message:
+ * a driver error can quote row values.
+ */
+export type RotationFailureReason = 'no-key' | 'collision' | 'other';
+
+function failureReason(error: unknown): RotationFailureReason {
+  if (error instanceof RecipientDecryptError) return 'no-key';
+  if (error instanceof HmacCollisionError) return 'collision';
+  return 'other';
+}
+
 function isUniqueViolation(error: unknown): boolean {
   if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
   const meta = error.meta as { code?: unknown } | undefined;
@@ -37,7 +56,14 @@ function isUniqueViolation(error: unknown): boolean {
 
 @Injectable()
 export class OpsAlertKeyRotationService {
+  private readonly logger = new Logger(OpsAlertKeyRotationService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /** One line per failed row: the recipient id and a coarse reason — never an address, a key or an error message. */
+  private logFailure(operation: 'rewrap' | 'rehash', id: string, error: unknown): void {
+    this.logger.warn(`ops-alert recipient ${operation} failed: recipient=${id} reason=${failureReason(error)}`);
+  }
 
   async rewrap(actor: AuthUser): Promise<RewrapResult> {
     const config = resolveRecipientCryptoConfig();
@@ -50,7 +76,8 @@ export class OpsAlertKeyRotationService {
     for (const { id } of ids) {
       try {
         if (await this.rewrapOne(actor, id)) result.rewrapped += 1;
-      } catch {
+      } catch (error) {
+        this.logFailure('rewrap', id, error);
         result.failed += 1;
       }
     }
@@ -68,7 +95,8 @@ export class OpsAlertKeyRotationService {
     for (const { id } of ids) {
       try {
         if (await this.rehashOne(actor, id)) result.rehashed += 1;
-      } catch {
+      } catch (error) {
+        this.logFailure('rehash', id, error);
         result.failed += 1;
       }
     }
@@ -185,7 +213,7 @@ export class OpsAlertKeyRotationService {
       });
     } catch (error) {
       // Two live rows of one address now hash equal: that row stays on the old hash.
-      if (isUniqueViolation(error)) throw new Error('hmac collision');
+      if (isUniqueViolation(error)) throw new HmacCollisionError();
       throw error;
     }
   }

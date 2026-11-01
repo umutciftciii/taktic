@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { OpsAlertEmailRouting, OpsAlertRecipientStatus, UserRole } from '@prisma/client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AuthUser } from '../src/modules/auth/auth.types';
@@ -132,7 +133,7 @@ describe('recipient keyed identity', () => {
     expect(a.version).toBe(1);
   });
 
-  it('hmac changes with key and version', () => {
+  it('hmac changes with the key; the version is recorded, not hashed', () => {
     const base = addressHmac(config(), 'ops@example.test');
     const otherKey = addressHmac(config({ OPS_ALERT_RECIPIENT_HMAC_KEY: OTHER_HMAC_KEY }), 'ops@example.test');
     expect(otherKey.hmac).not.toBe(base.hmac);
@@ -165,6 +166,7 @@ describe('normalizeAddress', () => {
     expect(normalizeAddress(long)).toBe(long);
     try {
       normalizeAddress('Ad <secret-value@x.com>');
+      expect.unreachable('a display-name form must be refused');
     } catch (error) {
       expect((error as Error).message).not.toContain('secret-value');
     }
@@ -352,8 +354,15 @@ describe('OpsAlertKeyRotationService', () => {
     const stuckBefore = await row(stuck.id);
 
     useKeys(V2_ONLY);
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     expect(await rotation().rewrap(actor)).toEqual({ rewrapped: 0, failed: 1 });
     expect(await row(stuck.id)).toEqual(stuckBefore);
+    // A safe line per failed row: its id and a coarse reason, never an address or a key.
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toEqual([expect.stringContaining(stuck.id)]);
+    expect(lines[0]).toContain('reason=no-key');
+    expect(lines[0]).not.toContain('stuck@example.test');
+    expect(lines[0]).not.toContain(keyOf(1));
     expect((await row(fine.id)).version).toBe(1);
     expect((await row(other.id)).addressKeyId).toBe('v2');
     expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'REWRAPPED' } })).toBe(0);
@@ -391,8 +400,13 @@ describe('OpsAlertKeyRotationService', () => {
     useKeys({ ...V1, hmacKey: OTHER_HMAC_KEY, hmacVersion: '2' });
     const twin = await add('same@example.test');
 
+    const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
     const result = await rotation().rehash(actor);
     expect(result).toEqual({ rehashed: 1, failed: 1 });
+    const lines = warn.mock.calls.map((call) => String(call[0]));
+    expect(lines).toEqual([expect.stringContaining(old.id)]);
+    expect(lines[0]).toContain('reason=collision');
+    expect(lines[0]).not.toContain('same@example.test');
     expect((await row(old.id)).addressHmacVersion).toBe(1);
     expect((await row(other.id)).addressHmacVersion).toBe(2);
     expect((await row(twin.id)).addressHmacVersion).toBe(2);
