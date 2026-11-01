@@ -13,6 +13,9 @@ import {
   recipientAuditSnapshot,
   recordRecipientAudit,
 } from './ops-alert-recipient.audit';
+import { readAppEnvironment } from '../../common/app-environment';
+import { readOpsAlertConfigSafely } from './ops-alert.config';
+import { decideRecipientRemoval } from './ops-alert-recipient-guard';
 import { addressHmac, decryptAddress, encryptAddress, normalizeAddress } from './recipient-crypto';
 import { RecipientCryptoConfig, resolveRecipientCryptoConfig } from './recipient-crypto.config';
 
@@ -248,6 +251,9 @@ export class OpsAlertRecipientsService {
       const wanted: RecipientAuditSnapshot = { ...recipientAuditSnapshot(before), ...(data as Partial<RecipientAuditSnapshot>) };
       const changed = changedRecipientFields(recipientAuditSnapshot(before), wanted);
       if (changed.length === 0) return (await this.toViews(tx, [before]))[0]!;
+      if (before.status === OpsAlertRecipientStatus.ACTIVE && before.notifyCritical && data.notifyCritical === false) {
+        await this.guardLastCritical(tx, before.id, input.confirmLastCritical === true);
+      }
 
       const after = await this.bump(tx, actor, before, data);
       const beforeSnap = recipientAuditSnapshot(before);
@@ -278,7 +284,14 @@ export class OpsAlertRecipientsService {
   }
 
   async pause(actor: AuthUser, id: string, input: { version: number; confirmLastCritical?: boolean }): Promise<RecipientView> {
-    return this.setStatus(actor, id, input.version, OpsAlertRecipientStatus.PAUSED, OpsAlertRecipientAuditAction.PAUSED);
+    return this.setStatus(
+      actor,
+      id,
+      input.version,
+      OpsAlertRecipientStatus.PAUSED,
+      OpsAlertRecipientAuditAction.PAUSED,
+      input.confirmLastCritical === true,
+    );
   }
 
   async resume(actor: AuthUser, id: string, input: { version: number }): Promise<RecipientView> {
@@ -292,6 +305,9 @@ export class OpsAlertRecipientsService {
   ): Promise<void> {
     await this.locked(async (tx) => {
       const before = await this.loadLive(tx, id, input.version);
+      if (before.status === OpsAlertRecipientStatus.ACTIVE && before.notifyCritical) {
+        await this.guardLastCritical(tx, before.id, input.confirmLastCritical === true);
+      }
       await this.shred(tx, actor, before, OpsAlertRecipientAuditAction.DELETED, input.reason);
     });
   }
@@ -373,10 +389,18 @@ export class OpsAlertRecipientsService {
     version: number,
     status: OpsAlertRecipientStatus,
     action: OpsAlertRecipientAuditAction,
+    confirmLastCritical = false,
   ): Promise<RecipientView> {
     return this.locked(async (tx) => {
       const before = await this.loadLive(tx, id, version);
       if (before.status === status) return (await this.toViews(tx, [before]))[0]!;
+      if (
+        status === OpsAlertRecipientStatus.PAUSED &&
+        before.status === OpsAlertRecipientStatus.ACTIVE &&
+        before.notifyCritical
+      ) {
+        await this.guardLastCritical(tx, before.id, confirmLastCritical);
+      }
       const after = await this.bump(tx, actor, before, { status });
       await recordRecipientAudit(tx, {
         recipientId: id,
@@ -388,6 +412,32 @@ export class OpsAlertRecipientsService {
       });
       return (await this.toViews(tx, [after]))[0]!;
     });
+  }
+
+  /**
+   * The last-critical / last-channel guard for an operation that takes the
+   * ACTIVE ∧ critical recipient `removedId` out of the critical set. Call under
+   * the lock, before any write: the count and the routing row are then stable.
+   * Environment and Telegram status are read now, never cached.
+   */
+  private async guardLastCritical(tx: Prisma.TransactionClient, removedId: string, confirmed: boolean): Promise<void> {
+    const liveCriticalAfter = await tx.opsAlertRecipient.count({
+      where: { status: OpsAlertRecipientStatus.ACTIVE, notifyCritical: true, id: { not: removedId } },
+    });
+    const settings = await tx.opsAlertRoutingSettings.findUnique({
+      where: { id: 'ops-alert-routing' },
+      select: { emailRouting: true },
+    });
+    const decision = decideRecipientRemoval({
+      environment: readAppEnvironment(),
+      telegramConfigured: readOpsAlertConfigSafely().telegram !== null,
+      routing: settings?.emailRouting ?? 'ENV_LEGACY',
+      liveCriticalAfter,
+      touchesCritical: true,
+      confirmed,
+    });
+    if (decision === 'BLOCKED') throw new LastChannelProtectedError();
+    if (decision === 'CONFIRM_REQUIRED') throw new LastCriticalConfirmationRequired();
   }
 
   /** The row, refusing a missing one, a deleted one and a stale `version`. Call under the lock. */

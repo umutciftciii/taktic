@@ -1,8 +1,11 @@
-import { OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertNoticeKind, UserRole } from '@prisma/client';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { OpsAlertChannel, OpsAlertDeliveryStatus, OpsAlertEmailRouting, OpsAlertNoticeKind, UserRole } from '@prisma/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AuthUser } from '../src/modules/auth/auth.types';
+import { decideRecipientRemoval } from '../src/modules/ops-alerts/ops-alert-recipient-guard';
 import {
   DuplicateRecipientError,
+  LastChannelProtectedError,
+  LastCriticalConfirmationRequired,
   mapDatabaseError,
   OpsAlertRecipientsService,
   RecipientDeletedError,
@@ -132,7 +135,7 @@ describe('OpsAlertRecipientsService', () => {
 
   it('pause and resume change status, bump the version and audit', async () => {
     const view = await add('pause@example.test');
-    const paused = await service.pause(actor, view.id, { version: 1 });
+    const paused = await service.pause(actor, view.id, { version: 1, confirmLastCritical: true });
     expect(paused.status).toBe('PAUSED');
     expect(paused.isLastCritical).toBe(false);
     const resumed = await service.resume(actor, view.id, { version: paused.version });
@@ -144,7 +147,7 @@ describe('OpsAlertRecipientsService', () => {
   it('remove shreds ciphertext and hmac and records the reason', async () => {
     const view = await add('gone@example.test');
     const live = await pendingDelivery(view.id);
-    await service.remove(actor, view.id, { version: 1, reason: 'Ekipten ayrıldı' });
+    await service.remove(actor, view.id, { version: 1, reason: 'Ekipten ayrıldı', confirmLastCritical: true });
     const row = await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: view.id } });
     expect(row.status).toBe('DELETED');
     expect(row.addressCiphertext).toBeNull();
@@ -203,7 +206,7 @@ describe('OpsAlertRecipientsService', () => {
   it('audit rows carry masked address only', async () => {
     const view = await add('secret.person@example.test');
     await service.update(actor, view.id, { version: 1, label: 'Başka' });
-    await service.pause(actor, view.id, { version: 2 });
+    await service.pause(actor, view.id, { version: 2, confirmLastCritical: true });
     await service.reveal(actor, view.id);
     const rows = await ctx.prisma.opsAlertRecipientAuditLog.findMany();
     const hmac = (await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: view.id } })).addressHmac!;
@@ -312,6 +315,129 @@ describe('OpsAlertRecipientsService', () => {
       );
       expect(caught).not.toBeNull();
       expect(mapDatabaseError(caught)).toBe(caught);
+    });
+  });
+
+  describe('last critical recipient / last channel guard', () => {
+    type Input = Parameters<typeof decideRecipientRemoval>[0];
+    const base: Input = {
+      environment: 'local',
+      telegramConfigured: false,
+      routing: OpsAlertEmailRouting.MANAGED,
+      liveCriticalAfter: 0,
+      touchesCritical: true,
+      confirmed: false,
+    };
+    it.each<[string, Partial<Input>, 'ALLOW' | 'CONFIRM_REQUIRED' | 'BLOCKED']>([
+      ['liveCriticalAfter >= 1', { liveCriticalAfter: 1, environment: 'production' }, 'ALLOW'],
+      ['operation does not touch critical', { touchesCritical: false, environment: 'production' }, 'ALLOW'],
+      ['MANAGED, 0 left, production, no telegram', { environment: 'production' }, 'BLOCKED'],
+      ['MANAGED, 0 left, production, no telegram, confirmed', { environment: 'production', confirmed: true }, 'BLOCKED'],
+      ['MANAGED, 0 left, production, telegram, unconfirmed', { environment: 'production', telegramConfigured: true }, 'CONFIRM_REQUIRED'],
+      ['MANAGED, 0 left, production, telegram, confirmed', { environment: 'production', telegramConfigured: true, confirmed: true }, 'ALLOW'],
+      ['MANAGED, 0 left, staging, no telegram, unconfirmed', { environment: 'staging' }, 'CONFIRM_REQUIRED'],
+      ['MANAGED, 0 left, staging, no telegram, confirmed', { environment: 'staging', confirmed: true }, 'ALLOW'],
+      ['MANAGED, 0 left, undeclared environment, unconfirmed', { environment: null }, 'CONFIRM_REQUIRED'],
+      ['ENV_LEGACY, 0 left, production, no telegram, unconfirmed', { routing: OpsAlertEmailRouting.ENV_LEGACY, environment: 'production' }, 'CONFIRM_REQUIRED'],
+      ['ENV_LEGACY, 0 left, production, no telegram, confirmed', { routing: OpsAlertEmailRouting.ENV_LEGACY, environment: 'production', confirmed: true }, 'ALLOW'],
+    ])('decides: %s', (_name, patch, expected) => {
+      expect(decideRecipientRemoval({ ...base, ...patch })).toBe(expected);
+    });
+
+    const TELEGRAM_VARS = ['OPS_ALERT_TELEGRAM_BOT_TOKEN', 'OPS_ALERT_TELEGRAM_CHAT_ID'] as const;
+    const saved: Record<string, string | undefined> = {};
+    beforeEach(() => {
+      for (const key of ['APP_ENVIRONMENT', ...TELEGRAM_VARS]) saved[key] = process.env[key];
+      for (const key of TELEGRAM_VARS) delete process.env[key];
+    });
+    afterEach(() => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    const withTelegram = () => {
+      process.env.OPS_ALERT_TELEGRAM_BOT_TOKEN = `${'1'.repeat(6)}:${'x'.repeat(35)}`;
+      process.env.OPS_ALERT_TELEGRAM_CHAT_ID = '-100222333444';
+    };
+    const setRouting = (emailRouting: OpsAlertEmailRouting) =>
+      ctx.prisma.opsAlertRoutingSettings.update({ where: { id: 'ops-alert-routing' }, data: { emailRouting } });
+
+    it('production guard reads telegram status per request', async () => {
+      process.env.APP_ENVIRONMENT = 'production';
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      const only = await add('last@example.test');
+      withTelegram();
+      await expect(service.pause(actor, only.id, { version: only.version })).rejects.toBeInstanceOf(
+        LastCriticalConfirmationRequired,
+      );
+      for (const key of TELEGRAM_VARS) delete process.env[key];
+      await expect(
+        service.pause(actor, only.id, { version: only.version, confirmLastCritical: true }),
+      ).rejects.toBeInstanceOf(LastChannelProtectedError);
+      const row = await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: only.id } });
+      expect(row.status).toBe('ACTIVE');
+    });
+
+    it('pausing the last critical recipient with telegram present needs confirmation', async () => {
+      process.env.APP_ENVIRONMENT = 'production';
+      withTelegram();
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      const only = await add('last@example.test');
+      await expect(service.pause(actor, only.id, { version: only.version })).rejects.toBeInstanceOf(
+        LastCriticalConfirmationRequired,
+      );
+      const paused = await service.pause(actor, only.id, { version: only.version, confirmLastCritical: true });
+      expect(paused.status).toBe('PAUSED');
+    });
+
+    it('update turning notifyCritical off and remove need confirmation on the last critical recipient', async () => {
+      process.env.APP_ENVIRONMENT = 'local';
+      const only = await add('last@example.test');
+      await expect(service.update(actor, only.id, { version: only.version, notifyCritical: false })).rejects.toBeInstanceOf(
+        LastCriticalConfirmationRequired,
+      );
+      await expect(service.remove(actor, only.id, { version: only.version, reason: 'x' })).rejects.toBeInstanceOf(
+        LastCriticalConfirmationRequired,
+      );
+      const updated = await service.update(actor, only.id, {
+        version: only.version,
+        notifyCritical: false,
+        confirmLastCritical: true,
+      });
+      expect(updated.notifyCritical).toBe(false);
+    });
+
+    it('operations that keep a critical recipient, or do not touch one, never need confirmation', async () => {
+      process.env.APP_ENVIRONMENT = 'production';
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      const a = await add('a@example.test');
+      const b = await add('b@example.test');
+      const quiet = await service.create(actor, { address: 'q@example.test', label: 'q', notifyWarning: true, notifyCritical: false, notifyRecovery: false });
+      // another critical recipient remains
+      await service.pause(actor, a.id, { version: a.version });
+      // warning-only recipient touches no critical
+      await service.pause(actor, quiet.id, { version: quiet.version });
+      await service.remove(actor, quiet.id, { version: quiet.version + 1, reason: 'x' });
+      // replacing the last critical recipient's address keeps it critical
+      const replaced = await service.replaceAddress(actor, b.id, { version: b.version, address: 'b2@example.test', reason: 'moved' });
+      expect(replaced.notifyCritical).toBe(true);
+    });
+
+    it('two concurrent removals of the last two critical recipients: exactly one succeeds in production without telegram', async () => {
+      process.env.APP_ENVIRONMENT = 'production';
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      const a = await add('a@example.test');
+      const b = await add('b@example.test');
+      const results = await Promise.allSettled([
+        service.remove(actor, a.id, { version: a.version, reason: 'x', confirmLastCritical: true }),
+        service.remove(actor, b.id, { version: b.version, reason: 'x', confirmLastCritical: true }),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(rejected.reason).toBeInstanceOf(LastChannelProtectedError);
+      const live = await ctx.prisma.opsAlertRecipient.count({ where: { status: { not: 'DELETED' } } });
+      expect(live).toBe(1);
     });
   });
 });
