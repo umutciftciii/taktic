@@ -51,6 +51,10 @@ export const PAYMENT_PROVIDERS_FOR_ENVIRONMENT = {
  * apps/api/src/modules/ops-alerts/ops-alert.config.ts, so a value the API
  * would refuse at boot is refused here first.
  */
+export const OPS_ALERT_TELEGRAM_TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
+export const OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
+const OPS_ALERT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // OBS-ALERT-002: mirrors apps/api/src/modules/ops-alerts/recipient-crypto.config.ts
 // (a source-reading test pins these). The key text is 32 bytes of published,
 // non-secret text; the API refuses it, and so does the contract.
@@ -59,9 +63,6 @@ export const DEVELOPMENT_RECIPIENT_HMAC_KEY = 'taktic-local-development-recipien
 export const RECIPIENT_HMAC_KEY_MIN_LENGTH = 32;
 const RECIPIENT_KEY_ID_PATTERN = /^v[1-9]\d{0,3}$/;
 const BASE64_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/;
-export const OPS_ALERT_TELEGRAM_TOKEN_PATTERN = /^\d{5,}:[A-Za-z0-9_-]{30,}$/;
-export const OPS_ALERT_TELEGRAM_CHAT_ID_PATTERN = /^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/;
-const OPS_ALERT_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** What the sandbox provider needs to boot (lemon-squeezy.config.ts). */
 export const LEMON_SQUEEZY_REQUIRED = [
