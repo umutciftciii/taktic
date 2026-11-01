@@ -569,7 +569,11 @@ describe('OpsAlertRoutingService', () => {
       expect(outcome.status).toBe('fulfilled');
       const finalMode = await mode();
       if (cut.status === 'rejected') expect((cut.reason as { code?: string }).code).toBe('COUNTS_CHANGED');
+      // When the apply won, the tick met its lock (BUSY) and queued nothing:
+      // one more evaluation makes the check below about real rows either way.
+      expect(await evaluator().evaluateOnly()).toBe('EVALUATED');
       const email = await deliveries({ channel: 'EMAIL' });
+      expect(email.length).toBeGreaterThanOrEqual(1);
       if (finalMode === 'MANAGED') {
         expect(email.every((row) => row.recipientId !== null)).toBe(true);
       } else {
