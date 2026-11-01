@@ -142,8 +142,13 @@ içeriyorsa okunur.
    keyring'e geri ekleyin ("Rotasyon → Şifreleme anahtarı" adım 2'deki `awk` ile), API'yi recreate
    edin. Anahtar bulunamıyorsa "Anahtar kaybı" bölümüne geçin.
 4. `addressHmacVersion` şu anki `OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION`'dan
-   farklıysa ve o sürümün HMAC anahtarı elinizdeyse, sürümü ona göre ayarlamak
-   yerine `rehash` çalıştırın (adresler çözüldüğü sürece yeni HMAC'ı hesaplar).
+   farklıysa `rehash` çalıştırın. Dump'taki HMAC'lar artık elinizde olmayan
+   eski bir HMAC anahtarıyla üretildiyse **tek yol budur**: o eski anahtar geri
+   getirilemez, `rehash` ise ona ihtiyaç duymaz — adresi şifreleme anahtarıyla
+   çözüp HMAC'ı şu anki anahtarla yeniden hesaplar. Bu yüzden adım 3'teki
+   şifreleme anahtarları önce keyring'de olmalıdır; çözülemeyen satır
+   `rehash`'te `failed` sayılır ve eski HMAC'ıyla kalır (tekilleştirme o satır
+   için çalışmaz).
 5. Eksik anahtarla açılan API çökmez: o anahtarla şifreli alıcıya gidecek her
    teslimat `DECRYPT_FAILED` ile `ABANDONED` olur, **başka bir adrese veya
    `OPS_ALERT_EMAIL`'e asla düşmez**; "Göster" ve test gönderimi de aynı kodla

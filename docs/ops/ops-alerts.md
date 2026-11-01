@@ -103,14 +103,17 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
   ACTIVE alıcıya ayrı bir teslimat satırı olarak gider. Geçiş ve geri dönüş
   yalnız SUPER_ADMIN'in (`OPS_ALERT_ROUTING_MANAGE`), önizleme + sayıya bağlı
   onayla yaptığı işlemlerdir. Telegram iki modda da değişmez.
-- **Alıcı:** etiket, maskeli adres ve üç tercih (Uyarı / Kritik / Düzelme;
-  varsayılan Kritik + Düzelme). En fazla 10 canlı alıcı. Adres değiştirilemez;
+- **Alıcı:** etiket, maskeli adres ve üç tercih (Uyarı / Kritik / Düzelme).
+  API üç tercihi de açıkça ister; "Kritik + Düzelme" ön seçimi admin
+  ekranının (PR-B) varsayılanıdır, API'nin değil. En fazla 10 canlı alıcı. Adres değiştirilemez;
   "adresi değiştir" yeni alıcı + eskisinin silinmesidir. Silme crypto-shred'dir
   (şifreli adres ve HMAC silinir). Düzelme yalnız o alarm için daha önce
   bilgilendirilmiş ve hâlâ ACTIVE alıcıya gider.
 - **Teslimat bağı:** yönetilen satır `recipientId` ile bir alıcıya kalıcı
-  bağlıdır; silinmiş/pasif/tercihi kapalı alıcıya bekleyen satır `CANCELLED`
-  olur, adresi çözülemeyen satır `DECRYPT_FAILED` ile `ABANDONED` olur —
+  bağlıdır; silinmiş/pasif/tercihi kapalı alıcıya bekleyen satır, worker ona
+  sıra geldiğinde `CANCELLED` olur (pasifleştirme ya da tercih kapatma anında
+  iptal etmez: worker o satıra ulaşmadan alıcı yeniden etkinleştirilir veya
+  tercih açılırsa bildirim teslim edilir), adresi çözülemeyen satır `DECRYPT_FAILED` ile `ABANDONED` olur —
   hiçbiri başka bir adrese ya da `OPS_ALERT_EMAIL`'e düşmez. Bildirim içeriği
   kuyruğa girerken satıra donar (`noticeSnapshot`); retry aynı içerik ve aynı
   `Idempotency-Key` ile gider.
