@@ -216,7 +216,15 @@ export class OpsAlertRecipientsService {
     return this.toViews(this.prisma, rows);
   }
 
-  async create(actor: AuthUser, input: CreateRecipientInput): Promise<RecipientView> {
+  /**
+   * `auditAction` names how the recipient came to be: an admin's create, or
+   * the routing service's import of OPS_ALERT_EMAIL (one audit row either way).
+   */
+  async create(
+    actor: AuthUser,
+    input: CreateRecipientInput,
+    auditAction: typeof OpsAlertRecipientAuditAction.CREATED | typeof OpsAlertRecipientAuditAction.IMPORTED_FROM_ENV = OpsAlertRecipientAuditAction.CREATED,
+  ): Promise<RecipientView> {
     const label = cleanLabel(input.label);
     const normalized = normalizeAddress(input.address);
     return this.locked(async (tx) => {
@@ -231,7 +239,7 @@ export class OpsAlertRecipientsService {
       await recordRecipientAudit(tx, {
         recipientId: row.id,
         actorId: actor.id,
-        action: OpsAlertRecipientAuditAction.CREATED,
+        action: auditAction,
         before: null,
         after: recipientAuditSnapshot(row),
       });

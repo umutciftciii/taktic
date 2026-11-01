@@ -5,6 +5,7 @@ import { SystemHealthModule } from '../system-health/system-health.module';
 import { OpsAlertDeliveryWorker } from './ops-alert-delivery.worker';
 import { OpsAlertRecipientsService } from './ops-alert-recipients.service';
 import { OpsAlertEvaluator } from './ops-alert-evaluator.service';
+import { OpsAlertRoutingService } from './ops-alert-routing.service';
 import { TelegramAlertPort, TelegramBotApiAdapter } from './telegram-alert.port';
 
 /**
@@ -19,8 +20,9 @@ import { TelegramAlertPort, TelegramBotApiAdapter } from './telegram-alert.port'
     OpsAlertEvaluator,
     OpsAlertDeliveryWorker,
     OpsAlertRecipientsService,
+    OpsAlertRoutingService,
     { provide: TelegramAlertPort, useFactory: () => new TelegramBotApiAdapter() },
   ],
-  exports: [OpsAlertEvaluator, OpsAlertDeliveryWorker, OpsAlertRecipientsService, TelegramAlertPort],
+  exports: [OpsAlertEvaluator, OpsAlertDeliveryWorker, OpsAlertRecipientsService, OpsAlertRoutingService, TelegramAlertPort],
 })
 export class OpsAlertsModule {}
