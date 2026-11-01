@@ -55,6 +55,9 @@ export function RecipientForm({
     mode.kind === 'edit' ? updateRecipientAction : createRecipientAction,
     RECIPIENT_FORM_IDLE,
   );
+  // Frozen at mount: a re-render of the page with a newer row must not move the
+  // version under what was typed here (the API then refuses the stale save).
+  const [version] = useState(mode.kind === 'edit' ? mode.version : null);
   const [address, setAddress] = useState('');
   const [label, setLabel] = useState(defaults.label);
   const [notify, setNotify] = useState({
@@ -72,7 +75,7 @@ export function RecipientForm({
       {mode.kind === 'edit' ? (
         <>
           <input type="hidden" name="recipientId" value={mode.recipientId} />
-          <input type="hidden" name="version" value={mode.version} />
+          <input type="hidden" name="version" value={version ?? ''} />
         </>
       ) : null}
 

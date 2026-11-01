@@ -1039,8 +1039,6 @@ describe('recipient action refusals and results', () => {
     const invalid = await settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE));
     expect(invalid).toMatchObject({ kind: 'error' });
     expect(JSON.stringify(invalid)).toContain('kabul edilmedi');
-    api.resumeOpsAlertRecipient.mockRejectedValueOnce(new ApiError(403, JSON.stringify({ statusCode: 403, message: 'Forbidden' })));
-    expect(JSON.stringify(await settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE)))).toContain('yetkiniz yok');
     for (const result of [invalid]) expect(JSON.stringify(result)).not.toContain(RECIPIENT_ERROR_TEXT.UNKNOWN);
   });
 
@@ -1265,7 +1263,8 @@ describe('B3 carry-over: the second step survives, refusals show, no dead save b
 // OBS-ALERT-002 PR-B (task B4) — the SUPER_ADMIN routing panel
 // ---------------------------------------------------------------------------
 
-const { RoutingSwitchBody } = await import('../app/system-health/notification-settings/routing-panel');
+const { RoutingSwitchBody, revertCancelWords } = await import('../app/system-health/notification-settings/routing-panel');
+const { recipientErrorText: recipientErrorTextFn } = await import('../lib/ops-alert-recipients');
 const { ROUTING_COUNTS_CHANGED_TEXT, ROUTING_SWITCH_IDLE, ROUTING_OP_IDLE } = await import(
   '../app/system-health/notification-settings/routing-panel-state'
 );
@@ -1365,23 +1364,47 @@ describe('routing panel: who sees it and which steps it draws', () => {
     expect(panel).not.toContain('ops-alert-routing-import');
   });
 
-  it('rewrap shows only with several key ids, rehash only with several HMAC versions — both behind the rewrap proof', async () => {
+  it('Ruling B-6: both key operations are always there for a SUPER_ADMIN — also with a single key id and HMAC version', async () => {
     api.isSuperAdmin = true;
     load();
     const single = panelOf(await renderSettings());
-    expect(single).not.toContain('ops-alert-routing-rewrap');
-    expect(single).not.toContain('ops-alert-routing-rehash');
+    expect(single).toContain('data-testid="ops-alert-routing-keys"');
+    expect(single).toContain('data-testid="ops-alert-routing-rewrap"');
+    expect(single).toContain('data-testid="ops-alert-routing-rewrap-dialog"');
+    expect(single).toContain('data-testid="ops-alert-routing-rehash"');
+    expect(single).toContain('data-testid="ops-alert-routing-rehash-dialog"');
+    expect(single).toContain('Şifrelemeyi yenile');
+    expect(single).toContain('Adres özetini yenile');
+    // The "rotation under way" sentence is for several versions only.
+    expect(single).not.toContain('data-testid="ops-alert-routing-rotation-note"');
 
-    load({ routing: { keyIds: { k1: 2, k2: 1 } } });
-    const keys = panelOf(await renderSettings());
-    expect(keys).toContain('data-testid="ops-alert-routing-rewrap"');
-    expect(keys).toContain('data-testid="ops-alert-routing-rewrap-dialog"');
-    expect(keys).not.toContain('ops-alert-routing-rehash');
+    for (const over of [{ keyIds: { k1: 2, k2: 1 } }, { hmacVersions: { '1': 2, '2': 1 } }]) {
+      load({ routing: over });
+      const several = panelOf(await renderSettings());
+      expect(several).toContain('data-testid="ops-alert-routing-rotation-note"');
+      expect(several).toContain('data-testid="ops-alert-routing-rewrap"');
+      expect(several).toContain('data-testid="ops-alert-routing-rehash"');
+    }
+  });
 
-    load({ routing: { hmacVersions: { '1': 2, '2': 1 } } });
-    const hmac = panelOf(await renderSettings());
-    expect(hmac).toContain('data-testid="ops-alert-routing-rehash"');
-    expect(hmac).not.toContain('ops-alert-routing-rewrap"');
+  it('an ADMIN never gets a key operation, whatever the versions', async () => {
+    api.held = new Set([READ, WRITE, DELETE, TEST, REVEAL, MANAGE]);
+    for (const over of [{}, { keyIds: { k1: 2, k2: 1 }, hmacVersions: { '1': 2, '2': 1 } }]) {
+      load({ routing: over });
+      const markup = await renderSettings();
+      expect(markup).not.toContain('ops-alert-routing-rewrap');
+      expect(markup).not.toContain('ops-alert-routing-rehash');
+      expect(markup).not.toContain('ops-alert-routing-keys');
+    }
+  });
+
+  it('a hand-typed ?ok= or ?error= that names an Object property draws no notice and does not crash', async () => {
+    load();
+    for (const key of ['__proto__', 'toString', 'constructor', 'hasOwnProperty', 'valueOf']) {
+      const markup = await renderSettings({ ok: key, error: key });
+      expect(markup).not.toContain('data-testid="ops-alert-recipients-ok"');
+      expect(markup).not.toContain('data-testid="ops-alert-recipients-error"');
+    }
   });
 
   it('says what an import, a cutover and a revert did', async () => {
@@ -1670,7 +1693,8 @@ describe('routing server actions', () => {
     api.isSuperAdmin = true;
     load();
     const afterRewrap = await renderSettings({ ok: 'rewrapped', adet: '3', hata: '1' });
-    expect(afterRewrap).not.toContain('data-testid="ops-alert-routing-keys"');
+    // The key block (always there for a SUPER_ADMIN) carries no result: the notice does.
+    expect(afterRewrap).not.toContain('data-testid="ops-alert-routing-rotation-note"');
     const notice = /data-testid="ops-alert-recipients-ok">([^<]*)</.exec(afterRewrap)?.[1] ?? '';
     expect(notice).toContain('3 alıcının adresi etkin şifreleme anahtarına taşındı.');
     expect(notice).toContain('1 alıcı taşınamadı');
@@ -1682,5 +1706,58 @@ describe('routing server actions', () => {
     expect(typed).not.toContain('x');
     expect(typed).not.toContain('-2');
     expect(typed.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 PR-B — final whole-branch review fixes
+// ---------------------------------------------------------------------------
+
+describe('final review fixes', () => {
+  it('recipientErrorText never answers an Object property for a code', () => {
+    for (const key of ['__proto__', 'toString', 'constructor', 'hasOwnProperty', 'valueOf']) {
+      expect(recipientErrorTextFn(key)).toBe(RECIPIENT_ERROR_TEXT.UNKNOWN);
+    }
+    expect(recipientErrorTextFn('TIMEOUT')).toBe('Zaman aşımı.');
+  });
+
+  it('revert forced only by others\' sends in flight: no "Eşleşmeyen 0", its own words in the box and the dialog', () => {
+    const counts = { PENDING: { rebind: 1, cancel: 0 }, FAILED: { rebind: 0, cancel: 0 }, SENDING: { rebind: 0, cancel: 0 } };
+    const markup = renderBody('REVERT', {
+      kind: 'preview',
+      preview: preview({ direction: 'REVERT', confirmRequired: true, inFlight: 2, counts }),
+      at: 1,
+    });
+    expect(markup).not.toContain('Eşleşmeyen 0');
+    const box = /data-testid="ops-alert-routing-cancel-unmatched"[\s\S]*?<\/label>/.exec(markup)?.[0] ?? '';
+    expect(box).toContain('required=""');
+    expect(box).toContain('Başka alıcılara gönderimi süren teslimatlar yeniden denenirse iptal edilsin');
+    // The dialog's words come from the same choice (pure helper, the gate draws them on click).
+    expect(revertCancelWords(preview({ direction: 'REVERT', confirmRequired: true, inFlight: 2, counts }))).toMatchObject({
+      box: 'Başka alıcılara gönderimi süren teslimatlar yeniden denenirse iptal edilsin',
+    });
+    expect(revertCancelWords(preview({ direction: 'REVERT', confirmRequired: true })).box).toBe('Eşleşmeyen 5 teslimatı iptal et');
+    expect(revertCancelWords(preview({ direction: 'REVERT', confirmRequired: true })).consequence).toContain('5 bekleyen teslimat');
+    expect(revertCancelWords(preview({ direction: 'REVERT', confirmRequired: true, inFlight: 2, counts })).consequence).not.toContain('0');
+  });
+
+  it('the edit form freezes the version it was opened with', () => {
+    const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/recipient-form.tsx'), 'utf8');
+    expect(source).toMatch(/useState\(\s*mode\.kind === 'edit' \? mode\.version : null\s*\)/);
+    expect(source).not.toMatch(/name="version" value=\{mode\.version\}/);
+    const markup = renderToStaticMarkup(
+      <RecipientForm
+        mode={{ kind: 'edit', recipientId: 'rcp-1', version: 4, maskedAddress: 'o***@example.test' }}
+        defaults={{ label: 'x', notifyWarning: false, notifyCritical: true, notifyRecovery: true }}
+        cancelHref={SETTINGS}
+      />,
+    );
+    expect(markup).toContain('<input type="hidden" name="version" value="4"/>');
+  });
+
+  it('refusalText has no 403 branch: apiFetch redirects every 403 before an ApiError exists', () => {
+    const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/actions.ts'), 'utf8');
+    expect(source).not.toContain('error.status === 403');
+    expect(source).not.toContain('yetkiniz yok');
   });
 });

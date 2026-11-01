@@ -43,15 +43,17 @@ import {
  * leaves no approval to click. A revert that cancels deliveries (or leaves
  * another recipient's send in flight) asks a separate, required tick.
  *
- * Rewrap and rehash appear only while a rotation is under way: several
- * encryption key ids, or several HMAC versions, among the live recipients.
+ * Rewrap and rehash are always offered (Ruling B-6); a note says a rotation is
+ * under way when the live recipients sit on several key ids or HMAC versions.
  */
 
 type RoutingPanelInput = Pick<RoutingState, 'emailRouting' | 'envAddressConfigured' | 'envAddressManaged' | 'keyIds' | 'hmacVersions'>;
 
 export function RoutingPanel({ routing }: { routing: RoutingPanelInput }) {
-  const rewrap = Object.keys(routing.keyIds).length > 1;
-  const rehash = Object.keys(routing.hmacVersions).length > 1;
+  // Ruling B-6: both key operations are always offered (the API is idempotent;
+  // a run with nothing to move answers 0). The runbook presses them right
+  // after the new key is made active, while every row is still on the old one.
+  const rotating = Object.keys(routing.keyIds).length > 1 || Object.keys(routing.hmacVersions).length > 1;
   return (
     <div className="ops-alert-routing" data-routing={routing.emailRouting}>
       {routing.emailRouting === 'ENV_LEGACY' ? (
@@ -85,54 +87,53 @@ export function RoutingPanel({ routing }: { routing: RoutingPanelInput }) {
           <SwitchForm key="REVERT" direction="REVERT" />
         </>
       )}
-      {rewrap || rehash ? (
-        <div className="cell-stack" data-testid="ops-alert-routing-keys">
-          <p className="cell-muted">
-            Anahtar değişimi sürüyor: alıcıların bir kısmı eski anahtarla saklanıyor. Etkin anahtar ortamda tanımlandıktan sonra
-            alıcıları ona taşıyın.
+      <div className="cell-stack" data-testid="ops-alert-routing-keys">
+        <p className="cell-muted">
+          Anahtar rotasyonu: ortamda yeni anahtar etkin yapıldıktan sonra alıcıları ona taşıyın. Taşınacak alıcı yoksa işlem hiçbir
+          şeyi değiştirmez.
+        </p>
+        {rotating ? (
+          <p className="cell-muted" data-testid="ops-alert-routing-rotation-note">
+            Anahtar değişimi sürüyor: alıcıların bir kısmı eski anahtarla saklanıyor.
           </p>
-          {/* A finished run ends on the page notice (`?ok=rewrapped|rehashed`): after a
-              full success this block is gone, so the result cannot live in it. */}
-          {rewrap ? (
-            <RotationForm action={rewrapRecipientsAction} testId="ops-alert-routing-rewrap">
-              <ConfirmDialog
-                triggerLabel="Şifrelemeyi yenile"
-                proof="ops-alert-routing.rewrap"
-                triggerClassName="btn btn-secondary btn-sm"
-                title="Şifreleme anahtarını yenile"
-                consequence={
-                  <p>
-                    Etkin olmayan anahtarla saklanan her alıcının adresi çözülüp etkin anahtarla yeniden şifrelenir. Adresler
-                    değişmez; her alıcı için geçmişe bir kayıt düşer.
-                  </p>
-                }
-                confirmLabel="Evet, yeniden şifrele"
-                tone="primary"
-                testId="ops-alert-routing-rewrap"
-              />
-            </RotationForm>
-          ) : null}
-          {rehash ? (
-            <RotationForm action={rehashRecipientsAction} testId="ops-alert-routing-rehash">
-              <ConfirmDialog
-                triggerLabel="Adres özetini yenile"
-                proof="ops-alert-routing.rehash"
-                triggerClassName="btn btn-secondary btn-sm"
-                title="Adres özetini yenile"
-                consequence={
-                  <p>
-                    Güncel olmayan sürümle hesaplanmış her alıcının adres özeti güncel sürümle yeniden hesaplanır. Aynı adresli
-                    iki alıcı çıkarsa o alıcı yenilenmez.
-                  </p>
-                }
-                confirmLabel="Evet, yenile"
-                tone="primary"
-                testId="ops-alert-routing-rehash"
-              />
-            </RotationForm>
-          ) : null}
-        </div>
-      ) : null}
+        ) : null}
+        {/* A finished run ends on the page notice (`?ok=rewrapped|rehashed&adet=&hata=`),
+        which survives the revalidation that redraws this block. */}
+        <RotationForm action={rewrapRecipientsAction} testId="ops-alert-routing-rewrap">
+          <ConfirmDialog
+            triggerLabel="Şifrelemeyi yenile"
+            proof="ops-alert-routing.rewrap"
+            triggerClassName="btn btn-secondary btn-sm"
+            title="Şifreleme anahtarını yenile"
+            consequence={
+              <p>
+                Etkin olmayan anahtarla saklanan her alıcının adresi çözülüp etkin anahtarla yeniden şifrelenir. Adresler
+                değişmez; her alıcı için geçmişe bir kayıt düşer.
+              </p>
+            }
+            confirmLabel="Evet, yeniden şifrele"
+            tone="primary"
+            testId="ops-alert-routing-rewrap"
+          />
+        </RotationForm>
+        <RotationForm action={rehashRecipientsAction} testId="ops-alert-routing-rehash">
+          <ConfirmDialog
+            triggerLabel="Adres özetini yenile"
+            proof="ops-alert-routing.rehash"
+            triggerClassName="btn btn-secondary btn-sm"
+            title="Adres özetini yenile"
+            consequence={
+              <p>
+                Güncel olmayan sürümle hesaplanmış her alıcının adres özeti güncel sürümle yeniden hesaplanır. Aynı adresli
+                iki alıcı çıkarsa o alıcı yenilenmez.
+              </p>
+            }
+            confirmLabel="Evet, yenile"
+            tone="primary"
+            testId="ops-alert-routing-rehash"
+          />
+        </RotationForm>
+      </div>
     </div>
   );
 }
@@ -194,6 +195,25 @@ function SwitchForm({ direction }: { direction: RoutingDirection }) {
 
 const STATUSES: RoutingPendingStatus[] = ['PENDING', 'FAILED', 'SENDING'];
 
+/**
+ * The words of a revert's `cancelUnmatched` tick and of its dialog. The API
+ * asks for the tick when the revert cancels pending deliveries, or when it
+ * only leaves other recipients' sends in flight (their retry is cancelled by
+ * the worker) — then there is nothing to count as cancelled, and "Eşleşmeyen 0"
+ * would say the opposite of what happens.
+ */
+export function revertCancelWords(preview: Pick<RoutingPreview, 'counts'>): { box: string; consequence: string } {
+  const total = routingCancelTotal(preview);
+  if (total > 0) {
+    return { box: `Eşleşmeyen ${total} teslimatı iptal et`, consequence: `Eşleşmeyen ${total} bekleyen teslimat iptal edilir.` };
+  }
+  return {
+    box: 'Başka alıcılara gönderimi süren teslimatlar yeniden denenirse iptal edilsin',
+    consequence:
+      'Başka alıcılara gönderimi süren teslimatların sonucu kaydedilir; başarısız olurlarsa yeniden denenmez, iptal edilir.',
+  };
+}
+
 const WORDS = {
   CUTOVER: {
     id: 'cutover',
@@ -254,6 +274,7 @@ function PreviewDetails({ direction, preview }: { direction: RoutingDirection; p
   const blocked = preview.blockers.length > 0;
   const cancelTotal = routingCancelTotal(preview);
   const askCancel = direction === 'REVERT' && preview.confirmRequired;
+  const cancelWords = revertCancelWords(preview);
   // A switch never cancels a SENDING row: on a cutover this cell is the
   // unmatched in-flight rows LEGACY_ROWS_UNMATCHED holds back, shown as what
   // would be lost — not as something the approval cancels.
@@ -320,8 +341,8 @@ function PreviewDetails({ direction, preview }: { direction: RoutingDirection; p
             <label className="ops-alert-switch-row" data-testid="ops-alert-routing-cancel-unmatched">
               <input type="checkbox" name="cancelUnmatched" value="true" required />
               <span>
-                Eşleşmeyen {cancelTotal} teslimatı iptal et
-                {preview.inFlight > 0 ? (
+                {cancelWords.box}
+                {cancelTotal > 0 && preview.inFlight > 0 ? (
                   <span className="cell-muted"> Gönderimi süren teslimatların sonucu kaydedilir; yeniden denenirse iptal edilir.</span>
                 ) : null}
               </span>
@@ -340,7 +361,7 @@ function PreviewDetails({ direction, preview }: { direction: RoutingDirection; p
                 consequence: (
                   <>
                     <p>{words.consequence}</p>
-                    {askCancel ? <p>Eşleşmeyen {cancelTotal} bekleyen teslimat iptal edilir.</p> : null}
+                    {askCancel ? <p>{cancelWords.consequence}</p> : null}
                     <p>Önizlemedeki sayılar uygulanır; arada değiştiyse hiçbir şey yapılmaz ve yeniden önizlemeniz istenir.</p>
                   </>
                 ),

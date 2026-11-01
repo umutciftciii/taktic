@@ -184,7 +184,9 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
 
   const params = await searchParams;
   const okText = params.ok
-    ? (OK_MESSAGES[params.ok] ?? rotationText(params.ok, readCount(params.adet), readCount(params.hata)))
+    ? Object.prototype.hasOwnProperty.call(OK_MESSAGES, params.ok)
+      ? OK_MESSAGES[params.ok]!
+      : rotationText(params.ok, readCount(params.adet), readCount(params.hata))
     : null;
   const errorText = recipientStaleMessage(params.error);
   const historyPage = parsePage(params.gecmisSayfa);

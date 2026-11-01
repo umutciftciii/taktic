@@ -184,7 +184,9 @@ export const RECIPIENT_ERROR_TEXT: Record<string, string> = {
 
 /** The text for a code, or the unknown-error text for one this panel does not know. */
 export function recipientErrorText(code: string | null | undefined): string {
-  return (code && RECIPIENT_ERROR_TEXT[code]) || RECIPIENT_ERROR_TEXT.UNKNOWN!;
+  // Own keys only: a code like `__proto__` or `toString` must not reach Object.prototype.
+  return (code && Object.prototype.hasOwnProperty.call(RECIPIENT_ERROR_TEXT, code) && RECIPIENT_ERROR_TEXT[code]) ||
+    RECIPIENT_ERROR_TEXT.UNKNOWN!;
 }
 
 // ---------------------------------------------------------------------------

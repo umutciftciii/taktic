@@ -111,14 +111,14 @@ const ADDRESS_CODES = new Set(['RECIPIENT_ADDRESS_INVALID', 'RECIPIENT_DUPLICATE
 
 /**
  * The sentence for a refusal. A coded one is the code's text; one without a
- * code — a class-validator 400, a 403 from the permission guard — is named by
- * its status rather than "Bilinmeyen hata".
+ * code — a class-validator 400, a 429 — is named by its status rather than
+ * "Bilinmeyen hata". A 403 never gets here: apiFetch sends it to /yetkisiz
+ * (or /login) before an ApiError exists.
  */
 function refusalText(error: unknown, code: string | null): string {
   if (code !== null) return recipientErrorText(code);
   if (error instanceof ApiError) {
     if (error.status === 400) return 'Girilen bilgiler kabul edilmedi; alanları kontrol edip yeniden deneyin.';
-    if (error.status === 403) return 'Bu işlem için yetkiniz yok.';
     if (error.status === 429) return recipientErrorText('TEST_RATE_LIMITED');
   }
   return recipientErrorText(null);
