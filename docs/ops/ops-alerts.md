@@ -118,12 +118,28 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
   satır SENT iken karşısı hâlâ bekliyorsa geçiş **409
   `ROUTING_COLLISION_PENDING`** ile bekler (`collisions` sayısı). Bu kendiliğinden
   çözülür: worker mevcut modda tek canlı kopyayı gönderir ya da gönderilmiş
-  olanın kopyasını düşürür; sonra yeniden önizleyin. Önizleme token'ı
-  `counts`, `told`, `inFlight` ve `collisions`'ı kapsar.
+  olanın kopyasını düşürür; sonra yeniden önizleyin. `confirmRequired: true`
+  ise (yalnız geri dönüş) uygulama `cancelUnmatched: true` ister. Önizleme
+  token'ı `counts`, `told`, `inFlight`, `collisions` ve `confirmRequired`'ı
+  kapsar.
+- **Worker ve geçiş yarışı:** worker bir e-posta satırının nereye gideceğine,
+  satırı kilitleyip (claim hâlâ kendisindeyken) alıcısını ve modu **o anda**
+  okuyarak tek bir transaction'da karar verir; gönderilmeyen sonuç (iptal,
+  terk) da orada yazılır. Geçiş aynı satırı kilitlediği için ya karardan önce
+  işlenir ya da kararı bekler — geçişin taşıdığı satır worker tarafından
+  yanlışlıkla iptal edilmez.
 - **ENV_LEGACY'de alıcıya bağlı satır:** worker onu `ROUTING_REVERTED` ile
   iptal eder (bu modda e-posta yalnız `OPS_ALERT_EMAIL`'e gider). Tek istisna,
   env adresinin kendi alıcısına bağlı ve o bildirim için canlı legacy satırı
-  olmayan satırdır — o posta kutusunun tek kopyasıdır ve o alıcıya gider.
+  olmayan satırdır — o posta kutusunun tek kopyasıdır. Alıcının pasifliği ve
+  tercihleri bu modda uygulanmaz (env adresine de uygulanmaz): hiç legacy
+  satırı yoksa satır legacy'ye geri çevrilip env adresine gider ("bilgilendirildi"
+  doğru kalır); yalnız ölü legacy satırı varsa bağlı kalarak aynı adrese gider.
+- **Bilinen sınır — iki tarafı da sonuçlanmış çift:** taşınamayan bir SENT
+  satırı (karşı satırı CANCELLED/ABANDONED ve hedef anahtarı tutuyor)
+  "bilgilendirildi" bilgisini kendi tarafında tutar; bu alarmın Düzelme
+  bildirimi o posta kutusunu atlayabilir. Bu yalnız geçişler arasında env
+  adresi değişirse ya da satırlar elle yazılırsa oluşur.
 - **Alıcı:** etiket, maskeli adres ve üç tercih (Uyarı / Kritik / Düzelme).
   API üç tercihi de açıkça ister; "Kritik + Düzelme" ön seçimi admin
   ekranının (PR-B) varsayılanıdır, API'nin değil. En fazla 10 canlı alıcı. Adres değiştirilemez;
