@@ -44,6 +44,8 @@ export const RECIPIENT_PAUSED_ERROR_CODE = 'RECIPIENT_PAUSED';
 export const PREFERENCE_OFF_ERROR_CODE = 'PREFERENCE_OFF';
 export const DECRYPT_FAILED_ERROR_CODE = 'DECRYPT_FAILED';
 export const LEGACY_AFTER_CUTOVER_ERROR_CODE = 'LEGACY_AFTER_CUTOVER';
+/** A recipient-bound row that met ENV_LEGACY: cancelled by the revert, or by the worker after it. */
+export const ROUTING_REVERTED_ERROR_CODE = 'ROUTING_REVERTED';
 
 /** Where a claimed e-mail row goes — or the final reason it goes nowhere. */
 type EmailRoute =
@@ -94,7 +96,9 @@ type ClaimedDelivery = {
  * that was removed, paused or no longer wants the notice cancels the row
  * (final, no send, no retry), and an address that cannot be decrypted
  * abandons it (`DECRYPT_FAILED`). Such a row never falls back to
- * OPS_ALERT_EMAIL, in any routing mode. A row without a recipient follows the
+ * OPS_ALERT_EMAIL, in any routing mode; in ENV_LEGACY it is cancelled
+ * (`ROUTING_REVERTED`) unless it is the env address's own last copy of the
+ * notice (see {@link emailRoute}). A row without a recipient follows the
  * OBS-ALERT-001 path in ENV_LEGACY; in MANAGED it is first bound to the
  * ACTIVE recipient whose identity is the env address, or cancelled
  * (`LEGACY_AFTER_CUTOVER`). Every one of these outcomes is written under the
@@ -258,8 +262,16 @@ export class OpsAlertDeliveryWorker {
   /**
    * Where one claimed e-mail row may go (OBS-ALERT-002).
    *
-   *   bound to a recipient          that recipient's address, decrypted now,
+   *   bound, MANAGED                that recipient's address, decrypted now,
    *                                 or nowhere (see recipientRoute)
+   *   bound, ENV_LEGACY             cancelled (ROUTING_REVERTED): only the env
+   *                                 address gets e-mail in this mode, and a
+   *                                 send the revert found in flight must not
+   *                                 be retried to its recipient. Except the
+   *                                 env address's own recipient (same HMAC)
+   *                                 when no live legacy row exists for the
+   *                                 notice — then this row is that mailbox's
+   *                                 only copy and goes as in MANAGED
    *   no recipient, ENV_LEGACY      the OBS-ALERT-001 path: OPS_ALERT_EMAIL
    *   no recipient, MANAGED         bound now to the ACTIVE recipient whose
    *                                 identity is the env address, then as
@@ -273,20 +285,51 @@ export class OpsAlertDeliveryWorker {
     config: OpsAlertConfig,
     severity: OpsAlertSeverity,
   ): Promise<EmailRoute> {
+    const settings = await this.prisma.opsAlertRoutingSettings.findUnique({
+      where: { id: OPS_ALERT_ROUTING_ID },
+      select: { emailRouting: true },
+    });
+    const managed = (settings?.emailRouting ?? OpsAlertEmailRouting.ENV_LEGACY) === OpsAlertEmailRouting.MANAGED;
     let recipientId = delivery.recipientId;
     if (recipientId === null) {
-      const settings = await this.prisma.opsAlertRoutingSettings.findUnique({
-        where: { id: OPS_ALERT_ROUTING_ID },
-        select: { emailRouting: true },
-      });
-      if ((settings?.emailRouting ?? OpsAlertEmailRouting.ENV_LEGACY) !== OpsAlertEmailRouting.MANAGED) {
-        return { kind: 'legacy' };
-      }
+      if (!managed) return { kind: 'legacy' };
       const bound = await this.bindLegacyRow(delivery, token, config);
       if (bound.kind !== 'bound') return bound;
       recipientId = bound.recipientId;
+    } else if (!managed && !(await this.lastCopyForEnvAddress(delivery, recipientId, config))) {
+      return { kind: 'cancel', code: ROUTING_REVERTED_ERROR_CODE };
     }
     return this.recipientRoute(delivery.kind, severity, recipientId);
+  }
+
+  /**
+   * ENV_LEGACY, a bound row: is it the env address's only copy of the notice?
+   * Yes when its recipient is the env address (same HMAC and key version) and
+   * no legacy row for the notice is live (PENDING/FAILED/SENDING/SENT) — e.g.
+   * a worker that read MANAGED bound a legacy row just after a revert. Then
+   * it goes to that recipient, the same mailbox; otherwise the legacy row
+   * owns the notice, or the recipient is somebody else, and this row stops.
+   */
+  private async lastCopyForEnvAddress(delivery: ClaimedDelivery, recipientId: string, config: OpsAlertConfig): Promise<boolean> {
+    const identity = envIdentity(config);
+    if (!identity) return false;
+    const recipient = await this.prisma.opsAlertRecipient.findFirst({
+      where: { id: recipientId, addressHmac: identity.hmac, addressHmacVersion: identity.version },
+      select: { id: true },
+    });
+    if (!recipient) return false;
+    const legacy = await this.prisma.opsAlertDelivery.findFirst({
+      where: {
+        alertId: delivery.alertId,
+        kind: delivery.kind,
+        sequence: delivery.sequence,
+        channel: OpsAlertChannel.EMAIL,
+        recipientId: null,
+        status: { notIn: [OpsAlertDeliveryStatus.CANCELLED, OpsAlertDeliveryStatus.ABANDONED] },
+      },
+      select: { id: true },
+    });
+    return legacy === null;
   }
 
   /**
@@ -353,13 +396,8 @@ export class OpsAlertDeliveryWorker {
     config: OpsAlertConfig,
   ): Promise<{ kind: 'bound'; recipientId: string } | { kind: 'cancel'; code: string } | { kind: 'lost' }> {
     const unmatched = { kind: 'cancel', code: LEGACY_AFTER_CUTOVER_ERROR_CODE } as const;
-    if (!config.email) return unmatched;
-    let identity: { hmac: string; version: number };
-    try {
-      identity = addressHmac(resolveRecipientCryptoConfig(), normalizeAddress(config.email));
-    } catch {
-      return unmatched;
-    }
+    const identity = envIdentity(config);
+    if (!identity) return unmatched;
     const match = await this.prisma.opsAlertRecipient.findFirst({
       where: {
         status: OpsAlertRecipientStatus.ACTIVE,
@@ -432,6 +470,16 @@ export class OpsAlertDeliveryWorker {
       // The row stays SENDING; its lease runs out and it is taken again.
       this.logger.error(`ops alert delivery outcome could not be recorded (${error instanceof Error ? error.name : 'UnknownError'})`);
     }
+  }
+}
+
+/** The env address's identity, or null when it is unset or not a plain address. */
+function envIdentity(config: OpsAlertConfig): { hmac: string; version: number } | null {
+  if (!config.email) return null;
+  try {
+    return addressHmac(resolveRecipientCryptoConfig(), normalizeAddress(config.email));
+  } catch {
+    return null;
   }
 }
 

@@ -518,8 +518,23 @@ describe('managed alert delivery', () => {
 
       await worker().deliverDue();
 
-      expect(await deliveries()).toMatchObject([{ recipientId: bound.id, status: 'SENT' }]);
-      expect(alertMails().map((mail) => mail.to)).toEqual(['bound@example.test']);
+      // ENV_LEGACY e-mails only the env address: the bound row stops, and goes nowhere else.
+      expect(await deliveries()).toMatchObject([{ recipientId: bound.id, status: 'CANCELLED', errorCode: 'ROUTING_REVERTED' }]);
+      expect(alertMails()).toEqual([]);
+    });
+
+    it("in ENV_LEGACY, the env address's own recipient row goes to it when no legacy row has the notice", async () => {
+      // A worker that read MANAGED bound a legacy row just as the revert committed.
+      const own = await add(OPS_EMAIL, WARN);
+      await setRouting(OpsAlertEmailRouting.MANAGED);
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      await setRouting(OpsAlertEmailRouting.ENV_LEGACY);
+
+      await worker().deliverDue();
+
+      expect(await deliveries()).toMatchObject([{ recipientId: own.id, status: 'SENT' }]);
+      expect(alertMails().map((mail) => mail.to)).toEqual([OPS_EMAIL]);
     });
 
     it('two workers never deliver the same recipient row twice', async () => {
