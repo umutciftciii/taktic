@@ -106,6 +106,8 @@ export type ReplaceRecipientAddressBody = { version: number; address: string; re
 export type ApplyCutoverBody = { token: string };
 export type ApplyRevertBody = { token: string; cancelUnmatched?: boolean };
 
+/** At most this many live (active or paused) recipients (ops-alert-recipient.constants.ts). */
+export const OPS_ALERT_RECIPIENT_LIMIT = 10;
 export const RECIPIENT_LABEL_MAX_LENGTH = 80;
 export const RECIPIENT_REASON_MIN_LENGTH = 5;
 export const RECIPIENT_REASON_MAX_LENGTH = 500;
@@ -127,7 +129,7 @@ export const RECIPIENT_STATUS_BADGES: Record<RecipientStatus, string> = {
 };
 
 export const EMAIL_ROUTING_LABELS: Record<EmailRouting, string> = {
-  ENV_LEGACY: 'Ortam değişkeni adresi (OPS_ALERT_EMAIL)',
+  ENV_LEGACY: 'Env (geçiş öncesi)',
   MANAGED: 'Yönetilen alıcılar',
 };
 
@@ -223,7 +225,8 @@ export function recipientDeliverySummary(deliveries: readonly AlertDelivery[]): 
       }
       const count = (status: AlertDelivery['status'][]) => rows.filter((r) => status.includes(r.status)).length;
       const cancelled = count(['CANCELLED']);
-      const parts = [`${count(['SENT'])}/${rows.length - cancelled} gönderildi`];
+      // Every row cancelled: there is nothing to have sent, so no "0/0".
+      const parts = rows.length > cancelled ? [`${count(['SENT'])}/${rows.length - cancelled} gönderildi`] : [];
       const extras: Array<[number, string]> = [
         [count(['FAILED']), 'yeniden denenecek'],
         [count(['PENDING', 'SENDING']), 'bekliyor'],

@@ -337,8 +337,8 @@ describe('the page', () => {
       expect(markup).toContain('data-channel="telegram" data-configured="true"');
       expect(markup).toContain('data-testid="system-health-alert-OPS-ABCDEFGH23"');
       expect(markup).toContain('Talep süresi dolumu');
-      expect(markup).toContain('Telegram: Açılış — Yeniden denenecek (2. deneme)');
-      expect(markup).toContain('E-posta: Açılış — Gönderildi');
+      expect(markup).toContain('Telegram: Yeni sorun — Yeniden denenecek (2. deneme)');
+      expect(markup).toContain('E-posta: Yeni sorun — Gönderildi');
       expect(markup).toContain('data-testid="system-health-resolved-alert-OPS-ZXCVBNM234"');
       expect(markup).toContain('E-posta · Taşıma servisi kullanılamıyor');
       expect(markup).toContain('Düzeldi');
@@ -370,6 +370,54 @@ describe('the page', () => {
       apiMocks.apiFetch.mockResolvedValue(withoutEmail);
       const markup = await renderPage();
       expect(markup).toContain('data-testid="system-health-alerts-email-hidden"');
+    });
+
+    it('counts a notice that fans out to several recipients, per recipient', async () => {
+      const delivery = (over: Record<string, unknown>) => ({
+        kind: 'OPENED',
+        sequence: 1,
+        channel: 'EMAIL',
+        status: 'SENT',
+        attemptCount: 1,
+        sentAt: NOW,
+        errorCode: null,
+        recipientId: 'r1',
+        recipientLabel: 'Nöbetçi',
+        ...over,
+      });
+      const base = alertsBlock();
+      const open = [
+        {
+          ...base.open[0]!,
+          deliveries: [
+            delivery({ recipientId: 'r1' }),
+            delivery({ recipientId: 'r2' }),
+            delivery({ recipientId: 'r3', status: 'FAILED', sentAt: null }),
+          ],
+        },
+      ] as NonNullable<SystemHealthReport['alerts']>['open'];
+      apiMocks.apiFetch.mockResolvedValue(report({ alerts: alertsBlock({ open }) }));
+      const markup = await renderPage();
+      expect(markup).toContain('E-posta: Yeni sorun — 2/3 gönderildi, 1 yeniden denenecek');
+    });
+
+    it('an account without the recipient permissions gets null recipient fields and a page that still renders', async () => {
+      apiMocks.apiFetch.mockResolvedValue(report());
+      apiMocks.requireAdmin.mockResolvedValue({
+        can: (...names: string[]) => !names.includes('OPS_ALERT_RECIPIENTS_READ'),
+        permissions: [],
+        isSuperAdmin: false,
+      });
+      const markup = await renderPage();
+      expect(markup).toContain('E-posta: Yeni sorun — Gönderildi');
+      expect(markup).not.toContain('notification-settings');
+    });
+
+    it('links to Bildirim ayarları only for OPS_ALERT_RECIPIENTS_READ', async () => {
+      apiMocks.apiFetch.mockResolvedValue(report());
+      const withLink = await renderPage();
+      expect(withLink).toContain('href="/system-health/notification-settings"');
+      expect(withLink).toContain('data-testid="system-health-notification-settings-link"');
     });
 
     it('has Turkish copy for every engine reason', () => {

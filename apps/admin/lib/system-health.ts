@@ -184,12 +184,6 @@ export const OPS_ALERT_RESOLUTION_TEXT: Record<string, string> = {
 
 export const OPS_ALERT_CHANNEL_LABELS: Record<OpsAlertChannel, string> = { TELEGRAM: 'Telegram', EMAIL: 'E-posta' };
 
-export const OPS_ALERT_NOTICE_LABELS: Record<OpsAlertNoticeKind, string> = {
-  OPENED: 'Açılış',
-  REMINDER: 'Hatırlatma',
-  RESOLVED: 'Düzelme',
-};
-
 export const OPS_ALERT_DELIVERY_LABELS: Record<OpsAlertDeliveryStatus, string> = {
   PENDING: 'Bekliyor',
   SENDING: 'Gönderiliyor',
@@ -213,22 +207,6 @@ const EMAIL_ERROR_TEXT: Record<string, string> = {
 export function opsAlertSubject(alert: Pick<OpsAlertView, 'source' | 'subjectKey'>): string {
   if (alert.source === 'EMAIL') return `E-posta · ${EMAIL_ERROR_TEXT[alert.subjectKey] ?? alert.subjectKey}`;
   return schedulerJobName(alert.subjectKey as SystemHealthJobKey);
-}
-
-/** One line per channel: the latest notice there and how it went. */
-export function opsAlertChannelSummary(alert: Pick<OpsAlertView, 'deliveries'>): string {
-  const latest = new Map<OpsAlertChannel, OpsAlertView['deliveries'][number]>();
-  for (const delivery of alert.deliveries) latest.set(delivery.channel, delivery);
-  if (latest.size === 0) return 'Kanal yok';
-  return (['TELEGRAM', 'EMAIL'] as const)
-    .filter((channel) => latest.has(channel))
-    .map((channel) => {
-      const delivery = latest.get(channel)!;
-      return `${OPS_ALERT_CHANNEL_LABELS[channel]}: ${OPS_ALERT_NOTICE_LABELS[delivery.kind]} — ${OPS_ALERT_DELIVERY_LABELS[delivery.status]}${
-        delivery.attemptCount > 1 ? ` (${delivery.attemptCount}. deneme)` : ''
-      }`;
-    })
-    .join(' · ');
 }
 
 /** The API row, as this panel's server measured it while fetching the report. */
