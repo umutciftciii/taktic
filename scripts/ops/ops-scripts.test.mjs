@@ -157,6 +157,9 @@ done(99);
 
 const API_URL = 'https://api-staging.example.test';
 const PLACEHOLDER_FINGERPRINT = 'placeholder-fingerprint-key-not-a-secret-0001';
+// OBS-ALERT-002: the recipient keys the staging contract requires (the CI ops job's values).
+const PLACEHOLDER_RECIPIENT_ENC_KEYS = 'v1:Y2ktcGxhY2Vob2xkZXItcmVjaXBpZW50LWtleS0wMDE=';
+const PLACEHOLDER_RECIPIENT_HMAC_KEY = 'ci-placeholder-recipient-hmac-key-not-a-secret-0001';
 
 /** What `docker compose config` resolves for the staging host. */
 function stagingConfig(project = 'taktic-staging') {
@@ -180,6 +183,10 @@ function stagingConfig(project = 'taktic-staging') {
           APP_ENVIRONMENT: 'staging',
           DATABASE_URL: 'postgresql://placeholder',
           PROMOTION_FINGERPRINT_KEY: PLACEHOLDER_FINGERPRINT,
+          OPS_ALERT_RECIPIENT_ENC_KEYS: PLACEHOLDER_RECIPIENT_ENC_KEYS,
+          OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v1',
+          OPS_ALERT_RECIPIENT_HMAC_KEY: PLACEHOLDER_RECIPIENT_HMAC_KEY,
+          OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION: '1',
           PAYMENT_PROVIDER: 'lemon-squeezy-test',
           LEMON_SQUEEZY_API_KEY: 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.placeholderNotARealCredential',
           LEMON_SQUEEZY_STORE_ID: '424242',

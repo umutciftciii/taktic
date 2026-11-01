@@ -265,6 +265,11 @@ const TRUNCATED_TABLES = [
   'OpsAlertDelivery',
   'OpsAlert',
   'OpsAlertEngineState',
+  // OBS-ALERT-002: managed recipients, their audit rows (TRUNCATE does not fire
+  // the append-only trigger) and the routing row, re-seeded below.
+  'OpsAlertRecipientAuditLog',
+  'OpsAlertRecipient',
+  'OpsAlertRoutingSettings',
   // ADMIN-ACTION-AUDIT-001: append-only audit rows, children of User,
   // ProviderProfile and (by id only) the catalogue. TRUNCATE does not fire the
   // append-only triggers.
@@ -427,6 +432,13 @@ export async function resetDatabase(prisma: PrismaClient): Promise<void> {
     }
     throw error;
   }
+
+  // The routing row is created by its migration, not lazily by code, and the
+  // TRUNCATE above reaches it through User. Put back what a fresh database has.
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "OpsAlertRoutingSettings" ("id", "emailRouting", "updatedAt")
+     VALUES ('ops-alert-routing', 'ENV_LEGACY', CURRENT_TIMESTAMP)`,
+  );
 }
 
 function isDeadlock(error: unknown): boolean {

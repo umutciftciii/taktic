@@ -258,7 +258,9 @@ describe('PR-0 route/permission map', () => {
      * from MATCH_REVIEW (reserved for SUPER_ADMIN).
      * SHOWCASE-ALLOWANCE-004 moved it to 95: SHOWCASE_ALLOWANCE_VOID, voiding a
      * vitrin run's remaining free offers (reserved for SUPER_ADMIN).
+     * OBS-ALERT-002 moved it to 101: OPS_ALERT_RECIPIENTS_READ / _WRITE /
+     * _DELETE / _REVEAL / _TEST and OPS_ALERT_ROUTING_MANAGE.
      */
-    expect(Object.keys(AdminPermission)).toHaveLength(95);
+    expect(Object.keys(AdminPermission)).toHaveLength(101);
   });
 });

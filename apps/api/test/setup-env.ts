@@ -93,3 +93,10 @@ delete process.env.TURNSTILE_SITEVERIFY_TIMEOUT_MS;
 // and a key exported in the developer's shell cannot change them.
 delete process.env.PROMOTION_FINGERPRINT_KEY;
 delete process.env.PROMOTION_FINGERPRINT_KEY_VERSION;
+// OBS-ALERT-002: the recipient keys. The suite runs on the published
+// development keys (NODE_ENV=test permits them); a key exported in the
+// developer's shell must not change what the specs seal or hash.
+delete process.env.OPS_ALERT_RECIPIENT_ENC_KEYS;
+delete process.env.OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE;
+delete process.env.OPS_ALERT_RECIPIENT_HMAC_KEY;
+delete process.env.OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION;

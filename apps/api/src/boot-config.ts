@@ -9,6 +9,7 @@ import { assertProviderClaimConfig } from './modules/provider-claim/provider-cla
 import { assertTurnstileConfig } from './modules/turnstile/turnstile.config';
 import { assertPromotionFingerprintConfig } from './modules/business-registration/promotion-fingerprint';
 import { assertOpsAlertConfig } from './modules/ops-alerts/ops-alert.config';
+import { assertOpsAlertRecipientCryptoConfig } from './modules/ops-alerts/recipient-crypto.config';
 
 /**
  * Every configuration check the API makes before it is allowed to start, in
@@ -100,6 +101,12 @@ export const BOOT_CONFIG_CHECKS: ReadonlyArray<{ name: string; assert: () => voi
   // channel at all — it would fail without telling anyone. Values are never
   // echoed: the bot token is a credential.
   { name: 'ops-alert', assert: assertOpsAlertConfig },
+
+  // OBS-ALERT-002: the keys behind managed alert recipients. Outside a local
+  // stack and the test suite they are required, and the published development
+  // keys are refused: an address "encrypted" under a key that is in the
+  // repository is not encrypted. Names only, never a value.
+  { name: 'ops-alert-recipient-crypto', assert: assertOpsAlertRecipientCryptoConfig },
 ];
 
 /** main.ts: every check, in order, stopping the process on the first refusal. */

@@ -15,6 +15,10 @@ import { BOOT_CONFIG_CHECKS, assertBootConfig, runBootConfigChecks } from '../sr
 const PLACEHOLDER_FINGERPRINT_KEY = 'placeholder-fingerprint-key-not-a-secret-0001';
 const PLACEHOLDER_LEMON_KEY = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.placeholderNotARealCredential';
 const PLACEHOLDER_WEBHOOK_SECRET = 'placeholder-webhook-secret-not-real';
+// OBS-ALERT-002: built from repeated bytes and characters so nothing here
+// reads as a real secret.
+const PLACEHOLDER_RECIPIENT_ENC_KEY = Buffer.alloc(32, 7).toString('base64');
+const PLACEHOLDER_RECIPIENT_HMAC_KEY = 'r'.repeat(40);
 
 const STAGING_CONTRACT: Record<string, string> = {
   NODE_ENV: 'production',
@@ -30,6 +34,9 @@ const STAGING_CONTRACT: Record<string, string> = {
   TURNSTILE_SECRET_KEY: '1x0000000000000000000000000000000AA',
   TURNSTILE_EXPECTED_HOSTNAMES: 'staging.example.test',
   PROMOTION_FINGERPRINT_KEY: PLACEHOLDER_FINGERPRINT_KEY,
+  OPS_ALERT_RECIPIENT_ENC_KEYS: `v1:${PLACEHOLDER_RECIPIENT_ENC_KEY}`,
+  OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: 'v1',
+  OPS_ALERT_RECIPIENT_HMAC_KEY: PLACEHOLDER_RECIPIENT_HMAC_KEY,
 };
 
 let original: NodeJS.ProcessEnv;
@@ -96,6 +103,17 @@ describe('the staging runtime contract', () => {
     expect(refused()['ops-alert']).not.toContain('placeholderNotARealTelegramBotToken');
   });
 
+  it('refuses staging without the recipient keys, naming the variable and never a value (OBS-ALERT-002)', () => {
+    delete process.env.OPS_ALERT_RECIPIENT_ENC_KEYS;
+    expect(refused()['ops-alert-recipient-crypto']).toMatch(/OPS_ALERT_RECIPIENT_ENC_KEYS is required/);
+
+    process.env.OPS_ALERT_RECIPIENT_ENC_KEYS = STAGING_CONTRACT.OPS_ALERT_RECIPIENT_ENC_KEYS;
+    process.env.OPS_ALERT_RECIPIENT_HMAC_KEY = 'x'.repeat(31);
+    expect(refused()['ops-alert-recipient-crypto']).toMatch(/OPS_ALERT_RECIPIENT_HMAC_KEY must be at least 32/);
+    expect(refused()['ops-alert-recipient-crypto']).not.toContain('x'.repeat(31));
+    expect(JSON.stringify(refused())).not.toContain(PLACEHOLDER_RECIPIENT_ENC_KEY);
+  });
+
   it('reports every refusal in one run instead of stopping at the first', () => {
     delete process.env.PROMOTION_FINGERPRINT_KEY;
     delete process.env.LEMON_SQUEEZY_API_KEY;
@@ -141,6 +159,7 @@ describe('the staging runtime contract', () => {
       'turnstile',
       'promotion-fingerprint',
       'ops-alert',
+      'ops-alert-recipient-crypto',
     ]);
   });
 });

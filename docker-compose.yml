@@ -106,6 +106,13 @@ services:
       OPS_ALERT_EMAIL: ${OPS_ALERT_EMAIL:-}
       OPS_ALERT_TELEGRAM_BOT_TOKEN: ${OPS_ALERT_TELEGRAM_BOT_TOKEN:-}
       OPS_ALERT_TELEGRAM_CHAT_ID: ${OPS_ALERT_TELEGRAM_CHAT_ID:-}
+      # OBS-ALERT-002: the keys behind managed alert recipients. Unset, the API
+      # uses its published development keys on a local stack; the two secrets
+      # belong in the host environment, never in this file.
+      OPS_ALERT_RECIPIENT_ENC_KEYS: ${OPS_ALERT_RECIPIENT_ENC_KEYS:-}
+      OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: ${OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE:-}
+      OPS_ALERT_RECIPIENT_HMAC_KEY: ${OPS_ALERT_RECIPIENT_HMAC_KEY:-}
+      OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION: ${OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3001}
       # ADMIN-SYSTEM-HEALTH-001: where the system health screen probes the web
       # and the panel (GET /robots.txt, GET /login, 1.5 s). The compose service

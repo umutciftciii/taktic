@@ -4478,6 +4478,19 @@ export function adminPermissionLabel(permission: AdminPermission): {
     return { area: 'Paket iadeleri', action: PACKAGE_REFUND[permission] };
   }
 
+  // OBS-ALERT-002: the alert recipients and the e-mail routing switch, one area.
+  const OPS_ALERT: Record<string, string> = {
+    OPS_ALERT_RECIPIENTS_READ: 'alıcıları görme (maskeli)',
+    OPS_ALERT_RECIPIENTS_WRITE: 'alıcı ekleme ve düzenleme',
+    OPS_ALERT_RECIPIENTS_DELETE: 'alıcı silme',
+    OPS_ALERT_RECIPIENTS_REVEAL: 'alıcı adresini açık görme (her görüntüleme kayıt altına alınır)',
+    OPS_ALERT_RECIPIENTS_TEST: 'test bildirimi gönderme',
+    OPS_ALERT_ROUTING_MANAGE: 'e-posta yönlendirmesini değiştirme',
+  };
+  if (OPS_ALERT[permission]) {
+    return { area: 'Operasyon alarmları', action: OPS_ALERT[permission] };
+  }
+
   // CMP-006 PR-C: two permissions whose last word is not a verb.
   if (permission === 'PROVIDER_REGISTRATION_READ_SENSITIVE') {
     return { area: 'Hizmet verenler', action: 'işletme kayıt numarasının ham değerini görme (her görüntüleme kayıt altına alınır)' };

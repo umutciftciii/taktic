@@ -216,16 +216,16 @@ export class SystemHealthService {
     @Inject(SchedulerSettingsService) private readonly schedulerSettings: SchedulerSettingsService,
   ) {}
 
-  async report(options: { includeEmail: boolean }): Promise<SystemHealthReport> {
+  async report(options: { includeEmail: boolean; includeRecipients: boolean }): Promise<SystemHealthReport> {
+    // The alert block differs by both permissions, so both are in its cache key.
+    const alertsKey = `alerts${options.includeEmail ? ':email' : ''}${options.includeRecipients ? ':recipients' : ''}`;
     const [database, web, admin, schedulers, email, alerts] = await Promise.all([
       this.cached('database', PROBE_CACHE_MS, () => this.measureDatabase()),
       this.cached('web', PROBE_CACHE_MS, () => this.probe('web')),
       this.cached('admin', PROBE_CACHE_MS, () => this.probe('admin')),
       this.cached('schedulers', QUERY_CACHE_MS, () => this.measureSchedulers()),
       options.includeEmail ? this.cached('email', QUERY_CACHE_MS, () => this.measureEmail()) : undefined,
-      this.cached(options.includeEmail ? 'alerts:email' : 'alerts', QUERY_CACHE_MS, () =>
-        this.measureAlerts(options.includeEmail),
-      ),
+      this.cached(alertsKey, QUERY_CACHE_MS, () => this.measureAlerts(options.includeEmail, options.includeRecipients)),
     ]);
 
     const core: HealthStatus[] = [database.status, web.status, admin.status];
@@ -449,10 +449,10 @@ export class SystemHealthService {
     return { jobs, recentFailures: recentFailures.slice(0, RECENT_FAILURE_LIMIT) };
   }
 
-  private async measureAlerts(includeEmail: boolean): Promise<OpsAlertsReport> {
+  private async measureAlerts(includeEmail: boolean, includeRecipients: boolean): Promise<OpsAlertsReport> {
     const now = new Date();
     try {
-      return await withTimeout(readOpsAlertsReport(this.prisma, { includeEmail }, now), SECTION_QUERY_TIMEOUT_MS);
+      return await withTimeout(readOpsAlertsReport(this.prisma, { includeEmail, includeRecipients }, now), SECTION_QUERY_TIMEOUT_MS);
     } catch (error) {
       this.logger.warn(`system health: alert read failed (${error instanceof Error ? error.name : 'UnknownError'})`);
       return {
@@ -467,7 +467,8 @@ export class SystemHealthService {
           lastFailedAt: null,
           lastErrorType: null,
         },
-        channels: opsAlertChannelStatus(),
+        // Routing and the recipient count are database facts; unread, they are unknown.
+        channels: { ...opsAlertChannelStatus(), emailRouting: null, managedRecipients: null },
         open: [],
         recentlyResolved: [],
       };

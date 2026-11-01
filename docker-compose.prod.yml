@@ -204,6 +204,13 @@ services:
       OPS_ALERT_TELEGRAM_CHAT_ID: ${OPS_ALERT_TELEGRAM_CHAT_ID:-}
       OPS_ALERT_TELEGRAM_TIMEOUT_MS: ${OPS_ALERT_TELEGRAM_TIMEOUT_MS:-}
       OPS_ALERT_CRON: ${OPS_ALERT_CRON:-}
+      # OBS-ALERT-002: the keys behind managed alert recipients. Required on
+      # staging and production (the API refuses to boot without them and
+      # refuses the published development keys); api only, never logged.
+      OPS_ALERT_RECIPIENT_ENC_KEYS: ${OPS_ALERT_RECIPIENT_ENC_KEYS:-}
+      OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE: ${OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE:-}
+      OPS_ALERT_RECIPIENT_HMAC_KEY: ${OPS_ALERT_RECIPIENT_HMAC_KEY:-}
+      OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION: ${OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION:-}
       COMPANY_LEGAL_NAME: ${COMPANY_LEGAL_NAME:-}
       COMPANY_POSTAL_ADDRESS: ${COMPANY_POSTAL_ADDRESS:-}
       # Payment provider. Same sandbox-only contract as docker-compose.yml:

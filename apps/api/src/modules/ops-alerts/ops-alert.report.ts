@@ -1,7 +1,9 @@
 import {
   OpsAlertChannel,
   OpsAlertDeliveryStatus,
+  OpsAlertEmailRouting,
   OpsAlertNoticeKind,
+  OpsAlertRecipientStatus,
   OpsAlertSeverity,
   OpsAlertSource,
   OpsAlertState,
@@ -12,15 +14,22 @@ import { readOpsAlertCron } from '../../common/scheduler-cron';
 import type { HealthStatus } from '../system-health/system-health.rules';
 import { OpsAlertChannelStatus, opsAlertChannelStatus } from './ops-alert.config';
 import { EngineReason, OPS_ALERT_ENGINE_STATE_ID, evaluateEngine } from './ops-alert.rules';
+import { OPS_ALERT_ROUTING_ID } from './ops-alert-recipient.constants';
 
 /**
  * OBS-ALERT-001 — the "Operasyon alarmları" block of the system health report.
  *
  * Read-only, and an allow-list: the alert's key, codes, counts and times, and
- * per notice the channel, state and attempt count. Never a recipient, a chat
- * id, a token or a message. E-mail alerts are left out entirely — absent,
- * not filtered after reading — for a caller without NOTIFICATION_LOGS_READ,
- * the same split the e-mail section has.
+ * per notice the channel, state and attempt count. Never a recipient's
+ * address (OBS-ALERT-002: an e-mail notice names its managed recipient by id
+ * and label only), a chat id, a token or a message. E-mail alerts are left
+ * out entirely — absent, not filtered after reading — for a caller without
+ * NOTIFICATION_LOGS_READ, the same split the e-mail section has.
+ *
+ * OBS-ALERT-002: who the managed recipients are — a delivery's recipient id
+ * and label, and the live recipient count — is OPS_ALERT_RECIPIENTS_READ
+ * data. Without it the fields are not selected at all and answer null (the
+ * keys stay, so the response shape is one shape for every caller).
  *
  * The engine row answers whether the evaluator itself runs: its last
  * successful evaluation, judged by the scheduler screen's missed-tick rule.
@@ -42,6 +51,25 @@ export type OpsAlertDeliveryView = {
   attemptCount: number;
   sentAt: string | null;
   errorCode: string | null;
+  /**
+   * OBS-ALERT-002: the managed recipient this e-mail is bound to; null for
+   * Telegram and OPS_ALERT_EMAIL rows, and for every row when the caller
+   * lacks OPS_ALERT_RECIPIENTS_READ.
+   */
+  recipientId: string | null;
+  /** That recipient's label — never its address, masked or not. Null under the same rules as recipientId. */
+  recipientLabel: string | null;
+};
+
+/**
+ * OBS-ALERT-002: which e-mail routing is in force and how many managed
+ * recipients are live (not DELETED). Both null when the report could not be
+ * read (QUERY_FAILED); `managedRecipients` is also null for a caller without
+ * OPS_ALERT_RECIPIENTS_READ.
+ */
+export type OpsAlertChannelsView = OpsAlertChannelStatus & {
+  emailRouting: OpsAlertEmailRouting | null;
+  managedRecipients: number | null;
 };
 
 export type OpsAlertView = {
@@ -73,12 +101,22 @@ export type OpsAlertsReport = {
     /** DATABASE_ERROR | APPLICATION_ERROR — never a class name or message. */
     lastErrorType: string | null;
   };
-  channels: OpsAlertChannelStatus;
+  channels: OpsAlertChannelsView;
   open: OpsAlertView[];
   recentlyResolved: OpsAlertView[];
 };
 
-const alertSelect = Prisma.validator<Prisma.OpsAlertSelect>()({
+const deliverySelect = {
+  kind: true,
+  sequence: true,
+  channel: true,
+  status: true,
+  attemptCount: true,
+  sentAt: true,
+  errorCode: true,
+} as const;
+
+const alertBaseSelect = {
   ref: true,
   source: true,
   subjectKey: true,
@@ -90,11 +128,20 @@ const alertSelect = Prisma.validator<Prisma.OpsAlertSelect>()({
   occurrenceCount: true,
   resolvedAt: true,
   resolution: true,
-  deliveries: {
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    select: { kind: true, sequence: true, channel: true, status: true, attemptCount: true, sentAt: true, errorCode: true },
-  },
-});
+} as const;
+
+/** The recipient link is read only for an OPS_ALERT_RECIPIENTS_READ holder; otherwise it is never selected. */
+function alertSelect(includeRecipients: boolean): Prisma.OpsAlertSelect {
+  return {
+    ...alertBaseSelect,
+    deliveries: {
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: includeRecipients
+        ? { ...deliverySelect, recipientId: true, recipient: { select: { label: true } } }
+        : deliverySelect,
+    },
+  };
+}
 
 type AlertRow = {
   ref: string;
@@ -116,6 +163,8 @@ type AlertRow = {
     attemptCount: number;
     sentAt: Date | null;
     errorCode: string | null;
+    recipientId?: string | null;
+    recipient?: { label: string } | null;
   }>;
 };
 
@@ -140,17 +189,19 @@ function view(row: AlertRow): OpsAlertView {
       attemptCount: delivery.attemptCount,
       sentAt: delivery.sentAt?.toISOString() ?? null,
       errorCode: delivery.errorCode,
+      recipientId: delivery.recipientId ?? null,
+      recipientLabel: delivery.recipient?.label ?? null,
     })),
   };
 }
 
 export async function readOpsAlertsReport(
-  prisma: Pick<PrismaClient, 'opsAlert' | 'opsAlertEngineState'>,
-  options: { includeEmail: boolean },
+  prisma: Pick<PrismaClient, 'opsAlert' | 'opsAlertEngineState' | 'opsAlertRoutingSettings' | 'opsAlertRecipient'>,
+  options: { includeEmail: boolean; includeRecipients: boolean },
   now: Date = new Date(),
 ): Promise<OpsAlertsReport> {
   const sources = options.includeEmail ? [OpsAlertSource.SCHEDULER, OpsAlertSource.EMAIL] : [OpsAlertSource.SCHEDULER];
-  const [state, open, resolved] = await Promise.all([
+  const [state, open, resolved, routing, managedRecipients] = await Promise.all([
     prisma.opsAlertEngineState.findUnique({
       where: { id: OPS_ALERT_ENGINE_STATE_ID },
       select: { lastStartedAt: true, lastSucceededAt: true, lastFailedAt: true, lastErrorType: true },
@@ -159,8 +210,8 @@ export async function readOpsAlertsReport(
       where: { state: OpsAlertState.OPEN, source: { in: sources } },
       orderBy: [{ lastSeenAt: 'desc' }, { id: 'desc' }],
       take: ALERT_LIST_LIMIT,
-      select: alertSelect,
-    }),
+      select: alertSelect(options.includeRecipients),
+    }) as Promise<AlertRow[]>,
     prisma.opsAlert.findMany({
       where: {
         state: OpsAlertState.RESOLVED,
@@ -169,8 +220,12 @@ export async function readOpsAlertsReport(
       },
       orderBy: [{ resolvedAt: 'desc' }, { id: 'desc' }],
       take: ALERT_LIST_LIMIT,
-      select: alertSelect,
-    }),
+      select: alertSelect(options.includeRecipients),
+    }) as Promise<AlertRow[]>,
+    prisma.opsAlertRoutingSettings.findUnique({ where: { id: OPS_ALERT_ROUTING_ID }, select: { emailRouting: true } }),
+    options.includeRecipients
+      ? prisma.opsAlertRecipient.count({ where: { status: { not: OpsAlertRecipientStatus.DELETED } } })
+      : null,
   ]);
 
   const cron = readOpsAlertCron();
@@ -187,7 +242,11 @@ export async function readOpsAlertsReport(
       lastFailedAt: state?.lastFailedAt?.toISOString() ?? null,
       lastErrorType: state?.lastErrorType ?? null,
     },
-    channels: opsAlertChannelStatus(),
+    channels: {
+      ...opsAlertChannelStatus(),
+      emailRouting: routing?.emailRouting ?? OpsAlertEmailRouting.ENV_LEGACY,
+      managedRecipients,
+    },
     open: open.map(view),
     recentlyResolved: resolved.map(view),
   };

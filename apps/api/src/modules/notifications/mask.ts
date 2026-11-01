@@ -32,3 +32,10 @@ export function maskPhone(value: string): string {
 
   return `${prefix} ${'*'.repeat(hiddenCount)} ${tail}`;
 }
+
+/**
+ * What a log line says instead of a recipient when the message asks for
+ * `recipientLogPolicy: 'hidden'` (operations alerts): not the address, not the
+ * masked address, not a domain.
+ */
+export const RECIPIENT_HIDDEN_LABEL = 'alıcı gizli';

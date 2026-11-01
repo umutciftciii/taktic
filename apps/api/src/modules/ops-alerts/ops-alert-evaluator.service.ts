@@ -5,7 +5,9 @@ import {
   NotificationStatus,
   OpsAlertChannel,
   OpsAlertDeliveryStatus,
+  OpsAlertEmailRouting,
   OpsAlertNoticeKind,
+  OpsAlertRecipientStatus,
   OpsAlertSeverity,
   OpsAlertSource,
   OpsAlertState,
@@ -15,6 +17,7 @@ import { readOpsAlertCron } from '../../common/scheduler-cron';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationErrorCode, normalizeStoredErrorCode } from '../notifications/notification-errors';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { getAdminAppBaseUrl } from '../users/admin-invite.constants';
 import { OpsAlertConfig, readOpsAlertConfigSafely } from './ops-alert.config';
 import { OpsAlertDeliveryWorker } from './ops-alert-delivery.worker';
 import {
@@ -32,15 +35,23 @@ import {
   isAlertableEmailCode,
   mergeTemplates,
   newAlertRef,
-  noticeChannels,
+  noticeTargets,
   reminderDue,
   schedulerDecision,
+  snapshotNotice,
+  systemHealthUrl,
+  type NoticeAlert,
+  type NoticeRecipient,
+  type NoticeTarget,
 } from './ops-alert.rules';
+import { OPS_ALERT_ROUTING_ID } from './ops-alert-recipient.constants';
 
 type Tx = Prisma.TransactionClient;
 
 type OpenAlert = {
   id: string;
+  ref: string;
+  firstSeenAt: Date;
   fingerprint: string;
   source: OpsAlertSource;
   subjectKey: string;
@@ -55,6 +66,8 @@ type OpenAlert = {
 
 const openAlertSelect = {
   id: true,
+  ref: true,
+  firstSeenAt: true,
   fingerprint: true,
   source: true,
   subjectKey: true,
@@ -105,6 +118,15 @@ export type EvaluationOutcome = 'EVALUATED' | 'BUSY' | 'FAILED';
  * `pg_try_advisory_xact_lock`, so a second evaluator (another instance, a
  * slow previous tick) finds the lock taken and does nothing. The partial
  * unique index on an OPEN fingerprint backs that up in the database itself.
+ *
+ * **Recipients (OBS-ALERT-002).** Right after the lock it reads the e-mail
+ * routing mode, and in MANAGED the ACTIVE recipients with their preferences;
+ * the whole evaluation routes by that one picture ({@link noticeTargets}). In
+ * ENV_LEGACY nothing else is read and every notice routes exactly as in
+ * OBS-ALERT-001. In MANAGED each e-mail notice becomes one row per recipient
+ * whose preference takes it, bound to that recipient by `recipientId` from
+ * the moment it is queued; a recovery goes only to recipients that have a
+ * SENT/SENDING row on the alert and are still ACTIVE with recovery on.
  *
  * Restarts lose nothing: every alert, notice and the cursor are rows, and the
  * next tick continues from them.
@@ -160,6 +182,7 @@ export class OpsAlertEvaluator {
             SELECT pg_try_advisory_xact_lock(${OPS_ALERT_ADVISORY_LOCK_KEY}::bigint) AS "locked"`;
           if (!lock?.locked) return 'BUSY' as const;
 
+          const routing = await readRouting(tx, config);
           const state = await tx.opsAlertEngineState.findUnique({
             where: { id: OPS_ALERT_ENGINE_STATE_ID },
             select: { emailCursor: true },
@@ -170,8 +193,8 @@ export class OpsAlertEvaluator {
             ),
           );
 
-          await this.applySchedulers(tx, jobs, open, config, now);
-          const emailCursor = await this.applyEmail(tx, state?.emailCursor ?? null, open, config, now);
+          await this.applySchedulers(tx, jobs, open, routing, now);
+          const emailCursor = await this.applyEmail(tx, state?.emailCursor ?? null, open, routing, now);
 
           await tx.opsAlertEngineState.update({
             where: { id: OPS_ALERT_ENGINE_STATE_ID },
@@ -205,7 +228,7 @@ export class OpsAlertEvaluator {
     tx: Tx,
     jobs: Awaited<ReturnType<SystemHealthService['readSchedulerFacts']>>['jobs'],
     open: Map<string, OpenAlert>,
-    config: OpsAlertConfig,
+    routing: RoutingContext,
     now: Date,
   ) {
     for (const job of jobs) {
@@ -217,20 +240,20 @@ export class OpsAlertEvaluator {
       if (decision.kind === 'NEUTRAL') {
         if (decision.resolveOverdue) {
           for (const alert of jobAlerts.filter((candidate) => candidate.condition === 'OVERDUE')) {
-            await this.resolve(tx, alert, 'RECOVERED', open, config, now);
+            await this.resolve(tx, alert, 'RECOVERED', open, routing, now);
           }
         }
         continue;
       }
       if (decision.kind === 'RESOLVE') {
-        for (const alert of jobAlerts) await this.resolve(tx, alert, decision.resolution, open, config, now);
+        for (const alert of jobAlerts) await this.resolve(tx, alert, decision.resolution, open, routing, now);
         continue;
       }
 
       // A different problem on the same job replaces the old one: the new
       // alert's OPENED says what is wrong now, and the old one closes quietly.
       for (const alert of jobAlerts.filter((candidate) => candidate.condition !== decision.condition)) {
-        await this.resolve(tx, alert, 'SUPERSEDED', open, config, now);
+        await this.resolve(tx, alert, 'SUPERSEDED', open, routing, now);
       }
       await this.observe(
         tx,
@@ -248,7 +271,7 @@ export class OpsAlertEvaluator {
           detail: { ...decision.detail, occurrenceKey: decision.occurrenceKey },
         },
         open,
-        config,
+        routing,
         now,
       );
     }
@@ -267,7 +290,7 @@ export class OpsAlertEvaluator {
     tx: Tx,
     cursor: Date | null,
     open: Map<string, OpenAlert>,
-    config: OpsAlertConfig,
+    routing: RoutingContext,
     now: Date,
   ): Promise<Date> {
     const since = cursor ?? new Date(now.getTime() - EMAIL_INITIAL_LOOKBACK_MS);
@@ -316,7 +339,7 @@ export class OpsAlertEvaluator {
             detail: { templates: [...entry.templates] },
           },
           open,
-          config,
+          routing,
           now,
         );
       }
@@ -336,7 +359,7 @@ export class OpsAlertEvaluator {
         select: { id: true },
       });
       if (emailRecovered(alert.lastSeenAt, now, sent !== null)) {
-        await this.resolve(tx, alert, 'RECOVERED', open, config, now);
+        await this.resolve(tx, alert, 'RECOVERED', open, routing, now);
       }
     }
     return nextCursor;
@@ -347,7 +370,7 @@ export class OpsAlertEvaluator {
   // ---------------------------------------------------------------------------
 
   /** Opens the alert for an observation, or carries it forward. */
-  private async observe(tx: Tx, seen: Observation, open: Map<string, OpenAlert>, config: OpsAlertConfig, now: Date) {
+  private async observe(tx: Tx, seen: Observation, open: Map<string, OpenAlert>, routing: RoutingContext, now: Date) {
     const fingerprint = alertFingerprint(seen.source, seen.subjectKey, seen.condition);
     const existing = open.get(fingerprint);
 
@@ -374,7 +397,14 @@ export class OpsAlertEvaluator {
         select: openAlertSelect,
       });
       open.set(fingerprint, created as OpenAlert);
-      await this.queue(tx, created.id, OpsAlertNoticeKind.OPENED, 0, noticeChannels(OpsAlertNoticeKind.OPENED, severity, config, new Set()), now);
+      await this.queue(
+        tx,
+        toNoticeAlert(created as OpenAlert),
+        OpsAlertNoticeKind.OPENED,
+        0,
+        noticeTargets(OpsAlertNoticeKind.OPENED, severity, { ...routing, told: NOBODY_TOLD }),
+        now,
+      );
       return;
     }
 
@@ -422,10 +452,10 @@ export class OpsAlertEvaluator {
     if (remind) {
       await this.queue(
         tx,
-        existing.id,
+        toNoticeAlert(updated as OpenAlert),
         OpsAlertNoticeKind.REMINDER,
         reminderCount,
-        noticeChannels(OpsAlertNoticeKind.REMINDER, severity, config, new Set()),
+        noticeTargets(OpsAlertNoticeKind.REMINDER, severity, { ...routing, told: NOBODY_TOLD }),
         now,
       );
     }
@@ -442,7 +472,7 @@ export class OpsAlertEvaluator {
     alert: OpenAlert,
     resolution: OpsAlertResolution,
     open: Map<string, OpenAlert>,
-    config: OpsAlertConfig,
+    routing: RoutingContext,
     now: Date,
   ) {
     const closed = await tx.opsAlert.updateMany({
@@ -452,6 +482,12 @@ export class OpsAlertEvaluator {
     open.delete(alert.fingerprint);
     if (closed.count === 0) return;
 
+    // Row locks: this update and a recipient delete's (shred, which holds only
+    // the recipient lock, not ours) can touch the same delivery rows in
+    // different orders. That is a rare 40P01 deadlock, not a hang: PostgreSQL
+    // aborts one side. If it is this tick, the whole evaluation rolls back
+    // (FAILED) and the next tick re-evaluates from scratch; if it is the
+    // delete, the admin gets an error and nothing was changed.
     await tx.opsAlertDelivery.updateMany({
       where: {
         alertId: alert.id,
@@ -461,38 +497,108 @@ export class OpsAlertEvaluator {
     });
     if (resolution === 'SUPERSEDED') return;
 
-    const told = await tx.opsAlertDelivery.findMany({
+    // Who heard about it: Telegram, the legacy address, and managed
+    // recipients by id. noticeTargets keeps only the recipients that are
+    // still ACTIVE (routing.recipients) and want recovery notices.
+    const toldRows = await tx.opsAlertDelivery.findMany({
       where: {
         alertId: alert.id,
         status: { in: [OpsAlertDeliveryStatus.SENT, OpsAlertDeliveryStatus.SENDING] },
       },
-      select: { channel: true },
-      distinct: ['channel'],
+      select: { channel: true, recipientId: true },
+      distinct: ['channel', 'recipientId'],
     });
-    const channels = noticeChannels(
-      OpsAlertNoticeKind.RESOLVED,
-      alert.severity,
-      config,
-      new Set<OpsAlertChannel>(told.map((row) => row.channel)),
-    );
-    await this.queue(tx, alert.id, OpsAlertNoticeKind.RESOLVED, 0, channels, now);
+    const told = {
+      telegram: toldRows.some((row) => row.channel === OpsAlertChannel.TELEGRAM),
+      legacyEmail: toldRows.some((row) => row.channel === OpsAlertChannel.EMAIL && row.recipientId === null),
+      recipientIds: new Set(toldRows.flatMap((row) => (row.recipientId === null ? [] : [row.recipientId]))),
+    };
+    const targets = noticeTargets(OpsAlertNoticeKind.RESOLVED, alert.severity, { ...routing, told });
+    await this.queue(tx, toNoticeAlert(alert, { resolvedAt: now, resolution }), OpsAlertNoticeKind.RESOLVED, 0, targets, now);
   }
 
-  /** One row per channel; the unique key makes a repeat a no-op. */
+  /**
+   * One row per target — per channel, and per recipient for managed e-mail;
+   * the two partial unique keys (legacy per channel, managed per recipient)
+   * make a repeat a no-op. Each row freezes the notice content as the alert
+   * is right now (OBS-ALERT-002), so a retry can never carry different
+   * content, and a managed row carries its `recipientId` from birth: the
+   * worker sends it to that recipient or to nobody.
+   */
   private async queue(
     tx: Tx,
-    alertId: string,
+    alert: NoticeAlert & { id: string },
     kind: OpsAlertNoticeKind,
     sequence: number,
-    channels: OpsAlertChannel[],
+    targets: NoticeTarget[],
     now: Date,
   ) {
-    if (channels.length === 0) return;
+    if (targets.length === 0) return;
+    const noticeSnapshot = snapshotNotice(kind, alert, systemHealthUrl(getAdminAppBaseUrl())) as unknown as Prisma.InputJsonValue;
     await tx.opsAlertDelivery.createMany({
-      data: channels.map((channel) => ({ alertId, kind, sequence, channel, nextAttemptAt: now })),
+      data: targets.map((target) => ({
+        alertId: alert.id,
+        kind,
+        sequence,
+        channel: target.channel === 'TELEGRAM' ? OpsAlertChannel.TELEGRAM : OpsAlertChannel.EMAIL,
+        recipientId: target.channel === 'EMAIL' ? target.recipientId : null,
+        nextAttemptAt: now,
+        noticeSnapshot,
+      })),
       skipDuplicates: true,
     });
   }
+}
+
+/** What one evaluation routes by, read once under the evaluator's lock. */
+type RoutingContext = {
+  config: OpsAlertConfig;
+  routing: OpsAlertEmailRouting;
+  /** ACTIVE managed recipients; not read in ENV_LEGACY, where none is consulted. */
+  recipients: NoticeRecipient[];
+};
+
+const NOBODY_TOLD = { telegram: false, legacyEmail: false, recipientIds: new Set<string>() } as const;
+
+/**
+ * The routing mode and, in MANAGED, the ACTIVE recipients with their
+ * preferences. Read inside the advisory-locked transaction, so a whole
+ * evaluation routes by one picture — the cutover (A7) takes the same lock. A
+ * missing routing row reads as ENV_LEGACY, the migration's own default.
+ */
+async function readRouting(tx: Tx, config: OpsAlertConfig): Promise<RoutingContext> {
+  const settings = await tx.opsAlertRoutingSettings.findUnique({
+    where: { id: OPS_ALERT_ROUTING_ID },
+    select: { emailRouting: true },
+  });
+  const routing = settings?.emailRouting ?? OpsAlertEmailRouting.ENV_LEGACY;
+  if (routing !== OpsAlertEmailRouting.MANAGED) return { config, routing, recipients: [] };
+  const recipients = await tx.opsAlertRecipient.findMany({
+    where: { status: OpsAlertRecipientStatus.ACTIVE, channel: OpsAlertChannel.EMAIL },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, notifyWarning: true, notifyCritical: true, notifyRecovery: true },
+  });
+  return { config, routing, recipients };
+}
+
+function toNoticeAlert(
+  alert: OpenAlert,
+  closed: { resolvedAt: Date; resolution: string } | null = null,
+): NoticeAlert & { id: string } {
+  return {
+    id: alert.id,
+    ref: alert.ref,
+    source: alert.source,
+    subjectKey: alert.subjectKey,
+    condition: alert.condition,
+    severity: alert.severity,
+    firstSeenAt: alert.firstSeenAt,
+    lastSeenAt: alert.lastSeenAt,
+    occurrenceCount: alert.occurrenceCount,
+    resolvedAt: closed?.resolvedAt ?? null,
+    resolution: closed?.resolution ?? null,
+    detail: alert.detail,
+  };
 }
 
 /**

@@ -27,6 +27,10 @@ export class SystemHealthController {
   @Get()
   @RequiresPermission(AdminPermission.OPERATIONS_SETTINGS_READ)
   report(@CurrentUser() user: AuthUser) {
-    return this.health.report({ includeEmail: mayEmbed(user, AdminPermission.NOTIFICATION_LOGS_READ) });
+    return this.health.report({
+      includeEmail: mayEmbed(user, AdminPermission.NOTIFICATION_LOGS_READ),
+      // OBS-ALERT-002: managed recipients' ids, labels and count.
+      includeRecipients: mayEmbed(user, AdminPermission.OPS_ALERT_RECIPIENTS_READ),
+    });
   }
 }

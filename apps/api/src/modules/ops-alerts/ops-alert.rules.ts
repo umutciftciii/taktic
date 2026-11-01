@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { OpsAlertChannel, OpsAlertNoticeKind, OpsAlertSeverity, OpsAlertSource } from '@prisma/client';
+import { OpsAlertChannel, OpsAlertEmailRouting, OpsAlertNoticeKind, OpsAlertSeverity, OpsAlertSource } from '@prisma/client';
 import { formatDateTime } from '../notifications/templates/format';
 import {
   NOTIFICATION_ERROR_CODES,
@@ -30,6 +30,8 @@ import type { OpsAlertConfig } from './ops-alert.config';
  *
  * Each notice becomes one delivery per channel it is routed to, and each
  * delivery retries on its own; a channel that is down never holds the other.
+ * With managed recipients (OBS-ALERT-002, routing MANAGED) e-mail is one
+ * delivery per recipient, bound to it for good ({@link noticeTargets}).
  */
 
 // ---------------------------------------------------------------------------
@@ -298,6 +300,78 @@ export function noticeChannels(
   return channels;
 }
 
+/**
+ * OBS-ALERT-002 — one delivery row a notice becomes. An e-mail target names
+ * the managed recipient it is bound to for good, or `null` for the
+ * OPS_ALERT_EMAIL address (ENV_LEGACY).
+ */
+export type NoticeTarget = { channel: 'TELEGRAM' } | { channel: 'EMAIL'; recipientId: string | null };
+
+/** A managed recipient as routing reads it: who, and what they asked for. */
+export type NoticeRecipient = { id: string; notifyWarning: boolean; notifyCritical: boolean; notifyRecovery: boolean };
+
+/**
+ * Whether a recipient's preferences take a notice of this kind and severity:
+ * OPENED/REMINDER by the severity, RESOLVED by recovery. Whether the recipient
+ * was told about the alert at all is a separate question ({@link noticeTargets}).
+ */
+export function recipientWants(
+  kind: OpsAlertNoticeKind,
+  severity: OpsAlertSeverity,
+  recipient: Omit<NoticeRecipient, 'id'>,
+): boolean {
+  if (kind === OpsAlertNoticeKind.RESOLVED) return recipient.notifyRecovery;
+  return severity === OpsAlertSeverity.CRITICAL ? recipient.notifyCritical : recipient.notifyWarning;
+}
+
+/**
+ * Where a notice goes, by the e-mail routing mode.
+ *
+ *   ENV_LEGACY   exactly {@link noticeChannels} — the OBS-ALERT-001 rule has
+ *                one home, and managed recipients are not consulted at all
+ *   MANAGED      Telegram as in OBS-ALERT-001; e-mail one row per ACTIVE
+ *                recipient (the caller passes only those) whose preference
+ *                takes the severity — and for RESOLVED, only a recipient that
+ *                was told about the alert and still wants recovery notices.
+ *                The env address is never a target in this mode.
+ *
+ * `told` is what the alert's SENT/SENDING rows say: Telegram, the legacy
+ * address, and the managed recipients by id.
+ */
+export function noticeTargets(
+  kind: OpsAlertNoticeKind,
+  severity: OpsAlertSeverity,
+  ctx: {
+    routing: OpsAlertEmailRouting;
+    config: Pick<OpsAlertConfig, 'email' | 'telegram'>;
+    recipients: ReadonlyArray<NoticeRecipient>;
+    told: { telegram: boolean; legacyEmail: boolean; recipientIds: ReadonlySet<string> };
+  },
+): NoticeTarget[] {
+  if (ctx.routing !== OpsAlertEmailRouting.MANAGED) {
+    const toldChannels = new Set<OpsAlertChannel>();
+    if (ctx.told.telegram) toldChannels.add(OpsAlertChannel.TELEGRAM);
+    if (ctx.told.legacyEmail) toldChannels.add(OpsAlertChannel.EMAIL);
+    return noticeChannels(kind, severity, ctx.config, toldChannels).map((channel) =>
+      channel === OpsAlertChannel.TELEGRAM ? { channel: 'TELEGRAM' as const } : { channel: 'EMAIL' as const, recipientId: null },
+    );
+  }
+
+  const targets: NoticeTarget[] = [];
+  // Telegram is not managed: its rule is noticeChannels' with no e-mail.
+  const telegramOnly = { email: null, telegram: ctx.config.telegram };
+  const toldTelegram = new Set<OpsAlertChannel>(ctx.told.telegram ? [OpsAlertChannel.TELEGRAM] : []);
+  if (noticeChannels(kind, severity, telegramOnly, toldTelegram).includes(OpsAlertChannel.TELEGRAM)) {
+    targets.push({ channel: 'TELEGRAM' });
+  }
+  for (const recipient of ctx.recipients) {
+    if (kind === OpsAlertNoticeKind.RESOLVED && !ctx.told.recipientIds.has(recipient.id)) continue;
+    if (!recipientWants(kind, severity, recipient)) continue;
+    targets.push({ channel: 'EMAIL', recipientId: recipient.id });
+  }
+  return targets;
+}
+
 // ---------------------------------------------------------------------------
 // The message
 // ---------------------------------------------------------------------------
@@ -411,6 +485,72 @@ export function composeNotice(kind: OpsAlertNoticeKind, alert: NoticeAlert, admi
     ...(adminUrl ? ['', adminUrl] : []),
   ];
   return { emailData, telegramText: lines.join('\n') };
+}
+
+/** The headline of a test notice (OBS-ALERT-002). */
+export const TEST_NOTICE_HEADLINE = 'Test bildirimi';
+
+/**
+ * OBS-ALERT-002 — the synthetic notice an operator sends to one recipient to
+ * prove the mailbox receives alert e-mail. Same `ops-alert` template, fixed
+ * text: no alert, no reference, no OPS id, the one system health link.
+ */
+export function composeTestNotice(adminUrl: string | null): ComposedNotice {
+  const summary = 'Bu bir test bildirimidir: operasyon alarmı e-postaları bu adrese ulaşıyor. Herhangi bir işlem gerekmiyor.';
+  const emailData: Record<string, string> = {
+    fullName: 'Operasyon Ekibi',
+    noticeKind: 'TEST',
+    severity: OpsAlertSeverity.WARNING,
+    severityLabel: 'Bilgi',
+    alertRef: '',
+    sourceLabel: 'Bildirim ayarları',
+    subjectLabel: TEST_NOTICE_HEADLINE,
+    conditionLabel: '',
+    summary,
+    firstSeenAt: '',
+    lastSeenAt: '',
+    occurrenceCount: '',
+    templates: '',
+    resolvedAt: '',
+    adminUrl: adminUrl ?? '',
+  };
+  const lines = [`TakTick operasyon · ${TEST_NOTICE_HEADLINE}`, summary, ...(adminUrl ? ['', adminUrl] : [])];
+  return { emailData, telegramText: lines.join('\n') };
+}
+
+/**
+ * OBS-ALERT-002 — what a delivery row carries from the moment it is queued.
+ * Content is fixed here so a retry under the same idempotency key can never
+ * carry different content (the provider would answer 409).
+ */
+export type NoticeSnapshot = {
+  v: 1;
+  /** The alert's severity when the row was queued; preference checks read this. */
+  severity: OpsAlertSeverity;
+  emailData: Record<string, string>;
+  telegramText: string;
+};
+
+export function snapshotNotice(kind: OpsAlertNoticeKind, alert: NoticeAlert, adminUrl: string | null): NoticeSnapshot {
+  const { emailData, telegramText } = composeNotice(kind, alert, adminUrl);
+  return { v: 1, severity: alert.severity, emailData, telegramText };
+}
+
+/** Strict reader: anything that is not exactly a v1 snapshot is null (compose live). */
+export function readNoticeSnapshot(value: unknown): NoticeSnapshot | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.v !== 1) return null;
+  if (candidate.severity !== OpsAlertSeverity.WARNING && candidate.severity !== OpsAlertSeverity.CRITICAL) return null;
+  if (typeof candidate.telegramText !== 'string') return null;
+  const data = candidate.emailData;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
+  const emailData: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(data)) {
+    if (typeof entry !== 'string') return null;
+    emailData[key] = entry;
+  }
+  return { v: 1, severity: candidate.severity, emailData, telegramText: candidate.telegramText };
 }
 
 // ---------------------------------------------------------------------------

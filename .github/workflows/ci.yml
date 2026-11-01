@@ -487,6 +487,11 @@ jobs:
           WEB_TRUST_PROXY=true
           PROMOTION_FINGERPRINT_KEY=ci-placeholder-fingerprint-key-not-a-secret-0001
           PROMOTION_FINGERPRINT_KEY_VERSION=1
+          # OBS-ALERT-002: base64 of the 32-byte text "ci-placeholder-recipient-key-001".
+          OPS_ALERT_RECIPIENT_ENC_KEYS=v1:Y2ktcGxhY2Vob2xkZXItcmVjaXBpZW50LWtleS0wMDE=
+          OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE=v1
+          OPS_ALERT_RECIPIENT_HMAC_KEY=ci-placeholder-recipient-hmac-key-not-a-secret-0001
+          OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION=1
           EMAIL_TRANSPORT=resend
           RESEND_API_KEY=re_ciPlaceholderNotARealKey
           EMAIL_FROM="Taktick <noreply@notify.taktick.com.tr>"

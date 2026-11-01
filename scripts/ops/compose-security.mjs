@@ -61,6 +61,9 @@ export const API_ONLY_VARIABLES = [
   'PROMOTION_FINGERPRINT_KEY',
   // OBS-ALERT-001: the operations alert bot's credential.
   'OPS_ALERT_TELEGRAM_BOT_TOKEN',
+  // OBS-ALERT-002: the recipient address encryption keyring and identity key.
+  'OPS_ALERT_RECIPIENT_ENC_KEYS',
+  'OPS_ALERT_RECIPIENT_HMAC_KEY',
 ];
 
 /** Commands that mean "development server" wherever they appear. */
