@@ -1697,11 +1697,6 @@ describe('every ConfirmDialog is guarded on the server', () => {
     // the Notification Settings tasks that add each dialog and action delete
     // its entry here, so the list shrinks to nothing by the end of the PR.
     const PENDING_OPS_ALERT_KEYS: readonly string[] = [
-      'ops-alert-recipient.pause',
-      'ops-alert-recipient.delete',
-      'ops-alert-recipient.replace',
-      'ops-alert-recipient.reveal',
-      'ops-alert-recipient.last-critical',
       'ops-alert-routing.cutover',
       'ops-alert-routing.revert',
       'ops-alert-routing.rewrap',

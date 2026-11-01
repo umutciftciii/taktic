@@ -25,6 +25,7 @@ import {
 } from '../../../lib/ops-alert-recipients';
 import { recipientStaleMessage } from '../../../lib/status-conflicts';
 import { RecipientForm } from './recipient-form';
+import { RecipientDeleteForm, RecipientReplaceForm, RecipientRowActions, type RecipientRowPermissions } from './recipient-row-actions';
 
 /**
  * Admin > Sistem sağlığı > Operasyon alarmları > Bildirim ayarları
@@ -37,10 +38,12 @@ import { RecipientForm } from './recipient-form';
  * recipient's choices; they are changed in the edit window, which sends the
  * row's version so a stale form is refused rather than overwriting.
  *
- * Where the next tasks attach: each row's actions cell (`ops-alert-recipient-
- * actions`) takes pause / delete / address replacement / reveal / test, and the
- * SUPER_ADMIN routing panel (cutover, revert, key operations) goes between the
- * status strip and the table.
+ * Each row's actions (`recipient-row-actions.tsx`): edit, test send, pause /
+ * resume, address replacement and delete (both in a window of their own,
+ * `?alici=<id>&islem=adres|sil`), and — for a SUPER_ADMIN only — reveal. The
+ * risky ones sit behind confirmation gates whose proofs the server actions
+ * verify. The SUPER_ADMIN routing panel (cutover, revert, key operations) goes
+ * between the status strip and the table.
  *
  * Not drawn on purpose: no loading.tsx above this page (the window is a query
  * parameter on it, and a loading boundary above a query window re-suspends the
@@ -52,12 +55,16 @@ export const dynamic = 'force-dynamic';
 const PATH = '/system-health/notification-settings';
 
 type NotificationSettingsPageProps = {
-  searchParams: Promise<{ alici?: string; ok?: string; error?: string; gecmisSayfa?: string }>;
+  searchParams: Promise<{ alici?: string; islem?: string; ok?: string; error?: string; gecmisSayfa?: string }>;
 };
 
 const OK_MESSAGES: Record<string, string> = {
   created: 'Alıcı eklendi. Bundan sonraki alarm e-postaları seçtiği bildirim türleri için ona da gider.',
   updated: 'Alıcı güncellendi.',
+  paused: 'Alıcı duraklatıldı. Yeniden etkinleştirilene kadar alarm e-postası almaz.',
+  resumed: 'Alıcı yeniden etkinleştirildi.',
+  deleted: 'Alıcı silindi.',
+  replaced: 'Adres değiştirildi: eski alıcı silindi, yeni adres aynı etiket ve tercihlerle eklendi.',
 };
 
 const COLUMNS: DataColumn[] = [
@@ -122,8 +129,17 @@ function LastError({ recipient }: { recipient: RecipientView }) {
 }
 
 export default async function NotificationSettingsPage({ searchParams }: NotificationSettingsPageProps) {
-  const { can } = await requireAdmin('OPS_ALERT_RECIPIENTS_READ');
+  const { can, isSuperAdmin } = await requireAdmin('OPS_ALERT_RECIPIENTS_READ');
   const canWrite = can('OPS_ALERT_RECIPIENTS_WRITE');
+  const rowCan: RecipientRowPermissions = {
+    write: canWrite,
+    remove: can('OPS_ALERT_RECIPIENTS_DELETE'),
+    // The API takes WRITE and DELETE together: a replacement deletes the old recipient.
+    replace: can('OPS_ALERT_RECIPIENTS_WRITE', 'OPS_ALERT_RECIPIENTS_DELETE'),
+    test: can('OPS_ALERT_RECIPIENTS_TEST'),
+    // Reserved to SUPER_ADMIN by the API (user decision 2); a role cannot grant it.
+    reveal: isSuperAdmin,
+  };
 
   const params = await searchParams;
   const okText = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
@@ -148,13 +164,20 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
     ),
   };
 
-  // The window is a query parameter: `yeni`, or the id of the recipient to edit.
-  const openKey = canWrite ? (params.alici ?? '').trim() : '';
-  const adding = openKey === 'yeni' && !atLimit;
+  // The window is a query parameter: `yeni`, or the id of a recipient — to
+  // edit it, or with `islem=sil` / `islem=adres` to delete it or replace its
+  // address. Each window is drawn only for the permission it needs.
+  const operation = params.islem === 'sil' ? 'delete' : params.islem === 'adres' ? 'replace' : 'edit';
+  const allowed = operation === 'delete' ? rowCan.remove : operation === 'replace' ? rowCan.replace : canWrite;
+  const openKey = allowed ? (params.alici ?? '').trim() : '';
+  const adding = operation === 'edit' && openKey === 'yeni' && !atLimit;
   // A typed or stale `?alici=yeni` at the limit: say why no window opened.
-  const addRefused = openKey === 'yeni' && atLimit;
-  const editing = openKey && openKey !== 'yeni' ? (recipients.find((recipient) => recipient.id === openKey) ?? null) : null;
-  const missing = openKey !== '' && openKey !== 'yeni' && !editing;
+  const addRefused = operation === 'edit' && openKey === 'yeni' && atLimit;
+  const target = openKey && openKey !== 'yeni' ? (recipients.find((recipient) => recipient.id === openKey) ?? null) : null;
+  const missing = openKey !== '' && openKey !== 'yeni' && !target;
+  const editing = operation === 'edit' ? target : null;
+  const deleting = operation === 'delete' ? target : null;
+  const replacing = operation === 'replace' ? target : null;
 
   return (
     <main className="system-health-page" data-testid="ops-alert-recipients-page">
@@ -269,16 +292,7 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
                   </td>
                   <td className="col-actions">
                     <div className="seo-row-actions" data-testid="ops-alert-recipient-actions">
-                      {canWrite ? (
-                        <Link
-                          className="btn btn-secondary btn-sm"
-                          href={`${PATH}?alici=${encodeURIComponent(recipient.id)}`}
-                          scroll={false}
-                          data-testid="ops-alert-recipient-edit"
-                        >
-                          Düzenle
-                        </Link>
-                      ) : null}
+                      <RecipientRowActions recipient={rowRecipient(recipient)} can={rowCan} />
                     </div>
                   </td>
                 </tr>
@@ -326,6 +340,28 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
           />
         </RouteDialog>
       ) : null}
+      {deleting ? (
+        <RouteDialog title="Alıcıyı sil" closeHref={PATH} testId="ops-alert-recipient-dialog">
+          <RecipientDeleteForm key={deleting.id} recipient={rowRecipient(deleting)} cancelHref={PATH} />
+        </RouteDialog>
+      ) : null}
+      {replacing ? (
+        <RouteDialog title="Adresi değiştir" closeHref={PATH} testId="ops-alert-recipient-dialog">
+          <RecipientReplaceForm key={replacing.id} recipient={rowRecipient(replacing)} cancelHref={PATH} />
+        </RouteDialog>
+      ) : null}
     </main>
   );
+}
+
+/** The fields a row action needs; never more than the list already shows. */
+function rowRecipient(recipient: RecipientView) {
+  return {
+    id: recipient.id,
+    version: recipient.version,
+    label: recipient.label,
+    status: recipient.status,
+    maskedAddress: recipient.maskedAddress,
+    isLastCritical: recipient.isLastCritical,
+  };
 }

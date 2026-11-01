@@ -11,7 +11,16 @@ class Redirect extends Error {
   }
 }
 
-vi.mock('next/headers', () => ({ cookies: async () => ({ toString: () => '' }) }));
+// A signed-in staff session, so the real confirmation proofs mint and verify;
+// `set` is watched so a reveal is shown never to write a cookie.
+const session = vi.hoisted(() => ({ cookieSet: vi.fn() }));
+vi.mock('next/headers', () => ({
+  cookies: async () => ({
+    toString: () => '',
+    get: (name: string) => (name === 'taktic_session' ? { name, value: 'staff-session' } : undefined),
+    set: session.cookieSet,
+  }),
+}));
 vi.mock('next/navigation', () => ({
   redirect: (url: string) => {
     throw new Redirect(url);
@@ -19,7 +28,8 @@ vi.mock('next/navigation', () => ({
   useRouter: () => ({ replace: () => undefined, push: () => undefined, refresh: () => undefined }),
   usePathname: () => '/system-health/notification-settings',
 }));
-vi.mock('next/cache', () => ({ revalidatePath: vi.fn() }));
+const cache = vi.hoisted(() => ({ revalidatePath: vi.fn() }));
+vi.mock('next/cache', () => ({ revalidatePath: cache.revalidatePath }));
 
 const api = vi.hoisted(() => ({
   held: new Set<string>(),
@@ -29,6 +39,12 @@ const api = vi.hoisted(() => ({
   getOpsAlertRecipientsAudit: vi.fn(),
   createOpsAlertRecipient: vi.fn(),
   updateOpsAlertRecipient: vi.fn(),
+  pauseOpsAlertRecipient: vi.fn(),
+  resumeOpsAlertRecipient: vi.fn(),
+  deleteOpsAlertRecipient: vi.fn(),
+  replaceOpsAlertRecipientAddress: vi.fn(),
+  revealOpsAlertRecipient: vi.fn(),
+  testOpsAlertRecipient: vi.fn(),
 }));
 
 vi.mock('../lib/api', async (importOriginal) => ({
@@ -43,6 +59,12 @@ vi.mock('../lib/api', async (importOriginal) => ({
   getOpsAlertRecipientsAudit: api.getOpsAlertRecipientsAudit,
   createOpsAlertRecipient: api.createOpsAlertRecipient,
   updateOpsAlertRecipient: api.updateOpsAlertRecipient,
+  pauseOpsAlertRecipient: api.pauseOpsAlertRecipient,
+  resumeOpsAlertRecipient: api.resumeOpsAlertRecipient,
+  deleteOpsAlertRecipient: api.deleteOpsAlertRecipient,
+  replaceOpsAlertRecipientAddress: api.replaceOpsAlertRecipientAddress,
+  revealOpsAlertRecipient: api.revealOpsAlertRecipient,
+  testOpsAlertRecipient: api.testOpsAlertRecipient,
 }));
 
 import { ApiError, adminPermissionLabel } from '../lib/api';
@@ -331,6 +353,14 @@ beforeEach(() => {
     api.getOpsAlertRecipientsAudit,
     api.createOpsAlertRecipient,
     api.updateOpsAlertRecipient,
+    api.pauseOpsAlertRecipient,
+    api.resumeOpsAlertRecipient,
+    api.deleteOpsAlertRecipient,
+    api.replaceOpsAlertRecipientAddress,
+    api.revealOpsAlertRecipient,
+    api.testOpsAlertRecipient,
+    session.cookieSet,
+    cache.revalidatePath,
   ]) {
     fn.mockReset();
   }
@@ -587,13 +617,13 @@ describe('recipient server actions', () => {
     await expect(send()).rejects.toMatchObject({ url: '/system-health/notification-settings?error=notFound' });
   });
 
-  it('edit leaves the last-critical refusal in the form, in the API words', async () => {
+  it('edit turns the last-critical refusal into the second, separate confirmation step', async () => {
     api.updateOpsAlertRecipient.mockRejectedValue(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
     const result = await settingsActions.updateRecipientAction(
       idle,
       form({ recipientId: 'rcp-1', version: '3', label: 'A', notifyWarning: 'false', notifyCritical: 'false', notifyRecovery: 'true' }),
     );
-    expect(result).toMatchObject({ kind: 'error', code: 'LAST_CRITICAL_CONFIRM_REQUIRED' });
+    expect(result).toMatchObject({ kind: 'last-critical' });
   });
 });
 
@@ -621,5 +651,519 @@ describe('audit entries of the recipient domain', () => {
     }
     const test = describeAuditEntry(auditEntry({ action: 'TEST_SENT', changes: [{ field: 'result', from: null, to: 'TIMEOUT' }] }));
     expect(renderToStaticMarkup(<>{test.note}</>)).toContain('Zaman aşımı.');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 PR-B (task B3) — row actions, confirmation gates and proofs
+// ---------------------------------------------------------------------------
+
+const { issueConfirmationProof } = await import('../lib/confirmation-proof-server');
+const { CONFIRMATION_PROOF_FIELD, CONFIRMATION_PROOF_REFUSAL_MESSAGE } = await import('../lib/confirmation-proof-keys');
+const { LastCriticalStep } = await import('../app/system-health/notification-settings/last-critical-step');
+const { LAST_CRITICAL_WARNING, LAST_CHANNEL_PROTECTED_TEXT, RECIPIENT_ACTION_IDLE } = await import(
+  '../app/system-health/notification-settings/recipient-action-state'
+);
+
+const DELETE = 'OPS_ALERT_RECIPIENTS_DELETE';
+const TEST = 'OPS_ALERT_RECIPIENTS_TEST';
+const REVEAL = 'OPS_ALERT_RECIPIENTS_REVEAL';
+const SETTINGS = '/system-health/notification-settings';
+const FULL_ADDRESS = 'oncall@example.test';
+
+/** The form as a submission sends it; each proof is one `__confirmationProof` value. */
+function submission(fields: Record<string, string>, proofs: Array<string | null> = []): FormData {
+  const data = new FormData();
+  for (const [key, value] of Object.entries(fields)) data.set(key, value);
+  for (const proof of proofs) if (proof) data.append(CONFIRMATION_PROOF_FIELD, proof);
+  return data;
+}
+
+async function settle(run: () => Promise<unknown>): Promise<{ redirect?: string; value?: unknown }> {
+  try {
+    return { value: await run() };
+  } catch (error) {
+    if (error instanceof Redirect) return { redirect: error.url };
+    throw error;
+  }
+}
+
+const mint = (key: Parameters<typeof issueConfirmationProof>[0]) => issueConfirmationProof(key);
+
+type GuardedCase = {
+  name: string;
+  /** Every proof this submission needs, in order. */
+  keys: Array<Parameters<typeof issueConfirmationProof>[0]>;
+  write: ReturnType<typeof vi.fn>;
+  run: (proofs: Array<string | null>) => Promise<unknown>;
+};
+
+const BASE = { recipientId: 'rcp-1', version: '3' };
+const PREFS_OFF = { label: 'Nöbetçi', notifyWarning: 'false', notifyCritical: 'false', notifyRecovery: 'true' };
+
+const GUARDED: GuardedCase[] = [
+  {
+    name: 'Duraklat',
+    keys: ['ops-alert-recipient.pause'],
+    write: api.pauseOpsAlertRecipient,
+    run: (proofs) => settingsActions.pauseRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE, proofs)),
+  },
+  {
+    name: 'Duraklat — son kritik alıcı onayıyla',
+    keys: ['ops-alert-recipient.pause', 'ops-alert-recipient.last-critical'],
+    write: api.pauseOpsAlertRecipient,
+    run: (proofs) =>
+      settingsActions.pauseRecipientAction(RECIPIENT_ACTION_IDLE, submission({ ...BASE, confirmLastCritical: 'true' }, proofs)),
+  },
+  {
+    name: 'Sil',
+    keys: ['ops-alert-recipient.delete'],
+    write: api.deleteOpsAlertRecipient,
+    run: (proofs) =>
+      settingsActions.deleteRecipientAction(RECIPIENT_ACTION_IDLE, submission({ ...BASE, reason: 'Ekipten ayrıldı' }, proofs)),
+  },
+  {
+    name: 'Sil — son kritik alıcı onayıyla',
+    keys: ['ops-alert-recipient.delete', 'ops-alert-recipient.last-critical'],
+    write: api.deleteOpsAlertRecipient,
+    run: (proofs) =>
+      settingsActions.deleteRecipientAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, reason: 'Ekipten ayrıldı', confirmLastCritical: 'true' }, proofs),
+      ),
+  },
+  {
+    name: 'Adresi değiştir',
+    keys: ['ops-alert-recipient.replace'],
+    write: api.replaceOpsAlertRecipientAddress,
+    run: (proofs) =>
+      settingsActions.replaceRecipientAddressAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, address: 'new@example.test', reason: 'Adres değişti' }, proofs),
+      ),
+  },
+  {
+    name: 'Göster',
+    keys: ['ops-alert-recipient.reveal'],
+    write: api.revealOpsAlertRecipient,
+    run: (proofs) => settingsActions.revealRecipientAction(submission({ recipientId: 'rcp-1' }, proofs)),
+  },
+  {
+    name: 'Düzenle — son kritik alıcının Kritik bildirimini kapatma onayıyla',
+    keys: ['ops-alert-recipient.last-critical'],
+    write: api.updateOpsAlertRecipient,
+    run: (proofs) =>
+      settingsActions.updateRecipientAction(
+        { kind: 'idle' },
+        submission({ ...BASE, ...PREFS_OFF, confirmLastCritical: 'true' }, proofs),
+      ),
+  },
+];
+
+function primeWrites() {
+  api.pauseOpsAlertRecipient.mockResolvedValue(recipient({ status: 'PAUSED' }));
+  api.deleteOpsAlertRecipient.mockResolvedValue(undefined);
+  api.replaceOpsAlertRecipientAddress.mockResolvedValue(recipient({ id: 'rcp-2' }));
+  api.revealOpsAlertRecipient.mockResolvedValue({ address: FULL_ADDRESS });
+  api.updateOpsAlertRecipient.mockResolvedValue(recipient());
+}
+
+describe('recipient actions refuse a submission without its confirmation proof, and write nothing', () => {
+  for (const testCase of GUARDED) {
+    describe(testCase.name, () => {
+      it('no proof (a click before hydration, JavaScript off) is refused', async () => {
+        primeWrites();
+        const result = await settle(() => testCase.run([]));
+        expect(JSON.stringify(result.value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+        expect(testCase.write).not.toHaveBeenCalled();
+      });
+
+      it('a made-up proof, a static value, or a proof for another confirmation is refused', async () => {
+        primeWrites();
+        for (const forged of ['yes', 'true', 'eyJrIjoieCJ9.Zm9yZ2Vk']) {
+          expect(JSON.stringify((await settle(() => testCase.run(testCase.keys.map(() => forged)))).value)).toContain(
+            CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+          );
+        }
+        const otherKey = testCase.keys.includes('ops-alert-recipient.replace') ? 'ops-alert-recipient.delete' : 'ops-alert-recipient.replace';
+        const wrong = await Promise.all(testCase.keys.map(() => mint(otherKey)));
+        expect(JSON.stringify((await settle(() => testCase.run(wrong))).value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+        expect(testCase.write).not.toHaveBeenCalled();
+      });
+
+      if (testCase.keys.length > 1) {
+        it('each of its proofs is needed: one alone is refused', async () => {
+          primeWrites();
+          for (const key of testCase.keys) {
+            expect(JSON.stringify((await settle(async () => testCase.run([await mint(key)]))).value)).toContain(
+              CONFIRMATION_PROOF_REFUSAL_MESSAGE,
+            );
+          }
+          expect(testCase.write).not.toHaveBeenCalled();
+        });
+      }
+
+      it('real proofs go through once; a replay of them is refused', async () => {
+        primeWrites();
+        const proofs = await Promise.all(testCase.keys.map((key) => mint(key)));
+        const first = await settle(() => testCase.run(proofs));
+        expect(JSON.stringify(first)).not.toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+        expect(testCase.write).toHaveBeenCalledTimes(1);
+        const replay = await settle(() => testCase.run(proofs));
+        expect(JSON.stringify(replay.value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+        expect(testCase.write).toHaveBeenCalledTimes(1);
+      });
+    });
+  }
+
+  it('resume and test send are plain submits: no proof asked', async () => {
+    api.resumeOpsAlertRecipient.mockResolvedValue(recipient());
+    expect((await settle(() => settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE)))).redirect).toBe(
+      `${SETTINGS}?ok=resumed`,
+    );
+    expect(api.resumeOpsAlertRecipient).toHaveBeenCalledWith('rcp-1', { version: 3 });
+    api.testOpsAlertRecipient.mockResolvedValue({ result: 'SENT' });
+    await settingsActions.testRecipientAction(RECIPIENT_ACTION_IDLE, submission({ recipientId: 'rcp-1' }));
+    expect(api.testOpsAlertRecipient).toHaveBeenCalledWith('rcp-1');
+  });
+});
+
+describe('the last critical recipient: two separate confirmations', () => {
+  it('pause: the first confirmed submit meets LAST_CRITICAL_CONFIRM_REQUIRED and asks again; the second carries confirmLastCritical', async () => {
+    api.pauseOpsAlertRecipient.mockRejectedValueOnce(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
+    const first = await settingsActions.pauseRecipientAction(
+      RECIPIENT_ACTION_IDLE,
+      submission(BASE, [await mint('ops-alert-recipient.pause')]),
+    );
+    expect(first).toMatchObject({ kind: 'last-critical' });
+    expect(api.pauseOpsAlertRecipient).toHaveBeenLastCalledWith('rcp-1', { version: 3 });
+
+    api.pauseOpsAlertRecipient.mockResolvedValueOnce(recipient({ status: 'PAUSED' }));
+    const second = await settle(async () =>
+      settingsActions.pauseRecipientAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, confirmLastCritical: 'true' }, [
+          await mint('ops-alert-recipient.pause'),
+          await mint('ops-alert-recipient.last-critical'),
+        ]),
+      ),
+    );
+    expect(second.redirect).toBe(`${SETTINGS}?ok=paused`);
+    expect(api.pauseOpsAlertRecipient).toHaveBeenLastCalledWith('rcp-1', { version: 3, confirmLastCritical: true });
+  });
+
+  it('delete: the reason travels with both steps', async () => {
+    api.deleteOpsAlertRecipient.mockRejectedValueOnce(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
+    const fields = { ...BASE, reason: '  Ekipten ayrıldı ' };
+    expect(
+      await settingsActions.deleteRecipientAction(RECIPIENT_ACTION_IDLE, submission(fields, [await mint('ops-alert-recipient.delete')])),
+    ).toMatchObject({ kind: 'last-critical' });
+    api.deleteOpsAlertRecipient.mockResolvedValueOnce(undefined);
+    const second = await settle(async () =>
+      settingsActions.deleteRecipientAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...fields, confirmLastCritical: 'true' }, [
+          await mint('ops-alert-recipient.delete'),
+          await mint('ops-alert-recipient.last-critical'),
+        ]),
+      ),
+    );
+    expect(second.redirect).toBe(`${SETTINGS}?ok=deleted`);
+    expect(api.deleteOpsAlertRecipient).toHaveBeenLastCalledWith('rcp-1', {
+      version: 3,
+      reason: 'Ekipten ayrıldı',
+      confirmLastCritical: true,
+    });
+  });
+
+  it('edit (Ruling B-3): turning Kritik off on the last critical recipient asks the same second confirmation', async () => {
+    api.updateOpsAlertRecipient.mockRejectedValueOnce(conflict(409, 'LAST_CRITICAL_CONFIRM_REQUIRED'));
+    expect(await settingsActions.updateRecipientAction({ kind: 'idle' }, submission({ ...BASE, ...PREFS_OFF }))).toMatchObject({
+      kind: 'last-critical',
+    });
+    api.updateOpsAlertRecipient.mockResolvedValueOnce(recipient());
+    const second = await settle(async () =>
+      settingsActions.updateRecipientAction(
+        { kind: 'idle' },
+        submission({ ...BASE, ...PREFS_OFF, confirmLastCritical: 'true' }, [await mint('ops-alert-recipient.last-critical')]),
+      ),
+    );
+    expect(second.redirect).toBe(`${SETTINGS}?ok=updated`);
+    expect(api.updateOpsAlertRecipient).toHaveBeenLastCalledWith('rcp-1', {
+      version: 3,
+      label: 'Nöbetçi',
+      notifyWarning: false,
+      notifyCritical: false,
+      notifyRecovery: true,
+      confirmLastCritical: true,
+    });
+  });
+
+  it('LAST_CHANNEL_PROTECTED is a dead end: the state offers no confirmation', async () => {
+    api.pauseOpsAlertRecipient.mockRejectedValue(conflict(409, 'LAST_CHANNEL_PROTECTED'));
+    expect(
+      await settingsActions.pauseRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE, [await mint('ops-alert-recipient.pause')])),
+    ).toMatchObject({ kind: 'last-channel' });
+    api.deleteOpsAlertRecipient.mockRejectedValue(conflict(409, 'LAST_CHANNEL_PROTECTED'));
+    expect(
+      await settingsActions.deleteRecipientAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, reason: 'Ekipten ayrıldı' }, [await mint('ops-alert-recipient.delete')]),
+      ),
+    ).toMatchObject({ kind: 'last-channel' });
+    api.updateOpsAlertRecipient.mockRejectedValue(conflict(409, 'LAST_CHANNEL_PROTECTED'));
+    expect(await settingsActions.updateRecipientAction({ kind: 'idle' }, submission({ ...BASE, ...PREFS_OFF }))).toMatchObject({
+      kind: 'last-channel',
+    });
+  });
+
+  it('the second step draws the warning, verbatim, with its own confirmation; the dead end draws none', () => {
+    const asked = renderToStaticMarkup(
+      <form>
+        <LastCriticalStep state={{ kind: 'last-critical', at: 1 }} leadProof="ops-alert-recipient.pause" confirmLabel="Yine de duraklat" testId="t" />
+      </form>,
+    );
+    expect(LAST_CRITICAL_WARNING).toBe(
+      'Bu, kritik bildirim alan son e-posta alıcısı. Telegram yapılandırılmış olsa da e-posta ile kritik bildirim gelmeyecek.',
+    );
+    expect(asked).toContain(LAST_CRITICAL_WARNING);
+    expect(asked).toContain('<input type="hidden" name="confirmLastCritical" value="true"/>');
+    expect(asked).toContain('data-testid="t-confirm"');
+    expect(asked).toContain('Yine de duraklat');
+
+    const blocked = renderToStaticMarkup(
+      <form>
+        <LastCriticalStep state={{ kind: 'last-channel', at: 1 }} leadProof="ops-alert-recipient.pause" confirmLabel="Yine de duraklat" testId="t" />
+      </form>,
+    );
+    expect(LAST_CHANNEL_PROTECTED_TEXT).toBe(
+      "Production'da son etkin bildirim kanalı kaldırılamaz. Önce başka bir kritik alıcı ekleyin.",
+    );
+    expect(blocked).toContain('Production&#x27;da son etkin bildirim kanalı kaldırılamaz. Önce başka bir kritik alıcı ekleyin.');
+    expect(blocked).not.toContain('confirmLastCritical');
+    expect(blocked).not.toContain('<button');
+    expect(blocked).not.toContain('<dialog');
+
+    expect(renderToStaticMarkup(<form><LastCriticalStep state={{ kind: 'idle' }} leadProof={null} confirmLabel="x" testId="t" /></form>)).toBe('<form></form>');
+  });
+});
+
+describe('recipient action refusals and results', () => {
+  it('delete and replace need a reason of at least 5 characters, checked before the proof is spent', async () => {
+    const proof = await mint('ops-alert-recipient.delete');
+    const short = await settingsActions.deleteRecipientAction(RECIPIENT_ACTION_IDLE, submission({ ...BASE, reason: ' abc ' }, [proof]));
+    expect(short).toMatchObject({ kind: 'error', field: 'reason' });
+    expect(api.deleteOpsAlertRecipient).not.toHaveBeenCalled();
+    api.deleteOpsAlertRecipient.mockResolvedValue(undefined);
+    // The same proof is still good: a refused reason did not use it up.
+    expect(
+      (await settle(() => settingsActions.deleteRecipientAction(RECIPIENT_ACTION_IDLE, submission({ ...BASE, reason: 'Ekipten ayrıldı' }, [proof])))).redirect,
+    ).toBe(`${SETTINGS}?ok=deleted`);
+
+    const replace = await settingsActions.replaceRecipientAddressAction(
+      RECIPIENT_ACTION_IDLE,
+      submission({ ...BASE, address: 'new@example.test', reason: 'x' }, [await mint('ops-alert-recipient.replace')]),
+    );
+    expect(replace).toMatchObject({ kind: 'error', field: 'reason' });
+    expect(api.replaceOpsAlertRecipientAddress).not.toHaveBeenCalled();
+  });
+
+  it('replace sends the new address and the trimmed reason, and never echoes the address in a refusal', async () => {
+    api.replaceOpsAlertRecipientAddress.mockResolvedValue(recipient({ id: 'rcp-2' }));
+    const done = await settle(async () =>
+      settingsActions.replaceRecipientAddressAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, address: ' new@example.test ', reason: ' Adres değişti ' }, [await mint('ops-alert-recipient.replace')]),
+      ),
+    );
+    expect(done.redirect).toBe(`${SETTINGS}?ok=replaced`);
+    expect(api.replaceOpsAlertRecipientAddress).toHaveBeenCalledWith('rcp-1', {
+      version: 3,
+      address: 'new@example.test',
+      reason: 'Adres değişti',
+    });
+
+    for (const code of ['RECIPIENT_ADDRESS_INVALID', 'RECIPIENT_DUPLICATE']) {
+      api.replaceOpsAlertRecipientAddress.mockRejectedValueOnce(conflict(code === 'RECIPIENT_DUPLICATE' ? 409 : 400, code));
+      const refused = await settingsActions.replaceRecipientAddressAction(
+        RECIPIENT_ACTION_IDLE,
+        submission({ ...BASE, address: 'new@example.test', reason: 'Adres değişti' }, [await mint('ops-alert-recipient.replace')]),
+      );
+      expect(refused).toMatchObject({ kind: 'error', field: 'address', code, message: RECIPIENT_ERROR_TEXT[code] });
+      expect(JSON.stringify(refused)).not.toContain('new@example.test');
+    }
+  });
+
+  it('a stale row (VERSION_CONFLICT, deleted, missing) goes to the page notice of status-conflicts.ts', async () => {
+    for (const [status, code, key] of [
+      [409, 'VERSION_CONFLICT', 'versionConflict'],
+      [409, 'RECIPIENT_DELETED', 'deleted'],
+      [404, 'RECIPIENT_NOT_FOUND', 'notFound'],
+    ] as const) {
+      api.pauseOpsAlertRecipient.mockRejectedValueOnce(conflict(status, code));
+      expect(
+        (await settle(async () => settingsActions.pauseRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE, [await mint('ops-alert-recipient.pause')])))).redirect,
+      ).toBe(`${SETTINGS}?error=${key}`);
+      api.resumeOpsAlertRecipient.mockRejectedValueOnce(conflict(status, code));
+      expect((await settle(() => settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE)))).redirect).toBe(
+        `${SETTINGS}?error=${key}`,
+      );
+    }
+  });
+
+  it('a refusal without a code is named by its HTTP status, not "Bilinmeyen hata"', async () => {
+    api.resumeOpsAlertRecipient.mockRejectedValueOnce(new ApiError(400, JSON.stringify({ statusCode: 400, message: ['version must be an integer'] })));
+    const invalid = await settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE));
+    expect(invalid).toMatchObject({ kind: 'error' });
+    expect(JSON.stringify(invalid)).toContain('kabul edilmedi');
+    api.resumeOpsAlertRecipient.mockRejectedValueOnce(new ApiError(403, JSON.stringify({ statusCode: 403, message: 'Forbidden' })));
+    expect(JSON.stringify(await settingsActions.resumeRecipientAction(RECIPIENT_ACTION_IDLE, submission(BASE)))).toContain('yetkiniz yok');
+    for (const result of [invalid]) expect(JSON.stringify(result)).not.toContain(RECIPIENT_ERROR_TEXT.UNKNOWN);
+  });
+
+  it('test send: the result code and its sentence; 429 says to wait', async () => {
+    api.testOpsAlertRecipient.mockResolvedValueOnce({ result: 'SENT' });
+    expect(await settingsActions.testRecipientAction(RECIPIENT_ACTION_IDLE, submission({ recipientId: 'rcp-1' }))).toMatchObject({
+      kind: 'tested',
+      ok: true,
+      result: 'SENT',
+    });
+    api.testOpsAlertRecipient.mockResolvedValueOnce({ result: 'TIMEOUT' });
+    const failed = await settingsActions.testRecipientAction(RECIPIENT_ACTION_IDLE, submission({ recipientId: 'rcp-1' }));
+    expect(failed).toMatchObject({ kind: 'tested', ok: false, result: 'TIMEOUT' });
+    expect(JSON.stringify(failed)).toContain('Zaman aşımı.');
+
+    api.testOpsAlertRecipient.mockRejectedValueOnce(conflict(429, 'TEST_RATE_LIMITED'));
+    expect(await settingsActions.testRecipientAction(RECIPIENT_ACTION_IDLE, submission({ recipientId: 'rcp-1' }))).toMatchObject({
+      kind: 'error',
+      code: 'TEST_RATE_LIMITED',
+      message: RECIPIENT_ERROR_TEXT.TEST_RATE_LIMITED,
+    });
+    api.testOpsAlertRecipient.mockRejectedValueOnce(new ApiError(429, ''));
+    expect(await settingsActions.testRecipientAction(RECIPIENT_ACTION_IDLE, submission({ recipientId: 'rcp-1' }))).toMatchObject({
+      kind: 'error',
+      message: RECIPIENT_ERROR_TEXT.TEST_RATE_LIMITED,
+    });
+  });
+});
+
+describe('reveal: the full address reaches only the dialog that asked for it', () => {
+  it('answers the address to the caller and writes it nowhere: no redirect, no cookie, no revalidation, no log', async () => {
+    api.revealOpsAlertRecipient.mockResolvedValue({ address: FULL_ADDRESS });
+    const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'info'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error')];
+    const result = await settle(async () =>
+      settingsActions.revealRecipientAction(submission({ recipientId: 'rcp-1' }, [await mint('ops-alert-recipient.reveal')])),
+    );
+    expect(result.redirect).toBeUndefined();
+    expect(result.value).toEqual({ kind: 'revealed', address: FULL_ADDRESS });
+    expect(session.cookieSet).not.toHaveBeenCalled();
+    expect(cache.revalidatePath).not.toHaveBeenCalled();
+    for (const spy of logs) {
+      expect(JSON.stringify(spy.mock.calls)).not.toContain(FULL_ADDRESS);
+      spy.mockRestore();
+    }
+  });
+
+  it('the client half keeps it in component memory only: no URL, storage, cookie or router write', () => {
+    const source = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/recipient-row-actions.tsx'), 'utf8');
+    for (const forbidden of [/localStorage/, /sessionStorage/, /document\.cookie/, /useSearchParams/, /router\.(push|replace)/, /history\./, /console\./]) {
+      expect(source).not.toMatch(forbidden);
+    }
+    // Closing the window drops it.
+    expect(source).toMatch(/setAddress\(null\)/);
+    const actionsSource = readFileSync(resolve(__dirname, '../app/system-health/notification-settings/actions.ts'), 'utf8');
+    expect(actionsSource).not.toMatch(/console\./);
+  });
+});
+
+describe('Bildirim Ayarları row actions', () => {
+  const rowActions = (markup: string) => {
+    const start = markup.indexOf('data-testid="ops-alert-recipient-actions"');
+    return markup.slice(start, markup.indexOf('</td>', start));
+  };
+
+  it('a read-only account gets no action at all', async () => {
+    load();
+    const cell = rowActions(await renderSettings());
+    for (const id of ['edit', 'pause', 'resume', 'test', 'replace-link', 'delete-link', 'reveal']) {
+      expect(cell).not.toContain(`ops-alert-recipient-${id}"`);
+    }
+  });
+
+  it('WRITE pauses an active recipient behind a ConfirmDialog and resumes a paused one directly', async () => {
+    api.held = new Set([READ, WRITE]);
+    load({ recipients: [recipient(), recipient({ id: 'rcp-2', status: 'PAUSED' })] });
+    const markup = await renderSettings();
+    expect(markup).toContain('data-testid="ops-alert-recipient-pause"');
+    expect(markup).toContain('data-testid="ops-alert-recipient-pause-dialog"');
+    expect(markup).toContain('data-testid="ops-alert-recipient-resume"');
+    expect(markup).not.toContain('data-testid="ops-alert-recipient-resume-dialog"');
+    expect(markup).not.toContain('ops-alert-recipient-delete-link"');
+    expect(markup).not.toContain('ops-alert-recipient-replace-link"');
+  });
+
+  it('TEST gives a test-send button without a confirmation', async () => {
+    api.held = new Set([READ, TEST]);
+    load();
+    const cell = rowActions(await renderSettings());
+    expect(cell).toContain('data-testid="ops-alert-recipient-test"');
+    expect(cell).not.toContain('ops-alert-recipient-test-dialog');
+  });
+
+  it('DELETE links to the delete window; replacing the address needs WRITE and DELETE', async () => {
+    api.held = new Set([READ, DELETE]);
+    load();
+    const deleteOnly = rowActions(await renderSettings());
+    expect(deleteOnly).toMatch(/href="[^"]*alici=rcp-1&amp;islem=sil"/);
+    expect(deleteOnly).not.toContain('islem=adres');
+    api.held = new Set([READ, WRITE, DELETE]);
+    expect(rowActions(await renderSettings())).toMatch(/href="[^"]*alici=rcp-1&amp;islem=adres"/);
+  });
+
+  it('"Göster" is drawn for SUPER_ADMIN only — an ADMIN holding OPS_ALERT_RECIPIENTS_REVEAL through a role gets none', async () => {
+    api.held = new Set([READ, WRITE, DELETE, TEST, REVEAL]);
+    load();
+    expect(await renderSettings()).not.toContain('ops-alert-recipient-reveal');
+    api.isSuperAdmin = true;
+    const superAdmin = await renderSettings();
+    expect(superAdmin).toContain('data-testid="ops-alert-recipient-reveal"');
+    expect(superAdmin).toContain('data-testid="ops-alert-recipient-reveal-dialog"');
+    // The page itself never holds the address: it is fetched only by the confirmed dialog.
+    expect(api.revealOpsAlertRecipient).not.toHaveBeenCalled();
+    expect(superAdmin).not.toContain(FULL_ADDRESS);
+  });
+
+  it('?islem=sil opens the delete window: a reason of 5+ characters and a confirmation; not without DELETE', async () => {
+    api.held = new Set([READ, DELETE]);
+    load({ recipients: [recipient({ isLastCritical: true })] });
+    const markup = await renderSettings({ alici: 'rcp-1', islem: 'sil' });
+    expect(markup).toContain('data-testid="ops-alert-recipient-delete-form"');
+    expect(markup).toMatch(/<textarea[^>]*name="reason"[^>]*minLength="5"|<textarea[^>]*minLength="5"[^>]*name="reason"/);
+    expect(markup).toContain('data-testid="ops-alert-recipient-delete-dialog"');
+    expect(markup).toContain('<input type="hidden" name="version" value="3"/>');
+    expect(markup).not.toContain('confirmLastCritical');
+    api.held = new Set([READ, WRITE]);
+    const noDelete = await renderSettings({ alici: 'rcp-1', islem: 'sil' });
+    expect(noDelete).not.toContain('ops-alert-recipient-delete-form');
+  });
+
+  it('?islem=adres opens the replace window with a new address and a reason; only with WRITE and DELETE', async () => {
+    api.held = new Set([READ, WRITE, DELETE]);
+    load();
+    const markup = await renderSettings({ alici: 'rcp-1', islem: 'adres' });
+    expect(markup).toContain('data-testid="ops-alert-recipient-replace-form"');
+    expect(markup).toContain('name="address"');
+    expect(markup).toContain('name="reason"');
+    expect(markup).toContain('data-testid="ops-alert-recipient-replace-dialog"');
+    expect(markup).toContain('o***@example.test');
+    api.held = new Set([READ, WRITE]);
+    expect(await renderSettings({ alici: 'rcp-1', islem: 'adres' })).not.toContain('ops-alert-recipient-replace-form');
+  });
+
+  it('says what each success did', async () => {
+    load();
+    for (const ok of ['paused', 'resumed', 'deleted', 'replaced']) {
+      expect(await renderSettings({ ok })).toContain('data-testid="ops-alert-recipients-ok"');
+    }
   });
 });

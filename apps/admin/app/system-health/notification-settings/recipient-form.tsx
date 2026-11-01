@@ -6,6 +6,7 @@ import { useFormStatus } from 'react-dom';
 import { Toggle } from '../../../components/toggle';
 import { RECIPIENT_LABEL_MAX_LENGTH } from '../../../lib/ops-alert-recipients';
 import { createRecipientAction, updateRecipientAction } from './actions';
+import { LastCriticalStep } from './last-critical-step';
 import { RECIPIENT_FORM_IDLE } from './recipient-form-state';
 
 /**
@@ -22,6 +23,11 @@ import { RECIPIENT_FORM_IDLE } from './recipient-form-state';
  *   URL, a cookie or storage.
  * - Every rule (limit, duplicate, address shape, the row's version) is the
  *   API's; its refusal comes back under the form.
+ * - Turning Kritik off on the last critical recipient (Ruling B-3) is refused
+ *   once with LAST_CRITICAL_CONFIRM_REQUIRED: the window then swaps its save
+ *   button for the separate last-critical confirmation, which resubmits with
+ *   `confirmLastCritical=true`. Switching Kritik back on drops that step again.
+ *   On production's last live channel only the reason is shown.
  */
 
 type Mode = { kind: 'create' } | { kind: 'edit'; recipientId: string; version: number; maskedAddress: string };
@@ -57,6 +63,9 @@ export function RecipientForm({
     notifyRecovery: defaults.notifyRecovery,
   });
   const error = state.kind === 'error' ? state : null;
+  // The second step is about Kritik being off; once it is back on, the save is ordinary again.
+  const step = mode.kind === 'edit' && !notify.notifyCritical ? state : RECIPIENT_FORM_IDLE;
+  const asking = step.kind === 'last-critical';
   const errorOn = (field: 'address' | 'label') => (error?.field === field ? error.message : null);
 
   return (
@@ -137,8 +146,10 @@ export function RecipientForm({
         </div>
       ) : null}
 
+      <LastCriticalStep state={step} leadProof={null} confirmLabel="Yine de kaydet" testId="ops-alert-form-last-critical" />
+
       <div className="form-actions">
-        <SubmitButton label={mode.kind === 'edit' ? 'Değişiklikleri kaydet' : 'Alıcıyı ekle'} />
+        {asking ? null : <SubmitButton label={mode.kind === 'edit' ? 'Değişiklikleri kaydet' : 'Alıcıyı ekle'} />}
         <Link className="btn btn-secondary" href={cancelHref} scroll={false}>
           Vazgeç
         </Link>
