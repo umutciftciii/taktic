@@ -30,6 +30,13 @@ export const RECIPIENT_AUDIT_FIELDS = [
   'maskedAddress',
 ] as const;
 
+/**
+ * Stored only by REWRAPPED / REHASHED: which key sealed the address, which
+ * version of the identity key hashed it. Metadata, never the ciphertext or
+ * the HMAC itself.
+ */
+export const ROTATION_AUDIT_FIELDS = ['keyId', 'hmacVersion'] as const;
+
 export type RecipientAuditField = (typeof RECIPIENT_AUDIT_FIELDS)[number];
 export type RecipientAuditSnapshot = {
   label: string;
@@ -67,6 +74,25 @@ export function changedRecipientFields(
   after: RecipientAuditSnapshot,
 ): RecipientAuditField[] {
   return RECIPIENT_AUDIT_FIELDS.filter((field) => before[field] !== after[field]);
+}
+
+/** One REWRAPPED / REHASHED row: `{ keyId }` or `{ hmacVersion }` on each side, nothing else. */
+export async function recordRotationAudit(
+  tx: Prisma.TransactionClient,
+  input:
+    | { recipientId: string; actorId: string; action: 'REWRAPPED'; before: { keyId: string }; after: { keyId: string } }
+    | { recipientId: string; actorId: string; action: 'REHASHED'; before: { hmacVersion: number }; after: { hmacVersion: number } },
+): Promise<void> {
+  await tx.opsAlertRecipientAuditLog.create({
+    data: {
+      recipientId: input.recipientId,
+      actorId: input.actorId,
+      action: input.action,
+      before: { ...input.before },
+      after: { ...input.after },
+    },
+    select: { id: true },
+  });
 }
 
 export async function recordRecipientAudit(
@@ -135,7 +161,7 @@ export async function readRecipientAudit(
     const before = readSide(row.before);
     const after = readSide(row.after);
     const changes: AuditChange[] = [];
-    for (const field of RECIPIENT_AUDIT_FIELDS) {
+    for (const field of [...RECIPIENT_AUDIT_FIELDS, ...ROTATION_AUDIT_FIELDS]) {
       if (!(field in before) && !(field in after)) continue;
       changes.push({
         field,

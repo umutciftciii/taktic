@@ -1,4 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { OpsAlertEmailRouting, OpsAlertRecipientStatus, UserRole } from '@prisma/client';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AuthUser } from '../src/modules/auth/auth.types';
+import { OPERATIONS_SETTINGS_ID } from '../src/modules/operations-settings/operations-settings.service';
+import { DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS } from '../src/modules/offers/refund-policy';
+import { OpsAlertEvaluator } from '../src/modules/ops-alerts/ops-alert-evaluator.service';
+import { OpsAlertKeyRotationService } from '../src/modules/ops-alerts/ops-alert-key-rotation.service';
+import { DuplicateRecipientError, OpsAlertRecipientsService } from '../src/modules/ops-alerts/ops-alert-recipients.service';
+import { OpsAlertRoutingService } from '../src/modules/ops-alerts/ops-alert-routing.service';
+import { TelegramAlertPort } from '../src/modules/ops-alerts/telegram-alert.port';
+import { SystemHealthService } from '../src/modules/system-health/system-health.service';
+import { createTestApp, createUser, resetDatabase, type TestContext } from './harness';
 import {
   DEVELOPMENT_RECIPIENT_ENC_KEYS,
   DEVELOPMENT_RECIPIENT_HMAC_KEY,
@@ -259,5 +270,181 @@ describe('recipient crypto configuration', () => {
 
   it('assertOpsAlertRecipientCryptoConfig passes in the test environment', () => {
     expect(() => assertOpsAlertRecipientCryptoConfig()).not.toThrow();
+  });
+});
+
+describe('OpsAlertKeyRotationService', () => {
+  let ctx: TestContext;
+  let actor: AuthUser;
+  const recipients = () => ctx.app.get(OpsAlertRecipientsService);
+  const rotation = () => ctx.app.get(OpsAlertKeyRotationService);
+  const prefs = { notifyWarning: true, notifyCritical: true, notifyRecovery: false };
+
+  /** Selects the keyring for what follows; the crypto config is resolved per call. */
+  function useKeys(env: { keys: string; active: string; hmacKey?: string; hmacVersion?: string }) {
+    vi.stubEnv('OPS_ALERT_RECIPIENT_ENC_KEYS', env.keys);
+    vi.stubEnv('OPS_ALERT_RECIPIENT_ENC_KEY_ACTIVE', env.active);
+    vi.stubEnv('OPS_ALERT_RECIPIENT_HMAC_KEY', env.hmacKey ?? HMAC_KEY);
+    vi.stubEnv('OPS_ALERT_RECIPIENT_HMAC_KEY_VERSION', env.hmacVersion ?? '1');
+  }
+  const V1 = { keys: `v1:${keyOf(1)}`, active: 'v1' };
+  const V1_V2 = { keys: `v1:${keyOf(1)},v2:${keyOf(2)}`, active: 'v2' };
+  const V2_ONLY = { keys: `v2:${keyOf(2)}`, active: 'v2' };
+
+  const add = (address: string) => recipients().create(actor, { address, label: 'Nöbetçi', ...prefs });
+  const row = (id: string) => ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id } });
+
+  beforeAll(async () => {
+    ctx = await createTestApp();
+  });
+  afterAll(async () => {
+    await ctx.app.close();
+  });
+  beforeEach(async () => {
+    await resetDatabase(ctx.prisma);
+    ctx.notifications.clear();
+    const user = await createUser(ctx.prisma, { role: UserRole.SUPER_ADMIN, name: 'Kök' });
+    actor = { id: user.id, email: user.email, phone: user.phone, name: user.name, role: user.role, isActive: true };
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('rewrap moves every live recipient to the active key and leaves deleted ones alone', async () => {
+    useKeys(V1);
+    const a = await add('a@example.test');
+    const b = await add('b@example.test');
+    const paused = await add('p@example.test');
+    const gone = await add('g@example.test');
+    await recipients().pause(actor, paused.id, { version: paused.version, confirmLastCritical: true });
+    await recipients().remove(actor, gone.id, { version: gone.version, reason: 'Ayrıldı', confirmLastCritical: true });
+    const goneBefore = await row(gone.id);
+    const nonceBefore = (await row(a.id)).addressNonce;
+
+    useKeys(V1_V2);
+    expect(await rotation().rewrap(actor)).toEqual({ rewrapped: 3, failed: 0 });
+
+    for (const [id, version] of [[a.id, 2], [b.id, 2], [paused.id, 3]] as const) {
+      const after = await row(id);
+      expect(after.addressKeyId).toBe('v2');
+      expect(after.version).toBe(version);
+      expect((await recipients().reveal(actor, id)).address).toBeTruthy();
+    }
+    expect((await recipients().reveal(actor, a.id)).address).toBe('a@example.test');
+    expect(Buffer.from((await row(a.id)).addressNonce!).equals(Buffer.from(nonceBefore!))).toBe(false);
+    expect(await row(gone.id)).toEqual(goneBefore);
+    expect((await row(paused.id)).status).toBe(OpsAlertRecipientStatus.PAUSED);
+
+    const audits = await ctx.prisma.opsAlertRecipientAuditLog.findMany({ where: { action: 'REWRAPPED' } });
+    expect(audits).toHaveLength(3);
+    expect(audits.every((entry) => JSON.stringify(entry.before) === '{"keyId":"v1"}' && JSON.stringify(entry.after) === '{"keyId":"v2"}')).toBe(true);
+
+    expect(await rotation().rewrap(actor)).toEqual({ rewrapped: 0, failed: 0 });
+  });
+
+  it('rewrap reports a recipient whose key is missing as failed and changes nothing for it', async () => {
+    useKeys(V1);
+    const stuck = await add('stuck@example.test');
+    useKeys(V1_V2);
+    const fine = await add('fine@example.test');
+    const other = await add('other@example.test');
+    const stuckBefore = await row(stuck.id);
+
+    useKeys(V2_ONLY);
+    expect(await rotation().rewrap(actor)).toEqual({ rewrapped: 0, failed: 1 });
+    expect(await row(stuck.id)).toEqual(stuckBefore);
+    expect((await row(fine.id)).version).toBe(1);
+    expect((await row(other.id)).addressKeyId).toBe('v2');
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'REWRAPPED' } })).toBe(0);
+  });
+
+  it('rehash updates hmac and version; dedupe still holds afterwards', async () => {
+    useKeys({ ...V1, hmacKey: HMAC_KEY, hmacVersion: '1' });
+    const a = await add('a@example.test');
+    const b = await add('b@example.test');
+    const before = await row(a.id);
+
+    useKeys({ ...V1, hmacKey: OTHER_HMAC_KEY, hmacVersion: '2' });
+    expect(await rotation().rehash(actor)).toEqual({ rehashed: 2, failed: 0 });
+
+    const current = resolveRecipientCryptoConfig();
+    const after = await row(a.id);
+    expect(after.addressHmacVersion).toBe(2);
+    expect(after.addressHmac).toBe(addressHmac(current, 'a@example.test').hmac);
+    expect(after.addressHmac).not.toBe(before.addressHmac);
+    expect(after.version).toBe(2);
+    expect((await row(b.id)).addressHmacVersion).toBe(2);
+    await expect(add('a@example.test')).rejects.toBeInstanceOf(DuplicateRecipientError);
+
+    const audits = await ctx.prisma.opsAlertRecipientAuditLog.findMany({ where: { action: 'REHASHED' } });
+    expect(audits).toHaveLength(2);
+    expect(audits.every((entry) => JSON.stringify(entry.before) === '{"hmacVersion":1}' && JSON.stringify(entry.after) === '{"hmacVersion":2}')).toBe(true);
+    expect(JSON.stringify(audits)).not.toContain(after.addressHmac!);
+    expect(await rotation().rehash(actor)).toEqual({ rehashed: 0, failed: 0 });
+  });
+
+  it('rehash counts a unique-index collision as failed and carries on', async () => {
+    useKeys({ ...V1, hmacKey: HMAC_KEY, hmacVersion: '1' });
+    const old = await add('same@example.test');
+    const other = await add('other@example.test');
+    useKeys({ ...V1, hmacKey: OTHER_HMAC_KEY, hmacVersion: '2' });
+    const twin = await add('same@example.test');
+
+    const result = await rotation().rehash(actor);
+    expect(result).toEqual({ rehashed: 1, failed: 1 });
+    expect((await row(old.id)).addressHmacVersion).toBe(1);
+    expect((await row(other.id)).addressHmacVersion).toBe(2);
+    expect((await row(twin.id)).addressHmacVersion).toBe(2);
+  });
+
+  it('state().keyIds reflects the distribution', async () => {
+    useKeys(V1);
+    await add('a@example.test');
+    await add('b@example.test');
+    useKeys(V1_V2);
+    await add('c@example.test');
+    const routing = ctx.app.get(OpsAlertRoutingService);
+    expect((await routing.state()).keyIds).toEqual({ v1: 2, v2: 1 });
+    await rotation().rewrap(actor);
+    expect((await routing.state()).keyIds).toEqual({ v2: 3 });
+  });
+
+  it('a managed delivery after rewrap still decrypts and sends to the same address', async () => {
+    useKeys(V1);
+    const target = await add('after-rewrap@example.test');
+    useKeys(V1_V2);
+    await rotation().rewrap(actor);
+    expect((await row(target.id)).addressKeyId).toBe('v2');
+
+    vi.spyOn(ctx.app.get(TelegramAlertPort), 'send').mockResolvedValue({ providerMessageId: 'tg-1' });
+    vi.stubEnv('OPS_ALERT_EMAIL', 'ops-alerts@example.test');
+    ctx.app.get(SystemHealthService).clearCache();
+    await ctx.prisma.opsAlertRoutingSettings.update({
+      where: { id: 'ops-alert-routing' },
+      data: { emailRouting: OpsAlertEmailRouting.MANAGED },
+    });
+    await ctx.prisma.operationsSettings.deleteMany();
+    await ctx.prisma.operationsSettings.create({
+      data: {
+        id: OPERATIONS_SETTINGS_ID,
+        unviewedOfferRefundWindowHours: DEFAULT_UNVIEWED_OFFER_REFUND_WINDOW_HOURS,
+        unviewedOfferRefundSchedulerEnabled: true,
+      },
+    });
+    const at = new Date(Date.now() - 5 * 60_000);
+    await ctx.prisma.schedulerRun.create({
+      data: {
+        jobKey: 'unviewed-offer-refund',
+        status: 'FAILED',
+        startedAt: at,
+        finishedAt: new Date(at.getTime() + 1000),
+        errorCode: 'PrismaClientKnownRequestError',
+      },
+    });
+
+    await ctx.app.get(OpsAlertEvaluator).evaluate();
+
+    expect(ctx.notifications.ofTemplate('ops-alert').map((mail) => mail.to)).toEqual(['after-rewrap@example.test']);
   });
 });

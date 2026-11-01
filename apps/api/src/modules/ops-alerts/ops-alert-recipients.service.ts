@@ -186,13 +186,12 @@ export function mapDatabaseError(error: unknown): unknown {
 
 @Injectable()
 export class OpsAlertRecipientsService {
-  private cryptoConfig: RecipientCryptoConfig | null = null;
-
   constructor(private readonly prisma: PrismaService) {}
 
   private crypto(): RecipientCryptoConfig {
-    this.cryptoConfig ??= resolveRecipientCryptoConfig();
-    return this.cryptoConfig;
+    // Resolved per call, like the worker and the rotation service: a rotated
+    // environment takes effect without a restart.
+    return resolveRecipientCryptoConfig();
   }
 
   /** Runs `work` in one transaction under the recipient lock, mapping the database's refusals. */
