@@ -110,11 +110,12 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
   (şifreli adres ve HMAC silinir). Düzelme yalnız o alarm için daha önce
   bilgilendirilmiş ve hâlâ ACTIVE alıcıya gider.
 - **Teslimat bağı:** yönetilen satır `recipientId` ile bir alıcıya kalıcı
-  bağlıdır; silinmiş/pasif/tercihi kapalı alıcıya bekleyen satır, worker ona
-  sıra geldiğinde `CANCELLED` olur (pasifleştirme ya da tercih kapatma anında
-  iptal etmez: worker o satıra ulaşmadan alıcı yeniden etkinleştirilir veya
-  tercih açılırsa bildirim teslim edilir), adresi çözülemeyen satır `DECRYPT_FAILED` ile `ABANDONED` olur —
-  hiçbiri başka bir adrese ya da `OPS_ALERT_EMAIL`'e düşmez. Bildirim içeriği
+  bağlıdır. Silme, alıcının bekleyen satırlarını hemen `CANCELLED` yapar.
+  Pasif ya da tercihi kapalı alıcının bekleyen satırı ise worker ona sıra
+  geldiğinde `CANCELLED` olur — pasifleştirme ve tercih kapatma anında iptal
+  etmez; worker o satıra ulaşmadan alıcı yeniden etkinleştirilir veya tercih
+  açılırsa bildirim teslim edilir. Adresi çözülemeyen satır `DECRYPT_FAILED`
+  ile `ABANDONED` olur — hiçbiri başka bir adrese ya da `OPS_ALERT_EMAIL`'e düşmez. Bildirim içeriği
   kuyruğa girerken satıra donar (`noticeSnapshot`); retry aynı içerik ve aynı
   `Idempotency-Key` ile gider.
 - **Gizlilik:** yanıtlarda adres maskelidir; tam adres ayrı yetki
