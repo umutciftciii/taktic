@@ -198,6 +198,20 @@ describe('OpsAlertRecipientsService', () => {
     const audit = await ctx.prisma.opsAlertRecipientAuditLog.findMany({ where: { action: 'ADDRESS_REPLACED' } });
     expect(audit).toHaveLength(2);
     expect(audit.map((a) => a.recipientId).sort()).toEqual([old.id, view.id].sort());
+    // The two rows name each other: the old one says what replaced it, the new one what it replaces.
+    const oldEntry = audit.find((a) => a.recipientId === old.id)!;
+    const newEntry = audit.find((a) => a.recipientId === view.id)!;
+    expect(oldEntry.after).toEqual({ status: 'DELETED', replacedBy: view.id });
+    expect(newEntry.after).toMatchObject({ replaces: old.id, status: 'ACTIVE' });
+
+    const replaced = async (recipientId: string) =>
+      (await service.auditPage(recipientId, {})).items.find((item) => item.action === 'ADDRESS_REPLACED')!;
+    expect((await replaced(old.id)).changes).toEqual(
+      expect.arrayContaining([{ field: 'replacedBy', from: null, to: view.id }]),
+    );
+    const newEntryView = await replaced(view.id);
+    expect(newEntryView.changes).toEqual(expect.arrayContaining([{ field: 'replaces', from: null, to: old.id }]));
+    expect(newEntryView.changes.some((change) => change.field === 'replacedBy')).toBe(false);
   });
 
   it('replaceAddress refuses an address that is already live and leaves the old one intact', async () => {

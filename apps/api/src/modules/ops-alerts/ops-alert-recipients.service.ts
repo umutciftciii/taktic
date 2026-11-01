@@ -364,11 +364,14 @@ export class OpsAlertRecipientsService {
     const normalized = normalizeAddress(input.address);
     return this.locked(async (tx) => {
       const old = await this.loadLive(tx, id, input.version);
+      // The new id is fixed first so the two audit rows can name each other.
+      const replacementId = newRowId();
       // The old recipient goes first: its slot and its HMAC are free for the
       // new one, so replacing a recipient at the limit, or by the very same
       // address, is not refused.
-      await this.shred(tx, actor, old, OpsAlertRecipientAuditAction.ADDRESS_REPLACED, input.reason);
+      await this.shred(tx, actor, old, OpsAlertRecipientAuditAction.ADDRESS_REPLACED, input.reason, { replacedBy: replacementId });
       const row = await this.insertRecipient(tx, actor, {
+        id: replacementId,
         normalized,
         label: old.label,
         notifyWarning: old.notifyWarning,
@@ -383,6 +386,7 @@ export class OpsAlertRecipientsService {
         before: null,
         after: recipientAuditSnapshot(row),
         reason: input.reason,
+        link: { replaces: old.id },
       });
       return (await this.toViews(tx, [row]))[0]!;
     });
@@ -623,6 +627,7 @@ export class OpsAlertRecipientsService {
     before: RecipientRow,
     action: OpsAlertRecipientAuditAction,
     reason: string,
+    link?: { replacedBy: string },
   ): Promise<void> {
     const result = await tx.opsAlertRecipient.updateMany({
       where: { id: before.id, version: before.version, status: { not: OpsAlertRecipientStatus.DELETED } },
@@ -657,6 +662,7 @@ export class OpsAlertRecipientsService {
       after: { ...recipientAuditSnapshot(before), status: OpsAlertRecipientStatus.DELETED },
       fields: ['status'],
       reason,
+      link,
     });
   }
 
@@ -665,6 +671,8 @@ export class OpsAlertRecipientsService {
     tx: Prisma.TransactionClient,
     actor: AuthUser,
     input: {
+      /** Pre-assigned by a caller that must name the row before it exists (replaceAddress); fresh otherwise. */
+      id?: string;
       normalized: string;
       label: string;
       notifyWarning: boolean;
@@ -677,7 +685,7 @@ export class OpsAlertRecipientsService {
     if (live >= OPS_ALERT_RECIPIENT_LIMIT) throw new RecipientLimitReachedError();
 
     const config = this.crypto();
-    const id = newRowId();
+    const id = input.id ?? newRowId();
     const sealed = encryptAddress(config, id, input.normalized);
     const identity = addressHmac(config, input.normalized);
     return tx.opsAlertRecipient.create({

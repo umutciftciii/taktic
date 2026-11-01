@@ -240,6 +240,21 @@ describe('OpsAlertRoutingService', () => {
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ recipientId: null, actorId: actor.id, before: { emailRouting: 'ENV_LEGACY' } });
       expect(audit[0]!.after).toEqual({ emailRouting: 'MANAGED', counts: preview.counts, told: 0 });
+
+      // The change log reads the switch: the mode on each side and the numbers, flattened.
+      const page = await recipients().auditPage(null, {});
+      const entry = page.items.find((item) => item.action === 'ROUTING_CUTOVER')!;
+      expect(entry.target).toBeNull();
+      expect(entry.changes).toEqual([
+        { field: 'emailRouting', from: 'ENV_LEGACY', to: 'MANAGED' },
+        { field: 'counts.PENDING.rebind', from: null, to: 1 },
+        { field: 'counts.PENDING.cancel', from: null, to: 0 },
+        { field: 'counts.FAILED.rebind', from: null, to: 0 },
+        { field: 'counts.FAILED.cancel', from: null, to: 0 },
+        { field: 'counts.SENDING.rebind', from: null, to: 0 },
+        { field: 'counts.SENDING.cancel', from: null, to: 0 },
+        { field: 'told', from: null, to: 0 },
+      ]);
     });
 
     it('a pending legacy row at cutover is delivered to the imported recipient exactly once', async () => {
@@ -606,6 +621,15 @@ describe('OpsAlertRoutingService', () => {
       expect(audit).toHaveLength(1);
       expect(audit[0]).toMatchObject({ recipientId: null, before: { emailRouting: 'MANAGED' } });
       expect(audit[0]!.after).toEqual({ emailRouting: 'ENV_LEGACY', counts: preview.counts, told: 0 });
+      const reverted = (await recipients().auditPage(null, {})).items.find((item) => item.action === 'ROUTING_REVERTED')!;
+      expect(reverted.changes).toEqual(
+        expect.arrayContaining([
+          { field: 'emailRouting', from: 'MANAGED', to: 'ENV_LEGACY' },
+          { field: 'counts.PENDING.rebind', from: null, to: 1 },
+          { field: 'counts.PENDING.cancel', from: null, to: 1 },
+          { field: 'told', from: null, to: 0 },
+        ]),
+      );
 
       await worker().deliverDue();
       expect(alertMails().map((mail) => mail.to)).toEqual([OPS_EMAIL]);
