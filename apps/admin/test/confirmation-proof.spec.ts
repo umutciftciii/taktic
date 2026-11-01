@@ -1693,13 +1693,7 @@ describe('every ConfirmDialog is guarded on the server', () => {
     const gates = gateFiles
       .flatMap((path) => [read(path), ...localImports(path).map((imported) => read(imported))])
       .join('\n');
-    // OBS-ALERT-002 PR-B: minted ahead of the screens that ask for them (task B1);
-    // the Notification Settings tasks that add each dialog and action delete
-    // its entry here, so the list shrinks to nothing by the end of the PR.
-    // Task B4 asked for the last three (the routing panel): nothing is pending.
-    const PENDING_OPS_ALERT_KEYS: readonly string[] = [];
     for (const key of CONFIRMATION_PROOF_KEYS) {
-      if (PENDING_OPS_ALERT_KEYS.includes(key)) continue;
       const asked = dialogs.includes(`proof="${key}"`) || gates.includes(`'${key}'`);
       expect(asked, `no dialog asks for ${key}`).toBe(true);
       expect(actions, `no action checks ${key}`).toContain(`'${key}'`);
