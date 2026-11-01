@@ -284,6 +284,7 @@ describe('OpsAlertRoutingService', () => {
         direction: 'CUTOVER',
         counts: counts({ PENDING: { rebind: 1, cancel: 0 } }),
         told: 0,
+        confirmRequired: false,
         blockers: [],
       });
       expect(preview.token).toMatch(/^[0-9a-f]{64}$/);
@@ -663,6 +664,7 @@ describe('OpsAlertRoutingService', () => {
         direction: 'REVERT',
         counts: counts({ PENDING: { rebind: 1, cancel: 1 } }),
         told: 0,
+        confirmRequired: true,
         blockers: [],
       });
 
@@ -709,7 +711,7 @@ describe('OpsAlertRoutingService', () => {
       expect(sent).toMatchObject({ recipientId: imported.id, status: 'SENT' });
 
       const preview = await routing().previewRevert();
-      expect(preview).toMatchObject({ counts: counts(), told: 1, blockers: [] });
+      expect(preview).toMatchObject({ counts: counts(), told: 1, confirmRequired: false, blockers: [] });
       await routing().applyRevert(actor, { token: preview.token, cancelUnmatched: false });
       expect(await deliveries({ id: sent!.id })).toMatchObject([{ recipientId: null, status: 'SENT' }]);
 
@@ -1064,7 +1066,7 @@ describe('OpsAlertRoutingService', () => {
       await twin(mine!, null, OpsAlertDeliveryStatus.SENT);
 
       const preview = await routing().previewRevert();
-      expect(preview).toMatchObject({ counts: counts(), inFlight: 1, collisions: 0, blockers: [] });
+      expect(preview).toMatchObject({ counts: counts(), inFlight: 1, collisions: 0, confirmRequired: false, blockers: [] });
       // The env address already has it: nothing of another recipient's is cancelled, no confirmation.
       await routing().applyRevert(actor, { token: preview.token, cancelUnmatched: false });
       expect(await deliveries({ id: mine!.id })).toMatchObject([
@@ -1100,8 +1102,13 @@ describe('OpsAlertRoutingService', () => {
       await inFlight(theirs.id);
 
       const preview = await routing().previewRevert();
-      expect(preview).toMatchObject({ counts: counts({ PENDING: { rebind: 1, cancel: 0 } }), inFlight: 1, blockers: [] });
-      // Its retry would be cancelled: that needs the operator's confirmation too.
+      expect(preview).toMatchObject({
+        counts: counts({ PENDING: { rebind: 1, cancel: 0 } }),
+        inFlight: 1,
+        confirmRequired: true,
+        blockers: [],
+      });
+      // Its retry would be cancelled: that needs the operator's confirmation too, and the preview says so.
       expect((await errorOf(routing().applyRevert(actor, { token: preview.token, cancelUnmatched: false }))).code).toBe(
         'CONFIRM_CANCEL_REQUIRED',
       );

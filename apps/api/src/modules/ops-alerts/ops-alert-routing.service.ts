@@ -86,7 +86,17 @@ import { resolveRecipientCryptoConfig } from './recipient-crypto.config';
  *             legacy, where it is)
  *
  * Partner rows are locked FOR UPDATE with the moving rows, so the worker
- * cannot claim either side between the plan and the writes.
+ * cannot claim either side between the plan and the writes. A row the worker
+ * has already claimed is moved by its link column only; the worker decides
+ * its route under the same row lock, on the recipient and mode it finds then.
+ *
+ * **Known limitation — "told" on a settled pair.** A SENT row that cannot
+ * move (its partner, CANCELLED/ABANDONED, holds the target key) keeps "told"
+ * on its own side: after a cutover the match is not told by a SENT legacy
+ * row, after a revert the env address is not told by the match's SENT row,
+ * so that alert's RESOLVED can skip the mailbox. Such pairs arise only from
+ * an env address change between switches or rows written by hand; the
+ * evaluator reads no recipient identity to bridge them, by design.
  *
  * **Previews bind the approval to the numbers.** A preview's token is an HMAC
  * (the recipient HMAC key) over the direction, the per-status counts, "told"
@@ -145,6 +155,12 @@ export type RoutingPreview = {
   inFlight: number;
   /** Notices held by ROUTING_COLLISION_PENDING: one per pair of rows the switch waits for. */
   collisions: number;
+  /**
+   * The apply must carry `cancelUnmatched: true` (revert only): it cancels
+   * pending rows, or leaves another recipient's in-flight row whose retry
+   * the worker will cancel. Always false for a cutover.
+   */
+  confirmRequired: boolean;
   blockers: RoutingBlocker[];
   token: string;
 };
@@ -282,12 +298,18 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function previewToken(plan: Pick<Plan, 'direction' | 'counts' | 'told' | 'inFlight' | 'collisions' | 'emailRouting'>): string {
+/** Revert only: what the operator confirms with `cancelUnmatched` — cancelled rows, or another recipient's in flight. */
+function confirmRequired(plan: Pick<Plan, 'direction' | 'cancelIds' | 'othersInFlight'>): boolean {
+  return plan.direction === 'REVERT' && (plan.cancelIds.length > 0 || plan.othersInFlight > 0);
+}
+
+function previewToken(plan: Plan): string {
   const body = canonicalJson({
     counts: plan.counts,
     told: plan.told,
     inFlight: plan.inFlight,
     collisions: plan.collisions,
+    confirmRequired: confirmRequired(plan),
     emailRouting: plan.emailRouting,
   });
   return createHmac('sha256', resolveRecipientCryptoConfig().hmacKey)
@@ -360,9 +382,7 @@ export class OpsAlertRoutingService {
       const plan = await this.planRevert(tx, true);
       this.approve(plan, input.token);
       // Another recipient's in-flight row is cancelled by the worker if it fails: the same confirmation.
-      if ((plan.cancelIds.length > 0 || plan.othersInFlight > 0) && input.cancelUnmatched !== true) {
-        throw new ConfirmCancelRequiredError();
-      }
+      if (confirmRequired(plan) && input.cancelUnmatched !== true) throw new ConfirmCancelRequiredError();
       await this.bind(tx, plan.rebindIds, null);
       await this.cancel(tx, plan.cancelIds, ROUTING_REVERTED_ERROR_CODE);
       return this.switchMode(tx, actor, plan, OpsAlertEmailRouting.ENV_LEGACY, OpsAlertRecipientAuditAction.ROUTING_REVERTED);
@@ -397,6 +417,7 @@ export class OpsAlertRoutingService {
       told: plan.told,
       inFlight: plan.inFlight,
       collisions: plan.collisions,
+      confirmRequired: confirmRequired(plan),
       blockers: plan.blockers,
       token: previewToken(plan),
     };
