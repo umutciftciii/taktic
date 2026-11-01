@@ -4,15 +4,17 @@ import {
   OpsAlertChannel,
   OpsAlertDeliveryStatus,
   OpsAlertEmailRouting,
+  OpsAlertNoticeKind,
   OpsAlertRecipientAuditAction,
   OpsAlertRecipientStatus,
+  OpsAlertSeverity,
   Prisma,
 } from '@prisma/client';
 import type { AuthUser } from '../auth/auth.types';
 import { PrismaService } from '../../prisma/prisma.service';
 import { readOpsAlertConfigSafely } from './ops-alert.config';
-import { OPS_ALERT_ADVISORY_LOCK_KEY } from './ops-alert.rules';
-import { LEGACY_AFTER_CUTOVER_ERROR_CODE } from './ops-alert-delivery.worker';
+import { OPS_ALERT_ADVISORY_LOCK_KEY, readNoticeSnapshot, recipientWants } from './ops-alert.rules';
+import { LEGACY_AFTER_CUTOVER_ERROR_CODE, PREFERENCE_OFF_ERROR_CODE } from './ops-alert-delivery.worker';
 import { OPS_ALERT_RECIPIENT_LOCK_KEY, OPS_ALERT_ROUTING_ID } from './ops-alert-recipient.constants';
 import { OpsAlertRecipientsService, type RecipientView } from './ops-alert-recipients.service';
 import { addressHmac, normalizeAddress } from './recipient-crypto';
@@ -36,8 +38,14 @@ import { resolveRecipientCryptoConfig } from './recipient-crypto.config';
  *             there is left to the worker, which binds it on a retry). When
  *             the recipient already has its own row
  *             for that notice, the legacy row is cancelled instead
- *             (LEGACY_AFTER_CUTOVER; a SENT one is left as it is). Pending
- *             legacy rows with no matching ACTIVE recipient block the cutover.
+ *             (LEGACY_AFTER_CUTOVER; a SENT one is left as it is). A pending
+ *             row the recipient's preferences do not take (the worker's own
+ *             rule: OPENED/REMINDER by the severity frozen in the snapshot,
+ *             else the alert's; RESOLVED by recovery) is bound and cancelled
+ *             (PREFERENCE_OFF) — the worker would cancel it on its next pass,
+ *             and the preview shows it as a cancel so preview == effect.
+ *             Pending legacy rows with no matching ACTIVE recipient block the
+ *             cutover.
  *   revert    rows of the recipient matching the env address (any status) are
  *             un-bound, so the env address keeps "told". Where a legacy row
  *             for that notice already exists, the pending managed row is
@@ -80,7 +88,10 @@ export type RoutingCounts = Record<PendingStatus, { rebind: number; cancel: numb
 export type RoutingPreview = {
   direction: RoutingDirection;
   counts: RoutingCounts;
-  /** SENT/SENDING rows whose "told" moves with the switch (cutover: OPEN alerts only). */
+  /**
+   * SENT rows whose "told" moves with the switch (cutover: OPEN alerts only).
+   * A SENDING row is in flight and is counted under `counts.SENDING`, not here.
+   */
   told: number;
   blockers: RoutingBlocker[];
   token: string;
@@ -136,6 +147,7 @@ export class RoutingBlockedError extends Error {
 
 type Client = Prisma.TransactionClient;
 type PlanRow = { id: string; status: OpsAlertDeliveryStatus; matched: boolean; collides: boolean; open: boolean };
+type CutoverRow = PlanRow & { kind: OpsAlertNoticeKind; noticeSnapshot: unknown; severity: OpsAlertSeverity };
 
 /** What one switch would do, row by row, and the numbers the operator approves. */
 type Plan = {
@@ -145,6 +157,8 @@ type Plan = {
   matchId: string | null;
   rebindIds: string[];
   cancelIds: string[];
+  /** Cutover only: rows bound to the match and cancelled PREFERENCE_OFF. Counted under `cancel`. */
+  preferenceOffIds: string[];
   counts: RoutingCounts;
   told: number;
   blockers: RoutingBlocker[];
@@ -229,8 +243,9 @@ export class OpsAlertRoutingService {
     return this.locked(async (tx) => {
       const plan = await this.planCutover(tx, true);
       this.approve(plan, input.token);
-      await this.bind(tx, plan.rebindIds, plan.matchId);
+      await this.bind(tx, [...plan.rebindIds, ...plan.preferenceOffIds], plan.matchId);
       await this.cancel(tx, plan.cancelIds, LEGACY_AFTER_CUTOVER_ERROR_CODE);
+      await this.cancel(tx, plan.preferenceOffIds, PREFERENCE_OFF_ERROR_CODE);
       return this.switchMode(tx, actor, plan, OpsAlertEmailRouting.MANAGED, OpsAlertRecipientAuditAction.ROUTING_CUTOVER);
     });
   }
@@ -304,9 +319,17 @@ export class OpsAlertRoutingService {
   private async planCutover(client: Client, lock: boolean): Promise<Plan> {
     const emailRouting = await this.mode(client);
     const matchId = await this.matchingRecipient(client, true);
+    // The match's preferences decide, like the worker, whether a row it takes over would be sent.
+    const prefs = matchId
+      ? await client.opsAlertRecipient.findUnique({
+          where: { id: matchId },
+          select: { notifyWarning: true, notifyCritical: true, notifyRecovery: true },
+        })
+      : null;
     // `collides`: the recipient already has its own row for this notice.
-    const rows = await client.$queryRaw<PlanRow[]>`
-      SELECT d."id", d."status", FALSE AS "matched", (a."state" = 'OPEN') AS "open",
+    const rows = await client.$queryRaw<CutoverRow[]>`
+      SELECT d."id", d."status", d."kind", d."noticeSnapshot", a."severity",
+        FALSE AS "matched", (a."state" = 'OPEN') AS "open",
         EXISTS (
           SELECT 1 FROM "OpsAlertDelivery" m
           WHERE m."alertId" = d."alertId" AND m."kind" = d."kind" AND m."sequence" = d."sequence"
@@ -325,6 +348,7 @@ export class OpsAlertRoutingService {
       matchId,
       rebindIds: [],
       cancelIds: [],
+      preferenceOffIds: [],
       counts: emptyCounts(),
       told: 0,
       blockers: [],
@@ -332,8 +356,10 @@ export class OpsAlertRoutingService {
     let unmatchedPending = 0;
     for (const row of rows) {
       const pending = isPending(row.status);
-      const carriesTold = row.status === OpsAlertDeliveryStatus.SENT || row.status === OpsAlertDeliveryStatus.SENDING;
-      if (carriesTold && !row.open) {
+      // SENT and in-flight SENDING rows are history the recipient was (being) told;
+      // on a resolved alert they are left alone.
+      const settledOrInFlight = row.status === OpsAlertDeliveryStatus.SENT || row.status === OpsAlertDeliveryStatus.SENDING;
+      if (settledOrInFlight && !row.open) {
         // A resolved alert's history is not rewritten. An unmatched SENDING row
         // there would still be cancelled by the worker on a retry, so it blocks.
         if (matchId === null && pending) unmatchedPending += 1;
@@ -351,10 +377,14 @@ export class OpsAlertRoutingService {
           plan.cancelIds.push(row.id);
         }
         // A SENT legacy row beside the recipient's own row stays as it is.
+      } else if (pending && prefs && !recipientWants(row.kind, readNoticeSnapshot(row.noticeSnapshot)?.severity ?? row.severity, prefs)) {
+        // The worker would cancel it on its next pass; the preview says so now.
+        plan.counts[row.status as PendingStatus].cancel += 1;
+        plan.preferenceOffIds.push(row.id);
       } else {
         plan.rebindIds.push(row.id);
         if (pending) plan.counts[row.status as PendingStatus].rebind += 1;
-        if (carriesTold) plan.told += 1;
+        if (row.status === OpsAlertDeliveryStatus.SENT) plan.told += 1;
       }
     }
 
@@ -391,6 +421,7 @@ export class OpsAlertRoutingService {
       matchId,
       rebindIds: [],
       cancelIds: [],
+      preferenceOffIds: [],
       counts: emptyCounts(),
       told: 0,
       blockers: [],

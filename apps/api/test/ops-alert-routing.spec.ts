@@ -275,12 +275,81 @@ describe('OpsAlertRoutingService', () => {
 
       const preview = await routing().previewCutover();
       expect(preview.counts).toEqual(counts({ SENDING: { rebind: 1, cancel: 0 } }));
-      expect(preview.told).toBe(1);
+      // An in-flight row is counted under SENDING, not as told: told is SENT only.
+      expect(preview.told).toBe(0);
       await routing().applyCutover(actor, { token: preview.token });
 
       expect(await deliveries({ id: legacy!.id })).toMatchObject([
         { recipientId: imported.id, status: 'SENDING', claimToken: 'worker-1', claimedAt, attemptCount: 1 },
       ]);
+    });
+
+    it('cutover counts a pending legacy row the matched recipient does not want as cancel, and cancels it PREFERENCE_OFF', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [legacy] = await deliveries({ channel: 'EMAIL' });
+      expect(legacy).toMatchObject({ recipientId: null, status: 'PENDING' });
+      const imported = await routing().importFromEnv(actor);
+      // The env address, now managed, takes critical and recovery notices only.
+      await ctx.prisma.opsAlertRecipient.update({ where: { id: imported.id }, data: { notifyWarning: false } });
+
+      const preview = await routing().previewCutover();
+      expect(preview).toMatchObject({ counts: counts({ PENDING: { rebind: 0, cancel: 1 } }), told: 0, blockers: [] });
+      await routing().applyCutover(actor, { token: preview.token });
+
+      expect(await deliveries({ id: legacy!.id })).toMatchObject([
+        { recipientId: imported.id, status: 'CANCELLED', errorCode: 'PREFERENCE_OFF', claimToken: null },
+      ]);
+      await worker().deliverDue();
+      expect(alertMails()).toEqual([]);
+    });
+
+    it('cutover reads the frozen severity and, for RESOLVED, the recovery preference', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [opened] = await deliveries({ channel: 'EMAIL' });
+      // Frozen as CRITICAL at queue time: the alert's live WARNING does not decide.
+      await ctx.prisma.opsAlertDelivery.update({
+        where: { id: opened!.id },
+        data: { noticeSnapshot: { ...(opened!.noticeSnapshot as object), severity: 'CRITICAL' } },
+      });
+      const resolved = await ctx.prisma.opsAlertDelivery.create({
+        data: {
+          alertId: opened!.alertId,
+          kind: OpsAlertNoticeKind.RESOLVED,
+          sequence: 0,
+          channel: OpsAlertChannel.EMAIL,
+          status: OpsAlertDeliveryStatus.FAILED,
+          nextAttemptAt: new Date(),
+        },
+      });
+      const imported = await routing().importFromEnv(actor);
+      await ctx.prisma.opsAlertRecipient.update({
+        where: { id: imported.id },
+        data: { notifyWarning: false, notifyCritical: true, notifyRecovery: false },
+      });
+
+      const preview = await routing().previewCutover();
+      expect(preview.counts).toEqual(counts({ PENDING: { rebind: 1, cancel: 0 }, FAILED: { rebind: 0, cancel: 1 } }));
+      await routing().applyCutover(actor, { token: preview.token });
+
+      expect(await deliveries({ id: opened!.id })).toMatchObject([{ recipientId: imported.id, status: 'PENDING' }]);
+      expect(await deliveries({ id: resolved.id })).toMatchObject([
+        { recipientId: imported.id, status: 'CANCELLED', errorCode: 'PREFERENCE_OFF' },
+      ]);
+    });
+
+    it('a preference change between preview and apply is COUNTS_CHANGED', async () => {
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const imported = await routing().importFromEnv(actor);
+      const preview = await routing().previewCutover();
+      expect(preview.counts).toEqual(counts({ PENDING: { rebind: 1, cancel: 0 } }));
+      await ctx.prisma.opsAlertRecipient.update({ where: { id: imported.id }, data: { notifyWarning: false } });
+
+      const error = await errorOf(routing().applyCutover(actor, { token: preview.token }));
+      expect(error.code).toBe('COUNTS_CHANGED');
+      expect(await mode()).toBe('ENV_LEGACY');
     });
 
     it('cutover carries told so a later RESOLVED reaches the imported recipient', async () => {
@@ -563,6 +632,22 @@ describe('OpsAlertRoutingService', () => {
       expect(await deliveries({ kind: OpsAlertNoticeKind.RESOLVED, channel: 'EMAIL' })).toMatchObject([
         { recipientId: null, status: 'SENT' },
       ]);
+    });
+
+    it('revert counts an in-flight matched row under SENDING, not as told', async () => {
+      const imported = await routing().importFromEnv(actor);
+      await cutover();
+      await warningAlert();
+      await evaluator().evaluateOnly();
+      const [mine] = await deliveries({ channel: 'EMAIL' });
+      await ctx.prisma.opsAlertDelivery.update({
+        where: { id: mine!.id },
+        data: { status: 'SENDING', claimToken: 'worker-1', claimedAt: new Date(), attemptCount: 1 },
+      });
+      expect(mine!.recipientId).toBe(imported.id);
+
+      const preview = await routing().previewRevert();
+      expect(preview).toMatchObject({ counts: counts({ SENDING: { rebind: 1, cancel: 0 } }), told: 0, blockers: [] });
     });
 
     it('revert does not collide with a legacy row for the same notice', async () => {
