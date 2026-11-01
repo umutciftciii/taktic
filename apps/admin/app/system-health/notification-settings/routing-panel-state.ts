@@ -18,11 +18,8 @@ export type RoutingSwitchState =
 
 export const ROUTING_SWITCH_IDLE: RoutingSwitchState = { kind: 'idle' };
 
-/** Import, rewrap and rehash: a refusal, or what a key operation did. */
-export type RoutingOpState =
-  | { kind: 'idle' }
-  | { kind: 'error'; message: string; code: string | null; at: number }
-  | { kind: 'done'; message: string; at: number };
+/** Import, rewrap and rehash: a refusal. A success redirects to the page notice. */
+export type RoutingOpState = { kind: 'idle' } | { kind: 'error'; message: string; code: string | null; at: number };
 
 export const ROUTING_OP_IDLE: RoutingOpState = { kind: 'idle' };
 

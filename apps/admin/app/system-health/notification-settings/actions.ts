@@ -55,7 +55,7 @@ import { ROUTING_COUNTS_CHANGED_TEXT, type RoutingOpState, type RoutingSwitchSta
  * send only the preview's token (and, for a revert, the operator's
  * `cancelUnmatched` tick) — never a number the client could choose; the API
  * recomputes the preview under its locks and answers COUNTS_CHANGED when it
- * moved. Rewrap and rehash verify the rewrap proof.
+ * moved. Rewrap and rehash each verify their own proof.
  *
  * Nothing here logs or returns an address — with one exception by design:
  * `revealRecipientAction` answers it to the dialog that asked, and nowhere
@@ -72,6 +72,7 @@ const LAST_CRITICAL: ConfirmationProofKey = 'ops-alert-recipient.last-critical';
 const CUTOVER: ConfirmationProofKey = 'ops-alert-routing.cutover';
 const REVERT: ConfirmationProofKey = 'ops-alert-routing.revert';
 const REWRAP: ConfirmationProofKey = 'ops-alert-routing.rewrap';
+const REHASH: ConfirmationProofKey = 'ops-alert-routing.rehash';
 
 function readString(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -450,35 +451,38 @@ export async function routingSwitchAction(_previous: RoutingSwitchState, formDat
   done(direction === 'CUTOVER' ? 'cutover' : 'reverted');
 }
 
-function rotationDone(message: string): RoutingOpState {
+/**
+ * A finished key operation ends on the page notice, like every other write:
+ * after a full success the page has one key id (or HMAC version) again and
+ * the key block that held the form is gone, so a form-local answer would never
+ * be seen. Only the two counts travel in the URL — never an address or an id.
+ */
+function rotationDone(ok: 'rewrapped' | 'rehashed', moved: number, failed: number): never {
   revalidatePath(PATH);
-  return { kind: 'done', message, at: Date.now() };
+  revalidatePath('/system-health');
+  redirect(`${PATH}?ok=${ok}&adet=${moved}&hata=${failed}`);
 }
 
 /** Re-encrypts every live recipient not on the active key; the answer is a count, never an address. */
 export async function rewrapRecipientsAction(_previous: RoutingOpState, formData: FormData): Promise<RoutingOpState> {
   if (!(await hasConfirmationProof(formData, REWRAP))) return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  let result: { rewrapped: number; failed: number };
   try {
-    const { rewrapped, failed } = await rewrapOpsAlertRecipients();
-    return rotationDone(
-      `${rewrapped} alıcının adresi etkin şifreleme anahtarına taşındı.` +
-        (failed > 0 ? ` ${failed} alıcı taşınamadı; anahtarları kontrol edip yeniden deneyin.` : ''),
-    );
+    result = await rewrapOpsAlertRecipients();
   } catch (error) {
     return routingError(error);
   }
+  rotationDone('rewrapped', result.rewrapped, result.failed);
 }
 
-/** Re-computes every live recipient's address digest with the current HMAC version (the same key operation proof). */
+/** Re-computes every live recipient's address digest with the current HMAC version. */
 export async function rehashRecipientsAction(_previous: RoutingOpState, formData: FormData): Promise<RoutingOpState> {
-  if (!(await hasConfirmationProof(formData, REWRAP))) return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  if (!(await hasConfirmationProof(formData, REHASH))) return routingRefused(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
+  let result: { rehashed: number; failed: number };
   try {
-    const { rehashed, failed } = await rehashOpsAlertRecipients();
-    return rotationDone(
-      `${rehashed} alıcının adres özeti güncel sürümle yenilendi.` +
-        (failed > 0 ? ` ${failed} alıcı yenilenemedi; anahtarları kontrol edip yeniden deneyin.` : ''),
-    );
+    result = await rehashOpsAlertRecipients();
   } catch (error) {
     return routingError(error);
   }
+  rotationDone('rehashed', result.rehashed, result.failed);
 }

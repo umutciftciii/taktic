@@ -58,7 +58,16 @@ export const dynamic = 'force-dynamic';
 const PATH = '/system-health/notification-settings';
 
 type NotificationSettingsPageProps = {
-  searchParams: Promise<{ alici?: string; islem?: string; ok?: string; error?: string; gecmisSayfa?: string }>;
+  searchParams: Promise<{
+    alici?: string;
+    islem?: string;
+    ok?: string;
+    error?: string;
+    gecmisSayfa?: string;
+    /** A key operation's counts (`?ok=rewrapped|rehashed`): how many moved, how many failed. */
+    adet?: string;
+    hata?: string;
+  }>;
 };
 
 const OK_MESSAGES: Record<string, string> = {
@@ -72,6 +81,32 @@ const OK_MESSAGES: Record<string, string> = {
   cutover: 'Yönlendirme yönetilen alıcılara geçirildi. Alarm e-postaları artık yalnız listedeki alıcılara gidiyor.',
   reverted: 'Yönlendirme OPS_ALERT_EMAIL adresine döndürüldü. Alarm e-postaları artık yalnız o adrese gidiyor.',
 };
+
+/** A count from the URL, or null for anything that is not a plain non-negative integer. */
+function readCount(value: string | undefined): number | null {
+  return value !== undefined && /^\d{1,6}$/.test(value) ? Number(value) : null;
+}
+
+/**
+ * What a rewrap or rehash did. It is a page notice rather than the form's own
+ * answer: after a full success the key block (and its form) is gone.
+ */
+function rotationText(ok: string, moved: number | null, failed: number | null): string | null {
+  if (ok !== 'rewrapped' && ok !== 'rehashed') return null;
+  const rewrap = ok === 'rewrapped';
+  const head =
+    moved === null
+      ? rewrap
+        ? 'Alıcı adresleri etkin şifreleme anahtarına taşındı.'
+        : 'Alıcıların adres özetleri güncel sürümle yenilendi.'
+      : rewrap
+        ? `${moved} alıcının adresi etkin şifreleme anahtarına taşındı.`
+        : `${moved} alıcının adres özeti güncel sürümle yenilendi.`;
+  if (!failed) return head;
+  return rewrap
+    ? `${head} ${failed} alıcı taşınamadı; anahtarları kontrol edip yeniden deneyin.`
+    : `${head} ${failed} alıcı yenilenemedi; anahtarları kontrol edip yeniden deneyin.`;
+}
 
 const COLUMNS: DataColumn[] = [
   { key: 'label', label: 'Etiket' },
@@ -148,7 +183,9 @@ export default async function NotificationSettingsPage({ searchParams }: Notific
   };
 
   const params = await searchParams;
-  const okText = params.ok ? (OK_MESSAGES[params.ok] ?? null) : null;
+  const okText = params.ok
+    ? (OK_MESSAGES[params.ok] ?? rotationText(params.ok, readCount(params.adet), readCount(params.hata)))
+    : null;
   const errorText = recipientStaleMessage(params.error);
   const historyPage = parsePage(params.gecmisSayfa);
 

@@ -65,7 +65,7 @@ export type RoutingPreview = {
   /** Notices held while two rows of one notice are unresolved. */
   collisions: number;
   /** The revert's apply must carry `cancelUnmatched: true`. Always false for a cutover. */
-  confirmRequired?: boolean;
+  confirmRequired: boolean;
   blockers: RoutingBlocker[];
   /** Binds the apply to these numbers; the client cannot mint one. */
   token: string;

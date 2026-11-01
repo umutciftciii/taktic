@@ -53,6 +53,7 @@ export const CONFIRMATION_PROOF_KEYS = [
   'ops-alert-routing.cutover',
   'ops-alert-routing.revert',
   'ops-alert-routing.rewrap',
+  'ops-alert-routing.rehash',
   'offer.refund',
   'offer.accept',
   'offer.reject',
@@ -132,6 +133,7 @@ export const OPS_ALERT_RECIPIENT_LAST_CRITICAL = 'ops-alert-recipient.last-criti
 export const OPS_ALERT_ROUTING_CUTOVER = 'ops-alert-routing.cutover' satisfies ConfirmationProofKey;
 export const OPS_ALERT_ROUTING_REVERT = 'ops-alert-routing.revert' satisfies ConfirmationProofKey;
 export const OPS_ALERT_ROUTING_REWRAP = 'ops-alert-routing.rewrap' satisfies ConfirmationProofKey;
+export const OPS_ALERT_ROUTING_REHASH = 'ops-alert-routing.rehash' satisfies ConfirmationProofKey;
 
 export function isConfirmationProofKey(value: unknown): value is ConfirmationProofKey {
   return typeof value === 'string' && (CONFIRMATION_PROOF_KEYS as readonly string[]).includes(value);

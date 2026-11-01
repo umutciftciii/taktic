@@ -91,6 +91,7 @@ import {
   OPS_ALERT_RECIPIENT_REVEAL,
   OPS_ALERT_ROUTING_CUTOVER,
   OPS_ALERT_ROUTING_REVERT,
+  OPS_ALERT_ROUTING_REHASH,
   OPS_ALERT_ROUTING_REWRAP,
   isConfirmationProofKey,
 } from '../lib/confirmation-proof-keys';
@@ -242,10 +243,11 @@ describe('confirmation proof keys', () => {
     OPS_ALERT_ROUTING_CUTOVER,
     OPS_ALERT_ROUTING_REVERT,
     OPS_ALERT_ROUTING_REWRAP,
+    OPS_ALERT_ROUTING_REHASH,
   ];
 
-  it('are eight distinct, mintable keys listed exactly once', () => {
-    expect(new Set(keys).size).toBe(8);
+  it('are nine distinct, mintable keys listed exactly once', () => {
+    expect(new Set(keys).size).toBe(9);
     for (const key of keys) {
       expect(isConfirmationProofKey(key)).toBe(true);
       expect(CONFIRMATION_PROOF_KEYS.filter((k) => k === key)).toHaveLength(1);
@@ -1448,6 +1450,22 @@ describe('routing preview: what the operator approves is what the API previewed'
     expect(plain).toContain('data-testid="ops-alert-routing-revert-confirm"');
   });
 
+  it('a blocked cutover marks SENDING cancels as what would be lost, not what it cancels', () => {
+    const blocked = renderBody('CUTOVER', {
+      kind: 'preview',
+      preview: preview({
+        blockers: ['LEGACY_ROWS_UNMATCHED'],
+        counts: { PENDING: { rebind: 0, cancel: 1 }, FAILED: { rebind: 0, cancel: 0 }, SENDING: { rebind: 0, cancel: 2 } },
+      }),
+      at: 1,
+    });
+    expect(blocked).toContain('data-testid="ops-alert-routing-sending-lost-note"');
+    expect(blocked).toContain('iptal edilmez');
+    expect(/data-testid="ops-alert-routing-count-SENDING-cancel"[^>]*>(\d+)/.exec(blocked)?.[1]).toBe('2');
+    const clean = renderBody('CUTOVER', { kind: 'preview', preview: preview(), at: 1 });
+    expect(clean).not.toContain('ops-alert-routing-sending-lost-note');
+  });
+
   it('COUNTS_CHANGED drops the preview and says to preview again, word for word', () => {
     expect(ROUTING_COUNTS_CHANGED_TEXT).toBe('Önizlemeden bu yana sayılar değişti; yeniden önizleyin.');
     const markup = renderBody('CUTOVER', { kind: 'error', message: ROUTING_COUNTS_CHANGED_TEXT, code: 'COUNTS_CHANGED', at: 1 });
@@ -1537,7 +1555,7 @@ describe('routing server actions', () => {
     },
     {
       name: 'Rehash',
-      key: 'ops-alert-routing.rewrap',
+      key: 'ops-alert-routing.rehash',
       write: api.rehashOpsAlertRecipients,
       run: (proofs) => settingsActions.rehashRecipientsAction(ROUTING_OP_IDLE, switchForm({}, proofs)),
     },
@@ -1552,9 +1570,15 @@ describe('routing server actions', () => {
       for (const proofs of [[], ['yes'], ['eyJrIjoieCJ9.Zm9yZ2Vk'], [await mint('ops-alert-recipient.pause')]]) {
         expect(JSON.stringify((await settle(() => testCase.run(proofs))).value)).toContain(CONFIRMATION_PROOF_REFUSAL_MESSAGE);
       }
-      // A cutover proof is not a revert proof, and the other way round.
-      if (testCase.key !== 'ops-alert-routing.rewrap') {
-        const other = testCase.key === 'ops-alert-routing.cutover' ? 'ops-alert-routing.revert' : 'ops-alert-routing.cutover';
+      // A cutover proof is not a revert proof, a rewrap proof not a rehash proof, and the other way round.
+      {
+        const PAIRS: Record<string, Parameters<typeof issueConfirmationProof>[0]> = {
+          'ops-alert-routing.cutover': 'ops-alert-routing.revert',
+          'ops-alert-routing.revert': 'ops-alert-routing.cutover',
+          'ops-alert-routing.rewrap': 'ops-alert-routing.rehash',
+          'ops-alert-routing.rehash': 'ops-alert-routing.rewrap',
+        };
+        const other = PAIRS[testCase.key]!;
         expect(JSON.stringify((await settle(async () => testCase.run([await mint(other)]))).value)).toContain(
           CONFIRMATION_PROOF_REFUSAL_MESSAGE,
         );
@@ -1628,16 +1652,35 @@ describe('routing server actions', () => {
     }
   });
 
-  it('rewrap and rehash say how many moved and how many failed, and refresh the page', async () => {
+  it('rewrap and rehash end on the page notice with their counts — still seen once the key block is gone', async () => {
     api.rewrapOpsAlertRecipients.mockResolvedValueOnce({ rewrapped: 3, failed: 1 });
-    const rewrap = await settingsActions.rewrapRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rewrap')]));
-    expect(rewrap).toMatchObject({ kind: 'done' });
-    expect(JSON.stringify(rewrap)).toContain('3 alıcı');
-    expect(JSON.stringify(rewrap)).toContain('1 alıcı');
+    const rewrap = await settle(async () =>
+      settingsActions.rewrapRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rewrap')])),
+    );
+    expect(rewrap.redirect).toBe(`${SETTINGS}?ok=rewrapped&adet=3&hata=1`);
     api.rehashOpsAlertRecipients.mockResolvedValueOnce({ rehashed: 2, failed: 0 });
-    const rehash = await settingsActions.rehashRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rewrap')]));
-    expect(rehash).toMatchObject({ kind: 'done' });
-    expect(JSON.stringify(rehash)).toContain('2 alıcı');
+    const rehash = await settle(async () =>
+      settingsActions.rehashRecipientsAction(ROUTING_OP_IDLE, switchForm({}, [await mint('ops-alert-routing.rehash')])),
+    );
+    expect(rehash.redirect).toBe(`${SETTINGS}?ok=rehashed&adet=2&hata=0`);
     expect(cache.revalidatePath).toHaveBeenCalledWith(SETTINGS);
+
+    // After a full success the page has one key id and one HMAC version again:
+    // the key block is gone, and the notice says what happened.
+    api.isSuperAdmin = true;
+    load();
+    const afterRewrap = await renderSettings({ ok: 'rewrapped', adet: '3', hata: '1' });
+    expect(afterRewrap).not.toContain('data-testid="ops-alert-routing-keys"');
+    const notice = /data-testid="ops-alert-recipients-ok">([^<]*)</.exec(afterRewrap)?.[1] ?? '';
+    expect(notice).toContain('3 alıcının adresi etkin şifreleme anahtarına taşındı.');
+    expect(notice).toContain('1 alıcı taşınamadı');
+    const afterRehash = /data-testid="ops-alert-recipients-ok">([^<]*)</.exec(await renderSettings({ ok: 'rehashed', adet: '2', hata: '0' }))?.[1] ?? '';
+    expect(afterRehash).toContain('2 alıcının adres özeti güncel sürümle yenilendi.');
+    expect(afterRehash).not.toContain('yenilenemedi');
+    // Hand-typed counts that are not counts are not printed.
+    const typed = /data-testid="ops-alert-recipients-ok">([^<]*)</.exec(await renderSettings({ ok: 'rewrapped', adet: '<b>x', hata: '-2' }))?.[1] ?? '';
+    expect(typed).not.toContain('x');
+    expect(typed).not.toContain('-2');
+    expect(typed.length).toBeGreaterThan(0);
   });
 });

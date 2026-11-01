@@ -1,6 +1,6 @@
 'use client';
 
-import { useActionState } from 'react';
+import { useActionState, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { ConfirmDialog } from '../../../components/confirm-dialog';
 import { ConfirmGate } from '../../../components/confirm-gate';
@@ -91,25 +91,45 @@ export function RoutingPanel({ routing }: { routing: RoutingPanelInput }) {
             Anahtar değişimi sürüyor: alıcıların bir kısmı eski anahtarla saklanıyor. Etkin anahtar ortamda tanımlandıktan sonra
             alıcıları ona taşıyın.
           </p>
+          {/* A finished run ends on the page notice (`?ok=rewrapped|rehashed`): after a
+              full success this block is gone, so the result cannot live in it. */}
           {rewrap ? (
-            <RotationForm
-              action={rewrapRecipientsAction}
-              triggerLabel="Şifrelemeyi yenile"
-              title="Şifreleme anahtarını yenile"
-              consequence="Etkin olmayan anahtarla saklanan her alıcının adresi çözülüp etkin anahtarla yeniden şifrelenir. Adresler değişmez; her alıcı için geçmişe bir kayıt düşer."
-              confirmLabel="Evet, yeniden şifrele"
-              testId="ops-alert-routing-rewrap"
-            />
+            <RotationForm action={rewrapRecipientsAction} testId="ops-alert-routing-rewrap">
+              <ConfirmDialog
+                triggerLabel="Şifrelemeyi yenile"
+                proof="ops-alert-routing.rewrap"
+                triggerClassName="btn btn-secondary btn-sm"
+                title="Şifreleme anahtarını yenile"
+                consequence={
+                  <p>
+                    Etkin olmayan anahtarla saklanan her alıcının adresi çözülüp etkin anahtarla yeniden şifrelenir. Adresler
+                    değişmez; her alıcı için geçmişe bir kayıt düşer.
+                  </p>
+                }
+                confirmLabel="Evet, yeniden şifrele"
+                tone="primary"
+                testId="ops-alert-routing-rewrap"
+              />
+            </RotationForm>
           ) : null}
           {rehash ? (
-            <RotationForm
-              action={rehashRecipientsAction}
-              triggerLabel="Adres özetini yenile"
-              title="Adres özetini yenile"
-              consequence="Güncel olmayan sürümle hesaplanmış her alıcının adres özeti güncel sürümle yeniden hesaplanır. Aynı adresli iki alıcı çıkarsa o alıcı yenilenmez."
-              confirmLabel="Evet, yenile"
-              testId="ops-alert-routing-rehash"
-            />
+            <RotationForm action={rehashRecipientsAction} testId="ops-alert-routing-rehash">
+              <ConfirmDialog
+                triggerLabel="Adres özetini yenile"
+                proof="ops-alert-routing.rehash"
+                triggerClassName="btn btn-secondary btn-sm"
+                title="Adres özetini yenile"
+                consequence={
+                  <p>
+                    Güncel olmayan sürümle hesaplanmış her alıcının adres özeti güncel sürümle yeniden hesaplanır. Aynı adresli
+                    iki alıcı çıkarsa o alıcı yenilenmez.
+                  </p>
+                }
+                confirmLabel="Evet, yenile"
+                tone="primary"
+                testId="ops-alert-routing-rehash"
+              />
+            </RotationForm>
           ) : null}
         </div>
       ) : null}
@@ -121,13 +141,6 @@ function OpNotice({ state, testId }: { state: RoutingOpState; testId: string }) 
   if (state.kind === 'error') {
     return (
       <p className="notice notice-error" role="alert" data-testid={`${testId}-error`} data-code={state.code ?? undefined}>
-        {state.message}
-      </p>
-    );
-  }
-  if (state.kind === 'done') {
-    return (
-      <p className="notice notice-success" role="status" data-testid={`${testId}-result`}>
         {state.message}
       </p>
     );
@@ -149,34 +162,20 @@ function ImportForm() {
   );
 }
 
+/** A key operation's form: its own confirmation (children) and, on a refusal, the sentence. */
 function RotationForm({
   action,
-  triggerLabel,
-  title,
-  consequence,
-  confirmLabel,
   testId,
+  children,
 }: {
   action: (previous: RoutingOpState, formData: FormData) => Promise<RoutingOpState>;
-  triggerLabel: string;
-  title: string;
-  consequence: string;
-  confirmLabel: string;
   testId: string;
+  children: ReactNode;
 }) {
   const [state, dispatch] = useActionState(action, ROUTING_OP_IDLE);
   return (
     <form action={dispatch} className="inline-form">
-      <ConfirmDialog
-        triggerLabel={triggerLabel}
-        proof="ops-alert-routing.rewrap"
-        triggerClassName="btn btn-secondary btn-sm"
-        title={title}
-        consequence={<p>{consequence}</p>}
-        confirmLabel={confirmLabel}
-        tone="primary"
-        testId={testId}
-      />
+      {children}
       <OpNotice state={state} testId={testId} />
     </form>
   );
@@ -254,7 +253,11 @@ function PreviewDetails({ direction, preview }: { direction: RoutingDirection; p
   const words = WORDS[direction];
   const blocked = preview.blockers.length > 0;
   const cancelTotal = routingCancelTotal(preview);
-  const askCancel = direction === 'REVERT' && preview.confirmRequired === true;
+  const askCancel = direction === 'REVERT' && preview.confirmRequired;
+  // A switch never cancels a SENDING row: on a cutover this cell is the
+  // unmatched in-flight rows LEGACY_ROWS_UNMATCHED holds back, shown as what
+  // would be lost — not as something the approval cancels.
+  const sendingLost = direction === 'CUTOVER' && preview.counts.SENDING.cancel > 0;
   return (
     <div className="cell-stack" data-testid={`ops-alert-routing-${words.id}-preview-result`}>
       <DataTable
@@ -275,10 +278,17 @@ function PreviewDetails({ direction, preview }: { direction: RoutingDirection; p
             </td>
             <td className="is-num" data-testid={`ops-alert-routing-count-${status}-cancel`}>
               {preview.counts[status].cancel}
+              {status === 'SENDING' && sendingLost ? <sup aria-hidden="true">*</sup> : null}
             </td>
           </tr>
         ))}
       </DataTable>
+      {sendingLost ? (
+        <p className="cell-muted" data-testid="ops-alert-routing-sending-lost-note">
+          * Gönderiliyor satırındaki sayı, eşleşen etkin alıcısı olmadığı için geçiş yapılsaydı kaybolacak gönderimlerdir. Geçiş
+          bunları iptal etmez; bu engel kalkmadan geçiş yapılamaz ve gönderimler iptal edilmez.
+        </p>
+      ) : null}
       <dl className="ops-alert-routing-figures">
         <div>
           <dt>{words.told}</dt>
