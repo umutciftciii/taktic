@@ -155,13 +155,12 @@ Operasyon alarmları → Bildirim Ayarları** (ekran PR-B ile gelir; API
 ## Geri alma
 
 **OBS-ALERT-002** (alıcı yönetimi) için: `scripts/ops/obs-alert-002-rollback.md`
-— önce yönlendirmeyi panelden `ENV_LEGACY`'ye döndürmek (R0); kod geri
-alınacaksa açık yönetilen teslimatlar sayı bazında raporlanır ve yalnız
-operatörün onayladığı sayılarla iptal edilir (R2). Şema geri alınmaz.
-R2, `deploy-runtime.md`'nin "eski API image'ını yeni şemada başlatma"
-kuralından bilinçli bir sapmadır (elle container değişimi + operatörün açık
-kararı) ve ürün sahibinin onayı beklenen **açık bir karardır**; tercih edilen
-yollar fix-forward ve dump'tan dönüştür.
+— önce yönlendirmeyi panelden `ENV_LEGACY`'ye döndürmek (R0); kod sorunu
+fix-forward ile, zorunluysa pre-deploy dump'tan dönüşle çözülür. Şema geri
+alınmaz. Eski API imajını 109'lu şemada çalıştırmak (R2) **desteklenmez**:
+`deploy-runtime.md`'nin "eski API image'ını yeni şemada başlatma" kuralı
+geçerlidir ve izole prova eski worker'ın kuyruktaki yönetilen teslimatları
+`OPS_ALERT_EMAIL`'e yönlendirdiğini gösterdi.
 
 **OBS-ALERT-001** için (yalnız OBS-ALERT-002 migration'ı uygulanmamış bir
 veritabanında): kod geri alındıktan sonra, API durdurulmuşken:

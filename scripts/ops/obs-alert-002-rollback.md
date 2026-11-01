@@ -1,8 +1,8 @@
 # OBS-ALERT-002 geri alma
 
 Migration `20261102090000_add_ops_alert_recipients` (109) ve onu kullanan kod
-için geri alma yolları. En sık durum R0'dır; R2 kod geri alımıdır ve şema
-yerinde kalır; R3 önerilmez.
+için geri alma yolları. En sık durum R0'dır; R2 (eski imajı yeni şemada
+çalıştırmak) desteklenmez; R3 önerilmez, şema gerekiyorsa dump'tan dönülür.
 
 Önce bakılacaklar: hangi PR geri alınıyor (PR-A: API + migration, PR-B: admin
 ekranları), yönlendirme modu (`ENV_LEGACY` / `MANAGED`), açık yönetilen
@@ -30,83 +30,30 @@ davranışıyla gider.
 Yalnız admin imajı önceki sürüme döner; veri etkisi yoktur. Mod `MANAGED`
 kalır. Geri dönüş gerekiyorsa R0'ı API üzerinden yapın.
 
-## R2 — PR-A kodunu geri al (şema kalır)
+## R2 — PR-A kodunu eski imajla geri al: desteklenmez
 
-> **Bilinçli sapma — karar AÇIK.** R2, `docs/ops/deploy-runtime.md` "Geri
-> dönüş" kuralından ("Migration uygulandıysa: eski API image'ını yeni şemada
-> başlatma") bilerek sapar: 109. migration uygulanmışken eski (`d7c195a2`) API
-> imajını yeni şemada çalıştırır. Repo'nun tercih ettiği yollar **fix-forward**
-> (düzelt, aynı deploy'u yeniden çalıştır) ve gerekirse **pre-deploy dump'tan
-> dönüş**tür (R3). R2 `deploy-staging.sh` ile yapılamaz (eski sürümün deploy
-> kapıları reddeder, adım 6); API container'ının **elle** değiştirilmesini ve
-> operatörün o an verdiği **açık kararı** gerektirir. R2'nin bir seçenek
-> olarak kalıp kalmayacağı ürün sahibinin onayına bağlıdır ve henüz
-> **verilmemiştir**; onay gelene kadar kod geri alımında fix-forward / dump
-> dönüşü kullanılır.
+R2 (109. migration uygulanmışken eski `d7c195a2` API imajını yeni şemada
+çalıştırmak) **desteklenen bir geri alma yöntemi değildir.**
+`docs/ops/deploy-runtime.md` "Geri dönüş" kuralı ("Migration uygulandıysa:
+eski API image'ını yeni şemada başlatma") geçerlidir ve bu belge onu
+değiştirmez; R2 ancak o kurala istisna verilerek yapılabilir ve böyle bir
+istisna **verilmemiştir.** İzole prova (aşağıda, "Eski imaj provası") kuralın
+bu migration için de gerekçeli olduğunu gösterdi: eski worker, kuyrukta kalan
+yönetilen teslimatları alıcıya bakmadan `OPS_ALERT_EMAIL`'e gönderir.
 
-Hedef: API'yi OBS-ALERT-001 sürümüne (`d7c195a2`) döndürmek; 109. migration
-ve tabloları yerinde kalır. Eski kod yeni tabloları ve sütunları yok sayar;
-eski tekilleştirme kısmi indeksle aynen sürer (bkz. "Prova sonuçları").
+PR-A kodunda sorun çıkarsa sırayla:
 
-1. **Mod `MANAGED` ise önce R0.** Cancel script'i `MANAGED`'da reddeder.
-2. **API'yi durdurun** (worker satır claim etmesin):
-   `docker stop taktic-api`.
-3. **Rapor** (salt-okunur, değer basmaz):
+1. **R0** — yönlendirmeyi `ENV_LEGACY`'ye döndürün; e-posta OBS-ALERT-001
+   davranışıyla `OPS_ALERT_EMAIL`'e gider, kod değişmez.
+2. **Fix-forward** — nedeni düzeltip aynı deploy'u yeniden çalıştırın
+   (`deploy-runtime.md`, "Geri dönüş").
+3. **Dump'tan dönüş** — zorunluysa pre-deploy dump'ını
+   `deploy-runtime.md`'deki adımlarla geri yükleyip önceki SHA'yı deploy edin
+   (bkz. R3). Dump 109'dan önceki şemadır; yönetilen teslimat satırı içermez.
 
-   ```bash
-   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/obs-alert-002-rollback-report.sql
-   ```
-
-   PostgreSQL yalnız container'da çalışıyorsa:
-   `docker exec -i taktic-postgres psql -U <kullanıcı> -d <db> -v ON_ERROR_STOP=1 -f - < scripts/ops/obs-alert-002-rollback-report.sql`
-
-   `open_recipient_deliveries` satırları, eski kodun `OPS_ALERT_EMAIL`'e
-   göndereceği yönetilen e-posta teslimatlarıdır; `expected` satırı bunların
-   onay satırıdır (`PENDING=<n>,FAILED=<n>,SENDING=<n>`). Legacy satırlar
-   (`open_legacy_deliveries`) bilgi içindir, dokunulmaz.
-4. **Operatör onayı.** Sayıları operatöre gösterin. Onay yoksa **durun**
-   (API'yi aynı sürümle tekrar açın). Onay varsa, onaylanan satırla:
-
-   ```bash
-   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-     -v expected='PENDING=<n>,FAILED=<n>,SENDING=<n>' \
-     -f scripts/ops/obs-alert-002-rollback-cancel.sql
-   ```
-
-   Script tek transaction'dır: bulduğu sayılar `expected` ile birebir değilse
-   `counts changed` ile reddeder ve **hiçbir şey değiştirmez** → 3. adıma dönün.
-   `expected` yoksa / biçimi bozuksa veya mod `MANAGED` ise de reddeder.
-   Başarılıysa satırlar `CANCELLED`, `errorCode = 'ROLLED_BACK'`, claim
-   alanları `NULL` olur ve `NOTICE` iptal edilen sayıları yazar. Raporu tekrar
-   çalıştırın: `expected` `PENDING=0,FAILED=0,SENDING=0` olmalı.
-5. **`OPS_ALERT_EMAIL`'in env'de durduğunu doğrulayın** (değer basmadan):
-   `grep -c '^OPS_ALERT_EMAIL=.' "$ENV_FILE"` → `1`. Eski kodun tek e-posta
-   hedefi budur.
-6. **`d7c195a2` API imajını başlatın — `deploy-staging.sh --sha d7c195a2`
-   ile değil.** O sürümün preflight'ı (adım 7) veritabanında "bu commit'in
-   içermediği uygulanmış migration" görünce (`20261102090000_…`) ve drift
-   kontrolü yeni tabloları görünce deploy'u reddeder. Bu kapılar tam olarak
-   R2'nin yaptığı şeye karşı korur: daha yeni bir şemanın üzerinde eski kodun
-   habersizce açılmasına (bkz. "Prova sonuçları" §3). Kapıyı aşmak yukarıdaki
-   açık karardır. Yalnız API container'ı eski imajla yeniden
-   oluşturulur:
-
-   ```bash
-   TAKTIC_IMAGE_TAG=<d7c195a2 imaj etiketi> \
-     docker compose --project-directory "$REPO_ROOT" -f docker-compose.prod.yml up -d --no-deps api
-   ```
-
-   Eski imaj yerelde yoksa önce `scripts/ops/build-images.sh` ile o commit'ten
-   üretilir. `migrate deploy` **çalıştırılmaz** (gerekmez; çalışsa da bir şey
-   yapmaz, bkz. prova). Admin PR-B içeriyorsa onu da önceki imaja alın (R1).
-7. **Doğrulama:** `/health/ready` 200 (applied migration sayısı 109 görünür,
-   beklenen), ilk alarm tick'i başarılı (Sistem Sağlığı → Operasyon alarmları,
-   motor gecikmesi), bir kabul olayıyla OPENED/RESOLVED'ın `OPS_ALERT_EMAIL`'e
-   ve Telegram'a gittiği.
-
-İleri dönüş (PR-A'yı yeniden açmak): normal `deploy-staging.sh --sha <PR-A
-sha>`; migration zaten uygulanmış olduğundan adım 6 atlanır. `ROLLED_BACK`
-satırları kalıcıdır, yeniden gönderilmez.
+`obs-alert-002-rollback-report.sql` salt-okunur durum raporu olarak
+kullanılabilir. `obs-alert-002-rollback-cancel.sql` R2 için yazılmıştı; R2
+desteklenmediği için hiçbir geri alma adımı onu çağırmaz.
 
 ## R3 — şemayı geri al: yapmayın
 
@@ -172,9 +119,51 @@ worktree'si (yalnız kök bağımlılıklar: Prisma CLI 6.19.3 + eski şemadan
      `CANCELLED` / `ROLLED_BACK` / claim NULL; yönetilen SENT satırı ve altı
      legacy satır aynen kaldı. Sonraki rapor `PENDING=0,FAILED=0,SENDING=0`.
 
-Kanıtlanmayanlar: `d7c195a2` **Docker imajının** boot'u ve gerçek bir alarm
-turu (evaluator + worker) koşulmadı — prova CLI ve client düzeyindedir; eski
-API'nin boot'ta migration ya da şema kontrolü yapmadığı kod okumasıyla
-doğrulandı (`/health/ready` yalnız uygulanmış migration sayısını raporlar).
-Eski `deploy-preflight.sh` koşulmadı (madde 3, kod okuması). Staging'de R2
-yapılacaksa ilk tick ve bir kabul olayı R2.7'de doğrulanmalıdır.
+Bu prova CLI ve client düzeyindedir; imaj boot'u ve gerçek alarm turu
+aşağıdaki "Eski imaj provası"ndadır.
+
+## Eski imaj provası (2026-11-01, yerel, izole)
+
+Amaç kanıttı, R2'yi desteklemek değil. Kendi `postgres:16` container'ı ve
+`--internal` (dışarı çıkışsız) Docker ağı; geliştirme stack'i, `taktic`
+veritabanı, staging/UAT/production'a dokunulmadı. Gerçek sır yok: e-posta
+console adaptörüne, sahte `ops-r2@example.invalid` adresine; Telegram
+tanımsız. İmajlar her revizyonun kendi Dockerfile'ıyla `git archive`'dan
+üretildi (`d7c195a2` API + migrate, `62339fa9` API + migrate); 109 migration
+yeni migrate imajıyla uygulandı. Prova sonunda container, ağ ve volume
+silindi.
+
+a. **Boot:** eski API 109'luk veritabanında açılır; eski `migrate status`
+   "Database schema is up to date!", `migrate deploy` exit 0 — bilinmeyen
+   migration'ı fark etmez. Yalnız eski deploy kapıları reddeder
+   (`deploy-staging.sh`/`local-sync.sh` adım 4 bilinmeyen migration'ı listeler,
+   adım 7 drift exit 2; mantık aynı sorgularla yeniden üretildi, script'ler
+   koşulmadı). Boot `NODE_ENV=development`, `APP_ENVIRONMENT=local`, console
+   e-posta ile yapıldı; production/staging sözleşmesiyle boot (Resend,
+   Turnstile) **koşulmadı.**
+b. **Sağlık:** `/health` 200; `/health/ready` 200,
+   `{"database":"ok","migrations":{"applied":109}}`.
+c. **Zamanlayıcı/worker:** dakikalık tick'te evaluator ve teslimat geçişi
+   koşar, `OpsAlertEngineState.lastSucceededAt` ilerler, hata yok.
+d. **Alarm turu (`ENV_LEGACY`): geçti.** FAILED bir `SchedulerRun` alarm açtı,
+   OPENED e-postası `OPS_ALERT_EMAIL`'e gitti; SUCCESS koşusu RESOLVED
+   e-postasını gönderdi. Satırlarda `recipientId` NULL, CHECK/trigger hatası
+   yok; eski `createMany(skipDuplicates)` tekilleştirmesi kısmi indeksle
+   korunur.
+e. **Mevcut PR-A satırları: başarısız — yönlendirme.** Eski worker vadesi
+   gelen her `OpsAlertDelivery` satırını claim edip `OPS_ALERT_EMAIL`'e
+   gönderir: `recipientId`'yi, alıcının durumunu (ACTIVE/PAUSED/DELETED),
+   tercihlerini, yönlendirme modunu (`MANAGED` ve `ENV_LEGACY` denendi) ve
+   alarm durumunu (çözülmüş alarmın satırı da gitti) yok sayar. Üç yönetilen
+   OPENED satırı aynı adrese üç e-posta üretti. Yönetilen SENT satırları
+   "bilgilendirildi" sayılır ve legacy bir RESOLVED kuyruklanır. Eski kod
+   yönlendirme satırını okumaz; yeni olaylar hep legacy satır alır.
+   `OPS_ALERT_EMAIL` tanımsızken yönetilen satırlar `NOT_CONFIGURED` ile
+   ABANDONED olur (yönlendirme yok ama hiç e-posta kanalı da yok).
+f. **Hata logları:** `OPS_ALERT_EMAIL` tanımlı koşularda WARN/ERROR yok.
+   Karşılaştırma: `62339fa9` imajı aynı veritabanında açılır, `ENV_LEGACY`
+   turu OPENED/RESOLVED gönderir; `MANAGED` modda koşulmadı.
+
+Sonuç: eski imaj ancak bütün açık yönetilen teslimatlar önceden iptal
+edilirse güvenli olurdu ve yine de kural istisnası gerektirir; bu yüzden R2
+desteklenmez.

@@ -1,10 +1,10 @@
 -- OBS-ALERT-002 rollback report — read-only, counts only.
 --
--- Step R2.3 of scripts/ops/obs-alert-002-rollback.md: before the code is
--- rolled back to OBS-ALERT-001 (d7c195a2), show the operator how many e-mail
--- deliveries are bound to a managed recipient and still open. OBS-ALERT-001
--- does not know recipients; it would send such a row to OPS_ALERT_EMAIL, so
--- these are the rows obs-alert-002-rollback-cancel.sql cancels.
+-- Shows the operator how many e-mail deliveries are bound to a managed
+-- recipient and still open. OBS-ALERT-001 does not know recipients; it would
+-- send such a row to OPS_ALERT_EMAIL — one reason running the previous API
+-- image on this schema (R2 in scripts/ops/obs-alert-002-rollback.md) is not
+-- supported.
 --
 --   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f scripts/ops/obs-alert-002-rollback-report.sql
 --

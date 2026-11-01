@@ -320,7 +320,7 @@ CANCELLED kararları retry tüketmez ve `finish` claim token koşuluyla yazılı
 - Produces (`OpsAlertRoutingService`):
   - `state(): Promise<RoutingState>` — `{ emailRouting; changedAt; envAddressConfigured: boolean; envAddressManaged: boolean; activeRecipients: number; liveCritical: number; telegramConfigured: boolean; keyIds: Record<string, number>; hmacVersions: Record<string, number> }`
   - `importFromEnv(actor): Promise<RecipientView>` — env adresini okur, A3 `create` ile üç tercih açık, etiket `"OPS_ALERT_EMAIL (içe aktarıldı)"`; audit `IMPORTED_FROM_ENV`; zaten yönetiliyorsa 409 `RECIPIENT_DUPLICATE`; env yoksa 409 `ENV_ADDRESS_MISSING`.
-  - `type RoutingPreview = { direction: 'CUTOVER' | 'REVERT'; counts: Record<'PENDING' | 'FAILED' | 'SENDING', { rebind: number; cancel: number }>; told: number; blockers: RoutingBlocker[]; token: string }` — `token` = sayıların HMAC'ı (sunucu anahtarıyla; istemci üretemez).
+  - `type RoutingPreview = { direction: 'CUTOVER' | 'REVERT'; counts: Record<'PENDING' | 'FAILED' | 'SENDING', { rebind: number; cancel: number }>; told: number; inFlight: number; collisions: number; blockers: RoutingBlocker[]; token: string }` — `token` = sayıların HMAC'ı (sunucu anahtarıyla; istemci üretemez). `inFlight`/`collisions` ve `ROUTING_COLLISION_PENDING` blocker'ı merge öncesi düzeltmede eklendi (uçuştaki SENDING asla iptal edilmez; çakışan çift worker yerleşene kadar geçişi bekletir).
   - `previewCutover(): Promise<RoutingPreview>`, `applyCutover(actor, { token }): Promise<RoutingState>`
   - `previewRevert(): Promise<RoutingPreview>`, `applyRevert(actor, { token, cancelUnmatched: boolean }): Promise<RoutingState>`
   - `RoutingBlocker = 'NO_LIVE_CRITICAL_CHANNEL' | 'LEGACY_ROWS_UNMATCHED' | 'ALREADY_IN_MODE'`
@@ -537,15 +537,7 @@ Kararlar:
 
 - **R0 — yalnız geçişi geri al (en sık):** SUPER_ADMIN panelinde geri dönüş önizlemesi → sayılar operatöre gösterilir → onay. Kod değişmez.
 - **R1 — PR-B geri al:** yalnız admin imajı önceki sürüme; veri etkisi yok. Mod MANAGED kalır; geri dönüş gerekiyorsa R0'ı API üzerinden (veya PR-A'nın endpoint'i ile) yap.
-- **R2 — PR-A kod geri al (şema kalır):**
-  1. Mod MANAGED ise önce R0.
-  2. API'yi durdur.
-  3. `obs-alert-002-rollback-report.sql` çalıştır, durum bazında sayıları operatöre göster.
-  4. Operatör onaylarsa `obs-alert-002-rollback-cancel.sql -v expected='…'` (sayılar değiştiyse kendiliğinden reddeder). Onay yoksa durulur.
-  5. `OPS_ALERT_EMAIL`'in env'de durduğunu doğrula.
-  6. `d7c195a2` imajını başlat; ilk tick ve bir kabul olayı.
-
-  Eski kod yeni tablo/sütunları yok sayar; legacy kuyruklama partial indeksle aynı kuralı korur (A10 provası bunu kanıtlar).
+- **R2 — PR-A kod geri al (şema kalır): desteklenmez (2026-11-01 karar).** `deploy-runtime.md` "eski API image'ını yeni şemada başlatma" kuralı korunur; istisna verilmedi. İzole eski imaj provası eski worker'ın kuyruktaki yönetilen teslimatları `OPS_ALERT_EMAIL`'e yönlendirdiğini gösterdi. Yol: R0 → fix-forward → gerekirse pre-deploy dump'tan dönüş. Ayrıntı ve kanıt: `scripts/ops/obs-alert-002-rollback.md`.
 - **R3 — şema geri al:** Önerilmez. Alıcı bağlı teslimat satırları varken eski tam unique indeks kurulamaz; geçmiş silinmeden olmaz. Yalnız dump + açık karar; script yazılmaz, prosedür `rollback.md`'de "yapma, dump'tan dön" olarak geçer.
 
 ---

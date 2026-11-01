@@ -1,6 +1,8 @@
 -- OBS-ALERT-002 rollback cancel — count-confirmed.
 --
--- Step R2.4 of scripts/ops/obs-alert-002-rollback.md. Cancels the e-mail
+-- Written for R2 of scripts/ops/obs-alert-002-rollback.md, which is not
+-- supported (the previous API image must not run on this schema); no rollback
+-- step calls it. Cancels the e-mail
 -- deliveries that are bound to a managed recipient and still open (PENDING,
 -- FAILED, SENDING), so the OBS-ALERT-001 code (d7c195a2) — which does not know
 -- recipients — cannot send them to OPS_ALERT_EMAIL. Legacy rows

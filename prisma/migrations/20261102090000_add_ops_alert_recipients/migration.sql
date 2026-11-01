@@ -19,9 +19,9 @@
 -- indexes, so they exist only here and in the database.
 --
 -- Rollback lives in scripts/ops/obs-alert-002-rollback.md: R0 reverts the
--- routing through the panel/API; R2 rolls the code back with a count-confirmed
--- cancel of managed deliveries (an open decision, see the document). The
--- schema is not rolled back: if it must go, restore the pre-deploy dump. The
+-- routing through the panel/API; code problems are fixed forward. Running the
+-- previous API image on this schema (R2) is not supported. The schema is not
+-- rolled back: if it must go, restore the pre-deploy dump. The
 -- AdminPermission values stay, as PostgreSQL cannot drop an enum value.
 
 -- CreateEnum
