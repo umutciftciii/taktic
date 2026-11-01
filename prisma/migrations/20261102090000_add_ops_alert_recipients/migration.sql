@@ -18,10 +18,11 @@
 -- so there is no moment without uniqueness. Prisma cannot express partial
 -- indexes, so they exist only here and in the database.
 --
--- Rollback: scripts/ops/obs-alert-002-rollback.md (to be added with the
--- rollback tooling); until then it is dropping the three tables, three enums
--- and two columns, and recreating the old unique index. The AdminPermission
--- values stay, as PostgreSQL cannot drop an enum value.
+-- Rollback lives in scripts/ops/obs-alert-002-rollback.md: R0 reverts the
+-- routing through the panel/API; R2 rolls the code back with a count-confirmed
+-- cancel of managed deliveries (an open decision, see the document). The
+-- schema is not rolled back: if it must go, restore the pre-deploy dump. The
+-- AdminPermission values stay, as PostgreSQL cannot drop an enum value.
 
 -- CreateEnum
 CREATE TYPE "OpsAlertRecipientStatus" AS ENUM ('ACTIVE', 'PAUSED', 'DELETED');
