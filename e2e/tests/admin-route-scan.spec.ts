@@ -26,7 +26,7 @@ import { primaryRuntime, repoRoot } from '../src/runtime';
  * ADMIN-DESIGN-001 / Faz 1: every signed-in screen still renders inside the new
  * shell.
  *
- * The redesign changed the stylesheet every one of the 62 screens reads and
+ * The redesign changed the stylesheet every one of the 63 screens reads and
  * the frame every one of them sits in, while converting none of their content.
  * So each one is opened once, as a super admin, at 1440px and at 390px — and
  * every screen a Faz 2/3 slice converted (CONVERTED_ROUTES) at 320px as well —

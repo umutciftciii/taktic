@@ -168,6 +168,13 @@ function apiServer(runtime: Runtime) {
       ...trustedProxyApiEnv,
       API_PORT: String(runtime.ports.api),
       REQUIRE_PHONE_VERIFICATION: String(runtime.requirePhoneVerification),
+      // No deployment is declared, stated rather than inherited: Playwright
+      // passes the runner's own environment through, and an exported
+      // APP_ENVIRONMENT would quietly change what the API allows (the
+      // last-recipient guard of OBS-ALERT-002 treats "undeclared" as
+      // production; admin-ops-alert-recipients.spec.ts relies on that). The
+      // phone-gate runtime below declares "local" over it.
+      APP_ENVIRONMENT: '',
       // The phone-verification test bypass, and only on the runtime whose
       // subject is phone verification. Every clause of its contract is set
       // here — a declared local environment, the flag, one listed number, the

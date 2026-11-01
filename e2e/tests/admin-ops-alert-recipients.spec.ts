@@ -20,7 +20,8 @@ import { E2E_OPS_ALERT_EMAIL, primaryRuntime } from '../src/runtime';
  * every one of those events.
  *
  * Why the delete comes after the revert: this runtime declares no
- * APP_ENVIRONMENT, which the API treats as production. Under MANAGED routing
+ * APP_ENVIRONMENT (pinned empty in playwright.config.ts, so a developer's
+ * exported value cannot change it), which the API treats as production. Under MANAGED routing
  * with no Telegram, taking away the last critical recipient is therefore
  * blocked outright (LAST_CHANNEL_PROTECTED, no confirmation offered) — the
  * spec asserts that dead end — and the confirmable last-critical step is what
@@ -29,6 +30,10 @@ import { E2E_OPS_ALERT_EMAIL, primaryRuntime } from '../src/runtime';
  * A full address is checked never to be in the page (the reveal window aside,
  * and gone once it closes) nor in any URL. Assertions about addresses compare
  * booleans, so a failure message never prints one.
+ *
+ * Retry-safe: the recipient log is append-only and shared, so its assertions
+ * count only the rows this test's own admin wrote (`ownAuditRows`), and the
+ * outbox is compared with its count before the test.
  *
  * Global state is restored in `finally` (routing back to ENV_LEGACY, every
  * live recipient shredded), since the suite is one serial worker on one
@@ -41,6 +46,18 @@ const SECOND_LABEL = 'E2E Nöbetçi mühendis';
 const IMPORTED_LABEL = 'OPS_ALERT_EMAIL (içe aktarıldı)';
 const DELETE_REASON = 'E2E: nöbet listesi değişti, alıcı kaldırıldı.';
 const ADDRESSES = [E2E_OPS_ALERT_EMAIL, SECOND_ADDRESS];
+
+/**
+ * This run's entries in the recipient log: the rows whose actor is this test's
+ * own (uniquely named) admin. The log is append-only and shared by the whole
+ * database, so a retry in the same run sees the first attempt's rows too.
+ */
+function ownAuditRows(page: Page, actorEmail: string, action: string): Locator {
+  return page
+    .getByTestId('ops-alert-audit')
+    .locator(`[data-testid="audit-row"][data-action="${action}"]`)
+    .filter({ has: page.getByTestId('audit-actor').filter({ hasText: actorEmail }) });
+}
 
 function row(page: Page, label: string): Locator {
   return page.getByTestId('ops-alert-recipient-row').filter({ hasText: label });
@@ -186,7 +203,7 @@ test.describe('OBS-ALERT-002 — Bildirim ayarları', () => {
       await expect(revealed).toBeHidden();
       await expect(page.getByTestId('ops-alert-recipient-revealed-address')).toHaveCount(0);
       // The close refreshes the list, so the REVEALED row shows in the log.
-      await expect(page.getByTestId('ops-alert-audit').locator('[data-testid="audit-row"][data-action="REVEALED"]')).toHaveCount(1);
+      await expect(ownAuditRows(page, account.email, 'REVEALED')).toHaveCount(1);
       expect(await addressExposed(page), 'a full address left after the reveal window closed').toBe(false);
 
       // ---- cutover: preview, then the approval bound to it ------------------
@@ -284,14 +301,14 @@ test.describe('OBS-ALERT-002 — Bildirim ayarları', () => {
         'ROUTING_REVERTED',
         'DELETED',
       ]) {
-        await expect(audit.locator(`[data-testid="audit-row"][data-action="${action}"]`), action).toHaveCount(1);
+        await expect(ownAuditRows(page, account.email, action), action).toHaveCount(1);
       }
       await expect(audit).toContainText('OPS_ALERT_EMAIL adresi alıcı olarak içe aktarıldı');
       await expect(audit).toContainText('Test e-postası gönderildi');
       await expect(audit).toContainText('Adres açık görüntülendi');
       await expect(audit).toContainText('Yönlendirme yönetilen alıcılara geçirildi');
       await expect(audit).toContainText('Yönlendirme ortam değişkenine döndürüldü');
-      await expect(audit.locator('[data-testid="audit-row"][data-action="DELETED"]')).toContainText(DELETE_REASON);
+      await expect(ownAuditRows(page, account.email, 'DELETED')).toContainText(DELETE_REASON);
       const logged = await prisma().opsAlertRecipientAuditLog.findMany({
         where: { recipientId: secondRow!.id },
         select: { action: true, reason: true },
@@ -321,10 +338,12 @@ test.describe('OBS-ALERT-002 — Bildirim ayarları', () => {
       'OPS_ALERT_RECIPIENTS_REVEAL',
       'OPS_ALERT_ROUTING_MANAGE',
     ]);
-    const readerActor = await Actor.open(browser, 'reader', primaryRuntime, { viewport: { width: 1440, height: 1000 } });
-    const operatorActor = await Actor.open(browser, 'operator', primaryRuntime, { viewport: { width: 1440, height: 1000 } });
+    let readerActor: Actor | null = null;
+    let operatorActor: Actor | null = null;
 
     try {
+      readerActor = await Actor.open(browser, 'reader', primaryRuntime, { viewport: { width: 1440, height: 1000 } });
+      operatorActor = await Actor.open(browser, 'operator', primaryRuntime, { viewport: { width: 1440, height: 1000 } });
       // A recipient to list, added by the super admin.
       await root.loginToAdmin(account.email, account.password);
       await root.gotoAdmin(`${PATH}?alici=yeni`);
@@ -368,7 +387,7 @@ test.describe('OBS-ALERT-002 — Bildirim ayarları', () => {
       await expect(operatorActor.page.getByTestId('ops-alert-routing-import')).toHaveCount(0);
     } finally {
       await restoreGlobalState(account.id);
-      await Promise.all([root.close(), readerActor.close(), operatorActor.close()]);
+      await Promise.all([root.close(), readerActor?.close(), operatorActor?.close()]);
     }
   });
 
