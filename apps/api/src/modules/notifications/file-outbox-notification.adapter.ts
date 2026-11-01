@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { maskEmail } from './mask';
+import { RECIPIENT_HIDDEN_LABEL, maskEmail } from './mask';
 import { notificationOutboxDir } from './notification-outbox';
 import {
   NotificationMessage,
@@ -70,7 +70,9 @@ export class FileOutboxNotificationAdapter extends NotificationPort {
 
     // The log line stays as poor in detail as the production one: the file is
     // the test channel, the log is not.
-    this.logger.log(`[${message.template}] recorded for ${maskEmail(message.to)}`);
+    this.logger.log(`[${message.template}] recorded for ${
+      message.recipientLogPolicy === 'hidden' ? RECIPIENT_HIDDEN_LABEL : maskEmail(message.to)
+    }`);
 
     // Deliberately no provider id: nothing was delivered, and the audit row for
     // a recorded message must not look like one a provider accepted.

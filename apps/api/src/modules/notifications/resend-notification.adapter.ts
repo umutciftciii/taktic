@@ -2,7 +2,7 @@ import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { isPublicUrlDeliverable, publicUrlIssues } from '../../common/public-urls';
 import { EmailBrandingService } from './email-branding.service';
 import { renderEmail } from './email-template';
-import { maskEmail } from './mask';
+import { RECIPIENT_HIDDEN_LABEL, maskEmail } from './mask';
 import { NotificationErrorCode } from './notification-errors';
 import {
   NotificationMessage,
@@ -105,7 +105,9 @@ export class ResendNotificationAdapter extends NotificationPort {
 
     const providerMessageId = await readMessageId(response);
 
-    this.logger.log(`[${message.template}] accepted by resend for ${maskEmail(message.to)}`);
+    this.logger.log(`[${message.template}] accepted by resend for ${
+        message.recipientLogPolicy === 'hidden' ? RECIPIENT_HIDDEN_LABEL : maskEmail(message.to)
+      }`);
 
     return { providerMessageId };
   }

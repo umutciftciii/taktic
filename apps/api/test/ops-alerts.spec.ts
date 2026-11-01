@@ -39,8 +39,10 @@ import {
   isAlertableEmailCode,
   newAlertRef,
   noticeChannels,
+  readNoticeSnapshot,
   reminderDue,
   schedulerDecision,
+  snapshotNotice,
   systemHealthUrl,
   type SchedulerJobObservation,
 } from '../src/modules/ops-alerts/ops-alert.rules';
@@ -883,6 +885,95 @@ describe('the alert engine', () => {
       expect(telegramSent).toHaveLength(2);
       expect(telegramSent[0]).toBe(telegramSent[1]);
       expect(telegramSent[0]).toContain(alert!.ref);
+    });
+  });
+
+  describe('frozen notice content (OBS-ALERT-002)', () => {
+    it('a retry sends the content frozen at queue time', async () => {
+      await switchOn('unviewedOfferRefundSchedulerEnabled');
+      await run('unviewed-offer-refund', 'FAILED', ago(5 * MINUTE));
+      ctx.notifications.failNextSend = true;
+      await evaluator().evaluate();
+      const [email] = await deliveries({ channel: 'EMAIL' });
+      expect(email).toMatchObject({ status: 'FAILED' });
+      const frozen = email!.noticeSnapshot as { v: number; severity: string; emailData: Record<string, string> };
+      expect(frozen).toMatchObject({ v: 1, emailData: { occurrenceCount: '1' } });
+
+      // The alert moves on before the retry.
+      await ctx.prisma.opsAlert.updateMany({ data: { occurrenceCount: 7 } });
+      const offered: Array<{ key: string | undefined; count: string | null | undefined }> = [];
+      const originalSend = ctx.notifications.send.bind(ctx.notifications);
+      vi.spyOn(ctx.notifications, 'send').mockImplementation(async (message) => {
+        offered.push({ key: message.idempotencyKey, count: message.data?.occurrenceCount });
+        return originalSend(message);
+      });
+      await makeDue();
+      await worker().deliverDue();
+
+      expect(offered).toEqual([{ key: opsAlertIdempotencyKey(email!.id), count: '1' }]);
+      expect(alertMails()[0]!.recipientLogPolicy).toBe('hidden');
+    });
+
+    it('queues every row with the alert as it is at that moment', async () => {
+      await switchOn('requestExpirySchedulerEnabled');
+      await run('request-expiry', 'FAILED', ago(10 * MINUTE));
+      await evaluator().evaluate();
+      await run('request-expiry', 'SUCCESS', ago(MINUTE));
+      await evaluator().evaluate();
+
+      const rows = await deliveries();
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      for (const row of rows) expect(row.noticeSnapshot).not.toBeNull();
+      const resolved = rows.find((row) => row.kind === 'RESOLVED' && row.channel === 'EMAIL');
+      expect(resolved!.noticeSnapshot).toMatchObject({ v: 1, emailData: { noticeKind: 'RESOLVED' } });
+      expect((resolved!.noticeSnapshot as { emailData: Record<string, string> }).emailData.resolvedAt).not.toBe('');
+    });
+
+    it('rows queued before the snapshot column compose live', async () => {
+      await switchOn('unviewedOfferRefundSchedulerEnabled');
+      await run('unviewed-offer-refund', 'FAILED', ago(5 * MINUTE));
+      ctx.notifications.failNextSend = true;
+      await evaluator().evaluate();
+      await ctx.prisma.opsAlertDelivery.updateMany({ data: { noticeSnapshot: Prisma.DbNull } });
+      await ctx.prisma.opsAlert.updateMany({ data: { occurrenceCount: 9 } });
+
+      await makeDue();
+      await worker().deliverDue();
+      expect(alertMails().at(-1)!.data).toMatchObject({ occurrenceCount: '9' });
+    });
+
+    it('reads a snapshot strictly: anything else is null', () => {
+      const good = snapshotNotice(
+        'OPENED',
+        {
+          ref: 'OPS-ABCDEFGH23',
+          source: OpsAlertSource.SCHEDULER,
+          subjectKey: 'request-expiry',
+          condition: 'OVERDUE',
+          severity: OpsAlertSeverity.WARNING,
+          firstSeenAt: new Date(),
+          lastSeenAt: new Date(),
+          occurrenceCount: 1,
+          resolvedAt: null,
+          resolution: null,
+          detail: {},
+        },
+        null,
+      );
+      expect(readNoticeSnapshot(JSON.parse(JSON.stringify(good)))).toEqual(good);
+      for (const bad of [
+        null,
+        'x',
+        [],
+        { ...good, v: 2 },
+        { ...good, severity: 'INFO' },
+        { ...good, telegramText: 5 },
+        { ...good, emailData: { a: 1 } },
+        { ...good, emailData: ['a'] },
+        { ...good, emailData: null },
+      ]) {
+        expect(readNoticeSnapshot(bad)).toBeNull();
+      }
     });
   });
 

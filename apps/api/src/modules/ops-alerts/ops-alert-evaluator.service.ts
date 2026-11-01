@@ -15,6 +15,7 @@ import { readOpsAlertCron } from '../../common/scheduler-cron';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NotificationErrorCode, normalizeStoredErrorCode } from '../notifications/notification-errors';
 import { SystemHealthService } from '../system-health/system-health.service';
+import { getAdminAppBaseUrl } from '../users/admin-invite.constants';
 import { OpsAlertConfig, readOpsAlertConfigSafely } from './ops-alert.config';
 import { OpsAlertDeliveryWorker } from './ops-alert-delivery.worker';
 import {
@@ -35,12 +36,17 @@ import {
   noticeChannels,
   reminderDue,
   schedulerDecision,
+  snapshotNotice,
+  systemHealthUrl,
+  type NoticeAlert,
 } from './ops-alert.rules';
 
 type Tx = Prisma.TransactionClient;
 
 type OpenAlert = {
   id: string;
+  ref: string;
+  firstSeenAt: Date;
   fingerprint: string;
   source: OpsAlertSource;
   subjectKey: string;
@@ -55,6 +61,8 @@ type OpenAlert = {
 
 const openAlertSelect = {
   id: true,
+  ref: true,
+  firstSeenAt: true,
   fingerprint: true,
   source: true,
   subjectKey: true,
@@ -374,7 +382,7 @@ export class OpsAlertEvaluator {
         select: openAlertSelect,
       });
       open.set(fingerprint, created as OpenAlert);
-      await this.queue(tx, created.id, OpsAlertNoticeKind.OPENED, 0, noticeChannels(OpsAlertNoticeKind.OPENED, severity, config, new Set()), now);
+      await this.queue(tx, toNoticeAlert(created as OpenAlert), OpsAlertNoticeKind.OPENED, 0, noticeChannels(OpsAlertNoticeKind.OPENED, severity, config, new Set()), now);
       return;
     }
 
@@ -422,7 +430,7 @@ export class OpsAlertEvaluator {
     if (remind) {
       await this.queue(
         tx,
-        existing.id,
+        toNoticeAlert(updated as OpenAlert),
         OpsAlertNoticeKind.REMINDER,
         reminderCount,
         noticeChannels(OpsAlertNoticeKind.REMINDER, severity, config, new Set()),
@@ -475,24 +483,49 @@ export class OpsAlertEvaluator {
       config,
       new Set<OpsAlertChannel>(told.map((row) => row.channel)),
     );
-    await this.queue(tx, alert.id, OpsAlertNoticeKind.RESOLVED, 0, channels, now);
+    await this.queue(tx, toNoticeAlert(alert, { resolvedAt: now, resolution }), OpsAlertNoticeKind.RESOLVED, 0, channels, now);
   }
 
-  /** One row per channel; the unique key makes a repeat a no-op. */
+  /**
+   * One row per channel; the unique key makes a repeat a no-op. Each row
+   * freezes the notice content as the alert is right now (OBS-ALERT-002), so
+   * a retry can never carry different content.
+   */
   private async queue(
     tx: Tx,
-    alertId: string,
+    alert: NoticeAlert & { id: string },
     kind: OpsAlertNoticeKind,
     sequence: number,
     channels: OpsAlertChannel[],
     now: Date,
   ) {
     if (channels.length === 0) return;
+    const noticeSnapshot = snapshotNotice(kind, alert, systemHealthUrl(getAdminAppBaseUrl())) as unknown as Prisma.InputJsonValue;
     await tx.opsAlertDelivery.createMany({
-      data: channels.map((channel) => ({ alertId, kind, sequence, channel, nextAttemptAt: now })),
+      data: channels.map((channel) => ({ alertId: alert.id, kind, sequence, channel, nextAttemptAt: now, noticeSnapshot })),
       skipDuplicates: true,
     });
   }
+}
+
+function toNoticeAlert(
+  alert: OpenAlert,
+  closed: { resolvedAt: Date; resolution: string } | null = null,
+): NoticeAlert & { id: string } {
+  return {
+    id: alert.id,
+    ref: alert.ref,
+    source: alert.source,
+    subjectKey: alert.subjectKey,
+    condition: alert.condition,
+    severity: alert.severity,
+    firstSeenAt: alert.firstSeenAt,
+    lastSeenAt: alert.lastSeenAt,
+    occurrenceCount: alert.occurrenceCount,
+    resolvedAt: closed?.resolvedAt ?? null,
+    resolution: closed?.resolution ?? null,
+    detail: alert.detail,
+  };
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   DELIVERY_LEASE_MS,
   DELIVERY_MAX_ATTEMPTS,
   composeNotice,
+  readNoticeSnapshot,
   deliveryBackoffMs,
   systemHealthUrl,
 } from './ops-alert.rules';
@@ -123,6 +124,7 @@ export class OpsAlertDeliveryWorker {
         kind: true,
         channel: true,
         attemptCount: true,
+        noticeSnapshot: true,
         alert: {
           select: {
             ref: true,
@@ -142,7 +144,10 @@ export class OpsAlertDeliveryWorker {
     });
     if (!delivery) return 'failed';
 
-    const notice = composeNotice(delivery.kind, delivery.alert, systemHealthUrl(getAdminAppBaseUrl()));
+    // Content frozen at queue time; a row from before the snapshot column composes live.
+    const notice =
+      readNoticeSnapshot(delivery.noticeSnapshot) ??
+      composeNotice(delivery.kind, delivery.alert, systemHealthUrl(getAdminAppBaseUrl()));
     const config = readOpsAlertConfigSafely();
     try {
       let providerMessageId: string | null;
@@ -158,6 +163,7 @@ export class OpsAlertDeliveryWorker {
             subject: transactionalSubject('ops-alert', notice.emailData),
             data: notice.emailData,
             idempotencyKey: opsAlertIdempotencyKey(delivery.id),
+            recipientLogPolicy: 'hidden',
           })
         ).providerMessageId;
       }

@@ -413,6 +413,41 @@ export function composeNotice(kind: OpsAlertNoticeKind, alert: NoticeAlert, admi
   return { emailData, telegramText: lines.join('\n') };
 }
 
+/**
+ * OBS-ALERT-002 — what a delivery row carries from the moment it is queued.
+ * Content is fixed here so a retry under the same idempotency key can never
+ * carry different content (the provider would answer 409).
+ */
+export type NoticeSnapshot = {
+  v: 1;
+  /** The alert's severity when the row was queued; preference checks read this. */
+  severity: OpsAlertSeverity;
+  emailData: Record<string, string>;
+  telegramText: string;
+};
+
+export function snapshotNotice(kind: OpsAlertNoticeKind, alert: NoticeAlert, adminUrl: string | null): NoticeSnapshot {
+  const { emailData, telegramText } = composeNotice(kind, alert, adminUrl);
+  return { v: 1, severity: alert.severity, emailData, telegramText };
+}
+
+/** Strict reader: anything that is not exactly a v1 snapshot is null (compose live). */
+export function readNoticeSnapshot(value: unknown): NoticeSnapshot | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  if (candidate.v !== 1) return null;
+  if (candidate.severity !== OpsAlertSeverity.WARNING && candidate.severity !== OpsAlertSeverity.CRITICAL) return null;
+  if (typeof candidate.telegramText !== 'string') return null;
+  const data = candidate.emailData;
+  if (typeof data !== 'object' || data === null || Array.isArray(data)) return null;
+  const emailData: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(data)) {
+    if (typeof entry !== 'string') return null;
+    emailData[key] = entry;
+  }
+  return { v: 1, severity: candidate.severity, emailData, telegramText: candidate.telegramText };
+}
+
 // ---------------------------------------------------------------------------
 // The engine itself
 // ---------------------------------------------------------------------------

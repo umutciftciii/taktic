@@ -73,6 +73,12 @@ export type NotificationMessage = {
    * from the body.
    */
   idempotencyKey?: string;
+  /**
+   * How adapters may name the recipient in log lines. `'masked'` (default) is
+   * the historical `maskEmail` form; `'hidden'` writes no part of the address
+   * (operations alerts: the recipients are an admin-managed secret).
+   */
+  recipientLogPolicy?: 'masked' | 'hidden';
 };
 
 /**

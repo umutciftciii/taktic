@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { maskEmail } from './mask';
+import { RECIPIENT_HIDDEN_LABEL, maskEmail } from './mask';
 import {
   NotificationMessage,
   NotificationPort,
@@ -19,7 +19,8 @@ export class ConsoleNotificationAdapter extends NotificationPort {
   private readonly logger = new Logger('Notification');
 
   async send(message: NotificationMessage): Promise<NotificationSendResult> {
-    const recipient = maskEmail(message.to);
+    const hidden = message.recipientLogPolicy === 'hidden';
+    const recipient = hidden ? RECIPIENT_HIDDEN_LABEL : maskEmail(message.to);
 
     if (process.env.NODE_ENV === 'production') {
       this.logger.warn(
@@ -32,7 +33,7 @@ export class ConsoleNotificationAdapter extends NotificationPort {
       '',
       '──────────── NOTIFICATION (dev console adapter) ────────────',
       `template : ${message.template}`,
-      `to       : ${message.to}`,
+      ...(hidden ? [] : [`to       : ${message.to}`]),
       `subject  : ${message.subject}`,
     ];
 
