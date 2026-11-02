@@ -498,6 +498,14 @@ export default defineConfig({
   reporter: [
     ['list'],
     ['html', { outputFolder: resolve(artifactsDir, 'report'), open: 'never' }],
+    // CI-PERF-001: a CI shard also writes machine-readable results, which the
+    // shard coverage job reads to prove every test ran exactly once.
+    ...(process.env.E2E_REPORT_DIR
+      ? ([
+          ['json', { outputFile: resolve(process.env.E2E_REPORT_DIR, 'results.json') }],
+          ['junit', { outputFile: resolve(process.env.E2E_REPORT_DIR, 'junit.xml') }],
+        ] as const)
+      : []),
   ],
 
   timeout: 90_000,

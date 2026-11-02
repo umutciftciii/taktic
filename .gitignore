@@ -4,6 +4,10 @@ node_modules
 .next
 dist
 coverage
+# Vitest JUnit/JSON output a CI shard writes (CI-PERF-001). Anchored to the
+# package roots: route folders named `reports` live deeper and stay tracked.
+/apps/*/reports/
+/packages/*/reports/
 .env
 .env.local
 .env.*.local
