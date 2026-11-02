@@ -19,8 +19,11 @@
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-// Job ids (not display names) as `needs` reports them.
-export const FULL_JOBS = ['verify', 'e2e', 'e2e-webkit', 'ops'];
+// Job ids (not display names) as `needs` reports them. A matrix job (api, e2e,
+// e2e-webkit) has one entry for all its shards, `success` only when every
+// shard succeeded; shard-coverage then proves that the shards together ran
+// every test exactly once (CI-PERF-001).
+export const FULL_JOBS = ['static', 'unit', 'api', 'e2e', 'e2e-webkit', 'shard-coverage', 'ops'];
 export const PR_JOBS = ['pr-evidence', ...FULL_JOBS];
 export const GATE_JOB = 'post-merge-gate';
 

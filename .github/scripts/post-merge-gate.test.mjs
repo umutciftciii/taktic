@@ -136,8 +136,40 @@ test('same base but a different tree → full', () =>
 
 // ── the job names the gate looks for are the ones ci.yml defines ────────────
 
+/**
+ * The display names ci.yml's jobs get on GitHub: a matrix job's name template
+ * expanded once per `matrix.shard`, the way GitHub expands it.
+ */
+function jobNamesIn(yml) {
+  const jobs = yml.slice(yml.indexOf('\njobs:\n'));
+  const blocks = jobs.split(/^(?= {2}[a-z][a-z0-9-]*:\s*$)/m).slice(1);
+  return blocks.flatMap((block) => {
+    const name = block.match(/^ {4}name: (.+)$/m)?.[1].trim();
+    if (!name) return [];
+    if (!name.includes('${{ matrix.shard }}')) return [name];
+    const shards = JSON.parse(block.match(/^ {8}shard: (\[[^\]]*\])$/m)?.[1] ?? '[]');
+    return shards.map((i) =>
+      name.replace('${{ matrix.shard }}', String(i)).replace('${{ strategy.job-total }}', String(shards.length)),
+    );
+  });
+}
+
 test('REQUIRED_JOBS match the job names in ci.yml', () => {
-  const yml = readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8');
-  const names = [...yml.matchAll(/^ {4}name: (.+)$/gm)].map((m) => m[1].trim());
+  const names = jobNamesIn(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
   for (const name of REQUIRED_JOBS) assert.ok(names.includes(name), `ci.yml has no job named "${name}"`);
 });
+
+test('every job a full run consists of is required — a new job or shard cannot be left out', () => {
+  const names = jobNamesIn(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+  const outside = ['post-merge gate (reuse PR result only for an identical tree)', 'record tested merge commit', 'CI result'];
+  assert.deepEqual(
+    names.filter((n) => !outside.includes(n)).sort(),
+    [...REQUIRED_JOBS].sort(),
+  );
+});
+
+test('a run missing one shard of a sharded job is not evidence', () =>
+  assertFull(scenario((s) => (s.jobs = s.jobs.filter((j) => j.name !== 'api tests (3/4)'))), /has 0 jobs named "api tests \(3\/4\)"/));
+
+test('a run with a shard re-run under the same name twice is not evidence', () =>
+  assertFull(scenario((s) => s.jobs.push({ name: 'e2e webkit (5/5)', status: 'completed', conclusion: 'success' })), /has 2 jobs/));

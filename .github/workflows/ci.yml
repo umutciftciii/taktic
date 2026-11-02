@@ -44,8 +44,9 @@ jobs:
   # Pull requests only: records which merge commit this run tests, for the
   # gate above to find once the PR is merged. The run's API record carries the
   # PR head, not the merge commit, so the SHA goes into an artifact's name.
-  # It also runs the gate's own tests and the CI result rule's, so a change to
-  # either is proven by the same pull request that makes it.
+  # It also runs the gate's own tests, the CI result rule's and the shard
+  # layout's and coverage check's, so a change to any of them is proven by the
+  # same pull request that makes it.
   pr-evidence:
     name: record tested merge commit
     if: github.event_name == 'pull_request'
@@ -55,9 +56,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: .github
-      - name: Test the post-merge gate and the CI result rule
-        run: node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
+          # apps/api/test: the coverage check's tests read the API suite's file list.
+          sparse-checkout: |
+            .github
+            apps/api/test
+      - name: Test the post-merge gate, the CI result rule and the shard checks
+        run: >-
+          node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
+          .github/scripts/ci-shards.test.mjs .github/scripts/shard-coverage.test.mjs
       - name: Record the merge commit under test
         run: git rev-parse HEAD | tee tested-commit.txt
       - uses: actions/upload-artifact@v4
@@ -66,18 +72,155 @@ jobs:
           path: tested-commit.txt
           retention-days: 14
 
-  verify:
-    name: typecheck · lint · test · build
+  # CI-PERF-001: what used to be one `verify` job (typecheck, lint, every
+  # package's tests, build — ~33 minutes, nearly all of it the API suite run
+  # file after file against one database) is now three kinds of job that start
+  # together: `static` and `unit` take a few minutes, and the API suite runs as
+  # `api` shards, each on its own runner with its own PostgreSQL. Nothing about
+  # what is checked changed — the same commands, the same suites, the same
+  # timeouts — only where they run. `shard-coverage` proves afterwards that the
+  # shards together ran every test exactly once.
+  static:
+    name: static (typecheck · lint · build)
     runs-on: ubuntu-latest
     needs: post-merge-gate
     # `!cancelled()` so that a skipped gate (every pull request) does not skip
     # this job; `!= 'true'` so that only a proven reuse does.
     if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
 
+    env:
+      # No database here: the URL is what the build and the e2e listing below
+      # read their configuration from, and neither connects to it.
+      DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      AUTH_COOKIE_NAME: taktic_session
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Release version
+        run: |
+          node --test scripts/release/version-check.test.mjs
+          pnpm version:check
+          echo "release version: $(pnpm --silent version:check --print)"
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      # The e2e tests each Playwright job must run between its shards, written
+      # down before any shard starts: `shard-coverage` compares the shards'
+      # reports with these lists. `--list` loads the specs and starts no
+      # server. The JSON goes to a file because the config prints a line of its
+      # own on stdout.
+      - name: List every e2e test
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/shard-expected"
+          PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/shard-expected/expected-e2e.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json >/dev/null
+          E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/shard-expected/expected-e2e-webkit.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --project=webkit >/dev/null
+          for f in "$RUNNER_TEMP"/shard-expected/*.json; do
+            echo "$(basename "$f"): $(node -e 'const r=require(process.argv[1]);let n=0;const v=s=>{for(const p of s.specs??[])n+=p.tests.length;(s.suites??[]).forEach(v)};r.suites.forEach(v);console.log(n)' "$f") tests"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shard-expected
+          path: ${{ runner.temp }}/shard-expected
+          retention-days: 14
+          if-no-files-found: error
+
+      # CI-FONTS-001: the build must not need a font service. Every font host
+      # is unreachable from here on, so a build that still fetches one fails.
+      - name: Block font services
+        run: .github/scripts/block-font-services.sh
+
+      - name: Build
+        run: pnpm build
+
+  # Every package's unit tests except the API's, which run in the `api`
+  # shards below. Seconds, not minutes: none of them needs a database.
+  unit:
+    name: unit (web · admin · shared)
+    runs-on: ubuntu-latest
+    needs: post-merge-gate
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Unit tests
+        run: >-
+          pnpm exec turbo run test --filter='!@taktic/api' --
+          --reporter=default --reporter=junit --reporter=json
+          --outputFile.junit=reports/junit.xml --outputFile.json=reports/results.json
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: unit-test-reports
+          path: |
+            apps/*/reports
+            packages/*/reports
+          retention-days: 14
+          if-no-files-found: error
+
+  # The API integration suite (apps/api, Vitest), one slice of its files per
+  # shard. Vitest's --shard orders the files by a hash of their path and gives
+  # each shard an equal count, so a slice is stable from run to run and does
+  # not depend on what ran before. Within a shard nothing changed: one worker,
+  # files one after another (`fileParallelism: false`), every case truncating
+  # the shard's own database — two files never touch one database at once.
+  # `fail-fast: false` so one failing shard does not cancel the others: the
+  # rest still report, and a re-run repeats only the shard that failed.
+  api:
+    name: api tests (${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    needs: post-merge-gate
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
     services:
       # Integration tests need a real PostgreSQL: they exercise Serializable
       # transactions, unique constraints and the credit ledger, none of which a
-      # mock would reproduce faithfully.
+      # mock would reproduce faithfully. Each shard has its own service
+      # container on its own runner, so shards share no database and no server.
       postgres:
         image: postgres:16.6-alpine
         env:
@@ -104,10 +247,13 @@ jobs:
           --health-retries 5
 
     env:
-      # The suite derives its own database (<name>_test) from this URL and
-      # refuses to run against anything not ending in _test, so the job never
-      # touches the database named here.
+      # The suite derives its own database from this URL and refuses to run
+      # against anything not ending in _test, so the job never touches the
+      # database named here. TEST_DATABASE_SLUG names that database after the
+      # shard (taktic_api_shard_<n>_test), which the step after the tests
+      # checks for.
       DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      TEST_DATABASE_SLUG: api_shard_${{ matrix.shard }}
       AUTH_COOKIE_NAME: taktic_session
 
     steps:
@@ -164,39 +310,67 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
-      - name: Release version
+      - name: API tests (this shard's files)
+        run: >-
+          pnpm --filter @taktic/api test
+          --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+          --reporter=default --reporter=junit --reporter=json
+          --outputFile.junit=reports/junit.xml --outputFile.json=reports/results.json
+
+      # Proof that the shard stayed inside its own database. The service holds
+      # only what this runner created: the base database the suite derives its
+      # name from (never connected to by a test — no row may have been written
+      # in it), the shard's own test database, and the scratch database
+      # match-round-migration.spec.ts creates next to it. Anything else, or the
+      # shard's database missing, fails the job.
+      - name: Prove this shard used only its own database
+        if: ${{ !cancelled() }}
+        env:
+          PG: ${{ job.services.postgres.id }}
+          SHARD_DB: taktic_api_shard_${{ matrix.shard }}_test
         run: |
-          node --test scripts/release/version-check.test.mjs
-          pnpm version:check
-          echo "release version: $(pnpm --silent version:check --print)"
+          set -euo pipefail
+          q() { docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d postgres -c "$1"; }
+          q "SELECT datname || ': ' || xact_commit || ' commits, ' || tup_inserted || ' inserted, ' || tup_updated || ' updated, ' || tup_deleted || ' deleted' FROM pg_stat_database WHERE datname IS NOT NULL ORDER BY 1"
+          scratch="${SHARD_DB%_test}_m1_test"
+          others=$(q "SELECT string_agg(datname, ', ') FROM pg_database WHERE NOT datistemplate AND datname NOT IN ('postgres', 'taktic', '$SHARD_DB', '$scratch')")
+          [ -z "$others" ] || { echo "::error::databases other than this shard's on its service: $others"; exit 1; }
+          [ "$(q "SELECT count(*) FROM pg_database WHERE datname = '$SHARD_DB'")" = 1 ] \
+            || { echo "::error::$SHARD_DB was never created: the suite ran against another database"; exit 1; }
+          written=$(q "SELECT tup_inserted + tup_updated + tup_deleted FROM pg_stat_database WHERE datname = 'taktic'")
+          [ "$written" = 0 ] || { echo "::error::$written rows were written to the base database taktic"; exit 1; }
+          echo "shard ${{ matrix.shard }} used $SHARD_DB only"
 
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Test
-        run: pnpm test
-
-      # CI-FONTS-001: the build must not need a font service. Every font host
-      # is unreachable from here on, so a build that still fetches one fails.
-      - name: Block font services
-        run: .github/scripts/block-font-services.sh
-
-      - name: Build
-        run: pnpm build
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-report-api-${{ matrix.shard }}
+          path: apps/api/reports
+          retention-days: 14
+          if-no-files-found: error
 
   e2e:
-    name: e2e (chromium)
+    name: e2e chromium (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     needs: post-merge-gate
     if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
 
-    # A separate job, not extra steps on `verify`: it needs a browser and boots
+    # A separate job, not extra steps on `static`: it needs a browser and boots
     # six application processes, so keeping it apart means a type error still
-    # fails in a minute instead of waiting behind a browser download. Both jobs
-    # start together, so the wall-clock cost to a PR is the slower of the two.
+    # fails in a minute instead of waiting behind a browser download.
+    #
+    # Sharded (CI-PERF-001): Playwright's --shard gives each shard whole spec
+    # files (the suite is not fullyParallel), and each shard is a runner of its
+    # own — its own PostgreSQL, its own six servers on the same ports nobody
+    # else uses there, its own outbox and artifacts directory. Within a shard
+    # the suite runs exactly as before: one worker, files in order, the same
+    # retries and timeouts. A test that asserts on global state ("no refund
+    # transaction exists at all") still sees only its own shard's database.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -206,7 +380,7 @@ jobs:
           POSTGRES_PASSWORD: taktic_password
         ports:
           - 5432:5432
-        # Same tmpfs and ceiling as `verify`, for the same reason; the first
+        # Same tmpfs and ceiling as `api`, for the same reason; the first
         # step below applies the matching durability settings.
         options: >-
           --tmpfs /var/lib/postgresql/data:rw,size=2g
@@ -216,16 +390,15 @@ jobs:
           --health-retries 5
 
     env:
-      # This job gets its own PostgreSQL service container, so nothing is shared
-      # with `verify` in the first place. On top of that the suite derives
-      # `taktic_e2e` from this URL and refuses to start against any database
-      # whose name does not end in _e2e — the integration suite's `taktic_test`
-      # included.
+      # The suite derives `taktic_e2e` from this URL and refuses to start
+      # against any database whose name does not end in _e2e — the integration
+      # suite's included.
       DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
       AUTH_COOKIE_NAME: taktic_session
+      E2E_REPORT_DIR: ${{ github.workspace }}/e2e/.artifacts/shard-report
 
     steps:
-      # Identical to the step of the same name on `verify`; see the notes there.
+      # Identical to the step of the same name on `api`; see the notes there.
       - name: Configure PostgreSQL for disposable CI storage
         env:
           PG: ${{ job.services.postgres.id }}
@@ -274,13 +447,40 @@ jobs:
         run: pnpm e2e:install
 
       # CI-FONTS-001: the build must not need a font service. Every font host
-      # is unreachable from here on, so a build that still fetches one fails
-      # (`pnpm e2e` builds web and admin first).
+      # is unreachable from here on, so a build that still fetches one fails.
       - name: Block font services
         run: .github/scripts/block-font-services.sh
 
-      - name: End-to-end tests
-        run: pnpm e2e
+      # What `pnpm e2e` runs, in two steps so the log times the build and the
+      # tests apart; the package script still prepares the database first.
+      - name: Build
+        run: pnpm build
+
+      - name: End-to-end tests (this shard's files)
+        run: pnpm --filter @taktic/e2e e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # Same check as the `api` shards: only the base and the e2e database on
+      # this shard's service, and no row written to the base.
+      - name: Prove this shard used only its own database
+        if: ${{ !cancelled() }}
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          q() { docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d postgres -c "$1"; }
+          q "SELECT datname || ': ' || xact_commit || ' commits, ' || tup_inserted || ' inserted, ' || tup_updated || ' updated, ' || tup_deleted || ' deleted' FROM pg_stat_database WHERE datname IS NOT NULL ORDER BY 1"
+          others=$(q "SELECT string_agg(datname, ', ') FROM pg_database WHERE NOT datistemplate AND datname NOT IN ('postgres', 'taktic', 'taktic_e2e')")
+          [ -z "$others" ] || { echo "::error::databases other than this shard's on its service: $others"; exit 1; }
+          written=$(q "SELECT tup_inserted + tup_updated + tup_deleted FROM pg_stat_database WHERE datname = 'taktic'")
+          [ "$written" = 0 ] || { echo "::error::$written rows were written to the base database taktic"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-report-e2e-${{ matrix.shard }}
+          path: e2e/.artifacts/shard-report
+          retention-days: 14
+          if-no-files-found: error
 
       # Traces, screenshots and videos are only written for failures
       # (see playwright.config.ts), so this uploads a debugging bundle exactly
@@ -289,7 +489,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts
+          name: e2e-artifacts-${{ matrix.shard }}
           path: |
             e2e/.artifacts/test-results
             e2e/.artifacts/report
@@ -297,7 +497,7 @@ jobs:
           if-no-files-found: ignore
 
   e2e-webkit:
-    name: e2e (webkit · sign-in and mobile shells)
+    name: e2e webkit (${{ matrix.shard }}/${{ strategy.job-total }})
     runs-on: ubuntu-latest
     needs: post-merge-gate
     if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
@@ -309,7 +509,12 @@ jobs:
     # leaves the browser holding, where the reported Safari failure was, and the
     # panel layouts at phone widths, where the reported iPhone one was. It runs
     # those specs and nothing else, in parallel with the job above and without
-    # adding a browser download to it.
+    # adding a browser download to it. Sharded the same way as `e2e`.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
+
     services:
       postgres:
         image: postgres:16.6-alpine
@@ -319,7 +524,7 @@ jobs:
           POSTGRES_PASSWORD: taktic_password
         ports:
           - 5432:5432
-        # Same tmpfs and ceiling as `verify`, for the same reason; the first
+        # Same tmpfs and ceiling as `api`, for the same reason; the first
         # step below applies the matching durability settings.
         options: >-
           --tmpfs /var/lib/postgresql/data:rw,size=2g
@@ -330,13 +535,14 @@ jobs:
 
     env:
       # Same derivation and same refusal as the job above: the suite appends
-      # _e2e and will not start against anything else. The two jobs get separate
-      # service containers, so they do not share the database either.
+      # _e2e and will not start against anything else. Every shard of both
+      # jobs has its own service container, so none shares the database.
       DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
       AUTH_COOKIE_NAME: taktic_session
+      E2E_REPORT_DIR: ${{ github.workspace }}/e2e/.artifacts/shard-report
 
     steps:
-      # Identical to the step of the same name on `verify`; see the notes there.
+      # Identical to the step of the same name on `api`; see the notes there.
       - name: Configure PostgreSQL for disposable CI storage
         env:
           PG: ${{ job.services.postgres.id }}
@@ -382,24 +588,85 @@ jobs:
         run: pnpm e2e:install:webkit
 
       # CI-FONTS-001: the build must not need a font service. Every font host
-      # is unreachable from here on, so a build that still fetches one fails
-      # (`pnpm e2e:webkit` builds web and admin first).
+      # is unreachable from here on, so a build that still fetches one fails.
       - name: Block font services
         run: .github/scripts/block-font-services.sh
 
-      - name: Sign-in screens and mobile shells (WebKit)
-        run: pnpm e2e:webkit
+      # What `pnpm e2e:webkit` runs, in two steps so the log times the build
+      # and the tests apart; the package script still prepares the database.
+      - name: Build
+        run: pnpm build
+
+      - name: Sign-in screens and mobile shells, WebKit (this shard's files)
+        run: pnpm --filter @taktic/e2e e2e:webkit --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # Same check as the `e2e` shards.
+      - name: Prove this shard used only its own database
+        if: ${{ !cancelled() }}
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          q() { docker exec "$PG" psql -v ON_ERROR_STOP=1 -tA -U taktic_user -d postgres -c "$1"; }
+          q "SELECT datname || ': ' || xact_commit || ' commits, ' || tup_inserted || ' inserted, ' || tup_updated || ' updated, ' || tup_deleted || ' deleted' FROM pg_stat_database WHERE datname IS NOT NULL ORDER BY 1"
+          others=$(q "SELECT string_agg(datname, ', ') FROM pg_database WHERE NOT datistemplate AND datname NOT IN ('postgres', 'taktic', 'taktic_e2e')")
+          [ -z "$others" ] || { echo "::error::databases other than this shard's on its service: $others"; exit 1; }
+          written=$(q "SELECT tup_inserted + tup_updated + tup_deleted FROM pg_stat_database WHERE datname = 'taktic'")
+          [ "$written" = 0 ] || { echo "::error::$written rows were written to the base database taktic"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: test-report-e2e-webkit-${{ matrix.shard }}
+          path: e2e/.artifacts/shard-report
+          retention-days: 14
+          if-no-files-found: error
 
       - name: Upload failure artifacts
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-webkit-artifacts
+          name: e2e-webkit-artifacts-${{ matrix.shard }}
           path: |
             e2e/.artifacts/test-results
             e2e/.artifacts/report
           retention-days: 7
           if-no-files-found: ignore
+
+  # The proof that splitting the suites lost nothing: every API spec file ran
+  # in exactly one `api` shard and every test in it passed; every e2e test the
+  # `static` job listed ran in exactly one shard of its browser's job and ended
+  # passed (or flaky: failed, then passed on the retry the suite allows). A
+  # shard that never reported — dropped from the matrix, cancelled, crashed
+  # before writing its report — fails this job, and so does a skipped test.
+  # It runs even when a shard failed, so the summary says what is missing.
+  shard-coverage:
+    name: shard coverage (every test exactly once)
+    runs-on: ubuntu-latest
+    needs: [post-merge-gate, static, api, e2e, e2e-webkit]
+    if: ${{ !cancelled() && needs.post-merge-gate.outputs.reuse != 'true' }}
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/scripts
+            apps/api/test
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: test-report-*
+          path: reports
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: shard-expected
+          path: reports
+
+      - name: Every test ran in exactly one shard and passed
+        run: node .github/scripts/shard-coverage.mjs reports
 
   ops:
     name: ops (compose · scripts · production images)
@@ -684,8 +951,9 @@ jobs:
   # still reports, and reports a failure) and decides in
   # .github/scripts/ci-result.mjs what passing means for each event:
   #
-  #   pull_request  pr-evidence, verify, e2e, e2e-webkit and ops all succeeded
-  #                 on this exact head; skipped, cancelled or failed is a fail
+  #   pull_request  pr-evidence, static, unit, every shard of api, e2e and
+  #                 e2e-webkit, shard-coverage and ops all succeeded on this
+  #                 exact head; skipped, cancelled or failed is a fail
   #   push (main)   the gate succeeded, and either it proved reuse and the full
   #                 jobs skipped for that reason, or every full job succeeded
   #
@@ -694,7 +962,7 @@ jobs:
   ci-result:
     name: CI result
     if: always()
-    needs: [post-merge-gate, pr-evidence, verify, e2e, e2e-webkit, ops]
+    needs: [post-merge-gate, pr-evidence, static, unit, api, e2e, e2e-webkit, shard-coverage, ops]
     runs-on: ubuntu-latest
     permissions:
       contents: read
