@@ -120,7 +120,7 @@ test.describe('ADMIN-DESIGN-001 Faz 3G — sistem ve yönetim', () => {
     });
     const catalogueSize = (await prisma().$queryRawUnsafe<{ n: number }[]>(
       `SELECT count(*)::int AS n FROM unnest(enum_range(NULL::"AdminPermission"))`,
-    ))[0]!.n - 4; // REL-002 Faz 4–5 + SHOWCASE-ALLOWANCE-004 + OBS-ALERT-002: SERVICE_INCIDENTS_CORRECT, MATCH_REVIEW_OPEN_ROUND, SHOWCASE_ALLOWANCE_VOID and OPS_ALERT_ROUTING_MANAGE are SUPER_ADMIN-only and never offered to a role.
+    ))[0]!.n - 5; // REL-002 Faz 4–5 + SHOWCASE-ALLOWANCE-004 + OBS-ALERT-002: SERVICE_INCIDENTS_CORRECT, MATCH_REVIEW_OPEN_ROUND, SHOWCASE_ALLOWANCE_VOID, OPS_ALERT_ROUTING_MANAGE and OPS_ALERT_RECIPIENTS_REVEAL are SUPER_ADMIN-only and never offered to a role.
     const { actor } = await openAs(browser, 'super');
     const page = actor.page;
 

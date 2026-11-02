@@ -6,6 +6,24 @@ import { notFound, redirect } from 'next/navigation';
 // because a re-export does not put the names in this module's own scope.
 import type { ReviewModerationAction, ReviewReportReason, ReviewReportResolution } from './reviews';
 import type { BusinessRegistrationView } from './business-registration';
+import type {
+  ApplyCutoverBody,
+  ApplyRevertBody,
+  CreateRecipientBody,
+  DeleteRecipientBody,
+  PauseRecipientBody,
+  RecipientAuditEntry,
+  RecipientReveal,
+  RecipientTestResult,
+  RecipientView,
+  ReplaceRecipientAddressBody,
+  ResumeRecipientBody,
+  RehashResult,
+  RewrapResult,
+  RoutingPreview,
+  RoutingState,
+  UpdateRecipientBody,
+} from './ops-alert-recipients';
 
 const apiUrl = process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -2506,6 +2524,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     throw new ApiError(response.status, await response.text());
   }
 
+  // A 204 (the recipient delete) has no body to parse.
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return response.json() as Promise<T>;
 }
 
@@ -4483,7 +4506,7 @@ export function adminPermissionLabel(permission: AdminPermission): {
     OPS_ALERT_RECIPIENTS_READ: 'alıcıları görme (maskeli)',
     OPS_ALERT_RECIPIENTS_WRITE: 'alıcı ekleme ve düzenleme',
     OPS_ALERT_RECIPIENTS_DELETE: 'alıcı silme',
-    OPS_ALERT_RECIPIENTS_REVEAL: 'alıcı adresini açık görme (her görüntüleme kayıt altına alınır)',
+    OPS_ALERT_RECIPIENTS_REVEAL: 'alıcı adresini açık görme (yalnız SUPER_ADMIN; her görüntüleme kayıt altına alınır)',
     OPS_ALERT_RECIPIENTS_TEST: 'test bildirimi gönderme',
     OPS_ALERT_ROUTING_MANAGE: 'e-posta yönlendirmesini değiştirme',
   };
@@ -4569,7 +4592,9 @@ export type AdminAuditDomain =
   | 'SHOWCASE_PACKAGE'
   // SEO-004: redirect and 404-suggestion writes (SeoAuditLog).
   | 'SEO_REDIRECT'
-  | 'SEO_NOT_FOUND_PATH';
+  | 'SEO_NOT_FOUND_PATH'
+  // OBS-ALERT-002: operations-alert recipients and the routing events.
+  | 'OPS_ALERT_RECIPIENT';
 
 export type AuditRef = { id: string; name: string | null };
 export type AuditValue = string | number | boolean | null | AuditRef | AuditRef[] | string[];
@@ -4636,4 +4661,104 @@ export function getCreditPackageHistory(packageId: string, page?: number) {
 
 export function getShowcasePackageHistory(packageId: string, page?: number) {
   return apiFetch<AdminAuditPage>(`/admin/showcase/packages/${packageId}/history${auditQuery(page)}`);
+}
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 — operations-alert e-mail recipients and routing
+// (apps/api/src/modules/ops-alerts/). Server-side callers only: each call
+// carries the staff session, and the mutations are reached through server
+// actions that verify a confirmation proof first. The API's refusals arrive
+// as ApiError with a `code` (see RECIPIENT_ERROR_TEXT).
+// ---------------------------------------------------------------------------
+
+function jsonBody(body: object): RequestInit {
+  return { body: JSON.stringify(body) };
+}
+
+export function listOpsAlertRecipients() {
+  return apiFetch<RecipientView[]>('/ops-alerts/recipients');
+}
+
+export function createOpsAlertRecipient(body: CreateRecipientBody) {
+  return apiFetch<RecipientView>('/ops-alerts/recipients', { method: 'POST', ...jsonBody(body) });
+}
+
+export function updateOpsAlertRecipient(id: string, body: UpdateRecipientBody) {
+  return apiFetch<RecipientView>(`/ops-alerts/recipients/${encodeURIComponent(id)}`, { method: 'PATCH', ...jsonBody(body) });
+}
+
+/** 204: resolves with nothing. */
+export function deleteOpsAlertRecipient(id: string, body: DeleteRecipientBody) {
+  return apiFetch<void>(`/ops-alerts/recipients/${encodeURIComponent(id)}`, { method: 'DELETE', ...jsonBody(body) });
+}
+
+export function pauseOpsAlertRecipient(id: string, body: PauseRecipientBody) {
+  return apiFetch<RecipientView>(`/ops-alerts/recipients/${encodeURIComponent(id)}/pause`, { method: 'POST', ...jsonBody(body) });
+}
+
+export function resumeOpsAlertRecipient(id: string, body: ResumeRecipientBody) {
+  return apiFetch<RecipientView>(`/ops-alerts/recipients/${encodeURIComponent(id)}/resume`, { method: 'POST', ...jsonBody(body) });
+}
+
+/** Replacing an address deletes the old recipient and returns the new one. */
+export function replaceOpsAlertRecipientAddress(id: string, body: ReplaceRecipientAddressBody) {
+  return apiFetch<RecipientView>(`/ops-alerts/recipients/${encodeURIComponent(id)}/replace-address`, {
+    method: 'POST',
+    ...jsonBody(body),
+  });
+}
+
+/** The one response that carries an address in full: audited, never cached. Hold it only in the dialog. */
+export function revealOpsAlertRecipient(id: string) {
+  return apiFetch<RecipientReveal>(`/ops-alerts/recipients/${encodeURIComponent(id)}/reveal`, { method: 'POST', body: '{}' });
+}
+
+export function testOpsAlertRecipient(id: string) {
+  return apiFetch<RecipientTestResult>(`/ops-alerts/recipients/${encodeURIComponent(id)}/test`, { method: 'POST', body: '{}' });
+}
+
+/** Every recipient's history and the routing events. */
+export function getOpsAlertRecipientsAudit(page?: number) {
+  return apiFetch<Omit<AdminAuditPage, 'items'> & { items: RecipientAuditEntry[] }>(
+    `/ops-alerts/recipients/audit${auditQuery(page)}`,
+  );
+}
+
+export function getOpsAlertRecipientAudit(id: string, page?: number) {
+  return apiFetch<Omit<AdminAuditPage, 'items'> & { items: RecipientAuditEntry[] }>(
+    `/ops-alerts/recipients/${encodeURIComponent(id)}/audit${auditQuery(page)}`,
+  );
+}
+
+export function getOpsAlertRouting() {
+  return apiFetch<RoutingState>('/ops-alerts/routing');
+}
+
+/** SUPER_ADMIN only (OPS_ALERT_ROUTING_MANAGE). Imports OPS_ALERT_EMAIL as a managed recipient. */
+export function importOpsAlertEnvRecipient() {
+  return apiFetch<RecipientView>('/ops-alerts/routing/import-env', { method: 'POST', body: '{}' });
+}
+
+export function previewOpsAlertCutover() {
+  return apiFetch<RoutingPreview>('/ops-alerts/routing/cutover/preview', { method: 'POST', body: '{}' });
+}
+
+export function applyOpsAlertCutover(body: ApplyCutoverBody) {
+  return apiFetch<RoutingState>('/ops-alerts/routing/cutover', { method: 'POST', ...jsonBody(body) });
+}
+
+export function previewOpsAlertRevert() {
+  return apiFetch<RoutingPreview>('/ops-alerts/routing/revert/preview', { method: 'POST', body: '{}' });
+}
+
+export function applyOpsAlertRevert(body: ApplyRevertBody) {
+  return apiFetch<RoutingState>('/ops-alerts/routing/revert', { method: 'POST', ...jsonBody(body) });
+}
+
+export function rewrapOpsAlertRecipients() {
+  return apiFetch<RewrapResult>('/ops-alerts/routing/rewrap', { method: 'POST', body: '{}' });
+}
+
+export function rehashOpsAlertRecipients() {
+  return apiFetch<RehashResult>('/ops-alerts/routing/rehash', { method: 'POST', body: '{}' });
 }

@@ -12,6 +12,7 @@ import {
   requireAdmin,
 } from '../../lib/api';
 import { rethrowNextControlFlow } from '../../lib/next-control-flow';
+import { recipientDeliverySummary } from '../../lib/ops-alert-recipients';
 import {
   API_REASON_TEXT,
   type ApiReachability,
@@ -36,7 +37,6 @@ import {
   type SystemHealthReport,
   apiReachability,
   jobState,
-  opsAlertChannelSummary,
   opsAlertSubject,
   schedulerJobName,
   schedulerSummaryLabel,
@@ -51,6 +51,9 @@ import { HealthRefresh } from './health-refresh';
  * only to screens that already exist. OPERATIONS_SETTINGS_READ opens it; the
  * e-mail section is drawn only when the API sent it, which it does for a
  * NOTIFICATION_LOGS_READ holder alone.
+ *
+ * OBS-ALERT-002: the alerts card links to "Bildirim ayarları" for
+ * OPS_ALERT_RECIPIENTS_READ holders; the recipients are managed there, never here.
  *
  * Every state comes from the API's rules except the API's own row, which
  * this panel's server measures by fetching the report: the API is never
@@ -121,7 +124,7 @@ function AlertRows({ alerts, testId }: { alerts: OpsAlertView[]; testId: string 
             {formatDateTime(alert.firstSeenAt)} / {formatDateTime(alert.lastSeenAt)}
           </td>
           <td className="is-num">{alert.occurrenceCount}</td>
-          <td>{opsAlertChannelSummary(alert)}</td>
+          <td>{recipientDeliverySummary(alert.deliveries)}</td>
         </tr>
       ))}
     </>
@@ -175,7 +178,7 @@ async function loadReport(): Promise<{ report: SystemHealthReport | null; api: A
 }
 
 export default async function SystemHealthPage() {
-  await requireAdmin('OPERATIONS_SETTINGS_READ');
+  const { can } = await requireAdmin('OPERATIONS_SETTINGS_READ');
   const { report, api } = await loadReport();
 
   const overall = report ? worstStatus([api.status, report.overall]) : worstStatus([api.status, 'UNKNOWN']);
@@ -411,6 +414,17 @@ export default async function SystemHealthPage() {
                 ? ` · kaçırılan çalışma: ${report.alerts.engine.missedTicks >= 3 ? '3 veya daha fazla' : report.alerts.engine.missedTicks}`
                 : ''
             }.`}
+            actions={
+              can('OPS_ALERT_RECIPIENTS_READ') ? (
+                <Link
+                  className="btn btn-secondary btn-sm"
+                  href="/system-health/notification-settings"
+                  data-testid="system-health-notification-settings-link"
+                >
+                  Bildirim ayarları
+                </Link>
+              ) : null
+            }
             padded={false}
             testId="system-health-alerts"
           >

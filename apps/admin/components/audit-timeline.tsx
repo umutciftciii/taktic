@@ -14,6 +14,7 @@ import {
   type AuditValue,
 } from '../lib/api';
 import { buildHref, type QueryParams } from '../lib/list-query';
+import { EMAIL_ROUTING_LABELS, RECIPIENT_STATUS_LABELS, recipientErrorText, type RecipientStatus } from '../lib/ops-alert-recipients';
 import { pageSummary, pageWindow } from '../lib/pagination';
 import { DataTable, type DataColumn } from './data-table';
 import { EmptyState } from './empty-state';
@@ -69,6 +70,20 @@ const FIELD_LABELS: Record<string, string> = {
   legalName: 'Yasal unvan',
   supportEmail: 'Destek e-postası',
   postalAddress: 'Posta adresi',
+  // OBS-ALERT-002: alert recipients and the routing switch
+  label: 'Etiket',
+  maskedAddress: 'Adres (maskeli)',
+  notifyWarning: 'Uyarı bildirimi',
+  notifyCritical: 'Kritik bildirimi',
+  notifyRecovery: 'Düzelme bildirimi',
+  keyId: 'Şifreleme anahtarı',
+  hmacVersion: 'Adres özeti sürümü',
+  result: 'Sonuç',
+  replaces: 'Yerini aldığı alıcı',
+  replacedBy: 'Yerine geçen alıcı',
+  emailRouting: 'E-posta yönlendirmesi',
+  told: 'Bildirilmiş sayılan teslimat',
+  inFlight: 'Gönderimi süren teslimat',
 };
 
 const CATEGORY_STATUS: Record<string, string> = { DRAFT: 'Taslak', ACTIVE: 'Yayında', INACTIVE: 'Kapalı' };
@@ -80,7 +95,13 @@ const PACKAGE_TYPE: Record<string, string> = {
 };
 const CARD_KIND: Record<string, string> = { SERVICE: 'Hizmet vitrini', PROMOTION: 'Genel tanıtım' };
 
+const ROUTING_COUNT_FIELD = /^counts\.(PENDING|FAILED|SENDING)\.(rebind|cancel)$/;
+const ROUTING_COUNT_STATUS: Record<string, string> = { PENDING: 'bekleyen', FAILED: 'yeniden denenecek', SENDING: 'gönderilen' };
+const ROUTING_COUNT_KIND: Record<string, string> = { rebind: 'yeni alıcıya bağlanan', cancel: 'iptal edilen' };
+
 export function auditFieldLabel(field: string): string {
+  const routingCount = ROUTING_COUNT_FIELD.exec(field);
+  if (routingCount) return `${ROUTING_COUNT_KIND[routingCount[2]!]} (${ROUTING_COUNT_STATUS[routingCount[1]!]})`;
   return FIELD_LABELS[field] ?? field;
 }
 
@@ -108,6 +129,11 @@ export function formatAuditValue(domain: AdminAuditEntry['domain'], field: strin
     if (field === 'priceAmount') return formatPrice(value);
     return value.toLocaleString('tr-TR');
   }
+  if (domain === 'OPS_ALERT_RECIPIENT') {
+    if (field === 'status') return RECIPIENT_STATUS_LABELS[value as RecipientStatus] ?? value;
+    if (field === 'emailRouting') return EMAIL_ROUTING_LABELS[value as keyof typeof EMAIL_ROUTING_LABELS] ?? value;
+    if (field === 'result') return value === 'SENT' ? 'Gönderildi' : recipientErrorText(value);
+  }
   if (field === 'status') {
     return domain === 'CATEGORY' ? (CATEGORY_STATUS[value] ?? value) : statusLabel(value);
   }
@@ -133,7 +159,7 @@ export function auditActorLabel(actor: AdminAuditEntry['actor'] | undefined): Re
 function ChangeList({ entry, changes }: { entry: AdminAuditEntry; changes: AuditChange[] }) {
   if (changes.length === 0) return null;
   // A create has no "before": its fields are listed with their first value.
-  const isCreate = entry.action === 'CREATED';
+  const isCreate = entry.action === 'CREATED' || entry.action === 'IMPORTED_FROM_ENV';
   return (
     <ul className="audit-changes" data-testid="audit-changes">
       {changes.map((change) => (
@@ -162,6 +188,23 @@ const ROLE_ACTIONS: Record<string, string> = {
   ROLE_REACTIVATED: 'Rol yeniden aktifleştirildi',
   ASSIGNMENT_GRANTED: 'Rol atandı',
   ASSIGNMENT_REVOKED: 'Rol geri alındı',
+};
+
+const RECIPIENT_ACTIONS: Record<string, string> = {
+  CREATED: 'Alıcı eklendi',
+  IMPORTED_FROM_ENV: 'OPS_ALERT_EMAIL adresi alıcı olarak içe aktarıldı',
+  LABEL_CHANGED: 'Etiket değişti',
+  PREFERENCES_CHANGED: 'Bildirim tercihleri değişti',
+  PAUSED: 'Alıcı duraklatıldı',
+  RESUMED: 'Alıcı yeniden etkinleştirildi',
+  DELETED: 'Alıcı silindi',
+  ADDRESS_REPLACED: 'Adres değiştirildi',
+  REVEALED: 'Adres açık görüntülendi',
+  TEST_SENT: 'Test e-postası gönderildi',
+  ROUTING_CUTOVER: 'Yönlendirme yönetilen alıcılara geçirildi',
+  ROUTING_REVERTED: 'Yönlendirme ortam değişkenine döndürüldü',
+  REWRAPPED: 'Şifreleme anahtarı yenilendi',
+  REHASHED: 'Adres özeti yenilendi',
 };
 
 const ROLE_CHANGED_FIELDS: Record<string, string> = { name: 'ad', description: 'açıklama', isActive: 'durum' };
@@ -262,6 +305,17 @@ export function describeAuditEntry(
           ) : null,
       };
     }
+    case 'OPS_ALERT_RECIPIENT':
+      return {
+        title: RECIPIENT_ACTIONS[entry.action] ?? entry.action,
+        note: (
+          <span className="cell-stack">
+            {entry.target?.label ? <span>Alıcı: {entry.target.label}</span> : null}
+            <ChangeList entry={entry} changes={entry.changes} />
+            {entry.reason ? <span>Gerekçe: {entry.reason}</span> : null}
+          </span>
+        ),
+      };
     case 'COMPANY_SETTINGS':
       return { title: 'Şirket bilgileri değişti', note: <ChangeList entry={entry} changes={entry.changes} /> };
     default:

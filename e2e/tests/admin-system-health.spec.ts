@@ -15,7 +15,8 @@ import { artifactsDir, primaryRuntime } from '../src/runtime';
  * readiness probe against the suite's database.
  *
  * And the access split: OPERATIONS_SETTINGS_READ opens the screen without the
- * e-mail section; NOTIFICATION_LOGS_READ alone opens nothing.
+ * e-mail section and without the link to Bildirim ayarları (OBS-ALERT-002);
+ * NOTIFICATION_LOGS_READ alone opens nothing.
  */
 
 const SHOTS = resolve(artifactsDir, 'system-health');
@@ -63,6 +64,11 @@ test.describe('system health (ADMIN-SYSTEM-HEALTH-001)', () => {
       await expect(page.getByTestId('system-health-alerts-status')).toHaveAttribute('data-status', /^(HEALTHY|DEGRADED|DOWN|UNKNOWN)$/);
       await expect(page.getByTestId('system-health-alert-channels')).toContainText('Telegram');
       await expect(page.getByTestId('system-health-alerts')).toContainText('Son başarılı değerlendirme');
+      // OBS-ALERT-002: the alerts card leads to the recipients screen (OPS_ALERT_RECIPIENTS_READ).
+      await expect(page.getByTestId('system-health-notification-settings-link')).toHaveAttribute(
+        'href',
+        '/system-health/notification-settings',
+      );
       await expect(page.getByTestId('system-health-not-measured')).toContainText('Dışarıdan erişilebilirlik');
       // Nothing on the screen acts: no form, no write button beyond "Yenile".
       await expect(page.locator('main form')).toHaveCount(0);
@@ -93,6 +99,7 @@ test.describe('system health (ADMIN-SYSTEM-HEALTH-001)', () => {
       await expect(admin.page.getByTestId('system-health-email-hidden')).toBeVisible();
       await expect(admin.page.getByTestId('system-health-alerts')).toBeVisible();
       await expect(admin.page.getByTestId('system-health-alerts-email-hidden')).toBeVisible();
+      await expect(admin.page.getByTestId('system-health-notification-settings-link')).toHaveCount(0);
       await expect(admin.page.locator('a[href^="/notifications/"]')).toHaveCount(0);
     } finally {
       await admin.close();

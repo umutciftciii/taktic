@@ -148,3 +148,42 @@ export function requestStatusErrorMessage(key: string | undefined): string | nul
     ? REQUEST_STATUS_ERROR_MESSAGES[key as RequestStatusErrorKey]
     : null;
 }
+
+// ---------------------------------------------------------------------------
+// OBS-ALERT-002 — a write to an alert recipient that was drawn from a stale row
+// ---------------------------------------------------------------------------
+
+export type RecipientStaleKey = 'versionConflict' | 'deleted' | 'notFound';
+
+/**
+ * What the Bildirim Ayarları page says when an edit was refused because the
+ * recipient moved after the form was drawn. The form's typed values cannot be
+ * saved against the new version unseen, so the window closes and the list
+ * shows the current row under this sentence. Nothing was written.
+ */
+export const RECIPIENT_STALE_MESSAGES: Record<RecipientStaleKey, string> = {
+  versionConflict:
+    'Alıcı kaydedilmedi. Alıcı bu sayfa açıldıktan sonra başka biri tarafından değiştirildi; aşağıda güncel hali görünüyor, değişikliği buna göre yeniden yapın.',
+  deleted: 'Alıcı kaydedilmedi. Bu alıcı bu sayfa açıldıktan sonra silindi.',
+  notFound: 'Alıcı kaydedilmedi. Alıcı bulunamadı; silinmiş olabilir.',
+};
+
+/** The coded refusals of `PATCH /ops-alerts/recipients/:id` that mean "the row moved". */
+export function recipientStaleKey(code: string | null): RecipientStaleKey | null {
+  switch (code) {
+    case 'VERSION_CONFLICT':
+      return 'versionConflict';
+    case 'RECIPIENT_DELETED':
+      return 'deleted';
+    case 'RECIPIENT_NOT_FOUND':
+      return 'notFound';
+    default:
+      return null;
+  }
+}
+
+export function recipientStaleMessage(key: string | undefined): string | null {
+  return key && Object.prototype.hasOwnProperty.call(RECIPIENT_STALE_MESSAGES, key)
+    ? RECIPIENT_STALE_MESSAGES[key as RecipientStaleKey]
+    : null;
+}

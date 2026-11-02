@@ -129,6 +129,15 @@ export const E2E_BYPASS_PHONE_E164 = '+905559980042';
 export const E2E_BYPASS_CODE = '424242';
 export const E2E_BYPASS_EXPIRES_AT = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
 
+/**
+ * OBS-ALERT-002: OPS_ALERT_EMAIL on every API runtime, so the routing panel's
+ * "import OPS_ALERT_EMAIL" step and the revert (which needs a live env
+ * channel) have an address to work with. A reserved example.test mailbox: the
+ * suite's e-mail transport is the file outbox, so nothing is ever delivered,
+ * and the alert evaluator's schedule is pinned to one minute a year.
+ */
+export const E2E_OPS_ALERT_EMAIL = 'ops-e2e@example.test';
+
 function port(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;

@@ -194,9 +194,10 @@ sonraki çalıştırmaya kalır (`failed` sayısında görünür, satır bozulma
 
 4. Preflight: `keyring v2 (2 keys)`. Yalnız API'yi recreate edin. Bundan sonra
    yeni alıcılar `v2` ile şifrelenir, eskiler `v1` ile okunmaya devam eder.
-5. **Rewrap:** SUPER_ADMIN, Bildirim Ayarları → yönlendirme paneli → "Yeniden
-   şifrele" (panel PR-B ile gelir; o zamana kadar API:
+5. **Rewrap:** SUPER_ADMIN, Bildirim Ayarları → E-posta yönlendirmesi paneli →
+   "Şifrelemeyi yenile" (onay penceresi: "Evet, yeniden şifrele"; API:
    `POST /ops-alerts/routing/rewrap`, `OPS_ALERT_ROUTING_MANAGE`, yalnız SUPER_ADMIN).
+   Düğme SUPER_ADMIN'e her zaman görünür; sonuç sayfanın üstündeki bildirimde yazar.
    Yanıt `{ rewrapped, failed }`; `failed > 0` ise nedeni giderip tekrar
    çalıştırın (idempotent: zaten `v2` olan satıra dokunmaz).
 6. Doğrulayın: `GET /ops-alerts/routing` → `keyIds` **yalnız** `{ "v2": n }`.
@@ -242,7 +243,8 @@ HMAC anahtarına ihtiyaç duymaz.
    ```
 
    Preflight: `hmac v2`. Yalnız API'yi recreate edin.
-3. **Hemen** `rehash` (`POST /ops-alerts/routing/rehash`) ve
+3. **Hemen** `rehash`: SUPER_ADMIN, Bildirim Ayarları → E-posta yönlendirmesi
+   paneli → "Adres özetini yenile" (API: `POST /ops-alerts/routing/rehash`) ve
    `hmacVersions` yalnız `{ "2": n }` olana kadar tekrarlayın. Arada alıcı
    eklemeyin ve geçiş/geri dönüş yapmayın: eski sürümlü satırlar tekilleştirme
    ve env adresi eşleşmesinde görünmez.

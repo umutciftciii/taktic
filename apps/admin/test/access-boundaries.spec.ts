@@ -129,7 +129,7 @@ describe('sidebar row ↔ page gate', () => {
 
 describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-001)', () => {
   /**
-   * All 61 signed-in page.tsx files, kept by hand. The first test fails the
+   * All 63 signed-in page.tsx files, kept by hand. The first test fails the
    * moment a page is added or removed without this table changing with it, so
    * a new screen cannot arrive without somebody deciding which row lights on
    * it and which gate it asks for.
@@ -210,6 +210,12 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
     '/credit-packages/[id]': { row: '/credit-packages', gate: ['CREDIT_PACKAGES_READ'] },
     '/operations-settings': { row: '/operations-settings', gate: ['OPERATIONS_SETTINGS_READ'] },
     '/system-health': { row: '/system-health', gate: ['OPERATIONS_SETTINGS_READ'] },
+    // OBS-ALERT-002: the recipients have their own read, so a role can hold one without the other.
+    '/system-health/notification-settings': {
+      row: '/system-health',
+      gate: ['OPS_ALERT_RECIPIENTS_READ'],
+      exception: 'The alert recipients are their own permission area, separate from the health report.',
+    },
     '/campaigns': { row: '/campaigns', gate: ['CAMPAIGNS_READ'] },
     '/campaigns/new': {
       row: '/campaigns',
@@ -249,7 +255,7 @@ describe('every signed-in screen ↔ its sidebar row ↔ its gate (ADMIN-DESIGN-
       .filter((route) => !OUTSIDE_THE_SHELL.includes(route))
       .sort();
     expect(onDisk).toEqual(Object.keys(SCREENS).sort());
-    expect(onDisk).toHaveLength(62);
+    expect(onDisk).toHaveLength(63);
   });
 
   it.each(Object.entries(SCREENS))('%s asks for exactly its recorded gate', (route, screen) => {

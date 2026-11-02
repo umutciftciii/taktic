@@ -96,12 +96,18 @@ export function mayReachAdminPanel(user: PermissionPrincipal | null | undefined)
  * and rotating the recipient keys decide where every alert goes, by product
  * decision a SUPER_ADMIN act. An ADMIN still reads the routing state
  * (OPS_ALERT_RECIPIENTS_READ).
+ *
+ * OPS_ALERT_RECIPIENTS_REVEAL (OBS-ALERT-002 PR-B, Ruling B-1): showing an
+ * alert recipient's full address (every reveal audited) is by product
+ * decision a SUPER_ADMIN act. An ADMIN still reads the masked address
+ * (OPS_ALERT_RECIPIENTS_READ).
  */
 export const SUPER_ADMIN_RESERVED_PERMISSIONS: readonly AdminPermission[] = [
   AdminPermission.SERVICE_INCIDENTS_CORRECT,
   AdminPermission.MATCH_REVIEW_OPEN_ROUND,
   AdminPermission.SHOWCASE_ALLOWANCE_VOID,
   AdminPermission.OPS_ALERT_ROUTING_MANAGE,
+  AdminPermission.OPS_ALERT_RECIPIENTS_REVEAL,
 ];
 
 export function isReservedPermission(permission: AdminPermission): boolean {

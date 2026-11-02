@@ -624,6 +624,7 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
       name: 'POST /ops-alerts/recipients/:id/reveal',
       verb: 'post',
       needs: [P.OPS_ALERT_RECIPIENTS_REVEAL],
+      reserved: true,
       prepare: async () => ({ path: `/ops-alerts/recipients/${(await seed('reveal@example.test')).id}/reveal`, body: {} }),
     },
     {
@@ -754,20 +755,23 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     expect((await ctx.prisma.opsAlertRecipient.findUniqueOrThrow({ where: { id: r.id } })).status).toBe('ACTIVE');
   });
 
-  it('OPS_ALERT_ROUTING_MANAGE is reserved: the role editor refuses it and the catalogue lists it as reserved', async () => {
-    expect(SUPER_ADMIN_RESERVED_PERMISSIONS).toContain(P.OPS_ALERT_ROUTING_MANAGE);
-    expect(GRANTABLE_ADMIN_PERMISSIONS).not.toContain(P.OPS_ALERT_ROUTING_MANAGE);
-    const catalogue = await call('get', '/admin/permissions', rootCookie).expect(200);
-    expect(catalogue.body.permissions).not.toContain('OPS_ALERT_ROUTING_MANAGE');
-    expect(catalogue.body.reservedForSuperAdmin).toContain('OPS_ALERT_ROUTING_MANAGE');
-    const created = await call('post', '/admin/roles', rootCookie, {
-      key: `routing-${Math.random().toString(36).slice(2, 8)}`,
-      name: 'Yönlendirme',
-      permissions: ['OPS_ALERT_ROUTING_MANAGE'],
-    });
-    expect(created.status).toBe(400);
-    expect(created.body.code).toBe('PERMISSION_RESERVED_FOR_SUPER_ADMIN');
-  });
+  it.each([[P.OPS_ALERT_ROUTING_MANAGE], [P.OPS_ALERT_RECIPIENTS_REVEAL]])(
+    '%s is reserved: the role editor refuses it and the catalogue lists it as reserved',
+    async (permission) => {
+      expect(SUPER_ADMIN_RESERVED_PERMISSIONS).toContain(permission);
+      expect(GRANTABLE_ADMIN_PERMISSIONS).not.toContain(permission);
+      const catalogue = await call('get', '/admin/permissions', rootCookie).expect(200);
+      expect(catalogue.body.permissions).not.toContain(permission);
+      expect(catalogue.body.reservedForSuperAdmin).toContain(permission);
+      const created = await call('post', '/admin/roles', rootCookie, {
+        key: `reserved-${Math.random().toString(36).slice(2, 8)}`,
+        name: 'Ayrılmış',
+        permissions: [permission],
+      });
+      expect(created.status).toBe(400);
+      expect(created.body.code).toBe('PERMISSION_RESERVED_FOR_SUPER_ADMIN');
+    },
+  );
 
   // -------------------------------------------------------------------------
   // Projection, reveal, test send
@@ -815,9 +819,12 @@ describe('OBS-ALERT-002 HTTP endpoints', () => {
     expect(JSON.stringify(response.body)).not.toContain('new.person@example.test');
   });
 
-  it('reveal sets no-store and audits every reveal', async () => {
+  it('reveal refuses an ADMIN whose role holds REVEAL; SUPER_ADMIN gets the address, no-store, audited every time', async () => {
     const r = await seed('Reveal.Me@example.test');
-    const cookie = await adminCookie([P.OPS_ALERT_RECIPIENTS_REVEAL]);
+    const smuggled = await adminCookie([P.OPS_ALERT_RECIPIENTS_REVEAL]);
+    await call('post', `/ops-alerts/recipients/${r.id}/reveal`, smuggled, {}).expect(403);
+    expect(await ctx.prisma.opsAlertRecipientAuditLog.count({ where: { action: 'REVEALED', recipientId: r.id } })).toBe(0);
+    const cookie = rootCookie;
     const response = await call('post', `/ops-alerts/recipients/${r.id}/reveal`, cookie, {}).expect(200);
     expect(response.headers['cache-control']).toBe('no-store');
     expect(response.body).toEqual({ address: 'reveal.me@example.test' });
