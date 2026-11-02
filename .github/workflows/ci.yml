@@ -310,9 +310,13 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      # `exec vitest run`, not the package's `test` script: through
+      # `pnpm --filter … test`, pnpm parses --shard and --outputFile.* as its
+      # own options and refuses them. The script is `vitest run` and nothing
+      # else, so this is the same command.
       - name: API tests (this shard's files)
         run: >-
-          pnpm --filter @taktic/api test
+          pnpm --filter @taktic/api exec vitest run
           --shard=${{ matrix.shard }}/${{ strategy.job-total }}
           --reporter=default --reporter=junit --reporter=json
           --outputFile.junit=reports/junit.xml --outputFile.json=reports/results.json
