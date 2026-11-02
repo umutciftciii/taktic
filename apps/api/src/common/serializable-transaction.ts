@@ -9,9 +9,12 @@ export const CONCURRENT_MODIFICATION_CODE = 'CONCURRENT_MODIFICATION';
 
 /**
  * Prisma error code for "Transaction failed due to a write conflict or a
- * deadlock". PostgreSQL raises it (SQLSTATE 40001) when a Serializable
- * transaction cannot be serialized against a concurrent one. The failing
- * transaction is always rolled back, so re-running the whole callback is safe.
+ * deadlock". Despite the wording, this code base sees it for SQLSTATE 40001:
+ * PostgreSQL raises that when a Serializable transaction cannot be serialized
+ * against a concurrent one. A real deadlock (40P01) reached the client as an
+ * unclassified connector error instead (REL-002, issue vs complete). The
+ * failing transaction is always rolled back, so re-running the whole callback
+ * is safe.
  */
 export const PRISMA_WRITE_CONFLICT_ERROR_CODE = 'P2034';
 

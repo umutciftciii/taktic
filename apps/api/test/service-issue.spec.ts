@@ -172,6 +172,9 @@ async function waitUntilParked(matches: (sql: string) => boolean) {
   throw new Error('Timed out waiting for the writer to park on the held row');
 }
 
+/** Thrown to roll a test-held transaction back once it has served its purpose. */
+class Rollback extends Error {}
+
 async function reportBody(requestId: string, overrides: Record<string, unknown> = {}) {
   return {
     roundId: await currentRoundId(requestId),
@@ -476,7 +479,49 @@ describe('races', () => {
       const statuses = [issue.status, complete.status];
       expect(statuses.filter((status) => status === 200 || status === 201)).toHaveLength(1);
       expect(statuses.filter((status) => status === 409)).toHaveLength(1);
+      const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+      const incidents = await ctx.prisma.providerServiceIncident.count({ where: { requestId: s.requestId } });
+      if (issue.status === 200) {
+        expect(row.status).toBe(ServiceRequestStatus.APPROVED);
+        expect(incidents).toBe(1);
+      } else {
+        expect(row.status).toBe(ServiceRequestStatus.COMPLETED);
+        expect(incidents).toBe(0);
+      }
     }
+  });
+
+  it('a report on somebody else\'s request locks nothing and is the same 404', async () => {
+    const s = await matchedRequest();
+    const stranger = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const strangerCookie = await loginAs(ctx.prisma, stranger.id);
+    const body = await reportBody(s.requestId);
+
+    let reported: Promise<request.Response> | undefined;
+    await ctx.prisma.$transaction(
+      async (tx) => {
+        // The owner's completion holds the request row.
+        await tx.serviceRequest.update({
+          where: { id: s.requestId },
+          data: { status: ServiceRequestStatus.COMPLETED, completedAt: new Date() },
+        });
+        // The stranger's report does not queue behind it: it answers while the
+        // row is still held.
+        reported = report(s.requestId, strangerCookie, body).then((response) => response);
+        const answered = await reported;
+        expect(answered.status).toBe(404);
+        // Undo inside the transaction; the owner's state stays as it was.
+        throw new Rollback();
+      },
+      { timeout: 30_000 },
+    ).catch((error: unknown) => {
+      if (!(error instanceof Rollback)) {
+        throw error;
+      }
+    });
+    expect(reported).toBeDefined();
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+    expect(row.status).toBe(ServiceRequestStatus.MATCHED);
   });
 
   it('issue vs staff cancel: exactly one wins', async () => {

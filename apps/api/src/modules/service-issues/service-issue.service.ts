@@ -184,11 +184,13 @@ export class ServiceIssueService {
   ): Promise<ServiceIssueResult> {
     const now = new Date();
 
-    // 0. The request row before anything else (see `lockRequestRowForUpdate`):
-    //    this transaction writes the round before the request, so it must not
-    //    reach the round holding nothing while a completion or a cancel holds
-    //    the request and waits for the round.
-    await lockRequestRowForUpdate(tx, requestId);
+    // 0. Lock the request row before anything else (see
+    //    `lockRequestRowForUpdate`). This transaction writes the round before
+    //    the request. Without the lock it could hold the round while a
+    //    completion or a cancel holds the request and waits for that round.
+    //    The lock covers only the caller's own request, so another customer's
+    //    report locks nothing and still gets the 404 below.
+    await lockRequestRowForUpdate(tx, { requestId, customerId: user.id });
 
     // 1. The request, owned by this customer. Anybody else's request and a
     //    request that does not exist are the same 404.
