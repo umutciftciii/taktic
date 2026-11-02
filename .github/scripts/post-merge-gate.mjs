@@ -19,14 +19,18 @@ import { appendFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { allShardJobNames } from './ci-shards.mjs';
 
 // The jobs that make up a full CI run. A PR run is evidence only when
 // each of them ran and succeeded in its latest attempt; a skipped one is not
-// evidence. `post-merge-gate.test.mjs` checks these names against ci.yml.
+// evidence. A sharded job is required shard by shard — `api tests (3/4)` is
+// a job of its own here — so a run missing a shard is never evidence.
+// `post-merge-gate.test.mjs` checks these names against ci.yml.
 export const REQUIRED_JOBS = [
-  'typecheck · lint · test · build',
-  'e2e (chromium)',
-  'e2e (webkit · sign-in and mobile shells)',
+  'static (typecheck · lint · build)',
+  'unit (web · admin · shared)',
+  ...allShardJobNames(),
+  'shard coverage (every test exactly once)',
   'ops (compose · scripts · production images)',
 ];
 
