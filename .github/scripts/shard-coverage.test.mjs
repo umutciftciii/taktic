@@ -229,11 +229,15 @@ test('plan: a shard that wrote no plan fails', () => {
   assert.match(problemsOf(checkPlan(PLAN, plans, planReports(planned()))), /shard 3\/4 wrote no plan/);
 });
 
-test('plan: a shard that planned from other inputs fails', () => {
+test('plan: a shard that planned from other inputs fails, naming the difference', () => {
+  // Without history the split is by test count: shard 2 still gets b, shard 3 loses e.
   const other = buildPlan('e2e', PLAN_LISTED, undefined);
   const plans = ownPlans();
   plans.set(2, other);
-  assert.match(problemsOf(checkPlan(PLAN, plans, planReports(planned()))), /shard 2\/4 planned differently from this check \(inputs differ: durations none vs [0-9a-f]{64}\)/);
+  plans.set(3, other);
+  const problems = problemsOf(checkPlan(PLAN, plans, planReports(planned())));
+  assert.match(problems, /shard 2\/4 planned differently from this check \(durations none vs [0-9a-f]{64}; its own files vs this check's: same files, other fields differ\)/);
+  assert.match(problems, /shard 3\/4 planned differently .*: -e\.spec\.ts\)/);
 });
 
 test('plan: a shard with no report is reported by the coverage check, not twice here', () => {

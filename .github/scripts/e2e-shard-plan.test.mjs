@@ -23,6 +23,7 @@ import {
   readDurations,
   reportFileMs,
   testListText,
+  verifySelection,
 } from './e2e-shard-plan.mjs';
 
 const script = fileURLToPath(new URL('./e2e-shard-plan.mjs', import.meta.url));
@@ -218,4 +219,18 @@ test('plan: a shard planned no files fails instead of running nothing', () => {
   run(1);
   assert.throws(() => run(2), (e) => e.status === 1 && /shard 2\/4 was planned no files/.test(e.stdout));
   assert.throws(() => run(9), (e) => e.status === 1 && /shard 9 is not one of e2e's 4/.test(e.stdout));
+});
+
+test('verify: Playwright\'s selection must be exactly the shard\'s planned files and tests', () => {
+  const files = { 'a.spec.ts': 2, 'b.spec.ts': 1, 'c.spec.ts': 1, 'd.spec.ts': 1, 'e.spec.ts': 1 };
+  const plan = buildPlan('e2e', listReport(files), undefined);
+  const mine = plan.shards[0];
+  const pick = (names) => listReport(Object.fromEntries(names.map((f) => [f, files[f]])));
+  assert.deepEqual(verifySelection(plan, 1, pick(mine.files)), []);
+  assert.match(verifySelection(plan, 1, pick([]))[0], /is planned for this shard but --test-list selects none of its tests/);
+  assert.match(verifySelection(plan, 1, pick([...mine.files, 'e.spec.ts'])).join('\n'), /selects e\.spec\.ts, which is not planned/);
+  const fewer = pick(mine.files);
+  fewer.suites[0].suites[0].specs.pop();
+  assert.match(verifySelection(plan, 1, fewer)[0], /selects 1 tests, the plan expects 2/);
+  assert.match(verifySelection(plan, 7, pick([]))[0], /plan has no shard 7/);
 });

@@ -181,7 +181,14 @@ export function checkPlan(plan, shardPlans, reports) {
   for (const s of plan.shards) {
     const own = shardPlans.get(s.index);
     if (!own) problems.push(`shard ${s.index}/${plan.count} wrote no plan`);
-    else if (JSON.stringify(own) !== expected) problems.push(`shard ${s.index}/${plan.count} planned differently from this check (inputs differ: durations ${own.durations ?? 'none'} vs ${plan.durations ?? 'none'})`);
+    else if (JSON.stringify(own) !== expected) {
+      const theirs = new Set(own.shards?.find((o) => o.index === s.index)?.files ?? []);
+      const diff = [...s.files.filter((f) => !theirs.has(f)).map((f) => `-${f}`), ...[...theirs].filter((f) => !s.files.includes(f)).map((f) => `+${f}`)];
+      problems.push(
+        `shard ${s.index}/${plan.count} planned differently from this check (durations ${own.durations ?? 'none'} vs ${plan.durations ?? 'none'}; ` +
+          `its own files vs this check's: ${diff.length ? diff.join(' ') : 'same files, other fields differ'})`,
+      );
+    }
     const report = reports.get(s.index);
     if (!report) {
       shards.push({ index: s.index, planned: Math.round(s.ms / 1000), seconds: null });

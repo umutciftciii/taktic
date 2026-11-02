@@ -51,6 +51,8 @@ for (const [id, job] of Object.entries(SHARDED_JOBS)) {
       // The shard lists its project the way `static` does, or the plans differ.
       const listing = id === 'e2e-webkit' ? /E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME=.*\n.*--list --reporter=json --project=webkit >/ : /^ {10}PLAYWRIGHT_JSON_OUTPUT_NAME=.*\n.*--list --reporter=json >/m;
       assert.match(block, listing);
+      // Playwright's selection is checked against the plan before the tests.
+      assert.match(block, new RegExp(`--list --reporter=json${id === 'e2e-webkit' ? ' --project=webkit' : ''} --test-list="\\$RUNNER_TEMP/e2e-test-list\\.txt" >/dev/null\\n +node \\.github/scripts/e2e-shard-plan\\.mjs verify "\\$E2E_REPORT_DIR/plan\\.json" \\$\\{\\{ matrix\\.shard \\}\\} "\\$RUNNER_TEMP/e2e-selected\\.json"`));
       // The plan is written before the tests run, into the uploaded directory.
       assert.ok(block.indexOf('e2e-shard-plan.mjs plan') < block.indexOf('--test-list='));
       assert.match(block, /^ {6}E2E_REPORT_DIR: \$\{\{ github\.workspace \}\}\/e2e\/\.artifacts\/shard-report$/m);

@@ -456,7 +456,8 @@ jobs:
       # report, where shard-coverage checks it against its own computation and
       # against what the shard ran. A new spec file without history is
       # estimated from its test count; a missing or broken history falls back
-      # to test counts with a warning.
+      # to test counts with a warning. Playwright's own selection from the
+      # test list is then checked against the plan.
       - name: Plan this shard's files by measured duration
         run: |
           set -euo pipefail
@@ -464,6 +465,11 @@ jobs:
             pnpm --filter @taktic/e2e exec playwright test --list --reporter=json >/dev/null
           node .github/scripts/e2e-shard-plan.mjs plan e2e ${{ matrix.shard }} "$RUNNER_TEMP/e2e-list.json" \
             "$RUNNER_TEMP/e2e-test-list.txt" "$E2E_REPORT_DIR/plan.json"
+          # --test-list does not fail on a line that matches nothing; check
+          # Playwright's own selection against the plan before any test runs.
+          PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-selected.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --test-list="$RUNNER_TEMP/e2e-test-list.txt" >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs verify "$E2E_REPORT_DIR/plan.json" ${{ matrix.shard }} "$RUNNER_TEMP/e2e-selected.json"
 
       # Chromium only. The critical journeys are about server actions, sessions
       # and pricing rules — none of which differ by browser engine — so a second
@@ -650,7 +656,8 @@ jobs:
       # report, where shard-coverage checks it against its own computation and
       # against what the shard ran. A new spec file without history is
       # estimated from its test count; a missing or broken history falls back
-      # to test counts with a warning.
+      # to test counts with a warning. Playwright's own selection from the
+      # test list is then checked against the plan.
       - name: Plan this shard's files by measured duration
         run: |
           set -euo pipefail
@@ -658,6 +665,11 @@ jobs:
             pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --project=webkit >/dev/null
           node .github/scripts/e2e-shard-plan.mjs plan e2e-webkit ${{ matrix.shard }} "$RUNNER_TEMP/e2e-list.json" \
             "$RUNNER_TEMP/e2e-test-list.txt" "$E2E_REPORT_DIR/plan.json"
+          # --test-list does not fail on a line that matches nothing; check
+          # Playwright's own selection against the plan before any test runs.
+          E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-selected.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --project=webkit --test-list="$RUNNER_TEMP/e2e-test-list.txt" >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs verify "$E2E_REPORT_DIR/plan.json" ${{ matrix.shard }} "$RUNNER_TEMP/e2e-selected.json"
 
       # CI-PERF-002A: the browser and its system packages through
       # playwright-install.sh rather than `playwright install --with-deps`.

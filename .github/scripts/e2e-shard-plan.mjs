@@ -37,6 +37,7 @@
 // one fast or slow run does not move the plan.
 //
 //   node .github/scripts/e2e-shard-plan.mjs plan <job> <shard> <list.json> <test-list out> <plan.json out>
+//   node .github/scripts/e2e-shard-plan.mjs verify <plan.json> <shard> <selected list.json>
 //   node .github/scripts/e2e-shard-plan.mjs update <run dir>...   (writes the durations file)
 
 import { createHash } from 'node:crypto';
@@ -267,13 +268,43 @@ function plan(jobId, shardArg, listPath, testListOut, planOut) {
   return 0;
 }
 
+// ── verify: Playwright selects exactly this shard's files ────────────────────
+
+/**
+ * What `--list --test-list=<this shard's list>` selected, compared with the
+ * plan. --test-list turns off Playwright's "no tests found" error, so a line
+ * that matched nothing would otherwise pass here and only fail later in
+ * shard-coverage.
+ */
+export function verifySelection(plan, index, selectedReport) {
+  const shard = plan.shards.find((s) => s.index === index);
+  if (!shard) return [`plan has no shard ${index}`];
+  const problems = [];
+  const selected = listedFiles(selectedReport, plan.project);
+  for (const f of shard.files) if (!selected.has(f)) problems.push(`${f} is planned for this shard but --test-list selects none of its tests`);
+  for (const f of selected.keys()) if (!shard.files.includes(f)) problems.push(`--test-list selects ${f}, which is not planned for this shard`);
+  const tests = [...selected.values()].reduce((a, b) => a + b, 0);
+  if (problems.length === 0 && tests !== shard.tests) problems.push(`--test-list selects ${tests} tests, the plan expects ${shard.tests}`);
+  return problems;
+}
+
+function verify(planPath, shardArg, selectedPath) {
+  const p = JSON.parse(readFileSync(planPath, 'utf8'));
+  const problems = verifySelection(p, Number(shardArg), JSON.parse(readFileSync(selectedPath, 'utf8')));
+  for (const problem of problems) console.log(`::error::${problem}`);
+  if (problems.length === 0) console.log(`--test-list selects exactly shard ${shardArg}'s planned files`);
+  return problems.length ? 1 : 0;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [command, ...args] = process.argv.slice(2);
   try {
     if (command === 'plan' && args.length === 5) process.exitCode = plan(...args);
+    else if (command === 'verify' && args.length === 3) process.exitCode = verify(...args);
     else if (command === 'update' && args.length > 0) update(args);
     else {
       console.error('usage: e2e-shard-plan.mjs plan <job> <shard> <list.json> <test-list out> <plan.json out>');
+      console.error('       e2e-shard-plan.mjs verify <plan.json> <shard> <selected list.json>');
       console.error('       e2e-shard-plan.mjs update <run dir>...');
       process.exitCode = 2;
     }
