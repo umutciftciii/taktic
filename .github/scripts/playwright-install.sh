@@ -20,13 +20,36 @@
 #   downloads the browser, and then asks Playwright again: the job fails unless
 #   it reports every system dependency installed.
 #
-# Each network or dpkg phase runs under a timeout (120 s) and is retried once.
-# Between the two attempts the killed one is cleaned up: its processes are
-# gone (timeout signals the whole process group), dpkg finishes or rolls back
+# Each failure is handled by what it is (CI-PERF-002B), and nothing waits
+# without a bound:
+#
+#   apt-get update, dpkg, browser  120 s each, retried once after `recover`;
+#                                  a second failure fails the step
+#   package download               120 s attempts that resume one another
+#                                  (apt keeps what arrived) while each brings
+#                                  new bytes, within a 360 s budget. Slow but
+#                                  moving is only slower; an attempt that
+#                                  brings nothing (a stall), a second apt error
+#                                  or a spent budget ends the fast path
+#   fast path ended (install)      Playwright's own `install-deps`, the path
+#                                  `--with-deps` always took: apt fetches and
+#                                  verifies every file against the signed index
+#                                  itself. One attempt, 600 s. The files this
+#                                  run already verified are handed to it, so it
+#                                  only fetches the rest. Never cached
+#   a file that does not match     fails the step, with no fallback: a mirror
+#   its hash (apt's "Hash Sum      serving other bytes than the signed index
+#   mismatch", or the manifest     names, or a manifest that disagrees with
+#   after the download)            apt's index, is not slowness, and no retry
+#                                  explains it
+#
+# Between two attempts the killed one is cleaned up: its processes are gone
+# (timeout signals the whole process group; `recover` kills any root apt that a
+# sudo session kept out of that group), dpkg finishes or rolls back
 # whatever it was configuring, and a half-downloaded file is either completed
 # or replaced by apt, then checked against the manifest like every other file.
-# A second failure fails the step. A cache that is missing, stale or wrong
-# only ever means more is downloaded; it never skips the final check.
+# A cache that is missing, stale or wrong only ever means more is downloaded;
+# whichever path installed the packages, the final check decides the step.
 
 set -euo pipefail
 
@@ -39,6 +62,10 @@ read -r -a PW <<<"${PLAYWRIGHT_CLI:-pnpm --filter @taktic/e2e exec playwright}"
 TIMEOUT=${PW_INSTALL_TIMEOUT_SECONDS:-120}
 # Only for exercising the retry path: a shorter limit on each first attempt.
 FIRST_TIMEOUT=${PW_INSTALL_FIRST_ATTEMPT_TIMEOUT_SECONDS:-$TIMEOUT}
+DOWNLOAD_BUDGET=${PW_DOWNLOAD_BUDGET_SECONDS:-360}
+FALLBACK_TIMEOUT=${PW_FALLBACK_TIMEOUT_SECONDS:-600}
+# Where the fallback's apt looks for archives it already has.
+SYSTEM_ARCHIVES=${PW_APT_SYSTEM_ARCHIVES:-/var/cache/apt/archives}
 # Outside $HOME: apt downloads as its sandbox user _apt, which cannot enter a
 # 0750 home directory and would otherwise fetch unsandboxed as root.
 DEB_DIR=${PW_APT_CACHE_DIR:-/var/cache/playwright-apt/$browser}
@@ -57,8 +84,10 @@ SUDO=sudo
 # `env` carries DEBIAN_FRONTEND through sudo, which resets the environment.
 # ForceHash=SHA256: apt verifies every download by SHA256, and --print-uris
 # reports that hash (on ubuntu 24.04 it printed MD5Sum without it).
+# A connection silent for 30 s is dropped and that file retried by apt itself,
+# rather than holding the attempt until its timeout.
 APT=(env DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=60 -o Dpkg::Use-Pty=0
-  -o Acquire::ForceHash=SHA256)
+  -o Acquire::ForceHash=SHA256 -o Acquire::http::Timeout=30 -o Acquire::Retries=3)
 
 mkdir -p "$WORK"
 # fd 3 is the step log, for what a function whose stdout is captured reports.
@@ -193,7 +222,7 @@ discarded=0
 verify_cache() {
   local f name want got
   mkdir -p "$DEB_DIR"
-  rm -rf "$DEB_DIR/partial" "$DEB_DIR/lock"
+  $SUDO rm -rf "$DEB_DIR/partial" "$DEB_DIR/lock"
   shopt -s nullglob dotglob
   for f in "$DEB_DIR"/*; do
     name=$(basename "$f")
@@ -233,17 +262,115 @@ assert_complete() {
   return "$bad"
 }
 
+# What has arrived in DEB_DIR so far, complete files and apt's partial ones:
+# "<bytes> <manifest files present>".
+progress() {
+  local bytes complete=0 name size sha
+  bytes=$($SUDO find "$DEB_DIR" -type f -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
+  while read -r name size sha; do
+    [ -f "$DEB_DIR/$name" ] && complete=$((complete + 1))
+  done <"$MANIFEST"
+  echo "$bytes $complete"
+}
+
+# apt-get --download-only until it finishes, as described at the top: a
+# timed-out attempt that brought new bytes or files is resumed by the next,
+# within DOWNLOAD_BUDGET; a stall, a second apt error or the spent budget
+# returns 1 with `why` set. Called in a condition, so it checks every status
+# itself rather than relying on set -e.
+download_debs() {
+  local n=0 errors=0 limit status before after deadline=$((SECONDS + DOWNLOAD_BUDGET)) started
+  while :; do
+    n=$((n + 1))
+    limit=$TIMEOUT
+    [ "$n" -eq 1 ] && limit=$FIRST_TIMEOUT
+    [ $((deadline - SECONDS)) -lt "$limit" ] && limit=$((deadline - SECONDS))
+    if [ "$limit" -le 0 ]; then
+      why="the download budget of ${DOWNLOAD_BUDGET}s is spent ($(progress | cut -d' ' -f2) of $files files here)"
+      return 1
+    fi
+    before=$(progress)
+    started=$SECONDS
+    set +e
+    $SUDO timeout --kill-after=15 "$limit" "${APT[@]}" "${opts[@]}" install --download-only "${pkgs[@]}" 2>&1 |
+      tee "$WORK/download.log"
+    status=${PIPESTATUS[0]}
+    set -e
+    timings+=("download=$((SECONDS - started))s#$n")
+    [ "$status" -eq 0 ] && return 0
+    if grep -q 'Hash Sum mismatch' "$WORK/download.log"; then
+      echo "::error::playwright-install: apt rejected a download whose hash does not match the signed index; not falling back"
+      exit 1
+    fi
+    after=$(progress)
+    if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+      if [ "${after% *}" -gt "${before% *}" ] || [ "${after#* }" -gt "${before#* }" ]; then
+        echo "::warning::playwright-install: download timed out after ${limit}s with $(( ${after% *} - ${before% *} )) bytes new (${after#* } of $files files); resuming"
+        recover
+        continue
+      fi
+      if [ "$SECONDS" -ge "$deadline" ]; then
+        why="the download budget of ${DOWNLOAD_BUDGET}s is spent (${after#* } of $files files here)"
+      else
+        why="the download stalled: attempt $n brought nothing in ${limit}s"
+      fi
+      return 1
+    fi
+    errors=$((errors + 1))
+    if [ "$errors" -ge 2 ]; then
+      why="apt-get failed to download a second time (exit $status)"
+      return 1
+    fi
+    echo "::warning::playwright-install: download exited $status; retrying once"
+    recover
+  done
+}
+
 # The manifest's files in DEB_DIR, verified: what the cache held and matched,
-# plus what apt downloaded for the rest. Does not touch dpkg.
+# plus what apt downloaded for the rest. Does not touch dpkg. Returns 1 with
+# `why` when the download did not finish (the fallback may take over); exits
+# when a file does not match the manifest (nothing may take over).
 fetch_debs() {
-  [ "$files" -gt 0 ] || { echo "::error::playwright-install: $count packages missing but the manifest is empty"; return 1; }
+  [ "$files" -gt 0 ] || { echo "::error::playwright-install: $count packages missing but the manifest is empty"; exit 1; }
   verify_cache
   # The download area apt's sandbox user writes to, as in /var/cache/apt.
   if [ -n "$SANDBOX_USER" ] && id "$SANDBOX_USER" >/dev/null 2>&1; then
     $SUDO install -d -o "$SANDBOX_USER" -g root -m 0700 "$DEB_DIR/partial"
   fi
-  attempt "download" root "${APT[@]}" "${opts[@]}" install --download-only "${pkgs[@]}"
-  assert_complete
+  download_debs || return 1
+  assert_complete || exit 1
+}
+
+# Playwright's own install path for the system packages, when the fast path
+# could not finish. The files this run verified against the manifest go where
+# apt looks first; apt checks them against its index again before use. Nothing
+# the manifest does not list, and nothing unverified, is handed over.
+fallback() {
+  local name size sha seeded=0 started status
+  path=fallback
+  echo "::warning::playwright-install: $why; falling back to Playwright's install-deps (apt verifies every file against the signed index)"
+  $SUDO install -d -m 0755 "$SYSTEM_ARCHIVES"
+  while read -r name size sha; do
+    if [ -f "$DEB_DIR/$name" ] && [ "$(stat -c %s "$DEB_DIR/$name") $(sha256sum "$DEB_DIR/$name" | cut -d' ' -f1)" = "$size $sha" ]; then
+      $SUDO install -m 0644 "$DEB_DIR/$name" "$SYSTEM_ARCHIVES/$name"
+      seeded=$((seeded + 1))
+    fi
+  done <"$MANIFEST"
+  echo "playwright-install: handing $seeded of $files verified files to install-deps"
+  recover
+  started=$SECONDS
+  set +e
+  # As a user: install-deps elevates its own apt commands with sudo. A root
+  # apt that sudo's own session keeps from the timeout is killed by `recover`.
+  timeout --kill-after=15 "$FALLBACK_TIMEOUT" "${PW[@]}" install-deps "$browser"
+  status=$?
+  set -e
+  timings+=("fallback=$((SECONDS - started))s#1")
+  if [ "$status" -ne 0 ]; then
+    recover
+    echo "::error::playwright-install: the install-deps fallback failed too (exit $status, limit ${FALLBACK_TIMEOUT}s)"
+    exit 1
+  fi
 }
 
 # Leave the directory as actions/cache/save should store it: the manifest's
@@ -261,11 +388,11 @@ tidy_debs() {
 
 report() {
   local what=$1 total=$((SECONDS - started))
-  echo "playwright-install $what: browser=$browser cache=$cache packages=$count files=$files from-cache=$kept discarded=$discarded downloaded=$((files - kept)) total=${total}s ${timings[*]}"
+  echo "playwright-install $what: browser=$browser cache=$cache path=$path packages=$count files=$files from-cache=$kept discarded=$discarded downloaded=$((files - kept)) total=${total}s ${timings[*]}"
   summary "### Playwright $what: $browser" "" \
-    "| cache | packages | files from cache | discarded | phases (seconds#attempt) | total |" \
-    "|---|---|---|---|---|---|" \
-    "| $cache | $count | $kept / $files | $discarded | ${timings[*]} | $total s |"
+    "| cache | path | packages | files from cache | discarded | phases (seconds#attempt) | total |" \
+    "|---|---|---|---|---|---|---|" \
+    "| $cache | $path | $count | $kept / $files | $discarded | ${timings[*]} | $total s |"
 }
 
 load_resolved() {
@@ -278,14 +405,26 @@ load_resolved() {
 
 cache=${PW_CACHE_RESULT:-none}
 started=$SECONDS
+# fast: the verified files, installed by this script; fallback: install-deps;
+# none: nothing was missing.
+path=none
+why=
 
 do_install() {
   load_resolved
+  # Only a complete, verified fast path leaves DEB_DIR fit to be cached.
+  local cacheable=false
   if [ "$count" -gt 0 ]; then
-    fetch_debs
-    attempt "install" root "${APT[@]}" "${opts[@]}" install "${pkgs[@]}"
-    tidy_debs
+    if fetch_debs; then
+      path=fast
+      attempt "install" root "${APT[@]}" "${opts[@]}" install "${pkgs[@]}"
+      tidy_debs
+      cacheable=true
+    else
+      fallback
+    fi
   fi
+  output "cacheable=$cacheable" "path=$path"
 
   attempt "browser" user "${PW[@]}" install "$browser"
 
@@ -300,11 +439,16 @@ do_install() {
 }
 
 # For the job that keeps main's cache warm: the verified files only — nothing
-# is installed and no browser is downloaded.
+# is installed and no browser is downloaded. No fallback: an incomplete
+# download fails, and nothing is saved.
 do_prefetch() {
   load_resolved
   if [ "$count" -gt 0 ]; then
-    fetch_debs
+    if ! fetch_debs; then
+      echo "::error::playwright-install: $why; nothing to cache"
+      exit 1
+    fi
+    path=fast
     tidy_debs
   fi
   report prefetch

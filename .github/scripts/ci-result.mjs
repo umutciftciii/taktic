@@ -28,7 +28,11 @@ export const PR_JOBS = ['pr-evidence', ...FULL_JOBS];
 export const GATE_JOB = 'post-merge-gate';
 // Jobs that only keep a cache warm (CI-PERF-002A). They never decide the
 // result — a cold cache means a slower next run, not an untested one — but a
-// push where one did not succeed says so in the result, never silently.
+// push where one did not succeed says so in the result, never silently. Since
+// CI-PERF-002B the job itself continues past the mirror and the cache service
+// and reports what it could not do as a warning on the run. It is also
+// `continue-on-error` as a job, so whatever result GitHub reports for it when
+// it does not run through (cancelled, a lost runner), this only ever warns.
 export const CACHE_JOBS = ['playwright-apt-cache'];
 
 const fail = (reason) => ({ ok: false, reason });
