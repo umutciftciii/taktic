@@ -39,7 +39,9 @@ read -r -a PW <<<"${PLAYWRIGHT_CLI:-pnpm --filter @taktic/e2e exec playwright}"
 TIMEOUT=${PW_INSTALL_TIMEOUT_SECONDS:-120}
 # Only for exercising the retry path: a shorter limit on each first attempt.
 FIRST_TIMEOUT=${PW_INSTALL_FIRST_ATTEMPT_TIMEOUT_SECONDS:-$TIMEOUT}
-DEB_DIR=${PW_APT_CACHE_DIR:-$HOME/.cache/playwright-apt/$browser}
+# Outside $HOME: apt downloads as its sandbox user _apt, which cannot enter a
+# 0750 home directory and would otherwise fetch unsandboxed as root.
+DEB_DIR=${PW_APT_CACHE_DIR:-/var/cache/playwright-apt/$browser}
 WORK=${PW_INSTALL_WORK_DIR:-${RUNNER_TEMP:-/tmp}/playwright-install-$browser}
 MANIFEST=$WORK/manifest
 PACKAGES=$WORK/packages
@@ -143,6 +145,8 @@ missing_packages() {
 
 do_resolve() {
   rm -f "$RESOLVED"
+  # Owned by the runner, so actions/cache/restore can unpack into it.
+  $SUDO install -d -o "$(id -u)" -g "$(id -g)" -m 0755 "$DEB_DIR"
   attempt "apt-get update" root "${APT[@]}" update
 
   missing_packages >"$PACKAGES"
@@ -231,6 +235,10 @@ assert_complete() {
 fetch_debs() {
   [ "$files" -gt 0 ] || { echo "::error::playwright-install: $count packages missing but the manifest is empty"; return 1; }
   verify_cache
+  # The download area apt's sandbox user writes to, as in /var/cache/apt.
+  if id _apt >/dev/null 2>&1; then
+    $SUDO install -d -o _apt -g root -m 0700 "$DEB_DIR/partial"
+  fi
   attempt "download" root "${APT[@]}" "${opts[@]}" install --download-only "${pkgs[@]}"
   assert_complete
 }
