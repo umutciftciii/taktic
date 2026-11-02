@@ -14,6 +14,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
+  lockRequestRowForUpdate,
   MAX_AUTO_MATCH_ROUNDS,
   openNextRound,
   transitionRoundToFailed,
@@ -182,6 +183,14 @@ export class ServiceIssueService {
     autoPublish: boolean,
   ): Promise<ServiceIssueResult> {
     const now = new Date();
+
+    // 0. Lock the request row before anything else (see
+    //    `lockRequestRowForUpdate`). This transaction writes the round before
+    //    the request. Without the lock it could hold the round while a
+    //    completion or a cancel holds the request and waits for that round.
+    //    The lock covers only the caller's own request, so another customer's
+    //    report locks nothing and still gets the 404 below.
+    await lockRequestRowForUpdate(tx, { requestId, customerId: user.id });
 
     // 1. The request, owned by this customer. Anybody else's request and a
     //    request that does not exist are the same 404.
