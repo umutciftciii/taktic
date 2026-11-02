@@ -464,10 +464,9 @@ describe('races', () => {
 
   it('issue vs complete, repeated: never a 500, always one winner and one 409', async () => {
     for (let attempt = 0; attempt < 8; attempt += 1) {
-      await ctx.app.get(ServiceIssueOutbox).whenIdle();
-      await resetDatabase(ctx.prisma);
+      // Each round is a new customer and request; only the request-creation
+      // throttle would notice eight of them in one case.
       resetAuthThrottle(ctx.app);
-      await setSettings({ serviceIssueReportingEnabled: true });
       const s = await matchedRequest();
       const body = await reportBody(s.requestId);
       const [issue, complete] = await Promise.all([
