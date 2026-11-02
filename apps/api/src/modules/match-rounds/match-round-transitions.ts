@@ -132,6 +132,41 @@ export function roundStateChangedException() {
 }
 
 /**
+ * Lock order: a transaction that writes both a request and its round locks
+ * the request row first. The completion, the cancel, the acceptance and the
+ * expiry already do this, because their first write is the request's
+ * conditional update. A writer whose first write lands on the round row calls
+ * this before it reads anything. Otherwise it holds the round while waiting
+ * for the request, which closes a cycle with those writers that PostgreSQL
+ * breaks with a deadlock (40P01).
+ *
+ * `FOR UPDATE`, not `FOR NO KEY UPDATE`: a writer that moves the request to
+ * another round changes `matchedOfferId` and `currentRoundId`, both unique,
+ * and PostgreSQL takes `FOR UPDATE` for that UPDATE. Taking the weaker lock
+ * here would only defer that lock to an upgrade halfway through the
+ * transaction, which is the kind of wait this function exists to remove. The
+ * cost is that a foreign-key insert referencing the row (`KEY SHARE`) waits
+ * for the commit.
+ *
+ * `customerId` limits the lock to that customer's own request. A caller who
+ * does not own it locks nothing and reaches its own 404 unchanged.
+ *
+ * Under Serializable isolation, locking a row that another transaction changed
+ * and committed after this one began fails with 40001. {@link runSerializable}
+ * retries that against the new state.
+ */
+export async function lockRequestRowForUpdate(
+  tx: Prisma.TransactionClient,
+  input: { requestId: string; customerId: string },
+): Promise<void> {
+  await tx.$queryRaw`
+    SELECT id FROM "ServiceRequest"
+    WHERE id = ${input.requestId} AND "customerId" = ${input.customerId}
+    FOR UPDATE
+  `;
+}
+
+/**
  * The request (with its projection columns) and its current round, read in
  * the caller's transaction. `null` when there is no such request.
  */

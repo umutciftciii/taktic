@@ -152,6 +152,22 @@ describe('isWriteConflictError', () => {
     expect(isWriteConflictError({ code: 'P2034' })).toBe(true);
   });
 
+  it('detects a serialization failure raised by a raw query (P2010 carrying SQLSTATE 40001)', () => {
+    const raw = new Prisma.PrismaClientKnownRequestError(
+      'Raw query failed. Code: `40001`. Message: `could not serialize access due to concurrent update`',
+      { code: 'P2010', clientVersion: 'test', meta: { code: '40001', message: 'could not serialize access due to concurrent update' } },
+    );
+    expect(isWriteConflictError(raw)).toBe(true);
+    expect(isWriteConflictError({ code: 'P2010', meta: { code: '40001' } })).toBe(true);
+  });
+
+  it('does not retry any other raw query failure, a deadlock included', () => {
+    expect(isWriteConflictError({ code: 'P2010', meta: { code: '40P01' } })).toBe(false);
+    expect(isWriteConflictError({ code: 'P2010', meta: { code: '55P03' } })).toBe(false);
+    expect(isWriteConflictError({ code: 'P2010', meta: { code: '23505' } })).toBe(false);
+    expect(isWriteConflictError({ code: 'P2010' })).toBe(false);
+  });
+
   it('rejects unrelated errors', () => {
     expect(isWriteConflictError(new Error('boom'))).toBe(false);
     expect(isWriteConflictError({ code: 'P2002' })).toBe(false);

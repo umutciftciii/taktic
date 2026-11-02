@@ -9,9 +9,12 @@ export const CONCURRENT_MODIFICATION_CODE = 'CONCURRENT_MODIFICATION';
 
 /**
  * Prisma error code for "Transaction failed due to a write conflict or a
- * deadlock". PostgreSQL raises it (SQLSTATE 40001) when a Serializable
- * transaction cannot be serialized against a concurrent one. The failing
- * transaction is always rolled back, so re-running the whole callback is safe.
+ * deadlock". Despite the wording, this code base sees it for SQLSTATE 40001:
+ * PostgreSQL raises that when a Serializable transaction cannot be serialized
+ * against a concurrent one. A real deadlock (40P01) reached the client as an
+ * unclassified connector error instead (REL-002, issue vs complete). The
+ * failing transaction is always rolled back, so re-running the whole callback
+ * is safe.
  */
 export const PRISMA_WRITE_CONFLICT_ERROR_CODE = 'P2034';
 
@@ -48,9 +51,10 @@ const defaultLogger = new Logger('SerializableTransaction');
 
 /**
  * Runs `handler` inside a Serializable transaction, retrying only when Prisma
- * reports a write conflict / deadlock (P2034).
+ * reports a write conflict (P2034, or the same 40001 abort raised by a raw
+ * query — see {@link isWriteConflictError}).
  *
- * Only P2034 is retried: that error guarantees the transaction was rolled back
+ * Only those are retried: they guarantee the transaction was rolled back
  * without committing anything, so replaying the callback cannot duplicate work.
  * Every other failure (business exceptions, unique constraint violations, and
  * any other Prisma error) is rethrown untouched, because it either carries a
@@ -102,17 +106,39 @@ export async function runSerializable<T>(
   }
 }
 
+/**
+ * Prisma error code for a failed raw query (`$queryRaw` / `$executeRaw`). It
+ * carries the database's own SQLSTATE in `meta.code`.
+ */
+const PRISMA_RAW_QUERY_FAILED_ERROR_CODE = 'P2010';
+
+/**
+ * SQLSTATE `serialization_failure`. Through a model query Prisma reports it as
+ * P2034, but through a raw query (such as a `SELECT … FOR NO KEY UPDATE` row
+ * lock) it reports it as P2010 with this code. It is the same abort, the
+ * transaction rolled back, so it is retried the same way. A deadlock (40P01)
+ * is deliberately not on this list: it means two writers lock in opposite
+ * orders, and that is fixed in the lock order, not by retrying.
+ */
+const POSTGRES_SERIALIZATION_FAILURE_SQLSTATE = '40001';
+
 export function isWriteConflictError(error: unknown): boolean {
-  if (error instanceof Prisma.PrismaClientKnownRequestError) {
-    return error.code === PRISMA_WRITE_CONFLICT_ERROR_CODE;
+  // Duck-typed rather than `instanceof Prisma.PrismaClientKnownRequestError`:
+  // Prisma errors can cross module-instance boundaries where `instanceof` fails.
+  if (typeof error !== 'object' || error === null) {
+    return false;
   }
 
-  // Prisma errors can cross module-instance boundaries where `instanceof` fails,
-  // so fall back to the error code itself.
+  const { code, meta } = error as { code?: unknown; meta?: unknown };
+  if (code === PRISMA_WRITE_CONFLICT_ERROR_CODE) {
+    return true;
+  }
+
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    (error as { code?: unknown }).code === PRISMA_WRITE_CONFLICT_ERROR_CODE
+    code === PRISMA_RAW_QUERY_FAILED_ERROR_CODE &&
+    typeof meta === 'object' &&
+    meta !== null &&
+    (meta as { code?: unknown }).code === POSTGRES_SERIALIZATION_FAILURE_SQLSTATE
   );
 }
 

@@ -152,6 +152,29 @@ function report(requestId: string, cookie: string, body: Record<string, unknown>
   return request(ctx.server).post(`/service-requests/${requestId}/service-issue`).set('Cookie', cookie).send(body);
 }
 
+/**
+ * Resolves once a backend of this test database is parked on a lock while
+ * running a statement `matches` recognises — the arrival order becomes a fact
+ * (same technique as `status-transition-guards.spec.ts`).
+ */
+async function waitUntilParked(matches: (sql: string) => boolean) {
+  for (let attempt = 0; attempt < 500; attempt += 1) {
+    const rows = await ctx.prisma.$queryRaw<{ query: string }[]>`
+      SELECT query
+      FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event_type = 'Lock'
+    `;
+    if (rows.some((row) => matches(row.query))) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error('Timed out waiting for the writer to park on the held row');
+}
+
+/** Thrown to roll a test-held transaction back once it has served its purpose. */
+class Rollback extends Error {}
+
 async function reportBody(requestId: string, overrides: Record<string, unknown> = {}) {
   return {
     roundId: await currentRoundId(requestId),
@@ -396,6 +419,109 @@ describe('races', () => {
       expect(row.status).toBe(ServiceRequestStatus.COMPLETED);
       expect(await ctx.prisma.providerServiceIncident.count()).toBe(0);
     }
+  });
+
+  // The deterministic form of the race above. A completion (and a staff
+  // cancel) writes the request row, then the round row. A report that locked
+  // the round first and waited for the request row closed the cycle, and
+  // PostgreSQL ended one side with 40P01, which reached the client as a 500.
+  // Here a test transaction takes the completion's first write. The report is
+  // started and parked behind it on the request row, and only then does the
+  // test transaction ask for the round row. The round row must still be free.
+  it('issue vs complete, interleaved: the report queues on the request row before it touches the round', async () => {
+    const s = await matchedRequest();
+    const body = await reportBody(s.requestId);
+    const roundId = body.roundId as string;
+
+    let reported: Promise<request.Response> | undefined;
+    await ctx.prisma.$transaction(
+      async (tx) => {
+        const completedAt = new Date();
+        await tx.serviceRequest.update({
+          where: { id: s.requestId },
+          data: { status: ServiceRequestStatus.COMPLETED, completedAt },
+        });
+
+        reported = report(s.requestId, s.customerCookie, body).then((response) => response);
+        await waitUntilParked((sql) => sql.includes('"ServiceRequest"'));
+
+        // NOWAIT: if the report already holds the round row, fail here at
+        // once instead of building the deadlock PostgreSQL would break.
+        await tx.$queryRaw`SELECT id FROM "ServiceRequestMatchRound" WHERE id = ${roundId} FOR NO KEY UPDATE NOWAIT`;
+        await tx.serviceRequestMatchRound.update({
+          where: { id: roundId },
+          data: { status: MatchRoundStatus.COMPLETED, completedAt },
+        });
+      },
+      { timeout: 30_000 },
+    );
+
+    const answered = await reported!;
+    expect(answered.status).toBe(409);
+    expect(answered.body.code).toBe('REQUEST_NOT_MATCHED');
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+    expect(row.status).toBe(ServiceRequestStatus.COMPLETED);
+    expect(await ctx.prisma.providerServiceIncident.count()).toBe(0);
+    expect(await ctx.prisma.serviceRequestProviderExclusion.count()).toBe(0);
+  });
+
+  it('issue vs complete, repeated: never a 500, always one winner and one 409', async () => {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      // Each round is a new customer and request; only the request-creation
+      // throttle would notice eight of them in one case.
+      resetAuthThrottle(ctx.app);
+      const s = await matchedRequest();
+      const body = await reportBody(s.requestId);
+      const [issue, complete] = await Promise.all([
+        report(s.requestId, s.customerCookie, body),
+        request(ctx.server).post(`/service-requests/${s.requestId}/complete`).set('Cookie', s.customerCookie),
+      ]);
+      const statuses = [issue.status, complete.status];
+      expect(statuses.filter((status) => status === 200 || status === 201)).toHaveLength(1);
+      expect(statuses.filter((status) => status === 409)).toHaveLength(1);
+      const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+      const incidents = await ctx.prisma.providerServiceIncident.count({ where: { requestId: s.requestId } });
+      if (issue.status === 200) {
+        expect(row.status).toBe(ServiceRequestStatus.APPROVED);
+        expect(incidents).toBe(1);
+      } else {
+        expect(row.status).toBe(ServiceRequestStatus.COMPLETED);
+        expect(incidents).toBe(0);
+      }
+    }
+  });
+
+  it('a report on somebody else\'s request locks nothing and is the same 404', async () => {
+    const s = await matchedRequest();
+    const stranger = await createUser(ctx.prisma, { role: UserRole.CUSTOMER });
+    const strangerCookie = await loginAs(ctx.prisma, stranger.id);
+    const body = await reportBody(s.requestId);
+
+    let reported: Promise<request.Response> | undefined;
+    await ctx.prisma.$transaction(
+      async (tx) => {
+        // The owner's completion holds the request row.
+        await tx.serviceRequest.update({
+          where: { id: s.requestId },
+          data: { status: ServiceRequestStatus.COMPLETED, completedAt: new Date() },
+        });
+        // The stranger's report does not queue behind it: it answers while the
+        // row is still held.
+        reported = report(s.requestId, strangerCookie, body).then((response) => response);
+        const answered = await reported;
+        expect(answered.status).toBe(404);
+        // Undo inside the transaction; the owner's state stays as it was.
+        throw new Rollback();
+      },
+      { timeout: 30_000 },
+    ).catch((error: unknown) => {
+      if (!(error instanceof Rollback)) {
+        throw error;
+      }
+    });
+    expect(reported).toBeDefined();
+    const row = await ctx.prisma.serviceRequest.findUniqueOrThrow({ where: { id: s.requestId } });
+    expect(row.status).toBe(ServiceRequestStatus.MATCHED);
   });
 
   it('issue vs staff cancel: exactly one wins', async () => {
