@@ -14,6 +14,7 @@ import { runSerializable } from '../../common/serializable-transaction';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import {
+  lockRequestRowForUpdate,
   MAX_AUTO_MATCH_ROUNDS,
   openNextRound,
   transitionRoundToFailed,
@@ -182,6 +183,12 @@ export class ServiceIssueService {
     autoPublish: boolean,
   ): Promise<ServiceIssueResult> {
     const now = new Date();
+
+    // 0. The request row before anything else (see `lockRequestRowForUpdate`):
+    //    this transaction writes the round before the request, so it must not
+    //    reach the round holding nothing while a completion or a cancel holds
+    //    the request and waits for the round.
+    await lockRequestRowForUpdate(tx, requestId);
 
     // 1. The request, owned by this customer. Anybody else's request and a
     //    request that does not exist are the same 404.

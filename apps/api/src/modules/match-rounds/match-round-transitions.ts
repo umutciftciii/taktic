@@ -132,6 +132,26 @@ export function roundStateChangedException() {
 }
 
 /**
+ * Lock order: a transaction that writes both a request and its round locks
+ * the request row first. The completion, the cancel, the acceptance and the
+ * expiry already do this, because their first write is the request's
+ * conditional update. A writer whose first write lands on the round row calls
+ * this before it reads anything. Otherwise it holds the round while waiting
+ * for the request, which closes a cycle with those writers that PostgreSQL
+ * breaks with a deadlock (40P01).
+ *
+ * `FOR NO KEY UPDATE` is the lock the request's own UPDATE would take. It
+ * conflicts with a concurrent writer of that row and with nothing else: the
+ * foreign-key checks of inserts that reference the row take `KEY SHARE`.
+ * Under Serializable isolation a row another transaction committed a change
+ * to after this one began fails with 40001, which {@link runSerializable}
+ * retries against the new state.
+ */
+export async function lockRequestRowForUpdate(tx: Prisma.TransactionClient, requestId: string): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "ServiceRequest" WHERE id = ${requestId} FOR NO KEY UPDATE`;
+}
+
+/**
  * The request (with its projection columns) and its current round, read in
  * the caller's transaction. `null` when there is no such request.
  */
