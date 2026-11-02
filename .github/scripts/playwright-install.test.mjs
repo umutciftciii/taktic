@@ -112,6 +112,7 @@ function run(ctx, mode, env = {}) {
       STUB_STATE: ctx.state,
       PLAYWRIGHT_CLI: join(ctx.bin, 'pw'),
       PW_APT_CACHE_DIR: ctx.debs,
+      PW_APT_SANDBOX_USER: '',
       PW_INSTALL_WORK_DIR: join(ctx.root, 'work'),
       PW_INSTALL_FIRST_ATTEMPT_TIMEOUT_SECONDS: '2',
       PW_INSTALL_TIMEOUT_SECONDS: '20',

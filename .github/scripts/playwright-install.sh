@@ -42,6 +42,9 @@ FIRST_TIMEOUT=${PW_INSTALL_FIRST_ATTEMPT_TIMEOUT_SECONDS:-$TIMEOUT}
 # Outside $HOME: apt downloads as its sandbox user _apt, which cannot enter a
 # 0750 home directory and would otherwise fetch unsandboxed as root.
 DEB_DIR=${PW_APT_CACHE_DIR:-/var/cache/playwright-apt/$browser}
+# apt's download sandbox user; empty only for the script's tests, which run apt
+# as a stand-in without root.
+SANDBOX_USER=${PW_APT_SANDBOX_USER-_apt}
 WORK=${PW_INSTALL_WORK_DIR:-${RUNNER_TEMP:-/tmp}/playwright-install-$browser}
 MANIFEST=$WORK/manifest
 PACKAGES=$WORK/packages
@@ -236,8 +239,8 @@ fetch_debs() {
   [ "$files" -gt 0 ] || { echo "::error::playwright-install: $count packages missing but the manifest is empty"; return 1; }
   verify_cache
   # The download area apt's sandbox user writes to, as in /var/cache/apt.
-  if id _apt >/dev/null 2>&1; then
-    $SUDO install -d -o _apt -g root -m 0700 "$DEB_DIR/partial"
+  if [ -n "$SANDBOX_USER" ] && id "$SANDBOX_USER" >/dev/null 2>&1; then
+    $SUDO install -d -o "$SANDBOX_USER" -g root -m 0700 "$DEB_DIR/partial"
   fi
   attempt "download" root "${APT[@]}" "${opts[@]}" install --download-only "${pkgs[@]}"
   assert_complete
