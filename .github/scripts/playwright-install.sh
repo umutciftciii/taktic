@@ -51,7 +51,7 @@ SUDO=sudo
 # apt waits for a lock rather than failing on it, and never asks a question.
 # `env` carries DEBIAN_FRONTEND through sudo, which resets the environment.
 # ForceHash=SHA256: apt verifies every download by SHA256, and --print-uris
-# reports that hash (it prints MD5Sum otherwise).
+# reports that hash (on ubuntu 24.04 it printed MD5Sum without it).
 APT=(env DEBIAN_FRONTEND=noninteractive apt-get -q -y -o DPkg::Lock::Timeout=60 -o Dpkg::Use-Pty=0
   -o Acquire::ForceHash=SHA256)
 
@@ -101,7 +101,10 @@ attempt() {
 recover() {
   $SUDO pkill -KILL -x apt-get 2>/dev/null || true
   $SUDO pkill -KILL -x dpkg 2>/dev/null || true
-  if ! $SUDO dpkg --configure -a; then
+  # Bounded and non-interactive like every other phase: a conffile question
+  # or a slow trigger must not hold the retry indefinitely.
+  if ! $SUDO timeout --kill-after=15 "$TIMEOUT" env DEBIAN_FRONTEND=noninteractive \
+    dpkg --force-confdef --force-confold --configure -a; then
     echo "::warning::playwright-install: dpkg --configure -a did not finish cleanly; the retry decides"
   fi
 }
@@ -118,9 +121,20 @@ missing_packages() {
   if [ "$status" -eq 0 ] && grep -q 'All system dependencies are installed' <<<"$out"; then
     return 0
   fi
-  if [ "$status" -eq 1 ] && grep -q '^Missing system dependencies' <<<"$out"; then
-    sed -n 's/^  \([a-z0-9][a-z0-9.+:-]*\)$/\1/p' <<<"$out"
-    return 0
+  if [ "$status" -eq 1 ] && grep -q '^Missing system dependencies (' <<<"$out"; then
+    # The list must hold exactly as many names as the heading announces: a
+    # change in Playwright's wording must fail here, not read as "none".
+    local want list got
+    want=$(sed -n 's/^Missing system dependencies (\([0-9][0-9]*\)):.*/\1/p' <<<"$out")
+    list=$(sed -n 's/^  \([a-z0-9][a-z0-9.+:-]*\)$/\1/p' <<<"$out")
+    got=$(grep -c . <<<"$list" || true)
+    if [ -n "$want" ] && [ "$got" = "$want" ]; then
+      printf '%s\n' "$list"
+      return 0
+    fi
+    printf '%s\n' "$out" >&3
+    echo "::error::playwright-install: Playwright announced ${want:-?} missing packages but $got could be read" >&3
+    return 1
   fi
   printf '%s\n' "$out" >&3
   echo "::error::playwright-install: could not read Playwright's dependency check (exit $status)" >&3
@@ -173,7 +187,7 @@ verify_cache() {
   local f name want got
   mkdir -p "$DEB_DIR"
   rm -rf "$DEB_DIR/partial" "$DEB_DIR/lock"
-  shopt -s nullglob
+  shopt -s nullglob dotglob
   for f in "$DEB_DIR"/*; do
     name=$(basename "$f")
     want=$(awk -v n="$name" '$1 == n { print $2, $3 }' "$MANIFEST")
@@ -188,7 +202,7 @@ verify_cache() {
     $SUDO rm -rf "$f"
     discarded=$((discarded + 1))
   done
-  shopt -u nullglob
+  shopt -u nullglob dotglob
 }
 
 # Exactly the manifest's files, each with its size and SHA256 — what dpkg is
@@ -222,9 +236,15 @@ fetch_debs() {
 }
 
 # Leave the directory as actions/cache/save should store it: the manifest's
-# files and nothing else, readable by the runner.
+# files and nothing else (no partial/, no lock, nothing a killed attempt left),
+# readable by the runner.
 tidy_debs() {
-  $SUDO rm -rf "$DEB_DIR/partial" "$DEB_DIR/lock"
+  local f
+  shopt -s nullglob dotglob
+  for f in "$DEB_DIR"/*; do
+    awk -v n="$(basename "$f")" '$1 == n { found = 1 } END { exit !found }' "$MANIFEST" || $SUDO rm -rf "$f"
+  done
+  shopt -u nullglob dotglob
   $SUDO chown -R "$(id -u):$(id -g)" "$DEB_DIR"
 }
 

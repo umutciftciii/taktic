@@ -54,7 +54,7 @@ if [ $dl = 1 ]; then
     if [ -f "$S/corrupt-download" ]; then printf 'tampered' >"$f"; else printf '%s' "$(content "$p")" >"$f"; fi
     echo "$p" >>"$S/downloaded"
   done
-  rm -f "$dir/partial-file"; exit 0
+  exit 0
 fi
 hang install "touch '$S/half-configured'"
 [ -f "$S/half-configured" ] && { echo "E: dpkg was interrupted, you must manually run 'dpkg --configure -a'" >&2; exit 100; }
@@ -63,7 +63,7 @@ for p in "\${pkgs[@]}"; do [ -f "$dir/$(file "$p")" ] || { echo "E: missing $p" 
 
 const DPKG = `#!/usr/bin/env bash
 echo "dpkg $*" >>"$STUB_STATE/calls"
-[ "$*" = "--configure -a" ] && rm -f "$STUB_STATE/half-configured"
+[[ "$*" == *"--configure -a"* ]] && rm -f "$STUB_STATE/half-configured"
 exit 0
 `;
 
@@ -73,13 +73,13 @@ const PW = `#!/usr/bin/env bash
 S=$STUB_STATE
 echo "playwright $*" >>"$S/calls"
 case "$1" in
-  --version) echo "Version 9.9.9" ;;
+  --version) echo "Version \${STUB_PW_VERSION:-9.9.9}" ;;
   install-deps)
     [ -f "$S/broken-dry-run" ] && { echo "Error: something else"; exit 3; }
     missing=()
     for p in $(cat "$S/needed"); do [ -f "$S/installed-$p" ] && [ ! -f "$S/never-installs" ] || missing+=("$p"); done
     if [ \${#missing[@]} -eq 0 ]; then echo "All system dependencies are installed."; exit 0; fi
-    echo "Missing system dependencies (\${#missing[@]}):"; printf '  %s\\n' "\${missing[@]}"; exit 1 ;;
+    echo "Missing system dependencies (\${#missing[@]}):"; printf "\${STUB_INDENT:-  }%s\\n" "\${missing[@]}"; exit 1 ;;
   install)
     if [ -f "$S/hang-browser" ]; then rm "$S/hang-browser"; sleep 60; fi
     touch "$S/browser-$2" ;;
@@ -174,6 +174,7 @@ test('the key changes with a package version, the runner image and the Playwrigh
   const base = keyFor({});
   assert.notEqual(keyFor({ STUB_VERSION: '1.1' }), base);
   assert.notEqual(keyFor({ ImageVersion: '20261102.1' }), base);
+  assert.notEqual(keyFor({ STUB_PW_VERSION: '9.9.10' }), base);
   assert.equal(keyFor({}), base);
 });
 
@@ -219,7 +220,7 @@ for (const phase of ['update', 'download', 'install', 'browser']) {
     assert.match(out, new RegExp(`${label.replace(' ', ' ')}=\\d+s#2`));
     // The clean-up ran between the attempts, and nothing it left behind
     // reached dpkg: every file is the index's, every package is installed.
-    assert.match(calls(ctx), /dpkg --configure -a/);
+    assert.match(calls(ctx), /dpkg --force-confdef --force-confold --configure -a/);
     assert.deepEqual(installed(ctx), PACKAGES);
     assert.ok(!existsSync(join(ctx.debs, 'partial-file')));
     assert.ok(!existsSync(join(ctx.state, 'half-configured')));
@@ -252,6 +253,29 @@ test('the step fails if Playwright still reports a missing dependency after the 
   const i = resolveAndInstall(ctx);
   assert.notEqual(i.status, 0, i.out);
   assert.match(i.out, /::error::playwright-install: Playwright still reports missing system dependencies for webkit/);
+});
+
+test('a dependency list Playwright worded differently fails, rather than reading as nothing missing', linuxOnly, () => {
+  const ctx = setup();
+  const r = run(ctx, 'resolve', { STUB_INDENT: '    ' });
+  assert.notEqual(r.status, 0, r.out);
+  assert.match(r.out, /::error::playwright-install: Playwright announced 3 missing packages but 0 could be read/);
+});
+
+test('the final check fails the same way if the list it gets back cannot be read', linuxOnly, () => {
+  const ctx = setup({ flags: ['never-installs'] });
+  assert.equal(run(ctx, 'resolve').status, 0);
+  const i = run(ctx, 'install', { STUB_INDENT: '\t' });
+  assert.notEqual(i.status, 0, i.out);
+  assert.match(i.out, /announced 3 missing packages but 0 could be read/);
+});
+
+test('hidden files in the cache are verified like any other and discarded', linuxOnly, () => {
+  const ctx = setup({ cached: { '.hidden': 'x' } });
+  const i = resolveAndInstall(ctx);
+  assert.equal(i.status, 0, i.out);
+  assert.ok(!existsSync(join(ctx.debs, '.hidden')));
+  assert.match(i.out, /discarded=1/);
 });
 
 test('nothing missing: no apt work, no files, the browser still installed and checked', linuxOnly, () => {

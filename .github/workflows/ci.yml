@@ -1016,6 +1016,8 @@ jobs:
     name: playwright apt cache (${{ matrix.browser }})
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -1059,6 +1061,23 @@ jobs:
         with:
           path: ${{ steps.pw-deps.outputs.dir }}
           key: ${{ steps.pw-deps.outputs.key }}
+
+      # actions/cache/save reports a failed upload as a warning and succeeds.
+      # This job exists only to leave that entry behind, so it checks.
+      - name: Confirm main's cache holds this key
+        id: pw-apt-confirm
+        if: steps.pw-deps.outputs.packages != '0'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
+          lookup-only: true
+
+      - name: Fail if it does not
+        if: steps.pw-deps.outputs.packages != '0' && steps.pw-apt-confirm.outputs.cache-hit != 'true'
+        run: |
+          echo "::error::main's apt cache has no entry ${{ steps.pw-deps.outputs.key }} after the save"
+          exit 1
 
   # The one check branch protection requires on main (CI-PROTECT-001), under a
   # name that does not change when a job above is renamed or added.
