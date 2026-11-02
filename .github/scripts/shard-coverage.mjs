@@ -13,6 +13,10 @@
 //                      project ran in exactly one shard and ended expected or
 //                      flaky (flaky = failed once, passed on the retry the
 //                      suite already allows), and each shard reported
+//   e2e shard plan     each shard ran exactly the spec files the duration plan
+//                      (e2e-shard-plan.mjs) gives it, and the plan it wrote is
+//                      the one this check computes again from the static
+//                      job's listing and the committed durations
 //
 // A skipped, pending or todo test counts as not run: the suites have none
 // today, and a test that stops running should be a decision someone sees.
@@ -20,13 +24,15 @@
 //   node .github/scripts/shard-coverage.mjs <reports dir>
 //
 // <reports dir> holds one directory per shard, named `test-report-<job>-<i>`,
-// each with the shard's `results.json`, and `expected-<job>.json` for each
-// Playwright job (the --list output).
+// each with the shard's `results.json` (and, for an e2e shard, its
+// `plan.json`), and `expected-<job>.json` for each Playwright job (the --list
+// output).
 
 import { appendFileSync, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { SHARDED_JOBS, shardIndexes } from './ci-shards.mjs';
+import { DURATIONS_FILE, buildPlan, reportFileMs } from './e2e-shard-plan.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
 const apiRoot = join(repoRoot, 'apps/api');
@@ -157,12 +163,46 @@ export function checkPlaywright(expected, reports, count) {
   return { problems, shards, tests: wanted.length };
 }
 
+/**
+ * Each shard ran exactly its part of the plan, and wrote the same plan.
+ *
+ * @param {object} plan  buildPlan() for the job, from the static listing
+ * @param {Map<number, object|undefined>} shardPlans  shard index → the plan.json it wrote
+ * @param {Map<number, object|undefined>} reports  shard index → Playwright JSON report
+ */
+export function checkPlan(plan, shardPlans, reports) {
+  const problems = [];
+  const shards = [];
+  const planned = new Map();
+  for (const s of plan.shards) for (const f of s.files) planned.set(f, [...(planned.get(f) ?? []), s.index]);
+  for (const [file, where] of planned) if (where.length > 1) problems.push(`the plan gives ${file} to shards ${where.join(', ')}`);
+  const expected = JSON.stringify(plan);
+
+  for (const s of plan.shards) {
+    const own = shardPlans.get(s.index);
+    if (!own) problems.push(`shard ${s.index}/${plan.count} wrote no plan`);
+    else if (JSON.stringify(own) !== expected) problems.push(`shard ${s.index}/${plan.count} planned differently from this check (inputs differ: durations ${own.durations ?? 'none'} vs ${plan.durations ?? 'none'})`);
+    const report = reports.get(s.index);
+    if (!report) {
+      shards.push({ index: s.index, planned: Math.round(s.ms / 1000), seconds: null });
+      continue;
+    }
+    const ran = reportFileMs(report, plan.project);
+    const want = new Set(s.files);
+    for (const f of s.files) if (!ran.has(f)) problems.push(`${f} was planned for shard ${s.index} but did not run there`);
+    for (const f of ran.keys()) if (!want.has(f)) problems.push(`${f} ran in shard ${s.index}, which the plan did not give it`);
+    const ms = [...ran.values()].reduce((a, b) => a + b, 0);
+    shards.push({ index: s.index, planned: Math.round(s.ms / 1000), seconds: Math.round(ms / 1000) });
+  }
+  return { problems, shards };
+}
+
 function readJson(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
 }
 
-function shardReports(dir, jobId, count) {
-  return new Map(shardIndexes(count).map((i) => [i, readJson(join(dir, `test-report-${jobId}-${i}`, 'results.json'))]));
+function shardReports(dir, jobId, count, file = 'results.json') {
+  return new Map(shardIndexes(count).map((i) => [i, readJson(join(dir, `test-report-${jobId}-${i}`, file))]));
 }
 
 function main(dir) {
@@ -188,6 +228,18 @@ function main(dir) {
     lines.push('');
     failed ||= result.problems.length > 0;
     for (const p of result.problems) lines.push(`- ✗ ${p}`);
+
+    if (expected) {
+      const durations = existsSync(DURATIONS_FILE) ? readFileSync(DURATIONS_FILE, 'utf8') : undefined;
+      const plan = buildPlan(jobId, expected, durations);
+      const planResult = checkPlan(plan, shardReports(dir, jobId, job.count, 'plan.json'), shardReports(dir, jobId, job.count));
+      lines.push(`${job.name} plan${plan.fallback ? ` (fallback to test counts: ${plan.fallback})` : ''}${plan.estimated.length ? `, ${plan.estimated.length} file(s) estimated` : ''}:`, '');
+      lines.push('| shard | files | planned s | test s |', '|---|---|---|---|');
+      for (const s of planResult.shards) lines.push(`| ${s.index}/${job.count} | ${plan.shards[s.index - 1].files.length} | ${s.planned} | ${s.seconds ?? '—'} |`);
+      lines.push('');
+      failed ||= planResult.problems.length > 0;
+      for (const p of planResult.problems) lines.push(`- ✗ ${p}`);
+    }
   }
 
   const head = failed ? '### Shard coverage FAILED' : '### Shard coverage: every test ran exactly once and passed';

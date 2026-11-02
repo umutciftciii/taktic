@@ -5,7 +5,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { apiSpecFiles, checkPlaywright, checkVitest, playwrightTests } from './shard-coverage.mjs';
+import { apiSpecFiles, checkPlan, checkPlaywright, checkVitest, playwrightTests } from './shard-coverage.mjs';
+import { buildPlan } from './e2e-shard-plan.mjs';
 
 // ── Vitest ──────────────────────────────────────────────────────────────────
 
@@ -185,4 +186,66 @@ test('playwright: the other browser project is a different test', () => {
 
 test('playwright: an empty --list fails', () => {
   assert.match(problemsOf(checkPlaywright(pwReport([]), new Map([[1, pwReport(ALL)]]), 1)), /--list output holds no tests/);
+});
+
+// ── the e2e duration plan (CI-PERF-002C) ────────────────────────────────────
+
+const PLAN_LISTED = pwReport(['a', 'b', 'c', 'd', 'e'].map((f, i) => spec(`${f}.spec.ts`, 12, `t${i}`)));
+const PLAN_DURATIONS = JSON.stringify({ version: 1, runs: [], projects: { chromium: { 'a.spec.ts': 50, 'b.spec.ts': 40, 'c.spec.ts': 10, 'd.spec.ts': 10, 'e.spec.ts': 5 } } });
+const PLAN = buildPlan('e2e', PLAN_LISTED, PLAN_DURATIONS);
+
+/** Shard reports that ran `layout[i]` (file letters), with results so durations exist. */
+function planReports(layout) {
+  return new Map(
+    layout.map((letters, i) => [
+      i + 1,
+      pwReport(letters.map((f) => ({ ...spec(`${f}.spec.ts`, 12, 't'), tests: [{ projectName: 'chromium', status: 'expected', results: [{ duration: 1000 }] }] }))),
+    ]),
+  );
+}
+const planned = () => PLAN.shards.map((s) => s.files.map((f) => f[0]));
+const ownPlans = (plan = PLAN) => new Map(plan.shards.map((s) => [s.index, structuredClone(plan)]));
+
+test('plan: the computed plan is the one the durations call for', () => {
+  assert.deepEqual(planned(), [['a'], ['b'], ['c', 'e'], ['d']]);
+});
+
+test('plan: every shard ran exactly its planned files and wrote the same plan', () => {
+  const r = checkPlan(PLAN, ownPlans(), planReports(planned()));
+  assert.deepEqual(r.problems, []);
+  assert.deepEqual(r.shards.map((s) => s.planned), [50, 40, 15, 10]);
+  assert.deepEqual(r.shards.map((s) => s.seconds), [1, 1, 2, 1]);
+});
+
+test('plan: a shard that ran another shard\'s file fails, both ways', () => {
+  const r = checkPlan(PLAN, ownPlans(), planReports([['a', 'd'], ['b'], ['c', 'e'], []]));
+  assert.match(problemsOf(r), /d\.spec\.ts was planned for shard 4 but did not run there/);
+  assert.match(problemsOf(r), /d\.spec\.ts ran in shard 1, which the plan did not give it/);
+});
+
+test('plan: a shard that wrote no plan fails', () => {
+  const plans = ownPlans();
+  plans.delete(3);
+  assert.match(problemsOf(checkPlan(PLAN, plans, planReports(planned()))), /shard 3\/4 wrote no plan/);
+});
+
+test('plan: a shard that planned from other inputs fails', () => {
+  const other = buildPlan('e2e', PLAN_LISTED, undefined);
+  const plans = ownPlans();
+  plans.set(2, other);
+  assert.match(problemsOf(checkPlan(PLAN, plans, planReports(planned()))), /shard 2\/4 planned differently from this check \(inputs differ: durations none vs [0-9a-f]{64}\)/);
+});
+
+test('plan: a shard with no report is reported by the coverage check, not twice here', () => {
+  const reports = planReports(planned());
+  reports.delete(4);
+  const r = checkPlan(PLAN, ownPlans(), reports);
+  assert.deepEqual(r.problems, []);
+  assert.equal(r.shards[3].seconds, null);
+});
+
+test('plan: a plan that gives one file to two shards fails', () => {
+  const broken = structuredClone(PLAN);
+  broken.shards[1].files.push('a.spec.ts');
+  assert.match(problemsOf(checkPlan(broken, ownPlans(broken), planReports(planned()))), /the plan gives a\.spec\.ts to shards 1, 2/);
 });

@@ -39,7 +39,23 @@ for (const [id, job] of Object.entries(SHARDED_JOBS)) {
 
   test(`ci.yml: ${id} passes its shard to the runner and uploads its report for shard-coverage`, () => {
     const block = jobBlock(id);
-    assert.match(block, /--shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ strategy\.job-total \}\}/);
+    if (id === 'api') {
+      assert.match(block, /--shard=\$\{\{ matrix\.shard \}\}\/\$\{\{ strategy\.job-total \}\}/);
+    } else {
+      // CI-PERF-002C: the e2e shards run the files their duration plan gives
+      // them, through Playwright's --test-list, and never also --shard (which
+      // would cut that list again by count).
+      assert.doesNotMatch(block, /\s--shard=/);
+      assert.match(block, new RegExp(`node \\.github/scripts/e2e-shard-plan\\.mjs plan ${id} \\$\\{\\{ matrix\\.shard \\}\\} "\\$RUNNER_TEMP/e2e-list\\.json" \\\\\n +"\\$RUNNER_TEMP/e2e-test-list\\.txt" "\\$E2E_REPORT_DIR/plan\\.json"`));
+      assert.match(block, /e2e(?::webkit)? --test-list="\$RUNNER_TEMP\/e2e-test-list\.txt"$/m);
+      // The shard lists its project the way `static` does, or the plans differ.
+      const listing = id === 'e2e-webkit' ? /E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME=.*\n.*--list --reporter=json --project=webkit >/ : /^ {10}PLAYWRIGHT_JSON_OUTPUT_NAME=.*\n.*--list --reporter=json >/m;
+      assert.match(block, listing);
+      // The plan is written before the tests run, into the uploaded directory.
+      assert.ok(block.indexOf('e2e-shard-plan.mjs plan') < block.indexOf('--test-list='));
+      assert.match(block, /^ {6}E2E_REPORT_DIR: \$\{\{ github\.workspace \}\}\/e2e\/\.artifacts\/shard-report$/m);
+      assert.match(block, /^ {10}path: e2e\/\.artifacts\/shard-report$/m);
+    }
     assert.match(block, new RegExp(`^ {10}name: test-report-${id}-\\$\\{\\{ matrix\\.shard \\}\\}$`, 'm'));
   });
 
@@ -50,6 +66,10 @@ for (const [id, job] of Object.entries(SHARDED_JOBS)) {
 
 test('ci.yml: each API shard tests against a database named after it', () => {
   assert.match(jobBlock('api'), /^ {6}TEST_DATABASE_SLUG: api_shard_\$\{\{ matrix\.shard \}\}$/m);
+});
+
+test('ci.yml: pr-evidence runs the shard plan tests', () => {
+  assert.match(jobBlock('pr-evidence'), /\.github\/scripts\/e2e-shard-plan\.test\.mjs/);
 });
 
 test('ci.yml: shard-coverage waits for every sharded job and the e2e listing', () => {
