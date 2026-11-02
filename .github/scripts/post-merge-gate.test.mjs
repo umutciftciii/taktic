@@ -161,9 +161,12 @@ test('REQUIRED_JOBS match the job names in ci.yml', () => {
 
 test('every job a full run consists of is required — a new job or shard cannot be left out', () => {
   const names = jobNamesIn(readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8'));
+  // Not part of a full run: the gate, the PR's evidence, the result, and the
+  // main-only jobs that warm a cache (CI-PERF-002A).
   const outside = ['post-merge gate (reuse PR result only for an identical tree)', 'record tested merge commit', 'CI result'];
+  const cacheJob = /^playwright apt cache \(/;
   assert.deepEqual(
-    names.filter((n) => !outside.includes(n)).sort(),
+    names.filter((n) => !outside.includes(n) && !cacheJob.test(n)).sort(),
     [...REQUIRED_JOBS].sort(),
   );
 });

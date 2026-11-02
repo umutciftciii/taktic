@@ -26,6 +26,10 @@ import { pathToFileURL } from 'node:url';
 export const FULL_JOBS = ['static', 'unit', 'api', 'e2e', 'e2e-webkit', 'shard-coverage', 'ops'];
 export const PR_JOBS = ['pr-evidence', ...FULL_JOBS];
 export const GATE_JOB = 'post-merge-gate';
+// Jobs that only keep a cache warm (CI-PERF-002A). They never decide the
+// result — a cold cache means a slower next run, not an untested one — but a
+// push where one did not succeed says so in the result, never silently.
+export const CACHE_JOBS = ['playwright-apt-cache'];
 
 const fail = (reason) => ({ ok: false, reason });
 
@@ -45,20 +49,30 @@ export function decide(event, needs) {
   }
 
   if (event === 'push') {
-    if (result(GATE_JOB) !== 'success') return fail(`${GATE_JOB}=${result(GATE_JOB)}`);
-    if (needs[GATE_JOB]?.outputs?.reuse === 'true') {
-      const ran = FULL_JOBS.filter((id) => result(id) !== 'skipped');
-      if (ran.length > 0) {
-        return fail(`gate proved reuse, but ${ran.map((id) => `${id}=${result(id)}`).join(', ')} did not skip`);
-      }
-      return { ok: true, reason: 'the gate proved this tree identical to its PR run; full jobs reused, not re-run' };
+    const decision = decidePush(result, needs);
+    const cold = CACHE_JOBS.filter((id) => result(id) !== 'success');
+    if (decision.ok && cold.length > 0) {
+      return { ...decision, warning: `cache not warmed: ${cold.map((id) => `${id}=${result(id)}`).join(', ')}` };
     }
-    const bad = notSucceeded(FULL_JOBS);
-    if (bad.length > 0) return fail(`no reuse, and ${bad.map((id) => `${id}=${result(id)}`).join(', ')}`);
-    return { ok: true, reason: `no reuse; ${FULL_JOBS.join(', ')} ran and succeeded` };
+    return decision;
   }
 
   return fail(`event ${event} has no CI result rule`);
+}
+
+// The push rule proper; `decide` adds what the cache jobs did.
+function decidePush(result, needs) {
+  if (result(GATE_JOB) !== 'success') return fail(`${GATE_JOB}=${result(GATE_JOB)}`);
+  if (needs[GATE_JOB]?.outputs?.reuse === 'true') {
+    const ran = FULL_JOBS.filter((id) => result(id) !== 'skipped');
+    if (ran.length > 0) {
+      return fail(`gate proved reuse, but ${ran.map((id) => `${id}=${result(id)}`).join(', ')} did not skip`);
+    }
+    return { ok: true, reason: 'the gate proved this tree identical to its PR run; full jobs reused, not re-run' };
+  }
+  const bad = FULL_JOBS.filter((id) => result(id) !== 'success');
+  if (bad.length > 0) return fail(`no reuse, and ${bad.map((id) => `${id}=${result(id)}`).join(', ')}`);
+  return { ok: true, reason: `no reuse; ${FULL_JOBS.join(', ')} ran and succeeded` };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -70,8 +84,9 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
   const line = `${decision.ok ? 'CI passed' : 'CI failed'}: ${decision.reason}`;
   try {
-    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ${line}\n`);
+    appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ${line}\n${decision.warning ? `\n⚠️ ${decision.warning}\n` : ''}`);
   } catch {}
   console.log(decision.ok ? line : `::error::${line}`);
+  if (decision.warning) console.log(`::warning::${decision.warning}`);
   process.exitCode = decision.ok ? 0 : 1;
 }
