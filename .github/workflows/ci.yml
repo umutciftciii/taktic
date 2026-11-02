@@ -64,6 +64,7 @@ jobs:
         run: >-
           node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
           .github/scripts/ci-shards.test.mjs .github/scripts/shard-coverage.test.mjs
+          .github/scripts/playwright-install.test.mjs
       - name: Record the merge commit under test
         run: git rev-parse HEAD | tee tested-commit.txt
       - uses: actions/upload-artifact@v4
@@ -447,8 +448,37 @@ jobs:
       # Chromium only. The critical journeys are about server actions, sessions
       # and pricing rules — none of which differ by browser engine — so a second
       # engine would double the runtime of every PR to re-test the same API.
+      # CI-PERF-002A: the browser and its system packages through
+      # playwright-install.sh rather than `playwright install --with-deps`.
+      # The apt files come from a cache only after their SHA256 matches the
+      # signed package index; whatever is missing or wrong is downloaded. Each
+      # phase has a 120 s timeout and one retry, and the step fails unless
+      # Playwright then reports every system dependency installed.
+      - name: Resolve Chromium's system packages
+        id: pw-deps
+        run: .github/scripts/playwright-install.sh resolve chromium
+
+      - name: Restore cached system packages
+        id: pw-apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
+          restore-keys: ${{ steps.pw-deps.outputs.restore-prefix }}
+
       - name: Install Chromium
-        run: pnpm e2e:install
+        env:
+          PW_CACHE_RESULT: ${{ steps.pw-apt-cache.outputs.cache-hit == 'true' && 'exact' || (steps.pw-apt-cache.outputs.cache-matched-key != '' && 'partial' || 'miss') }}
+        run: .github/scripts/playwright-install.sh install chromium
+
+      # One shard stores the verified files under this exact key; the others
+      # would only race it for the same entry.
+      - name: Save system packages for the next run
+        if: matrix.shard == 1 && steps.pw-apt-cache.outputs.cache-hit != 'true' && steps.pw-deps.outputs.packages != '0'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
 
       # CI-FONTS-001: the build must not need a font service. Every font host
       # is unreachable from here on, so a build that still fetches one fails.
@@ -588,8 +618,37 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      # CI-PERF-002A: the browser and its system packages through
+      # playwright-install.sh rather than `playwright install --with-deps`.
+      # The apt files come from a cache only after their SHA256 matches the
+      # signed package index; whatever is missing or wrong is downloaded. Each
+      # phase has a 120 s timeout and one retry, and the step fails unless
+      # Playwright then reports every system dependency installed.
+      - name: Resolve WebKit's system packages
+        id: pw-deps
+        run: .github/scripts/playwright-install.sh resolve webkit
+
+      - name: Restore cached system packages
+        id: pw-apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
+          restore-keys: ${{ steps.pw-deps.outputs.restore-prefix }}
+
       - name: Install WebKit
-        run: pnpm e2e:install:webkit
+        env:
+          PW_CACHE_RESULT: ${{ steps.pw-apt-cache.outputs.cache-hit == 'true' && 'exact' || (steps.pw-apt-cache.outputs.cache-matched-key != '' && 'partial' || 'miss') }}
+        run: .github/scripts/playwright-install.sh install webkit
+
+      # One shard stores the verified files under this exact key; the others
+      # would only race it for the same entry.
+      - name: Save system packages for the next run
+        if: matrix.shard == 1 && steps.pw-apt-cache.outputs.cache-hit != 'true' && steps.pw-deps.outputs.packages != '0'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
 
       # CI-FONTS-001: the build must not need a font service. Every font host
       # is unreachable from here on, so a build that still fetches one fails.
@@ -945,6 +1004,62 @@ jobs:
         if: failure()
         run: docker compose -f docker-compose.prod.yml logs --no-color --tail 200 || true
 
+  # CI-PERF-002A: keeps main's apt cache for the Playwright browsers warm.
+  # A pull request can read a cache main saved, never one another pull request
+  # saved — and on main the e2e jobs are usually skipped (the post-merge gate
+  # reuses the PR run), so without this job main would never hold one and
+  # every pull request's first run would download everything again. It runs on
+  # every push to main whatever the gate decided, downloads and verifies the
+  # files (`prefetch`: nothing installed, no browser) and saves them. It never
+  # decides whether CI passed: CI result reports it, and does not fail on it.
+  playwright-apt-cache:
+    name: playwright apt cache (${{ matrix.browser }})
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, webkit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve the system packages
+        id: pw-deps
+        run: .github/scripts/playwright-install.sh resolve ${{ matrix.browser }}
+
+      - name: Restore cached system packages
+        id: pw-apt-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
+          restore-keys: ${{ steps.pw-deps.outputs.restore-prefix }}
+
+      - name: Download and verify what the cache lacks
+        if: steps.pw-apt-cache.outputs.cache-hit != 'true'
+        env:
+          PW_CACHE_RESULT: ${{ steps.pw-apt-cache.outputs.cache-matched-key != '' && 'partial' || 'miss' }}
+        run: .github/scripts/playwright-install.sh prefetch ${{ matrix.browser }}
+
+      - name: Save system packages
+        if: steps.pw-apt-cache.outputs.cache-hit != 'true' && steps.pw-deps.outputs.packages != '0'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ steps.pw-deps.outputs.dir }}
+          key: ${{ steps.pw-deps.outputs.key }}
+
   # The one check branch protection requires on main (CI-PROTECT-001), under a
   # name that does not change when a job above is renamed or added.
   #
@@ -966,7 +1081,7 @@ jobs:
   ci-result:
     name: CI result
     if: always()
-    needs: [post-merge-gate, pr-evidence, static, unit, api, e2e, e2e-webkit, shard-coverage, ops]
+    needs: [post-merge-gate, pr-evidence, static, unit, api, e2e, e2e-webkit, shard-coverage, ops, playwright-apt-cache]
     runs-on: ubuntu-latest
     permissions:
       contents: read

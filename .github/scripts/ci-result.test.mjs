@@ -6,7 +6,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { FULL_JOBS, GATE_JOB, PR_JOBS, decide } from './ci-result.mjs';
+import { CACHE_JOBS, FULL_JOBS, GATE_JOB, PR_JOBS, decide } from './ci-result.mjs';
 
 const results = (overrides = {}, base = 'success') => ({
   [GATE_JOB]: { result: 'skipped', outputs: {} },
@@ -14,10 +14,11 @@ const results = (overrides = {}, base = 'success') => ({
   ...overrides,
 });
 
-const pushWith = (reuse, full) => ({
+const pushWith = (reuse, full, cache = 'success') => ({
   [GATE_JOB]: { result: 'success', outputs: reuse === undefined ? {} : { reuse } },
   'pr-evidence': { result: 'skipped', outputs: {} },
   ...Object.fromEntries(FULL_JOBS.map((id) => [id, { result: full, outputs: {} }])),
+  ...Object.fromEntries(CACHE_JOBS.map((id) => [id, { result: cache, outputs: {} }])),
 });
 
 // ── pull requests ───────────────────────────────────────────────────────────
@@ -82,6 +83,32 @@ for (const outcome of ['failure', 'cancelled', 'skipped']) {
   });
 }
 
+// ── cache jobs (CI-PERF-002A) ───────────────────────────────────────────────
+
+for (const outcome of ['failure', 'cancelled', 'skipped']) {
+  test(`push: a cache job ${outcome} keeps the result, and says so`, () => {
+    for (const [reuse, full] of [['true', 'skipped'], ['false', 'success']]) {
+      const d = decide('push', pushWith(reuse, full, outcome));
+      assert.equal(d.ok, true);
+      assert.match(d.warning, new RegExp(`cache not warmed: playwright-apt-cache=${outcome}`));
+    }
+  });
+}
+
+test('push: a cache job never turns a failing result into a passing one', () => {
+  const needs = pushWith('false', 'success');
+  needs.api = { result: 'failure' };
+  assert.equal(decide('push', needs).ok, false);
+});
+
+test('push: a warm cache adds no warning', () => {
+  assert.equal(decide('push', pushWith('true', 'skipped')).warning, undefined);
+});
+
+test('pull request: the cache job (push only) is not required', () => {
+  assert.equal(decide('pull_request', { ...results(), 'playwright-apt-cache': { result: 'skipped' } }).ok, true);
+});
+
 // ── anything else ───────────────────────────────────────────────────────────
 
 test('another event, or no results at all, fails', () => {
@@ -96,7 +123,7 @@ test('ci.yml: the CI result job runs always and needs every job it judges', () =
   const yml = readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8');
   const jobs = yml.slice(yml.indexOf('\njobs:\n'));
   const jobIds = [...jobs.matchAll(/^ {2}([a-z][a-z0-9-]*):\s*$/gm)].map((m) => m[1]);
-  for (const id of [GATE_JOB, ...PR_JOBS]) assert.ok(jobIds.includes(id), `ci.yml has no job "${id}"`);
+  for (const id of [GATE_JOB, ...PR_JOBS, ...CACHE_JOBS]) assert.ok(jobIds.includes(id), `ci.yml has no job "${id}"`);
 
   // The last job, so its block runs to the end of the file.
   assert.equal(jobIds.at(-1), 'ci-result', 'ci-result is the last job in ci.yml');
@@ -104,7 +131,7 @@ test('ci.yml: the CI result job runs always and needs every job it judges', () =
   assert.match(body, /^ {4}name: CI result$/m);
   assert.match(body, /^ {4}if: always\(\)$/m);
   const needs = body.match(/^ {4}needs: \[([^\]]*)\]$/m)?.[1].split(',').map((s) => s.trim());
-  assert.deepEqual([...needs].sort(), [GATE_JOB, ...PR_JOBS].sort());
+  assert.deepEqual([...needs].sort(), [GATE_JOB, ...PR_JOBS, ...CACHE_JOBS].sort());
   // Every other job is judged by it, so none may be left out of `needs`.
   assert.deepEqual(jobIds.filter((id) => id !== 'ci-result').sort(), [...needs].sort());
 });
