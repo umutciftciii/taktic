@@ -288,7 +288,10 @@ describe('provider review aggregate', () => {
     ]);
     expect(body.items[0].month).toMatch(/^\d{4}-\d{2}$/);
     expect(body.items[0].categoryName).toMatch(/^Klima /);
-    expect(JSON.stringify(body)).not.toMatch(PII_PATTERN);
+    // Ids and the cursor are blanked first, as below: a cuid may spell "0555"
+    // by chance, and in CI it did, at the same counter, run after run.
+    const text = JSON.stringify(body).replace(/"(id|[a-zA-Z]+Id|nextCursor)":"[^"]*"/g, '"$1":""');
+    expect(text).not.toMatch(PII_PATTERN);
   });
 
   it('labels a public item with its Istanbul calendar month, not the UTC one (TIMEZONE-001)', async () => {
