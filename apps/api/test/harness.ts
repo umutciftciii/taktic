@@ -182,7 +182,18 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestC
     new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
   );
 
+  // One listener for the life of the app, on loopback IPv4 — the address
+  // supertest dials. Handed a server that is not listening, supertest calls
+  // `listen(0)` itself and closes it after the response — in a spec that
+  // sends one request at a time, once per request — and that binds the IPv6
+  // wildcard while it connects to 127.0.0.1. On macOS that pairing let a
+  // request land on another process's server: a parallel run saw 401s from a
+  // session that server's database never had, and connect() timing out
+  // (TEST-HARNESS-SOCKET-001, reproduced without a database or Nest at all).
+  // A server that is already listening is used as it is, so no spec changes
+  // how it calls supertest. `app.close()` stops this listener.
   await app.init();
+  await app.listen(0, '127.0.0.1');
 
   // Closing waits for the background work first, so a sweep is never cut off
   // under a client that is going away and nothing of this app outlives it.
