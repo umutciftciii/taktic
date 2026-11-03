@@ -65,6 +65,7 @@ jobs:
           node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
           .github/scripts/ci-shards.test.mjs .github/scripts/shard-coverage.test.mjs
           .github/scripts/playwright-install.test.mjs .github/scripts/cache-confirm.test.mjs
+          .github/scripts/e2e-shard-plan.test.mjs
       - name: Record the merge commit under test
         run: git rev-parse HEAD | tee tested-commit.txt
       - uses: actions/upload-artifact@v4
@@ -364,10 +365,12 @@ jobs:
     # six application processes, so keeping it apart means a type error still
     # fails in a minute instead of waiting behind a browser download.
     #
-    # Sharded (CI-PERF-001): Playwright's --shard gives each shard whole spec
-    # files (the suite is not fullyParallel), and each shard is a runner of its
-    # own — its own PostgreSQL, its own six servers on the same ports nobody
-    # else uses there, its own outbox and artifacts directory. Within a shard
+    # Sharded (CI-PERF-001): each shard runs whole spec files (the suite is not
+    # fullyParallel), and each shard is a runner of its own — its own
+    # PostgreSQL, its own six servers on the same ports nobody else uses
+    # there, its own outbox and artifacts directory. Which files a shard runs
+    # is planned from their measured durations (CI-PERF-002C, see the
+    # planning step), not cut by test count as --shard does. Within a shard
     # the suite runs exactly as before: one worker, files in order, the same
     # retries and timeouts. A test that asserts on global state ("no refund
     # transaction exists at all") still sees only its own shard's database.
@@ -445,6 +448,29 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      # CI-PERF-002C: this shard's spec files, balanced by the seconds they
+      # took on earlier runs (.github/scripts/e2e-shard-plan.mjs, history in
+      # e2e-shard-durations.json next to it). Each shard lists the suite the
+      # way `static` does — `--list` starts no server — and computes the same
+      # plan from that and the committed durations; the plan goes next to the
+      # report, where shard-coverage checks it against its own computation and
+      # against what the shard ran. A new spec file without history is
+      # estimated from its test count; a missing or broken history falls back
+      # to test counts with a warning. Playwright's own selection from the
+      # test list is then checked against the plan.
+      - name: Plan this shard's files by measured duration
+        run: |
+          set -euo pipefail
+          PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-list.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs plan e2e ${{ matrix.shard }} "$RUNNER_TEMP/e2e-list.json" \
+            "$RUNNER_TEMP/e2e-test-list.txt" "$E2E_REPORT_DIR/plan.json"
+          # --test-list does not fail on a line that matches nothing; check
+          # Playwright's own selection against the plan before any test runs.
+          PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-selected.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --test-list="$RUNNER_TEMP/e2e-test-list.txt" >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs verify "$E2E_REPORT_DIR/plan.json" ${{ matrix.shard }} "$RUNNER_TEMP/e2e-selected.json"
+
       # Chromium only. The critical journeys are about server actions, sessions
       # and pricing rules — none of which differ by browser engine — so a second
       # engine would double the runtime of every PR to re-test the same API.
@@ -495,7 +521,7 @@ jobs:
         run: pnpm build
 
       - name: End-to-end tests (this shard's files)
-        run: pnpm --filter @taktic/e2e e2e --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: pnpm --filter @taktic/e2e e2e --test-list="$RUNNER_TEMP/e2e-test-list.txt"
 
       # Same check as the `api` shards: only the base and the e2e database on
       # this shard's service, and no row written to the base.
@@ -622,6 +648,29 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      # CI-PERF-002C: this shard's spec files, balanced by the seconds they
+      # took on earlier runs (.github/scripts/e2e-shard-plan.mjs, history in
+      # e2e-shard-durations.json next to it). Each shard lists the suite the
+      # way `static` does — `--list` starts no server — and computes the same
+      # plan from that and the committed durations; the plan goes next to the
+      # report, where shard-coverage checks it against its own computation and
+      # against what the shard ran. A new spec file without history is
+      # estimated from its test count; a missing or broken history falls back
+      # to test counts with a warning. Playwright's own selection from the
+      # test list is then checked against the plan.
+      - name: Plan this shard's files by measured duration
+        run: |
+          set -euo pipefail
+          E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-list.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --project=webkit >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs plan e2e-webkit ${{ matrix.shard }} "$RUNNER_TEMP/e2e-list.json" \
+            "$RUNNER_TEMP/e2e-test-list.txt" "$E2E_REPORT_DIR/plan.json"
+          # --test-list does not fail on a line that matches nothing; check
+          # Playwright's own selection against the plan before any test runs.
+          E2E_WEBKIT=1 PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/e2e-selected.json" \
+            pnpm --filter @taktic/e2e exec playwright test --list --reporter=json --project=webkit --test-list="$RUNNER_TEMP/e2e-test-list.txt" >/dev/null
+          node .github/scripts/e2e-shard-plan.mjs verify "$E2E_REPORT_DIR/plan.json" ${{ matrix.shard }} "$RUNNER_TEMP/e2e-selected.json"
+
       # CI-PERF-002A: the browser and its system packages through
       # playwright-install.sh rather than `playwright install --with-deps`.
       # The apt files come from a cache only after their SHA256 matches the
@@ -669,7 +718,7 @@ jobs:
         run: pnpm build
 
       - name: Sign-in screens and mobile shells, WebKit (this shard's files)
-        run: pnpm --filter @taktic/e2e e2e:webkit --shard=${{ matrix.shard }}/${{ strategy.job-total }}
+        run: pnpm --filter @taktic/e2e e2e:webkit --test-list="$RUNNER_TEMP/e2e-test-list.txt"
 
       # Same check as the `e2e` shards.
       - name: Prove this shard used only its own database
@@ -707,7 +756,8 @@ jobs:
   # The proof that splitting the suites lost nothing: every API spec file ran
   # in exactly one `api` shard and every test in it passed; every e2e test the
   # `static` job listed ran in exactly one shard of its browser's job and ended
-  # passed (or flaky: failed, then passed on the retry the suite allows). A
+  # passed (or flaky: failed, then passed on the retry the suite allows), and
+  # each e2e shard ran exactly the files its duration plan gave it. A
   # shard that never reported — dropped from the matrix, cancelled, crashed
   # before writing its report — fails this job, and so does a skipped test.
   # It runs even when a shard failed, so the summary says what is missing.
