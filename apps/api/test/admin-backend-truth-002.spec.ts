@@ -459,7 +459,9 @@ describe('E — a RUNNING run whose lease ran out is closed as interrupted', () 
   it('keeps the recovered record when the interrupted process later tries to close it', async () => {
     const run = await registry().start('request-reminder');
     // Its lease runs out (simulated by a recovery with the row backdated past it).
-    await ctx.prisma.$executeRaw`UPDATE "SchedulerRun" SET "status" = 'FAILED', "finishedAt" = now() AT TIME ZONE 'UTC', "errorCode" = ${PROCESS_INTERRUPTED} WHERE "id" = ${run.id}`;
+    // GREATEST as in the real recovery: startedAt is this process's clock and now()
+    // the server's, and in a Docker Desktop VM the server's can be a millisecond behind.
+    await ctx.prisma.$executeRaw`UPDATE "SchedulerRun" SET "status" = 'FAILED', "finishedAt" = GREATEST(now() AT TIME ZONE 'UTC', "startedAt"), "errorCode" = ${PROCESS_INTERRUPTED} WHERE "id" = ${run.id}`;
     await run.succeed('reminded=1');
     expect(await ctx.prisma.schedulerRun.findUniqueOrThrow({ where: { id: run.id! } })).toMatchObject({
       status: 'FAILED',
