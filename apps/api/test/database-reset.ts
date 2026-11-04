@@ -83,6 +83,8 @@ type CatalogTable = {
   rowSecurity: boolean;
   canTruncate: boolean;
   canDelete: boolean;
+  /** SELECT, and USAGE on the schema: what the residue check needs. */
+  canRead: boolean;
   /** Triggers session_replication_role = replica would not silence. */
   replicaProofTriggers: number;
   truncateTriggers: number;
@@ -107,6 +109,7 @@ const CATALOG_TABLES = `
          c.relrowsecurity AS "rowSecurity",
          has_table_privilege(c.oid, 'TRUNCATE') AS "canTruncate",
          has_table_privilege(c.oid, 'DELETE') AS "canDelete",
+         has_table_privilege(c.oid, 'SELECT') AND has_schema_privilege(n.oid, 'USAGE') AS "canRead",
          (SELECT count(*)::int FROM pg_trigger t
            WHERE t.tgrelid = c.oid AND t.tgenabled IN ('A', 'R')) AS "replicaProofTriggers",
          (SELECT count(*)::int FROM pg_trigger t
@@ -197,6 +200,11 @@ export async function loadResetPlan(db: ResetClient, config: ResetConfig): Promi
       `this role lacks ${config.mode.toUpperCase()} on ${names(forbidden(privilege))}.`,
     );
   }
+  // Found out here rather than by the residue check, which runs after the write.
+  const unreadable = tables.filter((table) => !table.canRead);
+  if (unreadable.length > 0) {
+    throw refuse(`this role cannot read ${names(unreadable)}, so it could not check them afterwards.`);
+  }
   const notOwned = sequences.filter((sequence) => !sequence.owned);
   if (notOwned.length > 0) {
     throw refuse(`this role cannot restart ${notOwned.map((s) => s.name).join(', ')}.`);
@@ -276,9 +284,10 @@ async function assertDeleteMatchesTruncate(
 }
 
 /**
- * One statement, so one transaction and one round trip, and SET LOCAL cannot
- * outlive it: replica mode ends with this block on commit and on failure alike,
- * and the pooled connection goes back with its triggers on.
+ * One statement, so one transaction and one round trip. Run outside a
+ * transaction, as resetDatabase always runs it, SET LOCAL cannot outlive it:
+ * replica mode ends with this block on commit and on failure alike, and the
+ * pooled connection goes back with its triggers on.
  *
  * ACCESS EXCLUSIVE is what TRUNCATE takes. A writer still in flight is waited
  * for, so its rows are deleted rather than committed behind the DELETE's back.
@@ -320,8 +329,9 @@ export function createDatabaseReset(config: ResetConfig) {
     const [before] = await db.$queryRawUnsafe<{ role: string; rows: string }[]>(plan.keptRowsQuery);
     if (before!.role !== 'origin') {
       throw new Error(
-        `This connection is in session_replication_role=${before!.role}: triggers and foreign keys ` +
-          'are off for every statement on it. Some earlier statement used SET rather than SET LOCAL.',
+        `The pooled connection this check landed on is in session_replication_role=${before!.role}: ` +
+          'triggers and foreign keys are off for every statement on it. Some earlier statement used ' +
+          'SET rather than SET LOCAL.',
       );
     }
     if (before!.rows !== plan.keptRowsBaseline) {
@@ -362,9 +372,11 @@ export function createDatabaseReset(config: ResetConfig) {
     planFor,
     /**
      * Resets, or fails for good. Vitest carries on after a failed `beforeEach`,
-     * so the failure is remembered: every later reset in this worker throws
+     * so the failure is remembered: every later reset in this spec file throws
      * without touching the database, and no case can start from a state that was
-     * not established. A failed `beforeEach` keeps its own case from running.
+     * not established. A failed `beforeEach` keeps its own case from running, and
+     * the failed cases turn the run red; the next file starts from a new module
+     * and has to pass the same checks for itself.
      */
     async run(db: ResetClient): Promise<void> {
       if (failure) {

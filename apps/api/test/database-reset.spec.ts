@@ -418,10 +418,11 @@ describe('the plan refuses what it cannot vouch for', () => {
     ],
   ];
 
-  it.each(unmatchable)('delete: %s', async (_label, statement, expected) => {
+  it.each(unmatchable)('delete: %s, while truncate has no objection', async (_label, statement, expected) => {
     await sql(statement);
 
     await expect(loadResetPlan(prisma, { mode: 'delete', ...TABLES })).rejects.toThrow(expected);
+    await expect(loadResetPlan(prisma, { mode: 'truncate', ...TABLES })).resolves.toBeDefined();
   });
 });
 
@@ -534,6 +535,28 @@ describe('privileges', () => {
         );
       },
     );
+  });
+});
+
+describe('privileges the check afterwards needs', () => {
+  const ROLE = `reset_fixture_reader_${process.pid}`;
+
+  beforeEach(createFixture);
+
+  it.each(RESET_MODES)('%s: a role that could write but not read is refused before it writes', async (mode) => {
+    const refused = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRawUnsafe(`CREATE ROLE "${ROLE}" NOLOGIN`);
+        await tx.$executeRawUnsafe(`GRANT USAGE ON SCHEMA "${SCHEMA}" TO "${ROLE}"`);
+        await tx.$executeRawUnsafe(`GRANT DELETE, TRUNCATE ON ALL TABLES IN SCHEMA "${SCHEMA}" TO "${ROLE}"`);
+        await tx.$executeRawUnsafe(`GRANT SET ON PARAMETER session_replication_role TO "${ROLE}"`);
+        await tx.$executeRawUnsafe(`SET LOCAL ROLE "${ROLE}"`);
+        await loadResetPlan(tx, { mode, ...TABLES });
+      },
+      { timeout: 30_000 },
+    );
+
+    await expect(refused).rejects.toThrow(/this role cannot read/);
   });
 });
 

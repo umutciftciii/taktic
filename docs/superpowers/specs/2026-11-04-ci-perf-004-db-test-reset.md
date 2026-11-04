@@ -77,25 +77,26 @@ yoktur. Aynı `SET LOCAL` zaten `harness.ts`'te (`rewriteGrantFixture`) kullanı
 
 `TEST_DB_RESET=truncate|delete`; boş/yok = `truncate`, başka değer = koşu hiç başlamaz.
 
-Reset planı istemci başına bir kez kurulur (dosya başına bir; 1 katalog sorgusu):
+Reset planı istemci başına bir kez kurulur (spec dosyası başına bir; birkaç salt-okunur sorgu):
 
 1. **Hedef sunucuya sorulur:** `current_database()` `_test` kuralından geçmeli (URL korumasına
    ek); `pg_is_in_recovery()` false olmalı.
 2. **Katalog:** kümeyi FK kapanışı belirler. `public`'te ne kümede ne de koruma listesinde olan tablo
    → hata (yeni FK'siz tablo bugün sessizce sızıyordu).
-3. **Yetki:** TRUNCATE/DELETE izni, sequence sahipliği, delete modunda `session_replication_role`
+3. **Yetki:** TRUNCATE/DELETE izni, kontrol için SELECT ve şema USAGE izni, sequence sahipliği, delete modunda `session_replication_role`
    izni; eksikse statement çalıştırılmadan anlaşılır hata.
 4. **Delete modu şartları:** §3'teki kaçış yolları (ALWAYS/REPLICA, ON TRUNCATE trigger, rule, RLS,
    partition/foreign table) varsa hata.
 
 Her resette:
 
-- **Önce:** bu bağlantıda `session_replication_role = origin` (sızıntı kontrolü) ve küme dışı tablolarda
+- **Önce:** sorgunun düştüğü havuz bağlantısında `session_replication_role = origin` (örneklem niteliğinde sızıntı kontrolü; havuzdaki diğer bağlantıları görmez) ve küme dışı tablolarda
   satır sayısı plan anındakiyle aynı.
 - **Reset:** `truncate` cümlesi bugünküyle birebir; `delete` tek `DO $reset$` bloğu.
 - **Sonra (commit dışından):** kümedeki her tablo boş; drain'in kaçırdığı geç yazıcı da burada yakalanır.
-- **Hata:** resetçi kalıcı olarak kırılır. Dosyadaki sonraki her `resetDatabase`, veritabanına
-  dokunmadan ilk hatayı atar. `beforeEach` hatası test gövdesini koşturmaz; koşu kırmızı biter.
+- **Hata:** resetçi kalıcı olarak kırılır. Spec dosyasındaki sonraki her `resetDatabase`, veritabanına
+  dokunmadan ilk hatayı atar. `beforeEach` hatası test gövdesini koşturmaz (geçici bir spec ile doğrulandı);
+  koşu kırmızı biter. Sonraki dosya yeni modül durumuyla başlar ve aynı kontrollerden kendisi geçmek zorundadır.
 
 Geri alma: `TEST_DB_RESET` silinir veya `truncate` kalır; `truncate` yolu aynı cümleyi çalıştırır.
 Varsayılan bu PR'da değişmez.
