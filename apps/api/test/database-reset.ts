@@ -207,8 +207,10 @@ export async function loadResetPlan(db: ResetClient, config: ResetConfig): Promi
   }
 
   const sequenceIds = sequences.map((sequence) => ident(sequence.schema, sequence.name));
-  const tableIds = tables.map((table) => ident(table.schema, table.name));
   const seedIds = config.seeds.map((table) => ident(schema, table));
+  // In TRUNCATE's lock order: what it names, in that order, then what it reaches.
+  const reachedIds = tables.map((table) => ident(table.schema, table.name));
+  const tableIds = [...seedIds, ...reachedIds.filter((id) => !seedIds.includes(id))];
   const keptIds = kept.map((table) => [table.name, ident(table.schema, table.name)] as const);
 
   const keptRowsQuery =
