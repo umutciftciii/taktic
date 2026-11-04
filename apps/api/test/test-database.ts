@@ -193,6 +193,14 @@ export function assertIsTestDatabase(databaseUrl: string): void {
     );
   }
 
+  assertIsTestDatabaseName(name);
+}
+
+/**
+ * The rule on the name alone, for when the name comes from the server's
+ * `current_database()` rather than from a URL.
+ */
+export function assertIsTestDatabaseName(name: string): void {
   if (!TEST_DATABASE_NAME.test(name)) {
     throw new Error(
       `Refusing to run tests against "${name}": the name must end with ${TEST_SUFFIX} and hold ` +

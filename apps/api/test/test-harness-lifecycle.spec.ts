@@ -9,6 +9,7 @@ import { RequestCancellationOutbox } from '../src/modules/notifications/request-
 import { RequestPublishOutbox } from '../src/modules/notifications/request-publish-outbox.service';
 import { ReviewInvitationOutbox } from '../src/modules/notifications/review-invitation-outbox.service';
 import { RequestDraftsService } from '../src/modules/request-drafts/request-drafts.service';
+import { isResetStatement } from './database-reset';
 import {
   backgroundWorkOwners,
   createApprovedRequest,
@@ -77,7 +78,7 @@ async function until(condition: () => boolean): Promise<void> {
 function watchTruncate(events: string[], onTruncate: () => void) {
   const original = ctx.prisma.$executeRawUnsafe.bind(ctx.prisma);
   return vi.spyOn(ctx.prisma, '$executeRawUnsafe').mockImplementation(((query: string, ...values: unknown[]) => {
-    if (query.startsWith('TRUNCATE')) {
+    if (isResetStatement(query)) {
       events.push('truncate');
       onTruncate();
     }
