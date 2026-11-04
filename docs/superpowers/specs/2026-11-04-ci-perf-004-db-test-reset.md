@@ -125,3 +125,50 @@ süre kazancı CI'da ölçülü.
 | Kalıntı sorgusu (112 EXISTS) | 0,6 / 0,8 | 0,5 / 0,9 |
 
 Kilit maliyeti ölçülemeyecek kadar küçük; TRUNCATE ile aynı kilit seviyesi korunur.
+
+## 8. Sonuçlar
+
+### CI, aynı runner, iki mod art arda (koşu 41893851369, 2 deneme, sıra ters)
+
+Süre: mod başına vitest süresi, migration dahil, saniye. Yıldız, o modun o shard'da önce koştuğu denemedir.
+
+| Shard | Deneme 1 truncate | Deneme 1 delete | Deneme 2 truncate | Deneme 2 delete |
+| --- | --- | --- | --- | --- |
+| 1 | 334\* | 177 | 542 | 230\* |
+| 2 | 563 | 229\* | 719\* | 234 |
+| 3 | 590\* | 217 | 588 | 243\* |
+| 4 | 576 | 196\* | 446\* | 181 |
+| **Toplam** | **2063** | **819** | **2295** | **888** |
+| **En yavaş shard** | **590** | **229** | **719** | **243** |
+
+Kazanç: toplam %60 ve %61, en yavaş shard %61 ve %66. Her koşuda aynı testler geçti: 5879 test, 0 hata.
+tmpfs tepesi, yalnız o mod önce koştuğunda karşılaştırılabilir (sonra koşan önceki modun WAL'ını da görür):
+delete 112–235 MB, truncate 823–856 MB. 2 GiB tavanının altında.
+
+**Toplam PR süresine etkisi şimdilik sınırlı:** bu PR'ın CI koşusunda kritik yol e2e job'larıydı (webkit 684 sn,
+chromium 660 sn). API job'ları kısalsa da toplam süreyi e2e belirler. Kazanç API job'larının runner dakikasındadır.
+
+### Yerel, 4 paralel shard, aynı tmpfs sunucu
+
+| Koşu | Duvar süresi (sn) | Test | Hata |
+| --- | --- | --- | --- |
+| delete a / b | 182 / 211 | 5877 | 0 |
+| truncate a / b | 394 / 444 | 5877 | 0 |
+| delete, agresif autovacuum, 2 koşu | 242 / 252 | 5879 | 0 |
+
+- Test kümesi test başına eşit: `delete a` ile `truncate a` arasında 5877 test, durum farkı 0.
+- Agresif autovacuum (`naptime=1`, eşik 5) boş alanı hemen geri verdirdi ve sırasız okumaya dayanan test
+  ortaya çıkmadı. Bu kanıt iki koşudur, kesin değildir.
+- Ölü satır: CI'da koşu sonunda shard başına 1,2k–36k; veritabanı 19–58 MB, truncate'te 31–51 MB. Tablo başına tepe yerelde ~25 MB.
+- Plan testi yapan 3 spec iki modda da geçti.
+
+### İzolasyon
+
+- Stres koşularından önce ve sonra `pg_stat_database` satır sayaçları karşılaştırıldı: mevcut 23 veritabanından 22'si birebir aynı.
+  Farklı olan tek DB `taktic_probe_test`, o an biten doğrulama koşumun kendi DB'sidir (+118/+6; istatistik gecikmesi olarak yorumlandı, ayrıca kanıtlanmadı).
+- Reset her zaman tek bağlantı, tek DB'de çalışır; `SET LOCAL` oturum ve işlem dışına çıkmaz.
+
+### Geri alma ve öneri
+
+Geri alma için kod gerekmez: `TEST_DB_RESET` ayarlanmazsa `truncate` çalışır. Varsayılanı değiştirmek ayrı bir PR'ın
+kararıdır; `ci.yml`'de `TEST_DB_RESET: delete` tek satırdır ve geri alınması da öyledir.
