@@ -8,6 +8,7 @@ import { AdminPermission, BusinessRegistrationType, CategoryDeliveryModel, Credi
 import bcrypt from 'bcryptjs';
 import type { Server } from 'node:http';
 import { AppModule } from '../src/app.module';
+import { createDatabaseReset, resolveResetMode, type ResetClient } from './database-reset';
 import type { NormalizedBusinessRegistration } from '../src/modules/business-registration/business-registration.rules';
 import { writeBusinessRegistration } from '../src/modules/business-registration/business-registration.writer';
 import { applyHttpSecurity } from '../src/common/http-security';
@@ -267,6 +268,10 @@ export function resetAuthThrottle(app: INestApplication): void {
   storage.storage.clear();
 }
 
+/**
+ * What the reset names directly. It reaches more than this: everything with a
+ * foreign key to one of these, whether listed or not (database-reset.ts).
+ */
 const TRUNCATED_TABLES = [
   // SEC-AUTH-ABUSE-001: sign-in attempt counters, no FK.
   'AuthAttemptCounter',
@@ -412,9 +417,17 @@ const TRUNCATED_TABLES = [
   'User',
 ];
 
+export const databaseResetTables = { seeds: TRUNCATED_TABLES, keep: ['_prisma_migrations'] };
+
+/** The row a migration creates and the reset, reaching it through User, removes. */
+export async function restoreMigrationRows(db: ResetClient): Promise<void> {
+  await db.$executeRawUnsafe(
+    `INSERT INTO "OpsAlertRoutingSettings" ("id", "emailRouting", "updatedAt")
+     VALUES ('ops-alert-routing', 'ENV_LEGACY', CURRENT_TIMESTAMP)`,
+  );
+}
+
 /**
- * Empties every table between cases.
- *
  * First it waits for every live application's background work
  * (TEST-FLAKE-003). A case's request handler may start an outbox sweep after
  * its commit and return before the sweep is done; a TRUNCATE issued while that
@@ -427,34 +440,16 @@ const TRUNCATED_TABLES = [
  * about is still talking to the database, and it is reported as exactly that
  * rather than retried away.
  */
+const databaseReset = createDatabaseReset({
+  mode: resolveResetMode(),
+  ...databaseResetTables,
+  beforeReset: () => Promise.all([...liveApps].map((app) => drainBackgroundWork(app))),
+  afterReset: restoreMigrationRows,
+});
+
+/** Empties every table between cases. See database-reset.ts. */
 export async function resetDatabase(prisma: PrismaClient): Promise<void> {
-  await Promise.all([...liveApps].map((app) => drainBackgroundWork(app)));
-
-  const list = TRUNCATED_TABLES.map((table) => `"public"."${table}"`).join(', ');
-  try {
-    await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE;`);
-  } catch (error) {
-    if (isDeadlock(error)) {
-      throw new Error(
-        'resetDatabase deadlocked with another database session. Background work that is not a ' +
-          'BackgroundWorkOwner (src/common/background-work.ts) is still running from an earlier case.',
-        { cause: error },
-      );
-    }
-    throw error;
-  }
-
-  // The routing row is created by its migration, not lazily by code, and the
-  // TRUNCATE above reaches it through User. Put back what a fresh database has.
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "OpsAlertRoutingSettings" ("id", "emailRouting", "updatedAt")
-     VALUES ('ops-alert-routing', 'ENV_LEGACY', CURRENT_TIMESTAMP)`,
-  );
-}
-
-function isDeadlock(error: unknown): boolean {
-  const meta = (error as { meta?: { code?: unknown } } | null)?.meta;
-  return meta?.code === '40P01' || (error instanceof Error && error.message.includes('40P01'));
+  await databaseReset.run(prisma);
 }
 
 let sequence = 0;

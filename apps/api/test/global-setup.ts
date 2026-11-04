@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { resolveResetMode } from './database-reset';
 import { ensureTestDatabaseExists } from './provision-test-database';
 import {
   assertIsTestDatabase,
@@ -30,6 +31,8 @@ export default async function setup() {
 
   const databaseUrl = resolveTestDatabaseUrl();
   assertIsTestDatabase(databaseUrl);
+  // Here so a mistyped value stops the run before a single file has started.
+  const resetMode = resolveResetMode();
 
   const outcome = await ensureTestDatabaseExists(databaseUrl);
 
@@ -58,5 +61,5 @@ export default async function setup() {
   // concurrent runs apart. The checkout path, the host and the credentials are
   // not, and a CI log is a place they should never appear.
   const origin = wasExplicit ? 'from TEST_DATABASE_URL' : `checkout ${checkoutSlug()}`;
-  console.log(`[api-test] database "${databaseNameOf(databaseUrl)}" (${origin}, ${outcome})`);
+  console.log(`[api-test] database "${databaseNameOf(databaseUrl)}" (${origin}, ${outcome}, reset: ${resetMode})`);
 }
