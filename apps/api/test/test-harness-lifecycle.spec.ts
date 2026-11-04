@@ -1,5 +1,7 @@
 import { ThrottlerStorage, ThrottlerStorageService } from '@nestjs/throttler';
 import { UserRole } from '@prisma/client';
+import type { Server } from 'node:http';
+import type { AddressInfo, Socket } from 'node:net';
 import request from 'supertest';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PackageRefundNotificationOutbox } from '../src/modules/notifications/package-refund-notification-outbox.service';
@@ -30,6 +32,9 @@ import {
  * status-transition-guards: the publish outbox's audience query). The reset
  * now drains every background-work owner the application has before it
  * touches a table, so the two never overlap.
+ *
+ * The app also listens once, on 127.0.0.1, for as long as it lives
+ * (TEST-HARNESS-SOCKET-001) — see the last block below.
  */
 
 let ctx: TestContext;
@@ -205,6 +210,78 @@ describe('resetAuthThrottle leaves no timer behind', () => {
     expect(storage.storage.size).toBe(0);
   });
 });
+
+describe('the test app listens once, on loopback IPv4', () => {
+  /*
+   * TEST-HARNESS-SOCKET-001. supertest given a server that is not listening
+   * calls `listen(0)` for every request — the IPv6 wildcard — and then dials
+   * 127.0.0.1. On macOS, under parallel runs, that let a request reach another
+   * process's server (a 401 for a session its database never had) or time out
+   * in connect(). These cases pin the shape that removed it.
+   */
+  it('is already listening on 127.0.0.1 when the spec gets it', () => {
+    expect(ctx.server.listening).toBe(true);
+    expect(ctx.server.address()).toMatchObject({ address: '127.0.0.1', family: 'IPv4' });
+  });
+
+  it('answers every request on that listener instead of opening one per request', async () => {
+    const { port } = ctx.server.address() as AddressInfo;
+    const listen = vi.spyOn(ctx.server, 'listen');
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        await request(ctx.server).get('/health').expect(200);
+      }
+      expect(listen).not.toHaveBeenCalled();
+      expect((ctx.server.address() as AddressInfo).port).toBe(port);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  it('leaves no connection open once a response has been read', async () => {
+    const sockets: Socket[] = [];
+    const track = (socket: Socket) => sockets.push(socket);
+    ctx.server.on('connection', track);
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        await request(ctx.server).get('/health').expect(200);
+      }
+    } finally {
+      ctx.server.off('connection', track);
+    }
+
+    expect(sockets).toHaveLength(3);
+    await Promise.all(sockets.map(closed));
+    expect(await openConnections(ctx.server)).toBe(0);
+  });
+
+  it('stops listening, with no socket left open, when the app is closed', async () => {
+    const own = await createTestApp();
+    try {
+      await request(own.server).get('/health').expect(200);
+    } finally {
+      await own.app.close();
+    }
+
+    expect(own.server.listening).toBe(false);
+    expect(own.server.address()).toBeNull();
+    expect(await openConnections(own.server)).toBe(0);
+  });
+});
+
+/** Resolves once `socket` has closed — at once if it already has. */
+function closed(socket: Socket): Promise<void> {
+  if (socket.destroyed) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => socket.once('close', () => resolve()));
+}
+
+function openConnections(server: Server): Promise<number> {
+  return new Promise((resolve, reject) =>
+    server.getConnections((error, count) => (error ? reject(error) : resolve(count))),
+  );
+}
 
 function providerInstances(): unknown[] {
   const { ModulesContainer } = require('@nestjs/core') as typeof import('@nestjs/core');
