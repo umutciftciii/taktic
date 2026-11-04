@@ -26,7 +26,7 @@ import { apiSpecFiles, checkVitest } from '../../.github/scripts/shard-coverage.
 import {
   BASE_DB, DATA_DIR, DB_USER, DURATIONS_FILE, IMAGE, KIND, LABELS, SERVER_SETTINGS, TMPFS_MB, USAGE,
   buildApiPlan, checkMount, checkPlanned, checkSettings, databaseCrossings, databaseUrl, formatSummary, parseArgs,
-  parsePublishedPort, reportFailures, shardDatabase, shardEnv, staleVerdict,
+  parsePublishedPort, reportFailures, shardDatabase, shardEnv, staleVerdict, unhandledErrors,
 } from './api-test-plan.mjs';
 
 const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -366,6 +366,8 @@ function logProblems(results) {
     const log = existsSync(r.logPath) ? readFileSync(r.logPath, 'utf8') : '';
     if (!log.includes(`database "${shardDatabase(r.index)}"`)) problems.push(`shard ${r.index} never reported using ${shardDatabase(r.index)}`);
     if (!/\[api-test\] database .*reset: delete\)/.test(log)) problems.push(`shard ${r.index} did not report the delete reset`);
+    for (const line of unhandledErrors(log)) problems.push(`shard ${r.index}, outside any test: ${line}`);
+    if (r.exit !== 0) problems.push(`shard ${r.index} exited ${r.exit}; its log is ${r.logPath}`);
   }
   return problems;
 }

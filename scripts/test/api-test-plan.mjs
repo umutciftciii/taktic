@@ -265,6 +265,20 @@ export function reportFailures(index, report) {
 const firstLine = (text) => (text ?? '').split('\n').find((l) => l.trim())?.trim().slice(0, 300) ?? '';
 
 /**
+ * What a shard's log says about an error outside any test: Vitest then exits 1
+ * while its report shows everything passed, so the report can not explain it.
+ */
+export function unhandledErrors(log) {
+  const lines = log.split('\n');
+  const out = [];
+  lines.forEach((line, i) => {
+    if (/^⎯+ Unhandled (Rejection|Error)/.test(line) || /^⎯+ Uncaught Exception/.test(line)) out.push((lines[i + 1] ?? '').trim().slice(0, 200));
+    else if (line.startsWith('This error originated in ')) out.push(line.slice(0, 200));
+  });
+  return out;
+}
+
+/**
  * Each file's cost: from the end of the file before it in the shard to its own
  * end. A report's per-file times start at the first test, which leaves out the
  * import and the Nest boot every file pays for; the gaps put them back. Files in

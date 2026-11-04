@@ -242,13 +242,16 @@ describe('a refund reported between the read and the write', () => {
       .finally(() => {
         settled = true;
       });
+    // Attached now, not after `await webhook`: the reservation can reject before
+    // that await resumes, and a rejection nobody is handling yet fails the run.
+    const refused = expect(reservation).rejects.toMatchObject({ response: { code: CODE } });
 
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(settled).toBe(false);
     release();
     await webhook;
+    await refused;
 
-    await expect(reservation).rejects.toMatchObject({ response: { code: CODE } });
     expect(await entitlement(right.id)).toMatchObject({ status: 'AVAILABLE', cardId: null });
   });
 });

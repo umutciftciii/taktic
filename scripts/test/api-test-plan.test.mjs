@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   DURATIONS_PROJECT, LABELS, KIND, RESERVED_PORT, buildApiPlan, checkMount, checkPlanned, checkSettings,
-  databaseCrossings, databaseUrl, parseArgs, parsePublishedPort, reportFailures, reportFileMs, shardEnv, staleVerdict,
+  databaseCrossings, databaseUrl, parseArgs, parsePublishedPort, reportFailures, reportFileMs, shardEnv, staleVerdict, unhandledErrors,
 } from './api-test-plan.mjs';
 
 const durations = (seconds) => JSON.stringify({ version: 1, projects: { [DURATIONS_PROJECT]: seconds } });
@@ -152,6 +152,11 @@ describe('reports', () => {
       [2, 'test/a.spec.ts', 'a fails', 'AssertionError: 401'],
       [2, 'test/c.spec.ts', null, 'Cannot find module'],
     ]);
+  });
+  it('finds an error outside any test in the log', () => {
+    const log = ' ✓ test/a.spec.ts\n⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯\nConflictException: nope\n ❯ x\nThis error originated in "test/a.spec.ts" test file. It does\n';
+    assert.deepEqual(unhandledErrors(log), ['ConflictException: nope', 'This error originated in "test/a.spec.ts" test file. It does']);
+    assert.deepEqual(unhandledErrors(' ✓ test/a.spec.ts\n'), []);
   });
   it('compares what ran with what was planned', () => {
     const plan = { shards: [{ index: 1, files: ['test/a.spec.ts', 'test/z.spec.ts'] }] };

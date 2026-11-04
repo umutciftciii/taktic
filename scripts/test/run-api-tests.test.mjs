@@ -94,7 +94,8 @@ const report = { startTime: 1000, testResults: files.map((f, i) => ({
 })) };
 const out = args.find((a) => a.startsWith('--outputFile.json=')).split('=')[1];
 fs.writeFileSync(out, JSON.stringify(report));
-process.exit(files.includes(failing) ? 1 : 0);
+if (cfg.unhandled) console.log('⎯⎯⎯⎯ Unhandled Rejection ⎯⎯⎯⎯⎯\\nConflictException: nope');
+process.exit(files.includes(failing) || cfg.unhandled ? 1 : 0);
 `;
 
 let dir;
@@ -215,6 +216,14 @@ describe('what makes a run red', () => {
     assert.match(output, /test\/boot-config\.spec\.ts › stub/);
     assert.match(output, /expected 200, got 401/);
     assert.equal(containers().length, 0);
+  });
+
+  it('an error outside any test: every test passed, and the reason is still shown', async () => {
+    config({ unhandled: true });
+    const { code, output } = await run();
+    assert.equal(code, 1);
+    assert.match(output, /outside any test: ConflictException: nope/);
+    assert.match(output, /shard 1 exited 1; its log is/);
   });
 
   it('a file that ran nowhere', async () => {
