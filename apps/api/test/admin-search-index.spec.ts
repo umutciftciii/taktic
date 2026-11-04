@@ -14,6 +14,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
+import { rebuildTablesOf } from './planner-table-state';
 import { resolveTestDatabaseUrl } from './test-database';
 
 /**
@@ -124,6 +125,7 @@ function planNodes(node: Record<string, unknown>, out: string[] = []): string[] 
  * a plan without one proves every arm of the WHERE is served by an index.
  */
 async function bitmapOnlyPlan(statement: { query: string; params: string }): Promise<string[]> {
+  await rebuildTablesOf(ctx.prisma, statement.query);
   return ctx.prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
     await tx.$executeRawUnsafe('SET LOCAL enable_indexscan = off');

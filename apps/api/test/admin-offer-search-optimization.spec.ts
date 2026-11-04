@@ -11,6 +11,7 @@ import { OffersService } from '../src/modules/offers/offers.service';
 import { viewedInPolicyWhere } from '../src/modules/offers/refund-policy';
 import { DEFAULT_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
 import { createApprovedRequest, createCategory, createTestApp, resetDatabase, type TestContext } from './harness';
+import { rebuildTablesOf } from './planner-table-state';
 import { resolveTestDatabaseUrl } from './test-database';
 
 /**
@@ -448,6 +449,7 @@ function planNodes(node: Record<string, unknown>, out: string[] = []): string[] 
 
 /** The plan PostgreSQL makes for a recorded statement when it may only use bitmap index scans. */
 async function bitmapOnlyPlan(statement: { query: string; params: string }): Promise<string[]> {
+  await rebuildTablesOf(ctx.prisma, statement.query);
   return ctx.prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
     await tx.$executeRawUnsafe('SET LOCAL enable_indexscan = off');

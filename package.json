@@ -11,6 +11,8 @@
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "test": "turbo test",
+    "test:api": "node scripts/test/run-api-tests.mjs",
+    "test:api:runner": "node --test scripts/test/api-test-plan.test.mjs scripts/test/run-api-tests.test.mjs",
     "e2e": "pnpm build && pnpm --filter @taktic/e2e e2e",
     "e2e:ui": "pnpm build && pnpm --filter @taktic/e2e e2e:ui",
     "e2e:install": "pnpm --filter @taktic/e2e e2e:install",
