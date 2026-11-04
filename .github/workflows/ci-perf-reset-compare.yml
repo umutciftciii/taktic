@@ -99,7 +99,8 @@ jobs:
           }
 
           run_mode() {
-            local mode=$1 peak=$report/peak-$mode start end code database
+            local mode=$1
+            local peak=$report/peak-$mode start end code database
             database=taktic_cmp_${mode}_${SHARD}_test
             echo 0 >"$peak"
             ( while :; do
