@@ -1,0 +1,144 @@
+# CI-PERF-004: what TEST_DB_RESET=delete actually saves, measured where it would
+# run. Each shard runs both modes one after the other on one runner against one
+# PostgreSQL, because the same files on two runners differ by more than the
+# effect being measured. The order swaps by shard and by attempt, so whichever
+# mode runs second does not always inherit a warm server. Nothing depends on
+# this workflow and ci.yml stays on the default mode.
+name: CI-PERF reset compare
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/ci-perf-reset-compare.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-perf-reset-compare-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    name: compare (${{ matrix.shard }}/${{ strategy.job-total }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+
+    # The same server as ci.yml's `api` job: same image, same tmpfs and ceiling.
+    services:
+      postgres:
+        image: postgres:16.6-alpine
+        env:
+          POSTGRES_DB: taktic
+          POSTGRES_USER: taktic_user
+          POSTGRES_PASSWORD: taktic_password
+        ports:
+          - 5432:5432
+        options: >-
+          --tmpfs /var/lib/postgresql/data:rw,size=2g
+          --health-cmd "pg_isready -U taktic_user -d taktic"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://taktic_user:taktic_password@localhost:5432/taktic?schema=public
+      AUTH_COOKIE_NAME: taktic_session
+
+    steps:
+      - name: Configure PostgreSQL for disposable CI storage
+        env:
+          PG: ${{ job.services.postgres.id }}
+        run: |
+          set -euo pipefail
+          docker exec "$PG" psql -v ON_ERROR_STOP=1 -q -U taktic_user -d taktic \
+            -c "ALTER SYSTEM SET fsync = off" \
+            -c "ALTER SYSTEM SET synchronous_commit = off" \
+            -c "ALTER SYSTEM SET full_page_writes = off" \
+            -c "SELECT pg_reload_conf()"
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Run this shard in both modes
+        env:
+          PG: ${{ job.services.postgres.id }}
+          SHARD: ${{ matrix.shard }}
+          TOTAL: ${{ strategy.job-total }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          # GitHub runs this under bash -e. A failing mode must not stop the other
+          # one from being measured; `status` carries the failure to the end.
+          set +e
+          set -uo pipefail
+          report=apps/api/reports
+          mkdir -p "$report"
+          status=0
+
+          tmpfs_used_mb() {
+            docker exec "$PG" df -k /var/lib/postgresql/data | awk 'NR == 2 { print int($3 / 1024) }'
+          }
+
+          run_mode() {
+            local mode=$1 peak=$report/peak-$mode start end code database
+            database=taktic_cmp_${mode}_${SHARD}_test
+            echo 0 >"$peak"
+            ( while :; do
+                used=$(tmpfs_used_mb)
+                [ "$used" -gt "$(cat "$peak")" ] && echo "$used" >"$peak"
+                sleep 5
+              done ) &
+            local sampler=$!
+
+            start=$(date +%s)
+            TEST_DB_RESET=$mode TEST_DATABASE_SLUG=cmp_${mode}_${SHARD} \
+              pnpm --filter @taktic/api exec vitest run --shard="$SHARD/$TOTAL" \
+                --reporter=default --reporter=json --outputFile.json="reports/$mode.json"
+            code=$?
+            end=$(date +%s)
+            kill "$sampler" 2>/dev/null
+            [ "$code" -eq 0 ] || status=1
+
+            local stats dead
+            stats=$(jq -r '"\(.numPassedTests) passed, \(.numFailedTests) failed, \(.numPendingTests) skipped"' "$report/$mode.json")
+            dead=$(docker exec "$PG" psql -tA -U taktic_user -d "$database" \
+              -c "SELECT coalesce(sum(n_dead_tup), 0) || ' dead rows, ' || pg_database_size(current_database()) / 1048576 || ' MB' FROM pg_stat_user_tables")
+            echo "reset-compare shard=$SHARD mode=$mode exit=$code seconds=$((end - start)) peak_tmpfs_mb=$(cat "$peak") tests=[$stats] db=[$dead]" \
+              | tee -a "$GITHUB_STEP_SUMMARY"
+
+            # Every database this mode made, the suite's migration scratch one too.
+            # Otherwise the next mode's tmpfs peak would include them.
+            docker exec "$PG" psql -tA -U taktic_user -d postgres \
+              -c "SELECT datname FROM pg_database WHERE datname LIKE 'taktic_cmp_%'" \
+              | while read -r name; do
+                  docker exec "$PG" psql -q -U taktic_user -d postgres -c "DROP DATABASE \"$name\" WITH (FORCE)"
+                done
+          }
+
+          if [ $(((SHARD + ATTEMPT) % 2)) -eq 0 ]; then
+            run_mode truncate
+            run_mode delete
+          else
+            run_mode delete
+            run_mode truncate
+          fi
+          exit "$status"
