@@ -5,7 +5,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { SHARDED_JOBS, allShardJobNames, shardIndexes, shardJobName } from './ci-shards.mjs';
 
 const yml = readFileSync(new URL('../workflows/ci.yml', import.meta.url), 'utf8');
@@ -77,4 +77,44 @@ test('ci.yml: pr-evidence runs the shard plan tests', () => {
 test('ci.yml: shard-coverage waits for every sharded job and the e2e listing', () => {
   const needs = jobBlock('shard-coverage').match(/^ {4}needs: \[([^\]]*)\]$/m)?.[1].split(',').map((s) => s.trim());
   for (const id of ['static', ...Object.keys(SHARDED_JOBS)]) assert.ok(needs?.includes(id), `shard-coverage does not need ${id}`);
+});
+
+// CI-HARDEN-001: `pnpm test:api` is a local tool, so nothing else would notice a
+// change that breaks it. These run in pr-evidence, apart from the step they guard.
+const stepsOf = (id) => jobBlock(id).split(/^(?= {6}- )/m);
+const packageScripts = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).scripts;
+const runnerTestDir = new URL('../../scripts/test/', import.meta.url);
+const runnerTests = readdirSync(runnerTestDir).filter((name) => name.endsWith('.test.mjs')).sort();
+
+test('ci.yml: unit runs the local API runner tests, after the Prisma client its preflight reads', () => {
+  const steps = stepsOf('unit');
+  const generate = steps.findIndex((step) => step.includes('run: pnpm db:generate'));
+  const runner = steps.findIndex((step) => /^ {8}run: pnpm test:api:runner$/m.test(step));
+  assert.notEqual(runner, -1, 'the unit job does not run pnpm test:api:runner');
+  assert.ok(generate !== -1 && generate < runner, 'pnpm test:api:runner runs before pnpm db:generate');
+});
+
+test('ci.yml: a failure in the unit tests does not hide the runner tests', () => {
+  const step = stepsOf('unit').find((text) => text.includes('run: pnpm test:api:runner'));
+  assert.match(step ?? '', /^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
+});
+
+test('ci.yml: unit stays one job on no database, and the API shards are still four', () => {
+  const block = jobBlock('unit');
+  assert.doesNotMatch(block, /^ {4}services:$/m);
+  assert.doesNotMatch(block, /^ {4}strategy:$/m);
+  assert.equal(SHARDED_JOBS.api.count, 4);
+});
+
+test('package.json: test:api:runner names every test file of the runner', () => {
+  assert.ok(runnerTests.length > 0);
+  const named = packageScripts['test:api:runner'].split(/\s+/).filter((word) => word.endsWith('.test.mjs'));
+  assert.deepEqual(named.sort(), runnerTests.map((name) => `scripts/test/${name}`));
+});
+
+test('the runner tests skip nothing: a green run means all of them ran', () => {
+  for (const name of runnerTests) {
+    const source = readFileSync(new URL(name, runnerTestDir), 'utf8');
+    assert.doesNotMatch(source, /\b(?:it|test|describe)\.(?:skip|only|todo)\b|\b(?:skip|only|todo):/, name);
+  }
 });

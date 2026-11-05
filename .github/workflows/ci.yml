@@ -57,9 +57,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # apps/api/test: the coverage check's tests read the API suite's file list.
+          # scripts/test: the shard checks compare its files with test:api:runner.
           sparse-checkout: |
             .github
             apps/api/test
+            scripts/test
       - name: Test the post-merge gate, the CI result rule and the shard checks
         run: >-
           node --test .github/scripts/post-merge-gate.test.mjs .github/scripts/ci-result.test.mjs
@@ -199,6 +201,17 @@ jobs:
             packages/*/reports
           retention-days: 14
           if-no-files-found: error
+
+      # CI-HARDEN-001: `pnpm test:api` is a local tool and nothing else here
+      # runs it, so these are what notice a change that breaks it. Stand-ins
+      # take the place of `docker` and `pnpm`: no container, no database. Here
+      # rather than in `static`, so a failure hides neither the typecheck nor
+      # the build, and last with `!cancelled()`, so a red unit test hides
+      # neither these nor their own report. The Prisma client above is needed:
+      # the runner's preflight compares it with the schema.
+      - name: Local API runner tests
+        if: ${{ !cancelled() }}
+        run: pnpm test:api:runner
 
   # The API integration suite (apps/api, Vitest), one slice of its files per
   # shard. Vitest's --shard orders the files by a hash of their path and gives
