@@ -139,13 +139,11 @@ async function until(check) {
   assert.fail('timed out waiting for the runner');
 }
 
+// A zombie has already exited. Once the runner is gone, only PID 1 can reap what
+// it killed, at its own pace, and signal 0 still reaches the process until then.
 const alive = (pid) => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  const r = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+  return r.status === 0 && !r.stdout.trim().startsWith('Z');
 };
 
 const labelled = (id, overrides = {}) => ({

@@ -63,13 +63,13 @@ describe('rebuildTables', () => {
     const url = new URL(resolveTestDatabaseUrl());
     url.searchParams.set('connection_limit', '1');
     const narrow = new PrismaClient({ datasources: { db: { url: url.toString() } } });
-    await db.$executeRawUnsafe(`CREATE ROLE "${role}"`);
     try {
+      await db.$executeRawUnsafe(`CREATE ROLE "${role}"`);
       await narrow.$executeRawUnsafe(`SET ROLE "${role}"`);
       await expect(rebuildTables(narrow, ['User'])).rejects.toThrow(/"User" was not rebuilt/);
     } finally {
       await narrow.$disconnect();
-      await db.$executeRawUnsafe(`DROP ROLE "${role}"`);
+      await db.$executeRawUnsafe(`DROP ROLE IF EXISTS "${role}"`);
     }
   });
 });
@@ -83,8 +83,10 @@ describe('bitmapOnlyPlan', () => {
 
   it('returns the nodes and indexes of the plan', async () => {
     const plan = await bitmapOnlyPlan(db, statement(`SELECT id FROM "User" WHERE email = 'a@b.c'`), ['User']);
+    // Either index of the column will do: which one wins depends on what earlier
+    // files of the shard left in the table, and this spec resets nothing.
     expect(plan).toContain('Bitmap Index Scan');
-    expect(plan).toContain('User_email_key');
+    expect(plan.some((node) => node.startsWith('User_email_'))).toBe(true);
   });
 
   it('fails when the plan reads a table the list does not name', async () => {
@@ -97,7 +99,11 @@ describe('bitmapOnlyPlan', () => {
     await expect(bitmapOnlyPlan(db, statement(nested), ['User'])).rejects.toThrow(/reads "ProviderProfile"/);
   });
 
-  it('fails when the plan reads none of the tables the list names', async () => {
-    await expect(bitmapOnlyPlan(db, statement('SELECT 1'), ['User'])).rejects.toThrow(/reads none of "User"/);
+  it('fails when the list names a table the plan does not read', async () => {
+    await expect(bitmapOnlyPlan(db, statement('SELECT count(*) FROM "User"'), ['User', 'Offer'])).rejects.toThrow(/does not read "Offer"/);
+  });
+
+  it('fails when the plan reads no table at all', async () => {
+    await expect(bitmapOnlyPlan(db, statement('SELECT 1'), ['User'])).rejects.toThrow(/does not read "User"/);
   });
 });

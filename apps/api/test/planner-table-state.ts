@@ -64,16 +64,17 @@ function planRelations(node: PlanNode, out = new Set<string>()): Set<string> {
   return out;
 }
 
+const quoted = (names: readonly string[]): string => names.map((name) => `"${name}"`).join(', ');
+
 /**
  * The plan PostgreSQL makes for a recorded statement when it may only use bitmap
  * index scans, on freshly rebuilt `tables`. Seq Scan stays possible as the
  * planner's last resort, so a plan without one proves every arm of the WHERE is
  * served by an index.
  *
- * `tables` is written out by the spec and checked against PostgreSQL's own
- * account of the statement: a plan that reads a table the list leaves out, or
- * none of those it names, has outgrown the list, and its result would rest on
- * files nobody rebuilt.
+ * `tables` is written out by the spec and must be exactly what PostgreSQL says
+ * the statement reads. A table left out means a result resting on files nobody
+ * rebuilt; a table too many means a list that no longer describes the statement.
  */
 export async function bitmapOnlyPlan(
   db: RawSql & Pick<PrismaClient, '$transaction'>,
@@ -92,10 +93,10 @@ export async function bitmapOnlyPlan(
     return row!['QUERY PLAN'][0]!.Plan;
   });
 
-  const read = [...planRelations(plan)];
-  const listed = read.filter((name) => tables.includes(name));
-  const unlisted = read.filter((name) => !tables.includes(name));
-  if (unlisted.length > 0) throw new Error(`bitmapOnlyPlan: the plan reads ${unlisted.map((n) => `"${n}"`).join(', ')}, not in the list`);
-  if (listed.length === 0) throw new Error(`bitmapOnlyPlan: the plan reads none of ${tables.map((n) => `"${n}"`).join(', ')}`);
+  const read = planRelations(plan);
+  const unlisted = [...read].filter((name) => !tables.includes(name));
+  const unread = tables.filter((name) => !read.has(name));
+  if (unlisted.length > 0) throw new Error(`bitmapOnlyPlan: the plan reads ${quoted(unlisted)}, not in the list`);
+  if (unread.length > 0) throw new Error(`bitmapOnlyPlan: the plan does not read ${quoted(unread)}, in the list`);
   return planNodes(plan);
 }

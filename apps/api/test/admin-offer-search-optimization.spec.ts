@@ -366,7 +366,7 @@ describe('the statements', () => {
     await service.listOffers({ q: 'ivan' }, viewer('both'));
     const sent = classify(statements);
     for (const statement of [sent.counts[0]!, sent.page[0]!]) {
-      const plan = await bitmapOnlyPlan(ctx.prisma, statement, ['Offer', 'ServiceRequest']);
+      const plan = await bitmapOnlyPlan(ctx.prisma, statement, ['Offer']);
       expect(plan).toContain('BitmapOr');
       // The provider arm is served by either index that leads with providerId
       // (the per-round unique replaced the per-request one in REL-002 M2).

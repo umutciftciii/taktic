@@ -99,6 +99,10 @@ test('ci.yml: a failure in the unit tests does not hide the runner tests', () =>
   assert.match(step ?? '', /^ {8}if: \$\{\{ !cancelled\(\) \}\}$/m);
 });
 
+test('ci.yml: a failure in the runner tests turns the unit job red', () => {
+  assert.doesNotMatch(jobBlock('unit'), /continue-on-error/);
+});
+
 test('ci.yml: unit stays one job on no database, and the API shards are still four', () => {
   const block = jobBlock('unit');
   assert.doesNotMatch(block, /^ {4}services:$/m);
@@ -115,6 +119,6 @@ test('package.json: test:api:runner names every test file of the runner', () => 
 test('the runner tests skip nothing: a green run means all of them ran', () => {
   for (const name of runnerTests) {
     const source = readFileSync(new URL(name, runnerTestDir), 'utf8');
-    assert.doesNotMatch(source, /\b(?:it|test|describe)\.(?:skip|only|todo)\b|\b(?:skip|only|todo):/, name);
+    assert.doesNotMatch(source, /\b(?:it|test|describe|suite|t|context)\.(?:skip|only|todo)\b|\b(?:skip|only|todo):/, name);
   }
 });
