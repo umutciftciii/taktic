@@ -1,7 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { settleActionRedirect } from './action-redirect';
 import { Actor, assertNoErrorScreen } from './actors';
-import { confirmThrough } from './confirm-dialog';
+import { confirmThrough, waitForHydration } from './confirm-dialog';
 import type { SeededCategory, UrgencyCode } from './fixtures';
 
 /**
@@ -282,12 +282,21 @@ export async function openRequestFormContactStep(
  * Fills the vitrin lead form's name and e-mail. The number is typed and proved
  * separately — the proof binds to the exact number — and it is the last of the
  * three to be left, so that blur is the one that starts the identity check.
+ *
+ * The form has to be React's before these fields are typed into. `gotoWeb` can
+ * return at DOMContentLoaded before the page has hydrated: a value typed then
+ * never reaches React's state, and a blur then reaches no handler or finds the
+ * state empty. Either way the identity check does not start, and
+ * `settleIdentityGate` waits for a POST that will not come. Measured on WebKit
+ * (CI-HARDEN-002): scripts held back 50 ms were enough, 9 runs in 10.
  */
 export async function fillLeadContact(
   page: Page,
   contact: { name: string; email: string },
 ): Promise<void> {
-  await page.getByLabel('Ad soyad *').fill(contact.name);
+  const name = page.getByLabel('Ad soyad *');
+  await waitForHydration(name);
+  await name.fill(contact.name);
   await page.getByLabel('E-posta *').fill(contact.email);
 }
 
