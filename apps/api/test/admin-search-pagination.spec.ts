@@ -24,7 +24,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
-import { rebuildTablesOf } from './planner-table-state';
+import { bitmapOnlyPlan } from './planner-table-state';
 import { resolveTestDatabaseUrl } from './test-database';
 
 /**
@@ -495,33 +495,6 @@ describe('no unbounded read', () => {
   });
 });
 
-/** The plan's node types and index names, flattened. */
-function planNodes(node: Record<string, unknown>, out: string[] = []): string[] {
-  out.push(String(node['Node Type']));
-  if (node['Index Name']) out.push(String(node['Index Name']));
-  for (const child of (node.Plans as Array<Record<string, unknown>> | undefined) ?? []) planNodes(child, out);
-  return out;
-}
-
-/**
- * The plan PostgreSQL makes for a recorded statement when it may only use
- * bitmap index scans. Seq Scan stays possible as the planner's last resort, so
- * a plan without one on "User" proves every arm of the search has an index.
- */
-async function bitmapOnlyPlan(statement: { query: string; params: string }): Promise<string[]> {
-  await rebuildTablesOf(ctx.prisma, statement.query);
-  return ctx.prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexonlyscan = off');
-    const [row] = await tx.$queryRawUnsafe<Array<{ 'QUERY PLAN': Array<{ Plan: Record<string, unknown> }> }>>(
-      `EXPLAIN (FORMAT JSON) ${statement.query}`,
-      ...(JSON.parse(statement.params) as unknown[]),
-    );
-    return planNodes(row!['QUERY PLAN'][0]!.Plan);
-  });
-}
-
 describe('the customer search is index-backed', () => {
   it('answers the count and the page with a BitmapOr of the trigram indexes, for text and phone boxes', async () => {
     await createUser(ctx.prisma, { role: UserRole.CUSTOMER, name: 'Işık Müşteri', phone: '+905551234567' });
@@ -548,7 +521,7 @@ describe('the customer search is index-backed', () => {
       const userStatements = statements.filter((s) => /FROM "User" u/.test(s.query));
       expect(userStatements, box).toHaveLength(2);
       for (const statement of userStatements) {
-        const plan = await bitmapOnlyPlan(statement);
+        const plan = await bitmapOnlyPlan(ctx.prisma, statement, ['User']);
         expect(plan, box).toContain('BitmapOr');
         expect(plan, box).not.toContain('Seq Scan');
         for (const index of ['User_name_trgm_idx', 'User_nameSearch_trgm_idx', 'User_email_trgm_idx', 'User_phone_trgm_idx']) {

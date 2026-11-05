@@ -11,7 +11,7 @@ import { OffersService } from '../src/modules/offers/offers.service';
 import { viewedInPolicyWhere } from '../src/modules/offers/refund-policy';
 import { DEFAULT_PROJECTION_OMIT, type PrismaService } from '../src/prisma/prisma.service';
 import { createApprovedRequest, createCategory, createTestApp, resetDatabase, type TestContext } from './harness';
-import { rebuildTablesOf } from './planner-table-state';
+import { bitmapOnlyPlan } from './planner-table-state';
 import { resolveTestDatabaseUrl } from './test-database';
 
 /**
@@ -366,7 +366,7 @@ describe('the statements', () => {
     await service.listOffers({ q: 'ivan' }, viewer('both'));
     const sent = classify(statements);
     for (const statement of [sent.counts[0]!, sent.page[0]!]) {
-      const plan = await bitmapOnlyPlan(statement);
+      const plan = await bitmapOnlyPlan(ctx.prisma, statement, ['Offer']);
       expect(plan).toContain('BitmapOr');
       // The provider arm is served by either index that leads with providerId
       // (the per-round unique replaced the per-request one in REL-002 M2).
@@ -429,7 +429,7 @@ describe('the resolvers are index-backed', () => {
           ['ProviderProfile', sent.providerResolver[0]!],
           ['ServiceRequest', sent.requestResolver[0]!],
         ] as const) {
-          const plan = await bitmapOnlyPlan(resolver);
+          const plan = await bitmapOnlyPlan(ctx.prisma, resolver, [table]);
           expect(plan, `${name} / ${box} / ${table}`).not.toContain('Seq Scan');
           for (const index of expected[name][table]) expect(plan, `${name} / ${box} / ${index}`).toContain(index);
           if (expected[name][table].length > 1) expect(plan, `${name} / ${box} / ${table}`).toContain('BitmapOr');
@@ -438,29 +438,6 @@ describe('the resolvers are index-backed', () => {
     }
   });
 });
-
-/** The plan's node types and index names, flattened. */
-function planNodes(node: Record<string, unknown>, out: string[] = []): string[] {
-  out.push(String(node['Node Type']));
-  if (node['Index Name']) out.push(String(node['Index Name']));
-  for (const child of (node.Plans as Array<Record<string, unknown>> | undefined) ?? []) planNodes(child, out);
-  return out;
-}
-
-/** The plan PostgreSQL makes for a recorded statement when it may only use bitmap index scans. */
-async function bitmapOnlyPlan(statement: { query: string; params: string }): Promise<string[]> {
-  await rebuildTablesOf(ctx.prisma, statement.query);
-  return ctx.prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexonlyscan = off');
-    const [row] = await tx.$queryRawUnsafe<Array<{ 'QUERY PLAN': Array<{ Plan: Record<string, unknown> }> }>>(
-      `EXPLAIN (FORMAT JSON) ${statement.query}`,
-      ...(JSON.parse(statement.params) as unknown[]),
-    );
-    return planNodes(row!['QUERY PLAN'][0]!.Plan);
-  });
-}
 
 describe('a table that matches more than the list holds keeps its join', () => {
   it('finds every offer, with the same total, figures and first pages, for every reader', async () => {

@@ -112,7 +112,7 @@ tikleriyle hizalı. `taktic-postgres` hiç yeniden başlamadı, 5433 dinlemede k
 ## 7. Açık riskler
 
 1. `scripts/test/*.test.mjs` CI'da koşmuyor, çünkü CI yapılandırması bu işin kapsamı dışında.
-   `pnpm test:api:runner` elle çalışır.
+   `pnpm test:api:runner` elle çalışır. (CI-HARDEN-001 ile kapandı: `unit` job'ında koşuyor.)
 2. "Başka shard'ın veritabanı" kontrolü 5 sn'de bir örneklemedir. Sıra dışı kısa bir bağlantıyı
    kaçırabilir; ama şu an kod yolu yok (`setup-env.ts` adı aynı slug'tan türetir).
 3. `kill -9` sonrası shard'lar bitene kadar container durur, sonraki koşu temizler. Makinenin

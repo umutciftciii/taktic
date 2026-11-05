@@ -14,7 +14,7 @@ import {
   resetDatabase,
   type TestContext,
 } from './harness';
-import { rebuildTablesOf } from './planner-table-state';
+import { bitmapOnlyPlan } from './planner-table-state';
 import { resolveTestDatabaseUrl } from './test-database';
 
 /**
@@ -111,33 +111,6 @@ describe('the migration', () => {
   });
 });
 
-/** The plan's node types and index names, flattened. */
-function planNodes(node: Record<string, unknown>, out: string[] = []): string[] {
-  out.push(String(node['Node Type']));
-  if (node['Index Name']) out.push(String(node['Index Name']));
-  for (const child of (node.Plans as Array<Record<string, unknown>> | undefined) ?? []) planNodes(child, out);
-  return out;
-}
-
-/**
- * The plan PostgreSQL makes for a recorded statement when it may only use
- * bitmap index scans. Seq Scan stays possible as the planner's last resort, so
- * a plan without one proves every arm of the WHERE is served by an index.
- */
-async function bitmapOnlyPlan(statement: { query: string; params: string }): Promise<string[]> {
-  await rebuildTablesOf(ctx.prisma, statement.query);
-  return ctx.prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe('SET LOCAL enable_seqscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexscan = off');
-    await tx.$executeRawUnsafe('SET LOCAL enable_indexonlyscan = off');
-    const [row] = await tx.$queryRawUnsafe<Array<{ 'QUERY PLAN': Array<{ Plan: Record<string, unknown> }> }>>(
-      `EXPLAIN (FORMAT JSON) ${statement.query}`,
-      ...(JSON.parse(statement.params) as unknown[]),
-    );
-    return planNodes(row!['QUERY PLAN'][0]!.Plan);
-  });
-}
-
 const searchStatements = (table: string) =>
   statements.filter((statement) => statement.query.includes(`FROM "public"."${table}"`) && /ILIKE/.test(statement.query));
 
@@ -182,7 +155,7 @@ describe('GET /finance/providers — generated SQL', () => {
     const [withContact] = searchStatements('ProviderProfile');
     expect(withContact!.query).toMatch(/"phone" ILIKE/);
     expect(withContact!.query).toMatch(/"email" ILIKE/);
-    const contactPlan = await bitmapOnlyPlan(withContact!);
+    const contactPlan = await bitmapOnlyPlan(ctx.prisma, withContact!, ['ProviderProfile']);
     expect(contactPlan).not.toContain('Seq Scan');
     expect(contactPlan).toContain('BitmapOr');
     expect(contactPlan).toEqual(
@@ -198,7 +171,7 @@ describe('GET /finance/providers — generated SQL', () => {
     await finance.listProviderFinance({ q: 'ışık' } as never, financeOnlyViewer);
     const [withoutContact] = searchStatements('ProviderProfile');
     expect(withoutContact!.query).not.toMatch(/"(phone|email)" (ILIKE|IN)/);
-    const plan = await bitmapOnlyPlan(withoutContact!);
+    const plan = await bitmapOnlyPlan(ctx.prisma, withoutContact!, ['ProviderProfile']);
     expect(plan).not.toContain('Seq Scan');
     expect(plan.filter((name) => name.endsWith('_trgm_idx')).sort()).toEqual([
       'ProviderProfile_businessNameSearch_trgm_idx',
@@ -211,7 +184,7 @@ describe('GET /finance/providers — generated SQL', () => {
     const finance = new FinanceService(logged as unknown as PrismaService);
 
     await finance.listProviderFinance({ q: '0555 123 45 67' } as never, contactViewer);
-    const plan = await bitmapOnlyPlan(searchStatements('ProviderProfile')[0]!);
+    const plan = await bitmapOnlyPlan(ctx.prisma, searchStatements('ProviderProfile')[0]!, ['ProviderProfile']);
     expect(plan).not.toContain('Seq Scan');
     expect(plan).toEqual(expect.arrayContaining(['ProviderProfile_phone_idx', 'ProviderProfile_phone_trgm_idx']));
   });
@@ -288,7 +261,7 @@ describe('GET /finance/credit-ledger — provider arm', () => {
     }
 
     const count = ledger.find((statement) => statement.query.startsWith('SELECT COUNT'))!;
-    const plan = await bitmapOnlyPlan(count);
+    const plan = await bitmapOnlyPlan(ctx.prisma, count, ['ProviderCreditTransaction']);
     expect(plan).not.toContain('Seq Scan');
     expect(plan).toContain('BitmapOr');
     expect(plan).toEqual(
@@ -301,7 +274,7 @@ describe('GET /finance/credit-ledger — provider arm', () => {
 
     // The providers it matched were found on their own table, by index.
     const [providerLookup] = searchStatements('ProviderProfile');
-    expect(await bitmapOnlyPlan(providerLookup!)).not.toContain('Seq Scan');
+    expect(await bitmapOnlyPlan(ctx.prisma, providerLookup!, ['ProviderProfile'])).not.toContain('Seq Scan');
   });
 
   it('never searches the provider phone or e-mail without PROVIDERS_READ', async () => {
